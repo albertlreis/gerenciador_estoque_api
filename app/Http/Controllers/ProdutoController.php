@@ -2,62 +2,49 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\Categoria;
 use App\Models\Produto;
 use Illuminate\Http\Request;
 
 class ProdutoController extends Controller
 {
-    public function index(Categoria $categoria)
+    public function index()
     {
-        return response()->json($categoria->produtos);
+        return response()->json(Produto::all());
     }
 
-    public function store(Request $request, Categoria $categoria)
+    public function store(Request $request)
     {
         $validated = $request->validate([
-            'nome'      => 'required|string|max:255',
-            'descricao' => 'nullable|string',
-            'ativo'     => 'boolean',
+            'nome'         => 'required|string|max:255',
+            'descricao'    => 'nullable|string',
+            'id_categoria' => 'required|exists:categorias,id',
+            'ativo'        => 'boolean',
         ]);
-
-        // Força o relacionamento com a categoria pai
-        $validated['id_categoria'] = $categoria->id;
 
         $produto = Produto::create($validated);
         return response()->json($produto, 201);
     }
 
-    public function show(Categoria $categoria, Produto $produto)
+    public function show(Produto $produto)
     {
-        if ($produto->id_categoria !== $categoria->id) {
-            return response()->json(['error' => 'Produto não pertence a esta categoria'], 404);
-        }
         return response()->json($produto);
     }
 
-    public function update(Request $request, Categoria $categoria, Produto $produto)
+    public function update(Request $request, Produto $produto)
     {
-        if ($produto->id_categoria !== $categoria->id) {
-            return response()->json(['error' => 'Produto não pertence a esta categoria'], 404);
-        }
-
         $validated = $request->validate([
-            'nome'      => 'sometimes|required|string|max:255',
-            'descricao' => 'nullable|string',
-            'ativo'     => 'boolean',
+            'nome'         => 'sometimes|required|string|max:255',
+            'descricao'    => 'nullable|string',
+            'id_categoria' => 'sometimes|required|exists:categorias,id',
+            'ativo'        => 'boolean',
         ]);
 
         $produto->update($validated);
         return response()->json($produto);
     }
 
-    public function destroy(Categoria $categoria, Produto $produto)
+    public function destroy(Produto $produto)
     {
-        if ($produto->id_categoria !== $categoria->id) {
-            return response()->json(['error' => 'Produto não pertence a esta categoria'], 404);
-        }
-
         $produto->delete();
         return response()->json(null, 204);
     }

@@ -16,14 +16,14 @@ use App\Http\Controllers\ParceiroController;
 use App\Http\Controllers\PedidoController;
 use App\Http\Controllers\PedidoItemController;
 
-Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
+Route::prefix('v1')/*->middleware('auth:sanctum')*/->group(function () {
     // ================================
     // Categorias e Produtos
     // ================================
     // Rotas para categorias
     Route::apiResource('categorias', CategoriaController::class);
     // Produtos pertencentes a uma categoria (rotas aninhadas)
-    Route::apiResource('categorias.produtos', ProdutoController::class);
+    Route::apiResource('produtos', ProdutoController::class);
 
     // ================================
     // Produtos: Imagens e Variações

@@ -10,7 +10,8 @@ class Produto extends Model
         'nome',
         'descricao',
         'id_categoria',
-        'ativo'
+        'ativo',
+        'preco'
     ];
 
     // Cada produto pertence a uma categoria

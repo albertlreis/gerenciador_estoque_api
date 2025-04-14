@@ -9,7 +9,8 @@ class ProdutoController extends Controller
 {
     public function index()
     {
-        return response()->json(Produto::all());
+        $produtos = Produto::with('categoria')->get();
+        return response()->json($produtos);
     }
 
     public function store(Request $request)
@@ -19,6 +20,7 @@ class ProdutoController extends Controller
             'descricao'    => 'nullable|string',
             'id_categoria' => 'required|exists:categorias,id',
             'ativo'        => 'boolean',
+            'preco'        => 'required|numeric|min:1',
         ]);
 
         $produto = Produto::create($validated);
@@ -37,6 +39,7 @@ class ProdutoController extends Controller
             'descricao'    => 'nullable|string',
             'id_categoria' => 'sometimes|required|exists:categorias,id',
             'ativo'        => 'boolean',
+            'preco'        => 'sometimes|required|numeric|min:1',
         ]);
 
         $produto->update($validated);

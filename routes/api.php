@@ -29,7 +29,9 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
     // Produtos: Imagens e Variações
     // ================================
     // Imagens associadas a um produto
-    Route::apiResource('produtos.imagens', ProdutoImagemController::class);
+    Route::apiResource('produtos.imagens', ProdutoImagemController::class, [
+        'parameters' => ['imagens' => 'imagem']
+    ]);
     // Variações associadas a um produto
     Route::apiResource('produtos.variacoes', ProdutoVariacaoController::class);
     // Movimentações de estoque para uma variação de produto (aninhado em produtos e variações)

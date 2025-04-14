@@ -16,7 +16,7 @@ use App\Http\Controllers\ParceiroController;
 use App\Http\Controllers\PedidoController;
 use App\Http\Controllers\PedidoItemController;
 
-Route::prefix('v1')/*->middleware('auth:sanctum')*/->group(function () {
+Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
     // ================================
     // Categorias e Produtos
     // ================================

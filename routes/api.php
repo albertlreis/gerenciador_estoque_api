@@ -35,7 +35,7 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
     // Variações associadas a um produto
     Route::apiResource('produtos.variacoes', ProdutoVariacaoController::class);
     // Movimentações de estoque para uma variação de produto (aninhado em produtos e variações)
-    Route::apiResource('produtos.variacoes.movimentacoes', EstoqueMovimentacaoController::class);
+    Route::apiResource('produtos.movimentacoes', EstoqueMovimentacaoController::class);
 
     // ================================
     // Atributos e Valores

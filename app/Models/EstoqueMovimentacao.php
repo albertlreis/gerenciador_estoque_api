@@ -6,8 +6,10 @@ use Illuminate\Database\Eloquent\Model;
 
 class EstoqueMovimentacao extends Model
 {
+    protected $table = 'estoque_movimentacoes';
+
     protected $fillable = [
-        'id_variacao',
+        'id_produto',
         'id_deposito_origem',
         'id_deposito_destino',
         'tipo',
@@ -16,19 +18,16 @@ class EstoqueMovimentacao extends Model
         'data_movimentacao'
     ];
 
-    // Cada movimentação está relacionada a uma variação de produto
-    public function produtoVariacao()
+    public function produto()
     {
-        return $this->belongsTo(ProdutoVariacao::class, 'id_variacao');
+        return $this->belongsTo(Produto::class, 'id_produto');
     }
 
-    // Relacionamento com o depósito de origem
     public function depositoOrigem()
     {
         return $this->belongsTo(Deposito::class, 'id_deposito_origem');
     }
 
-    // Relacionamento com o depósito de destino
     public function depositoDestino()
     {
         return $this->belongsTo(Deposito::class, 'id_deposito_destino');

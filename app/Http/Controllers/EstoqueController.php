@@ -16,7 +16,7 @@ class EstoqueController extends Controller
     public function store(Request $request, Deposito $deposito)
     {
         $validated = $request->validate([
-            'id_variacao' => 'required|exists:produto_variacoes,id',
+            'id_produto' => 'required|exists:produto,id',
             'quantidade'  => 'required|integer',
         ]);
 

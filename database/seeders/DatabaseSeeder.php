@@ -19,6 +19,9 @@ class DatabaseSeeder extends Seeder
             ProdutoVariacoesSeeder::class,
             ClientesSeeder::class,
             PedidosSeeder::class,
+            DepositosTableSeeder::class,
+            EstoqueTableSeeder::class,
+            EstoqueMovimentacoesTableSeeder::class,
         ]);
     }
 }

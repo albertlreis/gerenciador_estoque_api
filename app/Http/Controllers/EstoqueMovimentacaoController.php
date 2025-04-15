@@ -3,26 +3,20 @@
 namespace App\Http\Controllers;
 
 use App\Models\Produto;
-use App\Models\ProdutoVariacao;
 use App\Models\EstoqueMovimentacao;
 use Illuminate\Http\Request;
 
 class EstoqueMovimentacaoController extends Controller
 {
-    public function index(Produto $produto, ProdutoVariacao $variacao)
+    public function index(Produto $produto)
     {
-        if ($variacao->id_produto !== $produto->id) {
-            return response()->json(['error' => 'Variação não pertence a este produto'], 404);
-        }
-        return response()->json($variacao->movimentacoes);
+        // Retorna todas as movimentações que pertencem ao produto.
+        $movimentacoes = EstoqueMovimentacao::where('id_produto', $produto->id)->get();
+        return response()->json($movimentacoes);
     }
 
-    public function store(Request $request, Produto $produto, ProdutoVariacao $variacao)
+    public function store(Request $request, Produto $produto)
     {
-        if ($variacao->id_produto !== $produto->id) {
-            return response()->json(['error' => 'Variação não pertence a este produto'], 404);
-        }
-
         $validated = $request->validate([
             'id_deposito_origem'  => 'nullable|exists:depositos,id',
             'id_deposito_destino' => 'nullable|exists:depositos,id',
@@ -32,23 +26,24 @@ class EstoqueMovimentacaoController extends Controller
             'data_movimentacao'   => 'nullable|date',
         ]);
 
-        $validated['id_variacao'] = $variacao->id;
+        // Em vez de associar à variação, associamos ao produto.
+        $validated['id_produto'] = $produto->id;
         $movimentacao = EstoqueMovimentacao::create($validated);
         return response()->json($movimentacao, 201);
     }
 
-    public function show(Produto $produto, ProdutoVariacao $variacao, EstoqueMovimentacao $movimentacao)
+    public function show(Produto $produto, EstoqueMovimentacao $movimentacao)
     {
-        if ($variacao->id_produto !== $produto->id || $movimentacao->id_variacao !== $variacao->id) {
-            return response()->json(['error' => 'Movimentação não pertence a esta variação ou produto'], 404);
+        if ($movimentacao->id_produto !== $produto->id) {
+            return response()->json(['error' => 'Movimentação não pertence a este produto'], 404);
         }
         return response()->json($movimentacao);
     }
 
-    public function update(Request $request, Produto $produto, ProdutoVariacao $variacao, EstoqueMovimentacao $movimentacao)
+    public function update(Request $request, Produto $produto, EstoqueMovimentacao $movimentacao)
     {
-        if ($variacao->id_produto !== $produto->id || $movimentacao->id_variacao !== $variacao->id) {
-            return response()->json(['error' => 'Movimentação não pertence a esta variação ou produto'], 404);
+        if ($movimentacao->id_produto !== $produto->id) {
+            return response()->json(['error' => 'Movimentação não pertence a este produto'], 404);
         }
 
         $validated = $request->validate([
@@ -64,10 +59,10 @@ class EstoqueMovimentacaoController extends Controller
         return response()->json($movimentacao);
     }
 
-    public function destroy(Produto $produto, ProdutoVariacao $variacao, EstoqueMovimentacao $movimentacao)
+    public function destroy(Produto $produto, EstoqueMovimentacao $movimentacao)
     {
-        if ($variacao->id_produto !== $produto->id || $movimentacao->id_variacao !== $variacao->id) {
-            return response()->json(['error' => 'Movimentação não pertence a esta variação ou produto'], 404);
+        if ($movimentacao->id_produto !== $produto->id) {
+            return response()->json(['error' => 'Movimentação não pertence a este produto'], 404);
         }
 
         $movimentacao->delete();

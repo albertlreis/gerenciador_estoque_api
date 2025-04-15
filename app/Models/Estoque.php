@@ -6,16 +6,16 @@ use Illuminate\Database\Eloquent\Model;
 
 class Estoque extends Model
 {
+    protected $table = 'estoque';
     protected $fillable = [
-        'id_variacao',
+        'id_produto',
         'id_deposito',
         'quantidade'
     ];
 
-    // Cada registro de estoque está associado a uma variação de produto
-    public function produtoVariacao()
+    public function produto()
     {
-        return $this->belongsTo(ProdutoVariacao::class, 'id_variacao');
+        return $this->belongsTo(Produto::class, 'id_produto');
     }
 
     // E a um depósito

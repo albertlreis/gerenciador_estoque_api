@@ -4,12 +4,14 @@ namespace App\Http\Controllers;
 
 use App\Models\Pedido;
 use Illuminate\Http\Request;
+use Carbon\Carbon;
 
 class PedidoController extends Controller
 {
     public function index()
     {
-        return response()->json(Pedido::all());
+        $pedidos = Pedido::with('cliente')->get();
+        return response()->json($pedidos);
     }
 
     public function store(Request $request)
@@ -20,6 +22,11 @@ class PedidoController extends Controller
             'status'      => 'required|string|max:50',
             'observacoes' => 'nullable|string',
         ]);
+
+        if (!empty($validated['data_pedido'])) {
+            // Converte a data para o formato aceito pelo MySQL
+            $validated['data_pedido'] = Carbon::parse($validated['data_pedido'])->format('Y-m-d H:i:s');
+        }
 
         $pedido = Pedido::create($validated);
         return response()->json($pedido, 201);

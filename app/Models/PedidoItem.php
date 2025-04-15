@@ -6,9 +6,11 @@ use Illuminate\Database\Eloquent\Model;
 
 class PedidoItem extends Model
 {
+    protected $table = 'pedido_itens';
+
     protected $fillable = [
         'id_pedido',
-        'id_variacao',
+        'id_produto',
         'quantidade',
         'preco_unitario'
     ];
@@ -20,8 +22,8 @@ class PedidoItem extends Model
     }
 
     // Cada item está relacionado a uma variação de produto
-    public function produtoVariacao()
+    public function produto()
     {
-        return $this->belongsTo(ProdutoVariacao::class, 'id_variacao');
+        return $this->belongsTo(Produto::class, 'id_produto');
     }
 }

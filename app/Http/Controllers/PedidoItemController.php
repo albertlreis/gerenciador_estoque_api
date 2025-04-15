@@ -16,7 +16,7 @@ class PedidoItemController extends Controller
     public function store(Request $request, Pedido $pedido)
     {
         $validated = $request->validate([
-            'id_variacao'    => 'required|exists:produto_variacoes,id',
+            'id_produto'     => 'required|exists:produtos,id',
             'quantidade'     => 'required|integer',
             'preco_unitario' => 'required|numeric',
         ]);

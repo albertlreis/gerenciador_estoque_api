@@ -8,13 +8,19 @@ class Cliente extends Model
 {
     protected $fillable = [
         'nome',
+        'nome_fantasia',
         'documento',
+        'inscricao_estadual',
         'email',
         'telefone',
-        'endereco'
+        'endereco',
+        'tipo',
+        'whatsapp',
+        'cep',
+        'complemento'
     ];
 
-    // Um cliente pode realizar vários pedidos
+
     public function pedidos()
     {
         return $this->hasMany(Pedido::class, 'id_cliente');

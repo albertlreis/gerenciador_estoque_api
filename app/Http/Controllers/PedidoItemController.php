@@ -41,6 +41,7 @@ class PedidoItemController extends Controller
         }
 
         $validated = $request->validate([
+            'id_produto'     => 'sometimes|required|integer',
             'quantidade'     => 'sometimes|required|integer',
             'preco_unitario' => 'sometimes|required|numeric',
         ]);

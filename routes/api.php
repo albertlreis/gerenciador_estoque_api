@@ -65,5 +65,7 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
     // Rotas para pedidos
     Route::apiResource('pedidos', PedidoController::class);
     // Itens pertencentes a um pedido (rotas aninhadas)
-    Route::apiResource('pedidos.itens', PedidoItemController::class);
+    Route::apiResource('pedidos.itens', PedidoItemController::class, [
+        'parameters' => ['itens' => 'item']
+    ]);
 });

@@ -57,6 +57,7 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
     // Clientes e Parceiros
     // ================================
     Route::apiResource('clientes', ClienteController::class);
+    Route::get('/clientes/verifica-documento/{documento}/{id?}', [ClienteController::class, 'verificaDocumento']);
     Route::apiResource('parceiros', ParceiroController::class);
 
     // ================================

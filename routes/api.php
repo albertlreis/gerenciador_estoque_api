@@ -5,6 +5,7 @@ use App\Http\Controllers\{
     CategoriaController,
     ProdutoController,
     ProdutoImagemController,
+    ProdutoOutletController,
     ProdutoVariacaoController,
     ProdutoAtributoController,
     DepositoController,
@@ -14,23 +15,29 @@ use App\Http\Controllers\{
     ParceiroController,
     PedidoController,
     PedidoItemController,
-    CarrinhoController
+    CarrinhoController,
+    ConfiguracaoController
 };
 
 Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
+    // Configurações do sistema
+    Route::get('/configuracoes', [ConfiguracaoController::class, 'listar']);
+    Route::put('/configuracoes/{chave}', [ConfiguracaoController::class, 'atualizar']);
 
     // Produtos e Categorias
     Route::apiResource('categorias', CategoriaController::class);
+
+    Route::get('/produtos/outlet', [ProdutoOutletController::class, 'index']);
+    Route::patch('/produtos/{id}/remover-outlet', [ProdutoOutletController::class, 'removerOutlet']);
+
     Route::apiResource('produtos', ProdutoController::class);
     Route::get('atributos', [ProdutoAtributoController::class, 'index']);
 
-    // Rota separada para busca de variações (evita conflito com produtos/{id})
+    // Variações
     Route::get('variacoes', [ProdutoVariacaoController::class, 'buscar']);
-
     Route::prefix('produtos')->group(function () {
         Route::post('importar-xml', [ProdutoController::class, 'importarXML']);
         Route::post('importar-xml/confirmar', [ProdutoController::class, 'confirmarImportacao']);
-
         Route::apiResource('{produto}/imagens', ProdutoImagemController::class)->parameters(['imagens' => 'imagem']);
         Route::apiResource('{produto}/variacoes', ProdutoVariacaoController::class)->parameters(['variacoes' => 'variacao']);
     });

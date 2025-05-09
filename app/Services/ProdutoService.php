@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Produto;
 use App\Models\ProdutoVariacao;
 use App\Models\ProdutoVariacaoAtributo;
+use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 
 class ProdutoService
 {
@@ -94,7 +95,7 @@ class ProdutoService
         return $produto->load('variacoes.atributos');
     }
 
-    public function listarProdutosFiltrados($request)
+    public function listarProdutosFiltrados($request): LengthAwarePaginator
     {
         $query = Produto::with(['variacoes.atributos']);
 
@@ -110,6 +111,11 @@ class ProdutoService
         if ($request->has('ativo')) {
             $ativo = filter_var($request->ativo, FILTER_VALIDATE_BOOLEAN);
             $query->where('ativo', $ativo);
+        }
+
+        if ($request->has('is_outlet')) {
+            $isOutlet = filter_var($request->is_outlet, FILTER_VALIDATE_BOOLEAN);
+            $query->where('is_outlet', $isOutlet);
         }
 
         if ($request->filled('atributos') && is_array($request->atributos)) {

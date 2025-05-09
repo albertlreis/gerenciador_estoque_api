@@ -2,7 +2,6 @@
 
 namespace App\Http\Controllers;
 
-use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Throwable;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Http\JsonResponse;
@@ -19,7 +18,6 @@ use App\Models\{
     EstoqueMovimentacao
 };
 use App\Services\ProdutoService;
-use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 
 class ProdutoController extends Controller
 {
@@ -37,11 +35,12 @@ class ProdutoController extends Controller
      * Lista produtos com filtros e paginação.
      *
      * @param FiltrarProdutosRequest $request
-     * @return LengthAwarePaginator
+     * @return JsonResponse
      */
-    public function index(FiltrarProdutosRequest $request): LengthAwarePaginator
+    public function index(FiltrarProdutosRequest $request): JsonResponse
     {
-        return $this->produtoService->listarProdutosFiltrados($request);
+        $produtos = $this->produtoService->listarProdutosFiltrados($request);
+        return ProdutoResource::collection($produtos)->response();
     }
 
     /**

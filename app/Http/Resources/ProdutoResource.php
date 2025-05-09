@@ -16,6 +16,8 @@ class ProdutoResource extends JsonResource
             'categoria' => $this->whenLoaded('categoria'),
             'fabricante' => $this->fabricante,
             'ativo' => $this->ativo,
+            'is_outlet' => $this->is_outlet,
+            'data_ultima_saida' => $this->data_ultima_saida,
             'created_at' => $this->created_at,
             'updated_at' => $this->updated_at,
 

@@ -8,12 +8,15 @@ use App\Http\Requests\UpdatePedidoStatusRequest;
 use App\Models\Pedido;
 use App\Models\PedidoItem;
 use App\Models\Carrinho;
+use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Maatwebsite\Excel\Facades\Excel;
 use Barryvdh\DomPDF\Facade\Pdf;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 /**
  * Controller responsável por criar e gerenciar pedidos.
@@ -121,7 +124,7 @@ class PedidoController extends Controller
         return response()->json(['message' => 'Status atualizado com sucesso.', 'pedido' => $pedido]);
     }
 
-    public function exportar(Request $request)
+    public function exportar(Request $request): Response|BinaryFileResponse|JsonResponse
     {
         $formato = $request->query('formato');
         $detalhado = $request->boolean('detalhado', false);
@@ -139,6 +142,42 @@ class PedidoController extends Controller
         }
 
         return response()->json(['erro' => 'Formato inválido'], 400);
+    }
+
+    public function estatisticas(): JsonResponse
+    {
+        // Últimos 6 meses
+        $meses = collect(range(0, 5))->map(function ($i) {
+            return Carbon::now()->subMonths($i)->startOfMonth();
+        })->reverse();
+
+        // Buscar pedidos agrupados por mês no MySQL
+        $dados = DB::table('pedidos')
+            ->selectRaw("DATE_FORMAT(data_pedido, '%Y-%m-01') as mes, COUNT(*) as total")
+            ->where('data_pedido', '>=', $meses->first()->format('Y-m-d'))
+            ->whereNotNull('data_pedido')
+            ->groupBy('mes')
+            ->orderBy('mes')
+            ->get();
+
+        // Mapear todos os meses com os resultados
+        $labels = [];
+        $valores = [];
+
+        foreach ($meses as $mes) {
+            $chave = $mes->format('Y-m-01');
+            $label = $mes->format('M/Y');
+
+            $quantidade = $dados->firstWhere('mes', $chave)->total ?? 0;
+
+            $labels[] = $label;
+            $valores[] = (int) $quantidade;
+        }
+
+        return response()->json([
+            'labels' => $labels,
+            'valores' => $valores,
+        ]);
     }
 
 }

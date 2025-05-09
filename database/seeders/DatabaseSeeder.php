@@ -21,7 +21,6 @@ class DatabaseSeeder extends Seeder
             ClientesSeeder::class,
             ParceiroSeeder::class,
             PedidosSeeder::class,
-
 //            DepositosTableSeeder::class,
 //            EstoqueTableSeeder::class,
 //            EstoqueMovimentacoesTableSeeder::class,

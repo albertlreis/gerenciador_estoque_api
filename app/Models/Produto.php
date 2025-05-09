@@ -3,32 +3,34 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Produto extends Model
 {
     protected $fillable = [
-        'nome',
-        'descricao',
-        'id_categoria',
-        'ativo',
-        'preco'
+        'nome', 'descricao', 'id_categoria', 'id_fornecedor',
+        'altura', 'largura', 'profundidade', 'peso', 'ativo'
     ];
 
-    // Cada produto pertence a uma categoria
-    public function categoria()
+    public function categoria(): BelongsTo
     {
         return $this->belongsTo(Categoria::class, 'id_categoria');
     }
 
-    // Um produto pode ter várias imagens
-    public function imagens()
+    public function fornecedor(): BelongsTo
+    {
+        return $this->belongsTo(Fornecedor::class, 'id_fornecedor');
+    }
+
+    public function variacoes(): HasMany
+    {
+        return $this->hasMany(ProdutoVariacao::class, 'id_produto');
+    }
+
+    public function imagens(): HasMany
     {
         return $this->hasMany(ProdutoImagem::class, 'id_produto');
     }
 
-    // Um produto pode ter diversas variações
-    public function variacoes()
-    {
-        return $this->hasMany(ProdutoVariacao::class, 'id_produto');
-    }
 }

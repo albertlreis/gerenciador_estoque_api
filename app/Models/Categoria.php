@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Categoria extends Model
 {
@@ -12,7 +13,7 @@ class Categoria extends Model
     ];
 
     // Uma categoria possui vários produtos
-    public function produtos()
+    public function produtos(): HasMany
     {
         return $this->hasMany(Produto::class, 'id_categoria');
     }

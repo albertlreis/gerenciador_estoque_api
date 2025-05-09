@@ -17,7 +17,7 @@ return new class extends Migration
             $table->increments('id');
             $table->string('nome', 255);
             $table->text('descricao')->nullable();
-            $table->timestamps();  // Cria colunas created_at e updated_at
+            $table->timestamps();
         });
     }
 

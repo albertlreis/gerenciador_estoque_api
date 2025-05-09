@@ -6,31 +6,25 @@ use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
+
     /**
-     * Run the migrations.
-     *
-     * @return void
+     * Tabela de variações de um produto.
+     * Cada variação representa uma combinação específica com preço, SKU e código de barras próprios.
      */
-    public function up()
+    public function up(): void
     {
         Schema::create('produto_variacoes', function (Blueprint $table) {
-            $table->increments('id');
-            $table->unsignedInteger('id_produto');
-            $table->string('sku', 100)->unique();
-            $table->string('nome', 255);
-            $table->decimal('preco', 10, 2);
-            $table->decimal('custo', 10, 2);
-            $table->decimal('peso', 10, 2);
-            $table->decimal('altura', 10, 2);
-            $table->decimal('largura', 10, 2);
-            $table->decimal('profundidade', 10, 2);
-            $table->string('codigo_barras', 100)->nullable();
+            $table->increments('id'); // Identificador da variação
+            $table->unsignedInteger('id_produto'); // Produto ao qual pertence essa variação
+            $table->string('sku', 100)->unique(); // SKU único da variação
+            $table->string('nome', 255); // Nome descritivo da variação (ex: "Preta - Inox")
+            $table->decimal('preco', 10); // Preço de venda
+            $table->decimal('custo', 10); // Custo de aquisição/fabricação
+            $table->string('codigo_barras', 100)->nullable(); // Código de barras (EAN, GTIN, etc)
             $table->timestamps();
 
-            $table->foreign('id_produto')
-                ->references('id')
-                ->on('produtos')
-                ->onDelete('cascade');
+            // Chave estrangeira para produto base
+            $table->foreign('id_produto')->references('id')->on('produtos')->onDelete('cascade');
         });
     }
 
@@ -39,7 +33,7 @@ return new class extends Migration
      *
      * @return void
      */
-    public function down()
+    public function down(): void
     {
         Schema::dropIfExists('produto_variacoes');
     }

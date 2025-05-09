@@ -17,11 +17,12 @@ class DatabaseSeeder extends Seeder
             CategoriasSeeder::class,
             ProdutosSeeder::class,
             ProdutoVariacoesSeeder::class,
+            ProdutoVariacaoAtributosSeeder::class,
             ClientesSeeder::class,
-            PedidosSeeder::class,
-            DepositosTableSeeder::class,
-            EstoqueTableSeeder::class,
-            EstoqueMovimentacoesTableSeeder::class,
+//            PedidosSeeder::class,
+//            DepositosTableSeeder::class,
+//            EstoqueTableSeeder::class,
+//            EstoqueMovimentacoesTableSeeder::class,
         ]);
     }
 }

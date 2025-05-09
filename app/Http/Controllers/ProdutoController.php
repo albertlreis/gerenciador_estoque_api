@@ -1,217 +1,173 @@
 <?php
-
 namespace App\Http\Controllers;
 
+use App\Http\Requests\StoreProdutoRequest;
+use App\Http\Requests\UpdateProdutoRequest;
+use App\Http\Resources\ProdutoResource;
 use App\Models\Produto;
-use App\Models\ProdutoVariacao;
-use App\Models\ProdutoVariacaoAtributo;
+use App\Services\ProdutoService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Support\Facades\DB;
 use Throwable;
 
+/**
+ * Controlador responsável por gerenciar o CRUD de produtos e suas variações.
+ * Cada produto pode ter múltiplas variações, cada uma com seus próprios atributos (ex: cor, material).
+ */
 class ProdutoController extends Controller
 {
-    public function index()
+    private ProdutoService $produtoService;
+
+    /**
+     * Injeta a dependência do service de produtos.
+     *
+     * @param ProdutoService $produtoService
+     */
+    public function __construct(ProdutoService $produtoService)
     {
-        $produtos = Produto::with('categoria')->get();
-        return response()->json($produtos);
+        $this->produtoService = $produtoService;
     }
 
-    public function store(Request $request): JsonResponse
+    /**
+     * Lista produtos com paginação e filtros opcionais (nome, categoria).
+     *
+     * @param Request $request
+     * @return AnonymousResourceCollection
+     */
+    public function index(Request $request): AnonymousResourceCollection
     {
-        $validated = $request->validate([
-            'nome'          => 'required|string|max:255',
-            'descricao'     => 'nullable|string',
-            'id_categoria'  => 'required|exists:categorias,id',
-            'fabricante'    => 'nullable|string|max:255',
-            'ativo'         => 'boolean',
-            'variacoes'     => 'required|array|min:1',
-            'variacoes.*.nome'          => 'required|string|max:255',
-            'variacoes.*.preco'         => 'required|numeric|min:0',
-            'variacoes.*.custo'         => 'required|numeric|min:0',
-            'variacoes.*.sku'           => 'required|string|max:100|unique:produto_variacoes,sku',
-            'variacoes.*.codigo_barras' => 'nullable|string|max:100|unique:produto_variacoes,codigo_barras',
-            'variacoes.*.atributos'     => 'nullable|array',
-            'variacoes.*.atributos.*.atributo' => 'required_with:variacoes.*.atributos|string|max:100',
-            'variacoes.*.atributos.*.valor'    => 'required_with:variacoes.*.atributos|string|max:100',
-        ]);
+        $query = Produto::with(['variacoes.atributos']);
 
+        if ($request->filled('nome')) {
+            $query->where('nome', 'like', '%' . $request->nome . '%');
+        }
+
+        if ($request->filled('id_categoria')) {
+            $query->where('id_categoria', $request->id_categoria);
+        }
+
+        if ($request->filled('ativo')) {
+            $query->where('ativo', (bool) $request->ativo);
+        }
+
+        if ($request->filled('fabricante')) {
+            $query->where('fabricante', 'like', '%' . $request->fabricante . '%');
+        }
+
+        if ($request->boolean('has_variacoes')) {
+            $query->has('variacoes');
+        }
+        
+        $query->orderBy('created_at', 'desc');
+
+        $produtos = $query->paginate($request->get('per_page', 15));
+
+        return ProdutoResource::collection($produtos);
+    }
+
+    /**
+     * Cria um novo produto com suas variações e atributos.
+     *
+     * @param StoreProdutoRequest $request
+     * @return JsonResponse
+     */
+    public function store(StoreProdutoRequest $request): JsonResponse
+    {
         try {
             DB::beginTransaction();
 
-            // Cria o produto
-            $produto = Produto::create([
-                'nome'         => $validated['nome'],
-                'descricao'    => $validated['descricao'] ?? null,
-                'id_categoria' => $validated['id_categoria'],
-                'fabricante'   => $validated['fabricante'] ?? null,
-                'ativo'        => $validated['ativo'] ?? true,
-            ]);
-
-            // Cria variações e atributos vinculados
-            foreach ($validated['variacoes'] as $var) {
-                $variacao = ProdutoVariacao::create([
-                    'id_produto'    => $produto->id,
-                    'nome'          => $var['nome'],
-                    'preco'         => $var['preco'],
-                    'custo'         => $var['custo'],
-                    'sku'           => $var['sku'],
-                    'codigo_barras' => $var['codigo_barras'] ?? null,
-                ]);
-
-                // Se existirem atributos
-                if (!empty($var['atributos'])) {
-                    foreach ($var['atributos'] as $attr) {
-                        ProdutoVariacaoAtributo::create([
-                            'id_variacao' => $variacao->id,
-                            'atributo'    => $attr['atributo'],
-                            'valor'       => $attr['valor'],
-                        ]);
-                    }
-                }
-            }
+            $produto = $this->produtoService->store($request->validated());
 
             DB::commit();
 
             return response()->json([
                 'message' => 'Produto cadastrado com sucesso.',
-                'produto' => $produto->load('variacoes.atributos')
+                'produto' => new ProdutoResource($produto)
             ], 201);
         } catch (Throwable $e) {
             DB::rollBack();
             return response()->json([
                 'message' => 'Erro ao cadastrar produto.',
-                'error'   => $e->getMessage()
+                'error'   => app()->environment('local') ? $e->getMessage() : null
             ], 500);
         }
     }
 
-    public function show(Produto $produto)
+    /**
+     * Retorna os dados de um produto específico.
+     *
+     * @param int $id
+     * @return ProdutoResource
+     */
+    public function show(int $id): ProdutoResource
     {
-        $produto->load('categoria', 'imagens');
-        return response()->json($produto);
+        $produto = Produto::with(['variacoes.atributos'])->findOrFail($id);
+
+        return new ProdutoResource($produto);
     }
 
-    public function update(Request $request, $id)
+    /**
+     * Atualiza um produto, suas variações e atributos.
+     * Variações e atributos removidos no payload são apagados.
+     *
+     * @param UpdateProdutoRequest $request
+     * @param int $id
+     * @return JsonResponse
+     */
+    public function update(UpdateProdutoRequest $request, int $id): JsonResponse
     {
-        $validated = $request->validate([
-            'nome'          => 'required|string|max:255',
-            'descricao'     => 'nullable|string',
-            'id_categoria'  => 'required|exists:categorias,id',
-            'fabricante'    => 'nullable|string|max:255',
-            'ativo'         => 'boolean',
-            'variacoes'     => 'required|array|min:1',
-            'variacoes.*.id'            => 'nullable|exists:produto_variacoes,id',
-            'variacoes.*.nome'          => 'required|string|max:255',
-            'variacoes.*.preco'         => 'required|numeric|min:0',
-            'variacoes.*.custo'         => 'required|numeric|min:0',
-            'variacoes.*.sku'           => 'required|string|max:100',
-            'variacoes.*.codigo_barras' => 'nullable|string|max:100',
-            'variacoes.*.atributos'     => 'nullable|array',
-            'variacoes.*.atributos.*.id'       => 'nullable|exists:produto_variacao_atributos,id',
-            'variacoes.*.atributos.*.atributo' => 'required_with:variacoes.*.atributos|string|max:100',
-            'variacoes.*.atributos.*.valor'    => 'required_with:variacoes.*.atributos|string|max:100',
-        ]);
-
         try {
             DB::beginTransaction();
 
             $produto = Produto::findOrFail($id);
-            $produto->update([
-                'nome'         => $validated['nome'],
-                'descricao'    => $validated['descricao'] ?? null,
-                'id_categoria' => $validated['id_categoria'],
-                'fabricante'   => $validated['fabricante'] ?? null,
-                'ativo'        => $validated['ativo'] ?? true,
-            ]);
-
-            $variacaoIdsRecebidas = [];
-
-            foreach ($validated['variacoes'] as $var) {
-                if (isset($var['id'])) {
-                    // Atualizar variação existente
-                    $variacao = ProdutoVariacao::where('id_produto', $produto->id)->findOrFail($var['id']);
-                    $variacao->update([
-                        'nome'          => $var['nome'],
-                        'preco'         => $var['preco'],
-                        'custo'         => $var['custo'],
-                        'sku'           => $var['sku'],
-                        'codigo_barras' => $var['codigo_barras'] ?? null,
-                    ]);
-                } else {
-                    // Criar nova variação
-                    $variacao = ProdutoVariacao::create([
-                        'id_produto'    => $produto->id,
-                        'nome'          => $var['nome'],
-                        'preco'         => $var['preco'],
-                        'custo'         => $var['custo'],
-                        'sku'           => $var['sku'],
-                        'codigo_barras' => $var['codigo_barras'] ?? null,
-                    ]);
-                }
-
-                $variacaoIdsRecebidas[] = $variacao->id;
-
-                $atributoIdsRecebidos = [];
-
-                if (!empty($var['atributos'])) {
-                    foreach ($var['atributos'] as $attr) {
-                        if (isset($attr['id'])) {
-                            // Atualiza atributo existente
-                            $atributo = ProdutoVariacaoAtributo::where('id_variacao', $variacao->id)->findOrFail($attr['id']);
-                            $atributo->update([
-                                'atributo' => $attr['atributo'],
-                                'valor'    => $attr['valor'],
-                            ]);
-                        } else {
-                            // Cria novo atributo
-                            $atributo = ProdutoVariacaoAtributo::create([
-                                'id_variacao' => $variacao->id,
-                                'atributo'    => $attr['atributo'],
-                                'valor'       => $attr['valor'],
-                            ]);
-                        }
-                        $atributoIdsRecebidos[] = $atributo->id;
-                    }
-
-                    // Remove atributos não enviados
-                    ProdutoVariacaoAtributo::where('id_variacao', $variacao->id)
-                        ->whereNotIn('id', $atributoIdsRecebidos)
-                        ->delete();
-                } else {
-                    // Remove todos os atributos da variação se não vierem
-                    ProdutoVariacaoAtributo::where('id_variacao', $variacao->id)->delete();
-                }
-            }
-
-            // Remove variações não enviadas
-            ProdutoVariacao::where('id_produto', $produto->id)
-                ->whereNotIn('id', $variacaoIdsRecebidas)
-                ->each(function ($v) {
-                    // Remove os atributos vinculados primeiro
-                    $v->atributos()->delete();
-                    $v->delete();
-                });
+            $produto = $this->produtoService->update($produto, $request->validated());
 
             DB::commit();
 
             return response()->json([
                 'message' => 'Produto atualizado com sucesso.',
-                'produto' => $produto->load('variacoes.atributos')
+                'produto' => new ProdutoResource($produto)
             ]);
         } catch (Throwable $e) {
             DB::rollBack();
             return response()->json([
                 'message' => 'Erro ao atualizar produto.',
-                'error'   => $e->getMessage()
+                'error'   => app()->environment('local') ? $e->getMessage() : null
             ], 500);
         }
     }
 
-    public function destroy(Produto $produto)
+    /**
+     * Remove um produto e todas as suas variações e atributos vinculados.
+     *
+     * @param int $id
+     * @return JsonResponse
+     */
+    public function destroy(int $id): JsonResponse
     {
-        $produto->delete();
-        return response()->json(null, 204);
+        try {
+            DB::beginTransaction();
+
+            $produto = Produto::with('variacoes.atributos')->findOrFail($id);
+
+            foreach ($produto->variacoes as $variacao) {
+                $variacao->atributos->each->delete();
+                $variacao->delete();
+            }
+
+            $produto->delete();
+
+            DB::commit();
+
+            return response()->json(['message' => 'Produto excluído com sucesso.']);
+        } catch (Throwable $e) {
+            DB::rollBack();
+            return response()->json([
+                'message' => 'Erro ao excluir produto.',
+                'error'   => app()->environment('local') ? $e->getMessage() : null
+            ], 500);
+        }
     }
 }

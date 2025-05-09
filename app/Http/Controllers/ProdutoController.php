@@ -1,13 +1,13 @@
 <?php
 namespace App\Http\Controllers;
 
+use App\Http\Requests\FiltrarProdutosRequest;
 use App\Http\Requests\StoreProdutoRequest;
 use App\Http\Requests\UpdateProdutoRequest;
 use App\Http\Resources\ProdutoResource;
 use App\Models\Produto;
 use App\Services\ProdutoService;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Support\Facades\DB;
 use Throwable;
@@ -33,35 +33,42 @@ class ProdutoController extends Controller
     /**
      * Lista produtos com paginação e filtros opcionais (nome, categoria).
      *
-     * @param Request $request
+     * @param FiltrarProdutosRequest $request
      * @return AnonymousResourceCollection
      */
-    public function index(Request $request): AnonymousResourceCollection
+    public function index(FiltrarProdutosRequest $request): AnonymousResourceCollection
     {
         $query = Produto::with(['variacoes.atributos']);
 
+        // 🔍 Filtro por nome (busca parcial)
         if ($request->filled('nome')) {
             $query->where('nome', 'like', '%' . $request->nome . '%');
         }
 
+        // 🏷️ Filtro por múltiplas categorias
         if ($request->filled('id_categoria')) {
-            $query->where('id_categoria', $request->id_categoria);
+            $categorias = is_array($request->id_categoria) ? $request->id_categoria : [$request->id_categoria];
+            $query->whereIn('id_categoria', $categorias);
         }
 
-        if ($request->filled('ativo')) {
-            $query->where('ativo', (bool) $request->ativo);
+        // ✅ Filtro por status ativo
+        if ($request->has('ativo')) {
+            $ativo = filter_var($request->ativo, FILTER_VALIDATE_BOOLEAN);
+            $query->where('ativo', $ativo);
         }
 
-        if ($request->filled('fabricante')) {
-            $query->where('fabricante', 'like', '%' . $request->fabricante . '%');
+        // 🔧 Filtro por atributos
+        if ($request->filled('atributos') && is_array($request->atributos)) {
+            foreach ($request->atributos as $atributo => $valores) {
+                $query->whereHas('variacoes.atributos', function ($q) use ($atributo, $valores) {
+                    $q->where('atributo', $atributo)
+                        ->whereIn('valor', is_array($valores) ? $valores : [$valores]);
+                });
+            }
         }
 
-        if ($request->boolean('has_variacoes')) {
-            $query->has('variacoes');
-        }
-        
+        // 📅 Ordenação e paginação
         $query->orderBy('created_at', 'desc');
-
         $produtos = $query->paginate($request->get('per_page', 15));
 
         return ProdutoResource::collection($produtos);

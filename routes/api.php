@@ -1,12 +1,10 @@
 <?php
 
-use Illuminate\Http\Request;
+use App\Http\Controllers\ProdutoAtributoController;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\CategoriaController;
 use App\Http\Controllers\ProdutoController;
 use App\Http\Controllers\ProdutoImagemController;
-use App\Http\Controllers\AtributoController;
-use App\Http\Controllers\AtributoValorController;
 use App\Http\Controllers\ProdutoVariacaoController;
 use App\Http\Controllers\DepositoController;
 use App\Http\Controllers\EstoqueController;
@@ -24,6 +22,7 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
     Route::apiResource('categorias', CategoriaController::class);
     // Produtos pertencentes a uma categoria (rotas aninhadas)
     Route::apiResource('produtos', ProdutoController::class);
+    Route::get('/atributos', [ProdutoAtributoController::class, 'index']);
 
     // ================================
     // Produtos: Imagens e Variações

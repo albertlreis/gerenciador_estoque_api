@@ -54,19 +54,17 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
     // Pedidos e Itens de Pedido
     // ================================
     // Rotas para pedidos
-    Route::middleware('auth:sanctum')->prefix('carrinho')->group(function () {
+    Route::prefix('carrinho')->group(function () {
         Route::get('/', [CarrinhoController::class, 'index']);
         Route::post('/', [CarrinhoController::class, 'store']);
-        Route::delete('/', [CarrinhoController::class, 'clear']); // ✅ ESSA LINHA É NECESSÁRIA
+        Route::delete('/', [CarrinhoController::class, 'clear']);
         Route::delete('/{itemId}', [CarrinhoController::class, 'destroy']);
     });
 
-    Route::middleware('auth:sanctum')->prefix('pedidos')->group(function () {
-        Route::get('/', [PedidoController::class, 'index']);
-        Route::get('/{id}', [PedidoController::class, 'show']);
-        Route::post('/', [PedidoController::class, 'store']); // ✅ Finalizar pedido
-        Route::patch('/{id}/status', [PedidoController::class, 'updateStatus']);
-    });
+    Route::get('pedidos/exportar', [PedidoController::class, 'exportar']);
+    Route::patch('pedidos/{pedido}/status', [PedidoController::class, 'updateStatus']);
+    Route::apiResource('pedidos', PedidoController::class);
+
     // Itens pertencentes a um pedido (rotas aninhadas)
     Route::apiResource('pedidos.itens', PedidoItemController::class, [
         'parameters' => ['itens' => 'item']

@@ -19,7 +19,9 @@ class DatabaseSeeder extends Seeder
             ProdutoVariacoesSeeder::class,
             ProdutoVariacaoAtributosSeeder::class,
             ClientesSeeder::class,
-//            PedidosSeeder::class,
+            ParceiroSeeder::class,
+            PedidosSeeder::class,
+
 //            DepositosTableSeeder::class,
 //            EstoqueTableSeeder::class,
 //            EstoqueMovimentacoesTableSeeder::class,

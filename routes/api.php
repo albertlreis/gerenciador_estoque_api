@@ -1,72 +1,61 @@
 <?php
 
-use App\Http\Controllers\CarrinhoController;
-use App\Http\Controllers\ProdutoAtributoController;
 use Illuminate\Support\Facades\Route;
-use App\Http\Controllers\CategoriaController;
-use App\Http\Controllers\ProdutoController;
-use App\Http\Controllers\ProdutoImagemController;
-use App\Http\Controllers\ProdutoVariacaoController;
-use App\Http\Controllers\DepositoController;
-use App\Http\Controllers\EstoqueController;
-use App\Http\Controllers\EstoqueMovimentacaoController;
-use App\Http\Controllers\ClienteController;
-use App\Http\Controllers\ParceiroController;
-use App\Http\Controllers\PedidoController;
-use App\Http\Controllers\PedidoItemController;
+use App\Http\Controllers\{
+    CategoriaController,
+    ProdutoController,
+    ProdutoImagemController,
+    ProdutoVariacaoController,
+    ProdutoAtributoController,
+    DepositoController,
+    EstoqueController,
+    EstoqueMovimentacaoController,
+    ClienteController,
+    ParceiroController,
+    PedidoController,
+    PedidoItemController,
+    CarrinhoController
+};
 
 Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
-    // ================================
-    // Categorias e Produtos
-    // ================================
-    // Rotas para categorias
+
+    // Produtos e Categorias
     Route::apiResource('categorias', CategoriaController::class);
-    // Produtos pertencentes a uma categoria (rotas aninhadas)
     Route::apiResource('produtos', ProdutoController::class);
-    Route::get('/atributos', [ProdutoAtributoController::class, 'index']);
+    Route::get('atributos', [ProdutoAtributoController::class, 'index']);
 
-    // ================================
-    // Produtos: Imagens e Variações
-    // ================================
-    // Imagens associadas a um produto
-    Route::apiResource('produtos.imagens', ProdutoImagemController::class, [
-        'parameters' => ['imagens' => 'imagem']
-    ]);
-    // Variações associadas a um produto
-    Route::apiResource('produtos.variacoes', ProdutoVariacaoController::class);
+    // Rota separada para busca de variações (evita conflito com produtos/{id})
+    Route::get('variacoes', [ProdutoVariacaoController::class, 'buscar']);
 
-    // ================================
-    // Estoque e Depósitos
-    // ================================
-    // Rotas para depósitos
+    Route::prefix('produtos')->group(function () {
+        Route::post('importar-xml', [ProdutoController::class, 'importarXML']);
+        Route::post('importar-xml/confirmar', [ProdutoController::class, 'confirmarImportacao']);
+
+        Route::apiResource('{produto}/imagens', ProdutoImagemController::class)->parameters(['imagens' => 'imagem']);
+        Route::apiResource('{produto}/variacoes', ProdutoVariacaoController::class)->parameters(['variacoes' => 'variacao']);
+    });
+
+    // Depósitos e Estoque
     Route::apiResource('depositos', DepositoController::class);
-    // Estoque dos depósitos (cada depósito possui seus registros de estoque)
-    Route::apiResource('depositos.estoque', EstoqueController::class);
+    Route::apiResource('depositos.estoque', EstoqueController::class)->shallow();
+    Route::apiResource('depositos.movimentacoes', EstoqueMovimentacaoController::class)->shallow();
 
-    // ================================
     // Clientes e Parceiros
-    // ================================
     Route::apiResource('clientes', ClienteController::class);
-    Route::get('/clientes/verifica-documento/{documento}/{id?}', [ClienteController::class, 'verificaDocumento']);
+    Route::get('clientes/verifica-documento/{documento}/{id?}', [ClienteController::class, 'verificaDocumento']);
     Route::apiResource('parceiros', ParceiroController::class);
 
-    // ================================
-    // Pedidos e Itens de Pedido
-    // ================================
-    // Rotas para pedidos
+    // Pedidos e Carrinho
+    Route::get('pedidos/exportar', [PedidoController::class, 'exportar']);
+    Route::get('pedidos/estatisticas', [PedidoController::class, 'estatisticas']);
+    Route::patch('pedidos/{pedido}/status', [PedidoController::class, 'updateStatus']);
+    Route::apiResource('pedidos', PedidoController::class);
+    Route::apiResource('pedidos.itens', PedidoItemController::class)->parameters(['itens' => 'item']);
+
     Route::prefix('carrinho')->group(function () {
         Route::get('/', [CarrinhoController::class, 'index']);
         Route::post('/', [CarrinhoController::class, 'store']);
         Route::delete('/', [CarrinhoController::class, 'clear']);
         Route::delete('/{itemId}', [CarrinhoController::class, 'destroy']);
     });
-
-    Route::get('pedidos/exportar', [PedidoController::class, 'exportar']);
-    Route::patch('pedidos/{pedido}/status', [PedidoController::class, 'updateStatus']);
-    Route::apiResource('pedidos', PedidoController::class);
-
-    // Itens pertencentes a um pedido (rotas aninhadas)
-    Route::apiResource('pedidos.itens', PedidoItemController::class, [
-        'parameters' => ['itens' => 'item']
-    ]);
 });

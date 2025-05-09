@@ -2,32 +2,28 @@
 
 namespace Database\Seeders;
 
+use Exception;
 use Illuminate\Database\Seeder;
 use App\Models\Estoque;
+use App\Models\ProdutoVariacao;
 
 class EstoqueTableSeeder extends Seeder
 {
     public function run()
     {
-        // Exemplo: Produto 1 no Depósito 1 com 100 unidades
-        Estoque::create([
-            'id_produto'  => 1,
-            'id_deposito' => 1,
-            'quantidade'  => 100,
-        ]);
+        $depositos = [1, 2];
+        $variacoes = ProdutoVariacao::take(15)->get();
 
-        // Exemplo: Produto 2 no Depósito 1 com 50 unidades
-        Estoque::create([
-            'id_produto'  => 2,
-            'id_deposito' => 1,
-            'quantidade'  => 50,
-        ]);
+        if ($variacoes->count() < 15) {
+            throw new Exception('É necessário pelo menos 15 variações de produto para popular o estoque.');
+        }
 
-        // Exemplo: Produto 3 no Depósito 2 com 30 unidades
-        Estoque::create([
-            'id_produto'  => 3,
-            'id_deposito' => 2,
-            'quantidade'  => 30,
-        ]);
+        foreach ($variacoes as $index => $variacao) {
+            Estoque::create([
+                'id_variacao' => $variacao->id,
+                'id_deposito' => $depositos[$index % 2],
+                'quantidade' => rand(10, 200),
+            ]);
+        }
     }
 }

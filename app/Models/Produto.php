@@ -25,7 +25,7 @@ class Produto extends Model
 
     public function variacoes(): HasMany
     {
-        return $this->hasMany(ProdutoVariacao::class, 'id_produto');
+        return $this->hasMany(ProdutoVariacao::class, 'produto_id');
     }
 
     public function imagens(): HasMany

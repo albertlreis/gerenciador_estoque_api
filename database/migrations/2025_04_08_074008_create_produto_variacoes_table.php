@@ -15,7 +15,7 @@ return new class extends Migration
     {
         Schema::create('produto_variacoes', function (Blueprint $table) {
             $table->increments('id'); // Identificador da variação
-            $table->unsignedInteger('id_produto'); // Produto ao qual pertence essa variação
+            $table->unsignedInteger('produto_id'); // Produto ao qual pertence essa variação
             $table->string('sku', 100)->unique(); // SKU único da variação
             $table->string('nome', 255); // Nome descritivo da variação (ex: "Preta - Inox")
             $table->decimal('preco', 10); // Preço de venda
@@ -24,7 +24,7 @@ return new class extends Migration
             $table->timestamps();
 
             // Chave estrangeira para produto base
-            $table->foreign('id_produto')->references('id')->on('produtos')->onDelete('cascade');
+            $table->foreign('produto_id')->references('id')->on('produtos')->onDelete('cascade');
         });
     }
 

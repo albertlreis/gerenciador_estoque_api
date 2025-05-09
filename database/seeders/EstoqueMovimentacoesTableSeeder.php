@@ -2,34 +2,32 @@
 
 namespace Database\Seeders;
 
+use Exception;
 use Illuminate\Database\Seeder;
 use App\Models\EstoqueMovimentacao;
+use App\Models\ProdutoVariacao;
 use Carbon\Carbon;
 
 class EstoqueMovimentacoesTableSeeder extends Seeder
 {
     public function run()
     {
-        // Exemplo: Transferência do Produto 1 do Depósito 1 para o Depósito 2
-        EstoqueMovimentacao::create([
-            'id_produto'           => 1,
-            'id_deposito_origem'   => 1,
-            'id_deposito_destino'  => 2,
-            'tipo'                 => 'transferencia',
-            'quantidade'           => 20,
-            'observacao'           => 'Transferência interna',
-            'data_movimentacao'    => Carbon::now(),
-        ]);
+        $variacoes = ProdutoVariacao::take(20)->get();
 
-        // Exemplo: Entrada de estoque para o Produto 2 no Depósito 1 (compra de estoque)
-        EstoqueMovimentacao::create([
-            'id_produto'           => 2,
-            'id_deposito_origem'   => null,
-            'id_deposito_destino'  => 1,
-            'tipo'                 => 'entrada',
-            'quantidade'           => 50,
-            'observacao'           => 'Entrada de estoque - compra',
-            'data_movimentacao'    => Carbon::now()->subDays(2),
-        ]);
+        if ($variacoes->count() < 10) {
+            throw new Exception('É necessário pelo menos 10 variações de produto para popular as movimentações.');
+        }
+
+        foreach ($variacoes as $index => $variacao) {
+            EstoqueMovimentacao::create([
+                'id_variacao' => $variacao->id,
+                'id_deposito_origem' => $index % 2 === 0 ? 1 : null,
+                'id_deposito_destino' => $index % 2 === 0 ? 2 : 1,
+                'tipo' => $index % 2 === 0 ? 'transferencia' : 'entrada',
+                'quantidade' => rand(5, 50),
+                'observacao' => $index % 2 === 0 ? 'Transferência gerada em seed' : 'Entrada gerada em seed',
+                'data_movimentacao' => Carbon::now()->subDays(rand(1, 30)),
+            ]);
+        }
     }
 }

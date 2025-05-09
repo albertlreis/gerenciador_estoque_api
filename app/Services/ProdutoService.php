@@ -20,7 +20,7 @@ class ProdutoService
 
         foreach ($data['variacoes'] as $var) {
             $variacao = ProdutoVariacao::create([
-                'id_produto' => $produto->id,
+                'produto_id' => $produto->id,
                 'nome' => $var['nome'],
                 'preco' => $var['preco'],
                 'custo' => $var['custo'],
@@ -55,9 +55,10 @@ class ProdutoService
         foreach ($data['variacoes'] as $var) {
             $variacao = isset($var['id'])
                 ? ProdutoVariacao::findOrFail($var['id'])
-                : new ProdutoVariacao(['id_produto' => $produto->id]);
+                : new ProdutoVariacao(['produto_id' => $produto->id]);
 
             $variacao->fill([
+                'produto_id' => $produto->id,
                 'nome' => $var['nome'],
                 'preco' => $var['preco'],
                 'custo' => $var['custo'],
@@ -85,11 +86,43 @@ class ProdutoService
             $variacao->atributos()->whereNotIn('id', $idsAtributos)->delete();
         }
 
-        ProdutoVariacao::where('id_produto', $produto->id)->whereNotIn('id', $idsVariacoes)->each(function ($v) {
+        ProdutoVariacao::where('produto_id', $produto->id)->whereNotIn('id', $idsVariacoes)->each(function ($v) {
             $v->atributos()->delete();
             $v->delete();
         });
 
         return $produto->load('variacoes.atributos');
+    }
+
+    public function listarProdutosFiltrados($request)
+    {
+        $query = Produto::with(['variacoes.atributos']);
+
+        if ($request->filled('nome')) {
+            $query->where('nome', 'like', '%' . $request->nome . '%');
+        }
+
+        if ($request->filled('id_categoria')) {
+            $categorias = is_array($request->id_categoria) ? $request->id_categoria : [$request->id_categoria];
+            $query->whereIn('id_categoria', $categorias);
+        }
+
+        if ($request->has('ativo')) {
+            $ativo = filter_var($request->ativo, FILTER_VALIDATE_BOOLEAN);
+            $query->where('ativo', $ativo);
+        }
+
+        if ($request->filled('atributos') && is_array($request->atributos)) {
+            foreach ($request->atributos as $atributo => $valores) {
+                $query->whereHas('variacoes.atributos', function ($q) use ($atributo, $valores) {
+                    $q->where('atributo', $atributo)
+                        ->whereIn('valor', is_array($valores) ? $valores : [$valores]);
+                });
+            }
+        }
+
+        $query->orderBy('created_at', 'desc');
+
+        return $query->paginate($request->get('per_page', 15));
     }
 }

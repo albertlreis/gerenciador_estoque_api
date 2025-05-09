@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\CarrinhoController;
 use App\Http\Controllers\ProdutoAtributoController;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\CategoriaController;
@@ -53,7 +54,19 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
     // Pedidos e Itens de Pedido
     // ================================
     // Rotas para pedidos
-    Route::apiResource('pedidos', PedidoController::class);
+    Route::middleware('auth:sanctum')->prefix('carrinho')->group(function () {
+        Route::get('/', [CarrinhoController::class, 'index']);
+        Route::post('/', [CarrinhoController::class, 'store']);
+        Route::delete('/', [CarrinhoController::class, 'clear']); // ✅ ESSA LINHA É NECESSÁRIA
+        Route::delete('/{itemId}', [CarrinhoController::class, 'destroy']);
+    });
+
+    Route::middleware('auth:sanctum')->prefix('pedidos')->group(function () {
+        Route::get('/', [PedidoController::class, 'index']);
+        Route::get('/{id}', [PedidoController::class, 'show']);
+        Route::post('/', [PedidoController::class, 'store']); // ✅ Finalizar pedido
+        Route::patch('/{id}/status', [PedidoController::class, 'updateStatus']);
+    });
     // Itens pertencentes a um pedido (rotas aninhadas)
     Route::apiResource('pedidos.itens', PedidoItemController::class, [
         'parameters' => ['itens' => 'item']

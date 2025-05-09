@@ -6,16 +6,16 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
- * Model PedidoItem
+ * Model CarrinhoItem
  *
- * Representa um item dentro de um pedido, com vínculo a uma variação de produto.
+ * Representa um item dentro de um carrinho temporário.
  */
-class PedidoItem extends Model
+class CarrinhoItem extends Model
 {
-    protected $table = 'pedido_itens';
+    protected $table = 'carrinho_itens';
 
     protected $fillable = [
-        'id_pedido',
+        'id_carrinho',
         'id_variacao',
         'quantidade',
         'preco_unitario',
@@ -27,9 +27,9 @@ class PedidoItem extends Model
         'subtotal' => 'decimal:2',
     ];
 
-    public function pedido(): BelongsTo
+    public function carrinho(): BelongsTo
     {
-        return $this->belongsTo(Pedido::class, 'id_pedido');
+        return $this->belongsTo(Carrinho::class, 'id_carrinho');
     }
 
     public function variacao(): BelongsTo

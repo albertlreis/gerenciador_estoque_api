@@ -8,19 +8,34 @@ class FiltrarProdutosRequest extends FormRequest
 {
     public function authorize(): bool
     {
-        return true; // ou aplicar lógica de permissão
+        return true;
+    }
+
+    protected function prepareForValidation(): void
+    {
+        $this->merge([
+            'ativo' => $this->toBoolean($this->ativo),
+            'is_outlet' => $this->toBoolean($this->is_outlet),
+        ]);
+    }
+
+    private function toBoolean($value): ?bool
+    {
+        if (is_null($value) || $value === '') return null;
+        return filter_var($value, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
     }
 
     public function rules(): array
     {
         return [
-            'nome'           => ['nullable', 'string', 'max:255'],
-            'id_categoria'   => ['nullable', 'array'],
-            'id_categoria.*' => ['integer', 'exists:categorias,id'],
-            'ativo'          => ['nullable', 'boolean'],
-            'per_page'       => ['nullable', 'integer', 'min:1', 'max:100'],
-            'atributos'      => ['nullable', 'array'],
-            'atributos.*'    => ['array'],
+            'nome'             => ['nullable', 'string', 'max:255'],
+            'id_categoria'     => ['nullable', 'array'],
+            'id_categoria.*'   => ['integer', 'exists:categorias,id'],
+            'ativo'            => ['nullable', 'boolean'],
+            'is_outlet'        => ['nullable', 'boolean'],
+            'estoque_status'   => ['nullable', 'in:com_estoque,sem_estoque'],
+            'per_page'         => ['nullable', 'integer', 'min:1', 'max:100'],
+            'atributos'        => ['nullable', 'array'],
         ];
     }
 
@@ -28,6 +43,9 @@ class FiltrarProdutosRequest extends FormRequest
     {
         return [
             'id_categoria.*.exists' => 'Alguma categoria informada é inválida.',
+            'ativo.boolean'         => 'O campo ativo deve ser verdadeiro ou falso.',
+            'is_outlet.boolean'     => 'O campo outlet deve ser verdadeiro ou falso.',
+            'estoque_status.in'     => 'O filtro de estoque deve ser com_estoque ou sem_estoque.',
         ];
     }
 }

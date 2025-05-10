@@ -22,7 +22,7 @@ class ProdutosSeeder extends Seeder
 
         for ($i = 1; $i <= 40; $i++) {
             $ref = $base[$i % count($base)];
-            $isOutlet = $i > 30; // últimos 10 produtos são outlet
+            $isOutlet = $i > 30;
             $dias = $isOutlet ? rand(200, 500) : rand(5, 60);
             $dataUltimaSaida = $now->copy()->subDays($dias)->toDateString();
 
@@ -42,14 +42,13 @@ class ProdutosSeeder extends Seeder
                 'updated_at' => $now,
             ]);
 
-            // Criar variações
             $qtdVariacoes = rand(1, 3);
             for ($v = 1; $v <= $qtdVariacoes; $v++) {
                 $preco = rand(200, 1000);
                 $custo = rand(100, $preco - 50);
                 $precoPromocional = $isOutlet ? round($preco * (1 - rand(20, 40) / 100), 2) : null;
 
-                DB::table('produto_variacoes')->insert([
+                $variacaoId = DB::table('produto_variacoes')->insertGetId([
                     'produto_id' => $produtoId,
                     'nome' => "Variação $v",
                     'sku' => strtoupper(Str::random(8)) . $i . $v,
@@ -60,6 +59,15 @@ class ProdutosSeeder extends Seeder
                     'created_at' => $now,
                     'updated_at' => $now,
                 ]);
+
+                // Se for produto outlet, garantir que tenha estoque
+                if ($isOutlet) {
+                    DB::table('estoque')->insert([
+                        'id_variacao' => $variacaoId,
+                        'id_deposito' => rand(1, 2),
+                        'quantidade' => rand(5, 100),
+                    ]);
+                }
             }
         }
     }

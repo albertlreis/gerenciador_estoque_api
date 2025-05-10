@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 /**
  * Representa uma variação específica de um produto,
@@ -30,6 +31,11 @@ class ProdutoVariacao extends Model
     public function atributos(): HasMany
     {
         return $this->hasMany(ProdutoVariacaoAtributo::class, 'id_variacao');
+    }
+
+    public function estoque(): HasOne
+    {
+        return $this->hasOne(Estoque::class, 'id_variacao');
     }
 
     public function getNomeCompletoAttribute(): string

@@ -15,13 +15,12 @@ class DatabaseSeeder extends Seeder
     {
         $this->call([
             CategoriasSeeder::class,
+            DepositosTableSeeder::class,
             ProdutosSeeder::class,
-            ProdutoVariacoesSeeder::class,
             ProdutoVariacaoAtributosSeeder::class,
             ClientesSeeder::class,
             ParceiroSeeder::class,
             PedidosSeeder::class,
-            DepositosTableSeeder::class,
             EstoqueTableSeeder::class,
             EstoqueMovimentacoesTableSeeder::class,
             ProdutoVariacaoVinculosSeeder::class,

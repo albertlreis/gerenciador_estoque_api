@@ -20,6 +20,9 @@ class ProdutoVariacaoResource extends JsonResource
             'custo' => $this->custo,
             'sku' => $this->sku,
             'codigo_barras' => $this->codigo_barras,
+            'estoque' => [
+                'quantidade' => $this->estoque->quantidade ?? 0,
+            ],
             'atributos' => ProdutoVariacaoAtributoResource::collection($this->whenLoaded('atributos')),
         ];
     }

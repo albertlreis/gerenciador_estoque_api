@@ -12,7 +12,7 @@ class EstoqueTableSeeder extends Seeder
     public function run()
     {
         $depositos = [1, 2];
-        $variacoes = ProdutoVariacao::take(15)->get();
+        $variacoes = ProdutoVariacao::doesntHave('estoque')->inRandomOrder()->take(15)->get();
 
         if ($variacoes->count() < 15) {
             throw new Exception('É necessário pelo menos 15 variações de produto para popular o estoque.');

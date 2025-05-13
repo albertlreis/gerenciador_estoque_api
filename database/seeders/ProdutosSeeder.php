@@ -12,24 +12,39 @@ class ProdutosSeeder extends Seeder
     public function run(): void
     {
         $now = Carbon::now();
+
+        // Busca todos os IDs de categoria existentes
+        $categoriaIds = DB::table('categorias')->pluck('id')->toArray();
+
+        // Se não houver categorias, aborta
+        if (empty($categoriaIds)) {
+            throw new \Exception('Nenhuma categoria encontrada. Execute o CategoriasSeeder antes.');
+        }
+
+        // Lista base de produtos com descrições variadas
         $base = [
-            ['nome' => 'Produto Modelo', 'descricao' => 'Produto de demonstração.', 'id_categoria' => 1],
-            ['nome' => 'Mesa Decorativa', 'descricao' => 'Mesa pequena para decoração.', 'id_categoria' => 2],
-            ['nome' => 'Cadeira Dobrável', 'descricao' => 'Cadeira leve e dobrável.', 'id_categoria' => 3],
-            ['nome' => 'Cama Infantil', 'descricao' => 'Cama segura para crianças.', 'id_categoria' => 4],
-            ['nome' => 'Estante Alta', 'descricao' => 'Estante com prateleiras altas.', 'id_categoria' => 5],
+            'Sofá Retrátil',
+            'Mesa de Jantar',
+            'Cadeira Gamer',
+            'Estante Modular',
+            'Cama de Casal',
+            'Sofá de Canto',
+            'Mesa Escritório',
+            'Cadeira Ergonômica',
+            'Beliche Infantil',
+            'Cama com Gavetas',
         ];
 
         for ($i = 1; $i <= 40; $i++) {
-            $ref = $base[$i % count($base)];
+            $nomeBase = $base[$i % count($base)];
             $isOutlet = $i > 30;
             $dias = $isOutlet ? rand(200, 500) : rand(5, 60);
             $dataUltimaSaida = $now->copy()->subDays($dias)->toDateString();
 
             $produtoId = DB::table('produtos')->insertGetId([
-                'nome' => $ref['nome'] . ' #' . $i,
-                'descricao' => $ref['descricao'],
-                'id_categoria' => $ref['id_categoria'],
+                'nome' => $nomeBase . ' #' . $i,
+                'descricao' => 'Produto ' . strtolower($nomeBase) . ' com design moderno e excelente acabamento.',
+                'id_categoria' => $categoriaIds[array_rand($categoriaIds)],
                 'id_fornecedor' => null,
                 'altura' => rand(50, 200),
                 'largura' => rand(80, 220),
@@ -60,7 +75,7 @@ class ProdutosSeeder extends Seeder
                     'updated_at' => $now,
                 ]);
 
-                // Se for produto outlet, garantir que tenha estoque
+                // Garante estoque para produtos outlet
                 if ($isOutlet) {
                     DB::table('estoque')->insert([
                         'id_variacao' => $variacaoId,

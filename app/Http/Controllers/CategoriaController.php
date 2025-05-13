@@ -9,14 +9,15 @@ class CategoriaController extends Controller
 {
     public function index()
     {
-        return response()->json(Categoria::all());
+        return response()->json(Categoria::with('subcategorias')->whereNull('categoria_pai_id')->get());
     }
 
     public function store(Request $request)
     {
         $validated = $request->validate([
-            'nome'      => 'required|string|max:255',
+            'nome' => 'required|string|max:255',
             'descricao' => 'nullable|string',
+            'categoria_pai_id' => 'nullable|exists:categorias,id',
         ]);
 
         $categoria = Categoria::create($validated);
@@ -31,8 +32,9 @@ class CategoriaController extends Controller
     public function update(Request $request, Categoria $categoria)
     {
         $validated = $request->validate([
-            'nome'      => 'sometimes|required|string|max:255',
+            'nome' => 'sometimes|required|string|max:255',
             'descricao' => 'nullable|string',
+            'categoria_pai_id' => 'nullable|exists:categorias,id',
         ]);
 
         $categoria->update($validated);

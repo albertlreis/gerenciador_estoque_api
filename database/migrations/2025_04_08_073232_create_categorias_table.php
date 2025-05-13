@@ -17,8 +17,11 @@ return new class extends Migration
             $table->increments('id');
             $table->string('nome', 255);
             $table->text('descricao')->nullable();
+            $table->unsignedInteger('categoria_pai_id')->nullable();
+            $table->foreign('categoria_pai_id')->references('id')->on('categorias')->onDelete('cascade');
             $table->timestamps();
         });
+
     }
 
 

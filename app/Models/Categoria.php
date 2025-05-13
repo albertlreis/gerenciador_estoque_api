@@ -12,9 +12,18 @@ class Categoria extends Model
         'descricao'
     ];
 
-    // Uma categoria possui vários produtos
     public function produtos(): HasMany
     {
         return $this->hasMany(Produto::class, 'id_categoria');
+    }
+
+    public function subcategorias()
+    {
+        return $this->hasMany(Categoria::class, 'categoria_pai_id');
+    }
+
+    public function pai()
+    {
+        return $this->belongsTo(Categoria::class, 'categoria_pai_id');
     }
 }

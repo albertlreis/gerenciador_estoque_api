@@ -33,4 +33,16 @@ class Produto extends Model
         return $this->hasMany(ProdutoImagem::class, 'id_produto');
     }
 
+    public function imagemPrincipal()
+    {
+        return $this->hasOne(ProdutoImagem::class, 'id_produto')->where('principal', true);
+    }
+
+    public function getEstoqueTotalAttribute(): int
+    {
+        return $this->variacoes
+            ->flatMap(fn ($v) => $v->estoque ? [$v->estoque->quantidade] : [])
+            ->sum();
+    }
+
 }

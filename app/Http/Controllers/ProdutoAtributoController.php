@@ -14,12 +14,14 @@ class ProdutoAtributoController extends Controller
      */
     public function index(): JsonResponse
     {
-        $atributos = ProdutoVariacaoAtributo::select('atributo', 'valor')
+        $atributos = ProdutoVariacaoAtributo::query()
+            ->join('produto_variacoes', 'produto_variacoes.id', '=', 'produto_variacao_atributos.id_variacao')
+            ->join('produtos', 'produtos.id', '=', 'produto_variacoes.produto_id')
+            ->where('produtos.ativo', true)
+            ->select('produto_variacao_atributos.atributo', 'produto_variacao_atributos.valor')
             ->get()
             ->groupBy('atributo')
-            ->map(function ($items) {
-                return $items->pluck('valor')->unique()->values();
-            });
+            ->map(fn($items) => $items->pluck('valor')->unique()->values());
 
         return response()->json($atributos);
     }

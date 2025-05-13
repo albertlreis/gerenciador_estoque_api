@@ -9,6 +9,7 @@ use App\Models\Pedido;
 use App\Models\PedidoItem;
 use App\Models\Carrinho;
 use Carbon\Carbon;
+use Exception;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -27,18 +28,64 @@ class PedidoController extends Controller
     {
         $query = Pedido::with(['cliente', 'parceiro', 'itens.variacao.produto']);
 
+        // Filtros recebidos via query
+        if ($request->filled('status')) {
+            $query->where('status', $request->status);
+        }
+
+        if ($request->filled('data_inicio') || $request->filled('data_fim')) {
+            try {
+                $dataInicio = $request->filled('data_inicio') ? Carbon::parse($request->data_inicio)->startOfDay() : null;
+                $dataFim = $request->filled('data_fim') ? Carbon::parse($request->data_fim)->endOfDay() : null;
+
+                $query->when($dataInicio, fn($q) => $q->where('data_pedido', '>=', $dataInicio));
+                $query->when($dataFim, fn($q) => $q->where('data_pedido', '<=', $dataFim));
+            } catch (Exception) {
+                return response()->json(['erro' => 'Formato de data inválido. Use AAAA-MM-DD.'], 422);
+            }
+        }
+
+        if ($request->filled('busca')) {
+            $busca = strtolower($request->busca);
+            $tipo = $request->get('tipo_busca', 'todos'); // valores: cliente, parceiro, vendedor, todos
+
+            $query->where(function ($q) use ($busca, $tipo) {
+                if (in_array($tipo, ['todos', 'id'])) {
+                    if (is_numeric($busca)) {
+                        $q->orWhere('id', (int) $busca);
+                    }
+                }
+
+                if (in_array($tipo, ['todos', 'cliente'])) {
+                    $q->orWhereHas('cliente', fn($sub) =>
+                    $sub->whereRaw('LOWER(nome) LIKE ?', ["%{$busca}%"])
+                    );
+                }
+
+                if (in_array($tipo, ['todos', 'parceiro'])) {
+                    $q->orWhereHas('parceiro', fn($sub) =>
+                    $sub->whereRaw('LOWER(nome) LIKE ?', ["%{$busca}%"])
+                    );
+                }
+
+                if (in_array($tipo, ['todos', 'vendedor', 'usuario'])) {
+                    $q->orWhereHas('usuario', fn($sub) =>
+                    $sub->whereRaw('LOWER(nome) LIKE ?', ["%{$busca}%"])
+                    );
+                }
+            });
+        }
+
+
         // Ordenação
         $ordenarPor = $request->get('ordenarPor', 'data_pedido');
         $ordem = $request->get('ordem', 'desc');
 
         $query->orderBy($ordenarPor, $ordem);
 
-        // Paginação padrão
         $perPage = (int) $request->get('per_page', 10);
-
         $paginado = $query->paginate($perPage)->appends($request->query());
 
-        // Formatar os dados
         $paginado->getCollection()->transform(function ($pedido) {
             return [
                 'id' => $pedido->id,
@@ -62,6 +109,7 @@ class PedidoController extends Controller
 
         return response()->json($paginado);
     }
+
 
     public function store(StorePedidoRequest $request)
     {

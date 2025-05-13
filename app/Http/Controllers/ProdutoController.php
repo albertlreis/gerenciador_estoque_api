@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use Exception;
 use Throwable;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Http\JsonResponse;
@@ -226,7 +227,7 @@ class ProdutoController extends Controller
                 // Produto novo (sem vínculo nem variação existente)
                 if (!$variacaoId && !empty($item['descricao_xml'])) {
                     if (empty($item['id_categoria'])) {
-                        throw new \Exception("Categoria não informada para o produto: {$item['descricao_xml']}");
+                        throw new Exception("Categoria não informada para o produto: {$item['descricao_xml']}");
                     }
 
                     $produto = Produto::create([
@@ -254,10 +255,9 @@ class ProdutoController extends Controller
                 }
 
                 if (!$variacaoId) {
-                    throw new \Exception("Produto não identificado: {$item['descricao_xml']}");
+                    throw new Exception("Produto não identificado e sem variação vinculada: {$item['descricao_xml']}");
                 }
 
-                // Registrar movimentação de entrada
                 EstoqueMovimentacao::create([
                     'id_variacao' => $variacaoId,
                     'id_deposito_origem' => null,
@@ -267,6 +267,7 @@ class ProdutoController extends Controller
                     'observacao' => 'Importação NF-e nº ' . $nota['numero'],
                     'data_movimentacao' => $nota['data_emissao'],
                 ]);
+
             }
 
             DB::commit();

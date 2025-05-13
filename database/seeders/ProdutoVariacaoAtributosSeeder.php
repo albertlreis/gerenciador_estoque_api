@@ -13,28 +13,53 @@ class ProdutoVariacaoAtributosSeeder extends Seeder
         $now = Carbon::now();
         $atributos = [];
 
-        $valores = [
-            ['cor', 'vermelho'], ['cor', 'azul'], ['cor', 'preto'], ['cor', 'branco'], ['cor', 'verde'],
-            ['tipo_metal', 'inox'], ['tipo_metal', 'ferro'], ['tipo_metal', 'aço escovado'], ['tipo_metal', 'alumínio'],
-            ['tipo_madeira', 'carvalho'], ['tipo_madeira', 'nogueira'], ['tipo_madeira', 'pinus'], ['tipo_madeira', 'imbuia'],
+        // Mapeamento de atributos por categoria
+        $atributosPorCategoria = [
+            'Sofá' => [
+                ['cor', 'preto'], ['cor', 'cinza'], ['cor', 'bege'], ['tecido', 'veludo'], ['tecido', 'linho']
+            ],
+            'Mesa' => [
+                ['tipo_madeira', 'carvalho'], ['tipo_madeira', 'nogueira'], ['formato', 'redonda'], ['formato', 'retangular']
+            ],
+            'Cadeira' => [
+                ['estrutura', 'ferro'], ['estrutura', 'alumínio'], ['cor', 'preto'], ['revestimento', 'couro'], ['revestimento', 'tecido']
+            ],
+            'Cama' => [
+                ['tamanho', 'solteiro'], ['tamanho', 'casal'], ['material', 'madeira'], ['material', 'mdf']
+            ],
+            'Estante' => [
+                ['material', 'mdf'], ['material', 'madeira'], ['acabamento', 'fosco'], ['acabamento', 'brilhante']
+            ],
         ];
 
-        $variacoes = DB::table('produto_variacoes')->get();
-        $i = 0;
+        $variacoes = DB::table('produto_variacoes as pv')
+            ->join('produtos as p', 'pv.produto_id', '=', 'p.id')
+            ->join('categorias as c', 'p.id_categoria', '=', 'c.id')
+            ->select('pv.id as variacao_id', 'c.nome as categoria_nome')
+            ->get();
 
         foreach ($variacoes as $variacao) {
-            $totalAttrs = rand(2, 3);
-            for ($j = 0; $j < $totalAttrs; $j++) {
-                $index = ($i + $j) % count($valores);
+            // Detecta a categoria base (ex: Sofá de Canto => Sofá)
+            $categoriaBase = strtolower($variacao->categoria_nome);
+            $base = collect($atributosPorCategoria)->first(function ($_, $key) use ($categoriaBase) {
+                return str_contains($categoriaBase, strtolower($key));
+            });
+
+            // Se não encontrou categoria compatível, usa fallback genérico
+            $opcoes = $base ?? [['cor', 'preto'], ['material', 'madeira']];
+
+            // Seleciona 2 a 3 atributos distintos
+            $atributosSelecionados = collect($opcoes)->shuffle()->take(rand(2, 3));
+
+            foreach ($atributosSelecionados as [$atributo, $valor]) {
                 $atributos[] = [
-                    'id_variacao' => $variacao->id,
-                    'atributo'    => $valores[$index][0],
-                    'valor'       => $valores[$index][1],
+                    'id_variacao' => $variacao->variacao_id,
+                    'atributo'    => $atributo,
+                    'valor'       => $valor,
                     'created_at'  => $now,
                     'updated_at'  => $now,
                 ];
             }
-            $i++;
         }
 
         DB::table('produto_variacao_atributos')->insert($atributos);

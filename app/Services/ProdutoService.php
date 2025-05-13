@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\Categoria;
 use App\Models\Produto;
 use App\Models\ProdutoVariacao;
 use App\Models\ProdutoVariacaoAtributo;
@@ -99,15 +100,16 @@ class ProdutoService
 
     public function listarProdutosFiltrados($request): LengthAwarePaginator
     {
-        $query = Produto::with(['variacoes.atributos', 'variacoes.estoque']);
+        $query = Produto::with(['variacoes.atributos', 'variacoes.estoque', 'imagemPrincipal']);
 
         if (!empty($request->nome)) {
             $query->where('nome', 'ILIKE', '%' . $request->nome . '%');
         }
 
         if (!empty($request->id_categoria)) {
-            $categorias = is_array($request->id_categoria) ? $request->id_categoria : [$request->id_categoria];
-            $query->whereIn('id_categoria', $categorias);
+            $idsSelecionados = is_array($request->id_categoria) ? $request->id_categoria : [$request->id_categoria];
+            $idsExpandidos = Categoria::expandirIdsComFilhos($idsSelecionados);
+            $query->whereIn('id_categoria', $idsExpandidos);
         }
 
         if (!is_null($request->ativo)) {

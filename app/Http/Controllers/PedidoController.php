@@ -113,20 +113,24 @@ class PedidoController extends Controller
 
     public function store(StorePedidoRequest $request)
     {
-        $usuarioId = Auth::id();
+        $usuarioLogado = Auth::user();
 
-        $carrinho = Carrinho::where('id_usuario', $usuarioId)->with('itens')->first();
+        $idUsuarioFinal = $usuarioLogado->perfil === 'Administrador'
+            ? ($request->id_usuario ?? $usuarioLogado->id)
+            : $usuarioLogado->id;
+
+        $carrinho = Carrinho::where('id_usuario', $usuarioLogado->id)->with('itens')->first();
 
         if (!$carrinho || $carrinho->itens->isEmpty()) {
             return response()->json(['message' => 'Carrinho vazio.'], 422);
         }
 
-        return DB::transaction(function () use ($request, $carrinho, $usuarioId) {
+        return DB::transaction(function () use ($request, $carrinho, $idUsuarioFinal) {
             $total = $carrinho->itens->sum('subtotal');
 
             $pedido = Pedido::create([
                 'id_cliente'   => $request->id_cliente,
-                'id_usuario'   => $usuarioId,
+                'id_usuario'   => $idUsuarioFinal,
                 'id_parceiro'  => $request->id_parceiro,
                 'data_pedido'  => now(),
                 'status'       => 'confirmado',
@@ -144,7 +148,6 @@ class PedidoController extends Controller
                 ]);
             }
 
-            // Limpa o carrinho após finalizar o pedido
             $carrinho->itens()->delete();
 
             return response()->json([

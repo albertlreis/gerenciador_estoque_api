@@ -30,17 +30,20 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
     Route::get('/produtos/outlet', [ProdutoOutletController::class, 'index']);
     Route::patch('/produtos/{id}/remover-outlet', [ProdutoOutletController::class, 'removerOutlet']);
 
-    Route::apiResource('produtos', ProdutoController::class);
+
     Route::get('atributos', [ProdutoAtributoController::class, 'index']);
 
     // Variações
     Route::get('variacoes', [ProdutoVariacaoController::class, 'buscar']);
     Route::prefix('produtos')->group(function () {
+        Route::get('//estoque-baixo', [ProdutoController::class, 'estoqueBaixo']);
         Route::post('importar-xml', [ProdutoController::class, 'importarXML']);
         Route::post('importar-xml/confirmar', [ProdutoController::class, 'confirmarImportacao']);
         Route::apiResource('{produto}/imagens', ProdutoImagemController::class)->parameters(['imagens' => 'imagem']);
         Route::apiResource('{produto}/variacoes', ProdutoVariacaoController::class)->parameters(['variacoes' => 'variacao']);
     });
+
+    Route::apiResource('produtos', ProdutoController::class);
 
     // Depósitos e Estoque
     Route::apiResource('depositos', DepositoController::class);

@@ -285,4 +285,27 @@ class ProdutoController extends Controller
             ], 500);
         }
     }
+
+    public function estoqueBaixo(Request $request): JsonResponse
+    {
+        $limite = (int) $request->query('limite', 5);
+
+        $estoques = DB::table('estoque')
+            ->join('produto_variacoes', 'estoque.id_variacao', '=', 'produto_variacoes.id')
+            ->join('produtos', 'produto_variacoes.produto_id', '=', 'produtos.id')
+            ->join('depositos', 'estoque.id_deposito', '=', 'depositos.id')
+            ->where('estoque.quantidade', '<', $limite)
+            ->select(
+                'produtos.nome as produto',
+                'produto_variacoes.nome as variacao',
+                'depositos.nome as deposito',
+                'estoque.quantidade',
+                'produto_variacoes.preco'
+            )
+            ->orderBy('estoque.quantidade', 'asc')
+            ->get();
+
+        return response()->json($estoques);
+    }
+
 }

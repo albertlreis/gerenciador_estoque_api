@@ -23,18 +23,30 @@ use Symfony\Component\HttpFoundation\BinaryFileResponse;
  */
 class PedidoController extends Controller
 {
-    public function index()
+    public function index(Request $request)
     {
-        $pedidos = Pedido::with(['cliente', 'parceiro', 'itens.variacao.produto'])->get();
+        $query = Pedido::with(['cliente', 'parceiro', 'itens.variacao.produto']);
 
-        return $pedidos->map(function ($pedido) {
+        // Ordenação
+        $ordenarPor = $request->get('ordenarPor', 'data_pedido');
+        $ordem = $request->get('ordem', 'desc');
+
+        $query->orderBy($ordenarPor, $ordem);
+
+        // Paginação padrão
+        $perPage = (int) $request->get('per_page', 10);
+
+        $paginado = $query->paginate($perPage)->appends($request->query());
+
+        // Formatar os dados
+        $paginado->getCollection()->transform(function ($pedido) {
             return [
                 'id' => $pedido->id,
                 'numero' => $pedido->numero,
                 'data' => $pedido->data_pedido,
                 'cliente' => $pedido->cliente,
                 'parceiro' => $pedido->parceiro,
-                'total' => $pedido->valor_total,
+                'valor_total' => $pedido->valor_total,
                 'status' => $pedido->status,
                 'observacoes' => $pedido->observacoes,
                 'produtos' => $pedido->itens->map(function ($item) {
@@ -47,6 +59,8 @@ class PedidoController extends Controller
                 })
             ];
         });
+
+        return response()->json($paginado);
     }
 
     public function store(StorePedidoRequest $request)
@@ -144,40 +158,41 @@ class PedidoController extends Controller
         return response()->json(['erro' => 'Formato inválido'], 400);
     }
 
-    public function estatisticas(): JsonResponse
+    public function estatisticas(Request $request): JsonResponse
     {
-        // Últimos 6 meses
-        $meses = collect(range(0, 5))->map(function ($i) {
-            return Carbon::now()->subMonths($i)->startOfMonth();
-        })->reverse();
+        $intervalo = (int) $request->query('meses', 6);
 
-        // Buscar pedidos agrupados por mês no MySQL
+        $meses = collect(range(0, $intervalo - 1))
+            ->map(fn($i) => Carbon::now()->subMonths($i)->startOfMonth())
+            ->reverse();
+
         $dados = DB::table('pedidos')
-            ->selectRaw("DATE_FORMAT(data_pedido, '%Y-%m-01') as mes, COUNT(*) as total")
+            ->selectRaw("DATE_FORMAT(data_pedido, '%Y-%m-01') as mes, COUNT(*) as total, SUM(valor_total) as valor")
             ->where('data_pedido', '>=', $meses->first()->format('Y-m-d'))
             ->whereNotNull('data_pedido')
             ->groupBy('mes')
             ->orderBy('mes')
             ->get();
 
-        // Mapear todos os meses com os resultados
         $labels = [];
+        $quantidades = [];
         $valores = [];
 
         foreach ($meses as $mes) {
             $chave = $mes->format('Y-m-01');
             $label = $mes->format('M/Y');
 
-            $quantidade = $dados->firstWhere('mes', $chave)->total ?? 0;
+            $linha = $dados->firstWhere('mes', $chave);
 
             $labels[] = $label;
-            $valores[] = (int) $quantidade;
+            $quantidades[] = $linha->total ?? 0;
+            $valores[] = (float) ($linha->valor ?? 0);
         }
 
         return response()->json([
             'labels' => $labels,
+            'quantidades' => $quantidades,
             'valores' => $valores,
         ]);
     }
-
 }

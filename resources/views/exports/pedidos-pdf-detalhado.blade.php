@@ -1,15 +1,40 @@
-<!DOCTYPE html>
+@php use Carbon\Carbon; @endphp
+    <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
     <title>Relatório de Pedidos Detalhado</title>
     <style>
-        body { font-family: sans-serif; font-size: 12px; }
-        h2 { text-align: center; margin-bottom: 20px; }
-        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-        th, td { border: 1px solid #ccc; padding: 6px; text-align: left; }
-        th { background-color: #f0f0f0; }
-        .produtos-table { margin: 5px 0 15px 30px; width: 90%; }
+        body {
+            font-family: sans-serif;
+            font-size: 12px;
+        }
+
+        h2 {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+        }
+
+        th, td {
+            border: 1px solid #ccc;
+            padding: 6px;
+            text-align: left;
+        }
+
+        th {
+            background-color: #f0f0f0;
+        }
+
+        .produtos-table {
+            margin: 5px 0 15px 30px;
+            width: 90%;
+        }
     </style>
 </head>
 <body>
@@ -19,9 +44,9 @@
     <table>
         <tr>
             <th>Nº Pedido</th>
-            <td>{{ $pedido->numero }}</td>
+            <td>{{ $pedido->id }}</td>
             <th>Data</th>
-            <td>{{ $pedido->data }}</td>
+            <td>{{ Carbon::parse($pedido->data_pedido)->format('d/m/Y') }}</td>
         </tr>
         <tr>
             <th>Cliente</th>
@@ -31,7 +56,7 @@
         </tr>
         <tr>
             <th>Total</th>
-            <td>R$ {{ number_format($pedido->total, 2, ',', '.') }}</td>
+            <td>R$ {{ number_format($pedido->valor_total, 2, ',', '.') }}</td>
             <th>Status</th>
             <td>{{ ucfirst($pedido->status) }}</td>
         </tr>

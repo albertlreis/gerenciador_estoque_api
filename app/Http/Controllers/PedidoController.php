@@ -101,7 +101,8 @@ class PedidoController extends Controller
                         'nome' => $item->variacao->produto->nome ?? '-',
                         'variacao' => $item->variacao->descricao ?? '-',
                         'quantidade' => $item->quantidade,
-                        'valor' => $item->valor,
+                        'preco_unitario' => $item->preco_unitario,
+                        'subtotal' => $item->subtotal,
                     ];
                 })
             ];

@@ -2,63 +2,94 @@
 
 namespace App\Http\Controllers;
 
-use App\Http\Requests\StoreCarrinhoItemRequest;
 use App\Models\Carrinho;
-use App\Models\CarrinhoItem;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 
 /**
- * Controller responsável por gerenciar o carrinho de compras do usuário logado (vendedor).
+ * Controller responsável por gerenciar os carrinhos de compra dos usuários.
  */
 class CarrinhoController extends Controller
 {
+    /**
+     * Lista todos os carrinhos em rascunho do usuário logado.
+     */
     public function index()
     {
-        $carrinho = Carrinho::firstOrCreate(['id_usuario' => Auth::id()]);
-        $carrinho->load('itens.variacao');
+        $carrinhos = Carrinho::with('cliente', 'itens.variacao')
+            ->where('id_usuario', Auth::id())
+            ->where('status', 'rascunho')
+            ->get();
+
+        return response()->json($carrinhos);
+    }
+
+    /**
+     * Retorna os dados de um carrinho específico do usuário logado.
+     */
+    public function show($id)
+    {
+        $carrinho = Carrinho::with([
+            'cliente',
+            'itens.variacao.produto.imagemPrincipal', // traz a imagem principal
+            'itens.variacao.produto',                 // nome do produto
+            'itens.variacao.estoque',                 // quantidade disponível
+            'itens.variacao.atributos'                // atributos da variação
+        ])
+            ->where('id_usuario', Auth::id())
+            ->findOrFail($id);
 
         return response()->json($carrinho);
     }
 
-    public function store(StoreCarrinhoItemRequest $request)
+    /**
+     * Cria um novo carrinho vinculado a um cliente.
+     */
+    public function store(Request $request)
     {
-        $carrinho = Carrinho::firstOrCreate(['id_usuario' => Auth::id()]);
+        $request->validate([
+            'id_cliente' => 'required|exists:clientes,id'
+        ]);
 
-        $item = CarrinhoItem::updateOrCreate(
-            [
-                'id_carrinho' => $carrinho->id,
-                'id_variacao' => $request->id_variacao
-            ],
-            [
-                'quantidade'     => $request->quantidade,
-                'preco_unitario' => $request->preco_unitario,
-                'subtotal'       => $request->quantidade * $request->preco_unitario,
-            ]
-        );
+        $carrinho = Carrinho::create([
+            'id_usuario' => Auth::id(),
+            'id_cliente' => $request->id_cliente,
+            'status' => 'rascunho'
+        ]);
 
-        return response()->json($item, 201);
+        return response()->json($carrinho, 201);
     }
 
-    public function destroy($itemId)
+    /**
+     * Atualiza o cliente e/ou parceiro vinculados ao carrinho.
+     */
+    public function update(Request $request, $id)
     {
-        $item = CarrinhoItem::whereHas('carrinho', function ($q) {
-            $q->where('id_usuario', Auth::id());
-        })->findOrFail($itemId);
+        $request->validate([
+            'id_cliente' => 'nullable|exists:clientes,id',
+            'id_parceiro' => 'nullable|exists:parceiros,id'
+        ]);
 
-        $item->delete();
+        $carrinho = Carrinho::where('id', $id)
+            ->where('id_usuario', Auth::id())
+            ->firstOrFail();
 
-        return response()->json(['message' => 'Item removido com sucesso.']);
+        $carrinho->update($request->only(['id_cliente', 'id_parceiro']));
+
+        return response()->json($carrinho);
     }
 
-    public function clear()
+    /**
+     * Marca um carrinho como cancelado.
+     */
+    public function cancelar($id)
     {
-        $carrinho = Carrinho::where('id_usuario', Auth::id())->first();
+        $carrinho = Carrinho::where('id', $id)
+            ->where('id_usuario', Auth::id())
+            ->firstOrFail();
 
-        if ($carrinho) {
-            $carrinho->itens()->delete();
-        }
+        $carrinho->update(['status' => 'cancelado']);
 
-        return response()->json(['message' => 'Carrinho limpo com sucesso.']);
+        return response()->json(['message' => 'Carrinho cancelado com sucesso.']);
     }
 }

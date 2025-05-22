@@ -15,10 +15,7 @@ class Carrinho extends Model
 {
     protected $table = 'carrinhos';
 
-    protected $fillable = [
-        'id_usuario',
-        'id_cliente',
-    ];
+    protected $fillable = ['id_usuario', 'id_cliente', 'id_parceiro', 'status'];
 
     public function usuario(): BelongsTo
     {

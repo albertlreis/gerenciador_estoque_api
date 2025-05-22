@@ -120,7 +120,10 @@ class PedidoController extends Controller
             ? ($request->id_usuario ?? $usuarioLogado->id)
             : $usuarioLogado->id;
 
-        $carrinho = Carrinho::where('id_usuario', $usuarioLogado->id)->with('itens')->first();
+        $carrinho = Carrinho::where('id', $request->id_carrinho)
+            ->where('id_usuario', $usuarioLogado->id)
+            ->with('itens')
+            ->first();
 
         if (!$carrinho || $carrinho->itens->isEmpty()) {
             return response()->json(['message' => 'Carrinho vazio.'], 422);

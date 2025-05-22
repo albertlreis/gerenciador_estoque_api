@@ -56,6 +56,7 @@ return new class extends Migration
      */
     public function down()
     {
+        Schema::dropIfExists('carrinho_itens');
         Schema::dropIfExists('carrinhos');
     }
 };

@@ -2,6 +2,7 @@
 
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\{
+    CarrinhoItemController,
     CategoriaController,
     ProdutoController,
     ProdutoImagemController,
@@ -62,10 +63,14 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
     Route::apiResource('pedidos', PedidoController::class);
     Route::apiResource('pedidos.itens', PedidoItemController::class)->parameters(['itens' => 'item']);
 
-    Route::prefix('carrinho')->group(function () {
-        Route::get('/', [CarrinhoController::class, 'index']);
-        Route::post('/', [CarrinhoController::class, 'store']);
-        Route::delete('/', [CarrinhoController::class, 'clear']);
-        Route::delete('/{itemId}', [CarrinhoController::class, 'destroy']);
-    });
+    Route::get('/carrinhos', [CarrinhoController::class, 'index']);
+    Route::get('/carrinhos/{id}', [CarrinhoController::class, 'show']);
+    Route::post('/carrinhos', [CarrinhoController::class, 'store']);
+    Route::put('/carrinhos/{id}', [CarrinhoController::class, 'update']);
+    Route::post('/carrinhos/{id}/cancelar', [CarrinhoController::class, 'cancelar']);
+
+    Route::post('/carrinho-itens', [CarrinhoItemController::class, 'store']);
+    Route::delete('/carrinho-itens/{id}', [CarrinhoItemController::class, 'destroy']);
+    Route::delete('/carrinho-itens/limpar/{idCarrinho}', [CarrinhoItemController::class, 'clear']);
+
 });

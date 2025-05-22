@@ -19,7 +19,7 @@ class ProdutoVariacao extends Model
         'produto_id', 'sku', 'nome', 'preco', 'custo', 'codigo_barras'
     ];
 
-    protected $appends = ['nome_completo'];
+    protected $appends = ['nome_completo', 'estoque_total'];
 
     protected $with = ['produto'];
 
@@ -38,11 +38,16 @@ class ProdutoVariacao extends Model
         return $this->hasOne(Estoque::class, 'id_variacao');
     }
 
+    public function getEstoqueTotalAttribute(): int
+    {
+        return $this->estoque->quantidade ?? 0;
+    }
+
     public function getNomeCompletoAttribute(): string
     {
         $produtoNome = $this->produto->nome ?? '';
         $variacaoNome = $this->nome ?? '';
-        return trim("{$produtoNome} - {$variacaoNome}") ?: '-';
+        return trim("$produtoNome - $variacaoNome") ?: '-';
     }
 
 }

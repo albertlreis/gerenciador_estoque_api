@@ -3,24 +3,35 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class Estoque extends Model
 {
     protected $table = 'estoque';
+
     protected $fillable = [
-        'id_produto',
+        'id_variacao',
         'id_deposito',
         'quantidade'
     ];
 
-    public function produto()
+    protected $casts = [
+        'quantidade' => 'integer'
+    ];
+
+    /**
+     * Relacionamento com a variação de produto
+     */
+    public function variacao(): BelongsTo
     {
-        return $this->belongsTo(Produto::class, 'id_produto');
+        return $this->belongsTo(ProdutoVariacao::class, 'id_variacao')->withDefault();
     }
 
-    // E a um depósito
-    public function deposito()
+    /**
+     * Relacionamento com o depósito
+     */
+    public function deposito(): BelongsTo
     {
-        return $this->belongsTo(Deposito::class, 'id_deposito');
+        return $this->belongsTo(Deposito::class, 'id_deposito')->withDefault();
     }
 }

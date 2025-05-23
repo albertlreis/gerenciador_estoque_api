@@ -17,6 +17,7 @@ use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use InvalidArgumentException;
 use Maatwebsite\Excel\Facades\Excel;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
@@ -332,18 +333,16 @@ class PedidoController extends Controller
     {
         $bloco = trim(preg_replace('/\s+/', ' ', $bloco));
 
-        // Tenta capturar valor no final (mesmo colado)
+        // Captura o valor no final
         if (!preg_match('/(?<valor>\d{1,3}(?:\.\d{3})*,\d{2})$/', $bloco, $valorMatch)) {
             Log::debug('Valor não encontrado:', ['bloco' => $bloco]);
             return null;
         }
 
         $valor = (float) str_replace(['.', ','], ['', '.'], $valorMatch['valor']);
-
-        // Remove o valor do bloco para facilitar os outros matches
         $blocoSemValor = trim(str_replace($valorMatch[0], '', $bloco));
 
-        // Tenta capturar quantidade, tipo, ref, e descrição
+        // Captura quantidade, tipo, ref e descrição
         if (!preg_match('/^(?<quantidade>\d{1,2}\.\d{4})\s*(?:(?<tipo>PEDIDO|PRONTA\s+ENTREGA))?\s*(?<ref>[A-Z0-9]+)?\s+(?<descricao>.+)$/i', $blocoSemValor, $match)) {
             Log::debug('Bloco não reconhecido como produto:', ['bloco' => $bloco]);
             return null;
@@ -359,7 +358,11 @@ class PedidoController extends Controller
         }
 
         $produto = $this->extrairProduto($descricao);
-        $medidas = $this->extrairMedidas($produto['atributos']['medidas'] ?? '');
+        $fixos = $produto['fixos'] ?? [
+            'largura' => null,
+            'profundidade' => null,
+            'altura' => null,
+        ];
 
         return [
             'descricao' => $descricao,
@@ -369,11 +372,7 @@ class PedidoController extends Controller
             'tipo' => $tipo,
             'ref' => $ref,
             'atributos' => $produto['atributos'],
-            'fixos' => [
-                'largura' => $medidas[0],
-                'profundidade' => $medidas[1],
-                'altura' => $medidas[2],
-            ],
+            'fixos' => $fixos,
         ];
     }
 
@@ -393,7 +392,7 @@ class PedidoController extends Controller
         ];
     }
 
-    private function extrairPedido(string $texto): array
+    private function extrairPedido(string $texto, array $itens = []): array
     {
         $parcelas = [];
         if (preg_match_all('/(\w+)\s+(\d{2}\/\d{2}\/\d{4})\s+(\w+)\s+([\d\.]+,\d{2})/', $texto, $matches, PREG_SET_ORDER)) {
@@ -407,61 +406,178 @@ class PedidoController extends Controller
             }
         }
 
+        $numero = $this->extrairValor('/PEDIDO DE VENDA[:\s]*([0-9]+)/i', $texto, ''); // ajustado para aceitar \t e espaços invisíveis
+        $dataVenda = $this->extrairValor('/DATA VENDA\s+(\d{2}\/\d{2}\/\d{4})/i', $texto);
+        $vendedor = $this->extrairValor('/VENDEDOR RESPONSÁVEL\s+(.+)/i', $texto);
+        $formaPagamento = $this->extrairValor('/FORMA DE PAGAMENTO[:\s]+(.+)/i', $texto) ?: 'À vista';
+
+        $valorExtraido = $this->extrairValor('/VALOR FINAL\s*-\s*R\$[\s\u00a0]*([\d\.,]+)/iu', $texto);
+        $valorTotal = null;
+        if ($valorExtraido) {
+            $valorTotal = (float) str_replace(['.', ','], ['', '.'], $valorExtraido);
+        } elseif (!empty($itens)) {
+            $valorTotal = array_reduce($itens, function ($soma, $item) {
+                return $soma + ($item['quantidade'] * $item['valor']);
+            }, 0.0);
+        }
+
+        $observacoes = $this->extrairValor('/- Observações:\s*(.+?)(?=\n\S|\z)/is', $texto);
+
+        $dataEntregaEstimada = $this->extrairValor('/PRAZO DE ENTREGA\s*(.+?)(?=\nBAIRRO|\nCIDADE|\nCEP|\nDADOS DOS PRODUTOS|$)/i', $texto);
+
+        $tipos = collect($itens)->pluck('tipo')->unique()->values()->all();
+        $tipoPedido = match (true) {
+            count($tipos) === 1 => $tipos[0],
+            count($tipos) > 1 => 'MISTO',
+            default => 'PEDIDO'
+        };
+
+        Log::debug('[extrairPedido] Detalhes extraídos do pedido', [
+            'numero' => $numero,
+            'data_venda' => $dataVenda,
+            'vendedor' => $vendedor,
+            'forma_pagamento' => $formaPagamento,
+            'valor_total' => $valorTotal,
+            'observacoes' => $observacoes,
+            'data_entrega_estimada' => $dataEntregaEstimada,
+            'tipo_pedido' => $tipoPedido,
+            'parcelas' => $parcelas,
+        ]);
+
         return [
-            'data_venda' => $this->extrairValor('/DATA VENDA\s+(\d{2}\/\d{2}\/\d{4})/', $texto),
-            'vendedor' => $this->extrairValor('/VENDEDOR RESPONSÁVEL\s+(.+)/', $texto),
-            'forma_pagamento' => $this->extrairValor('/FORMA DE PAGAMENTO\s+(.+)/', $texto) ?: 'À vista',
+            'numero' => $numero,
+            'data_venda' => $dataVenda,
+            'vendedor' => $vendedor,
+            'forma_pagamento' => $formaPagamento,
+            'valor_total' => $valorTotal,
+            'observacoes' => $observacoes,
+            'data_entrega_estimada' => $dataEntregaEstimada,
+            'tipo_pedido' => $tipoPedido,
             'parcelas' => $parcelas,
         ];
     }
 
+    private function extrairValor(string $pattern, string $texto, ?string $fallback = null): ?string
+    {
+        try {
+            if (@preg_match($pattern, '') === false) {
+                throw new InvalidArgumentException("Regex inválido: $pattern");
+            }
+
+            if (preg_match($pattern, $texto, $match)) {
+                return isset($match[1]) ? trim($match[1]) : $fallback;
+            }
+
+            Log::debug('Valor não encontrado', [
+                'pattern' => $pattern,
+                'fallback' => $fallback,
+            ]);
+
+            return $fallback;
+        } catch (Throwable $e) {
+            Log::warning('Erro ao extrair valor com regex', [
+                'pattern' => $pattern,
+                'fallback' => $fallback,
+                'erro' => $e->getMessage()
+            ]);
+            return $fallback;
+        }
+    }
+
     private function extrairProduto(string $descricao): array
     {
-        $descricao = preg_replace('/\s+/', ' ', mb_strtoupper($descricao, 'UTF-8'));
+        $descricaoLimpa = preg_replace('/\s+/', ' ', mb_strtoupper($descricao, 'UTF-8'));
+        $descricaoLimpa = preg_replace('/[^A-Z0-9\*\:\(\)\/\-\.\, ]+/u', '', $descricaoLimpa);
 
-        // Nome antes do primeiro atributo ou medida
-        preg_match('/^(.*?)(\* COR|\bCOR:|\bTEC:|\bMED:|\bØ|\d{2,3} X \d{2,3})/', $descricao, $matchNome);
-        $nome = trim($matchNome[1] ?? $descricao);
+        $partes = explode('*', $descricaoLimpa, 2);
+        $nome = isset($partes[0]) ? trim(preg_replace('/[^A-Z0-9 \/]/u', '', $partes[0])) : 'DESCONHECIDO';
+        $nome = preg_replace('/\s+/', ' ', $nome); // evita colagem
 
-        preg_match('/COR(?:[^:]*):\s*([^\*]+?)(?=\s+[A-Z]+:|\s*$)/', $descricao, $cor);
-        preg_match('/TEC(?:IDO)?[^:]*:\s*([^\*]+?)(?=\s+[A-Z]+:|\s*$)/', $descricao, $tecido);
-        preg_match('/MED[^:]*:\s*([^\*]+?)(?=\s+[A-Z]+:|\s*$)/', $descricao, $medidas);
-        preg_match('/PESP[^:]*:\s*([^\*]+?)(?=\s+[A-Z]+:|\s*$)/', $descricao, $pesp);
-        preg_match('/MARMORE[^:]*:\s*([^\*]+?)(?=\s+[A-Z]+:|\s*$)/', $descricao, $marmore);
+        $restante = $partes[1] ?? '';
+        $atributos = [
+            'cores' => [],
+            'tecidos' => [],
+            'acabamentos' => [],
+            'observacoes' => [],
+        ];
+
+        $observacaoExtra = $restante;
+
+        // Mapas de atributos
+        $mapas = [
+            'cores' => [
+                'COR DO FERRO' => 'cor_do_ferro',
+                'COR INOX' => 'cor_inox',
+                'COR' => 'cor',
+            ],
+            'tecidos' => [
+                'TECIDO' => 'tecido',
+                'TEC' => 'tec',
+            ],
+            'acabamentos' => [
+                'PESP' => 'pesp',
+                'MÁRMORE' => 'marmore',
+                'MARMORE' => 'marmore',
+            ],
+        ];
+
+        foreach ($mapas as $grupo => $chaves) {
+            foreach ($chaves as $chaveOriginal => $chaveFinal) {
+                if (preg_match('/' . preg_quote($chaveOriginal, '/') . ':\s*([^:*]+)(?=\s+[A-Z]{3,}|$)/u', $restante, $match)) {
+                    $atributos[$grupo][$chaveFinal] = trim($match[1]);
+                    $observacaoExtra = str_replace($match[0], '', $observacaoExtra);
+                }
+            }
+        }
+
+        // Medidas
+        preg_match('/MED:\s*(.+?)(?=\s+[A-Z]{3,}|$)/u', $restante, $matchMedidas);
+        if (!$matchMedidas && preg_match('/(\d{2,3})\s*[xXØ]\s*(\d{2,3})\s*[xXØ]\s*(\d{2,3})/', $descricaoLimpa, $matchFallback)) {
+            $matchMedidas[1] = $matchFallback[0];
+        }
+
+        $medidas = $this->extrairMedidas($matchMedidas[1] ?? '');
+        if (isset($matchMedidas[0])) {
+            $observacaoExtra = str_replace($matchMedidas[0], '', $observacaoExtra);
+        }
+
+        // Observação entre parênteses
+        if (preg_match('/\(([^)]+)\)/u', $descricao, $matchObs)) {
+            $atributos['observacoes']['observacao'] = trim($matchObs[1]);
+            $observacaoExtra = str_replace($matchObs[0], '', $observacaoExtra);
+        }
+
+        // Limpeza final da observação extra
+        $extra = trim(preg_replace('/\s+/', ' ', $observacaoExtra));
+        if ($extra !== '') {
+            $atributos['observacoes']['observacao_extra'] = $extra;
+        }
 
         return [
-            'nome' => $nome,
-            'atributos' => [
-                'cor' => trim($cor[1] ?? ''),
-                'tecido' => trim($tecido[1] ?? ''),
-                'medidas' => trim($medidas[1] ?? ''),
-                'pesponto' => trim($pesp[1] ?? ''),
-                'marmore' => trim($marmore[1] ?? ''),
-            ],
+            'nome' => str_replace(' ', '', $nome), // opcional: pode retornar com espaços
+            'atributos' => $atributos,
             'fixos' => [
-                'altura' => null,
-                'largura' => null,
-                'profundidade' => null,
+                'largura' => $medidas[0],
+                'profundidade' => $medidas[1],
+                'altura' => $medidas[2],
             ],
         ];
     }
 
     private function extrairMedidas(string $texto): array
     {
-        $texto = preg_replace('/[^\d xXØ]/', '', strtoupper($texto));
-        $partes = preg_split('/[xXØ]/', $texto);
+        $texto = mb_strtoupper(trim($texto));
+        $texto = preg_replace('/[^0-9xXØ]/u', '', $texto);
+        $texto = str_replace(['Ø', 'X'], 'x', $texto);
+
+        $partes = explode('x', $texto);
+        $partes = array_map('trim', $partes);
 
         return [
-            isset($partes[2]) ? (int) trim($partes[2]) : null, // Altura
-            isset($partes[0]) ? (int) trim($partes[0]) : null, // Largura
-            isset($partes[1]) ? (int) trim($partes[1]) : null, // Profundidade
+            isset($partes[0]) ? (int) $partes[0] : null,
+            isset($partes[1]) ? (int) $partes[1] : null,
+            isset($partes[2]) ? (int) $partes[2] : null,
         ];
-    }
-
-    private function extrairValor(string $pattern, string $texto): string
-    {
-        preg_match($pattern, $texto, $match);
-        return isset($match[1]) ? trim($match[1]) : '';
     }
 
     public function confirmarImportacaoPDF(Request $request): JsonResponse

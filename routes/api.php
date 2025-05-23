@@ -59,6 +59,8 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
     // Pedidos e Carrinho
     Route::get('pedidos/exportar', [PedidoController::class, 'exportar']);
     Route::get('pedidos/estatisticas', [PedidoController::class, 'estatisticas']);
+    Route::post('pedidos/importar-pdf', [PedidoController::class, 'importarPDF']);
+    Route::post('pedidos/importar-pdf/confirmar', [PedidoController::class, 'confirmarImportacaoPDF']);
     Route::patch('pedidos/{pedido}/status', [PedidoController::class, 'updateStatus']);
     Route::apiResource('pedidos', PedidoController::class);
     Route::apiResource('pedidos.itens', PedidoItemController::class)->parameters(['itens' => 'item']);

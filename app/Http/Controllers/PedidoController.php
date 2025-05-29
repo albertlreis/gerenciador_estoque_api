@@ -6,6 +6,7 @@ use App\Exports\PedidosExport;
 use App\Http\Requests\StorePedidoRequest;
 use App\Http\Requests\UpdatePedidoStatusRequest;
 use App\Models\Cliente;
+use App\Models\Consignacao;
 use App\Models\Pedido;
 use App\Models\PedidoItem;
 use App\Models\Carrinho;
@@ -155,6 +156,10 @@ class PedidoController extends Controller
                     'preco_unitario' => $item->preco_unitario,
                     'subtotal'       => $item->subtotal,
                 ]);
+
+                if ($request->boolean('modo_consignacao')) {
+                    $this->registrarConsignacoes($pedido, $carrinho->itens, $request->prazo_consignacao);
+                }
             }
 
             $carrinho->itens()->delete();
@@ -164,6 +169,21 @@ class PedidoController extends Controller
                 'pedido'  => $pedido->load('itens.variacao'),
             ], 201);
         });
+    }
+
+
+    private function registrarConsignacoes(Pedido $pedido, $itens, int $prazoDias): void
+    {
+        foreach ($itens as $item) {
+            Consignacao::create([
+                'pedido_id' => $pedido->id,
+                'produto_variacao_id' => $item->id_variacao,
+                'quantidade' => $item->quantidade,
+                'data_envio' => now(),
+                'prazo_resposta' => now()->addDays($prazoDias),
+                'status' => 'pendente',
+            ]);
+        }
     }
 
     public function show($id): array

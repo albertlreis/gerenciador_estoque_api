@@ -20,6 +20,8 @@ class StorePedidoRequest extends FormRequest
             'id_cliente'  => 'required|exists:clientes,id',
             'id_parceiro' => 'nullable|exists:parceiros,id',
             'observacoes' => 'nullable|string|max:1000',
+            'modo_consignacao' => 'sometimes|boolean',
+            'prazo_consignacao' => 'required_if:modo_consignacao,true|integer|min:1|max:30',
         ];
 
         if (auth()->user()?->perfil === 'Administrador') {

@@ -50,4 +50,14 @@ class Pedido extends Model
     {
         return $this->hasMany(PedidoItem::class, 'id_pedido');
     }
+
+    public function consignacoes(): HasMany
+    {
+        return $this->hasMany(Consignacao::class);
+    }
+
+    public function isConsignado(): bool
+    {
+        return $this->consignacoes()->exists();
+    }
 }

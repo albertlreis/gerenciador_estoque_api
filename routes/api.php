@@ -74,8 +74,11 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
     Route::delete('/carrinho-itens/{id}', [CarrinhoItemController::class, 'destroy']);
     Route::delete('/carrinho-itens/limpar/{idCarrinho}', [CarrinhoItemController::class, 'clear']);
 
-    Route::get('/consignacoes', [ConsignacaoController::class, 'index']);
-    Route::patch('/consignacoes/{id}', [ConsignacaoController::class, 'atualizarStatus']);
-    Route::get('/consignacoes/vencendo', [ConsignacaoController::class, 'vencendo']);
+    Route::prefix('consignacoes')->middleware('auth:sanctum')->group(function () {
+        Route::get('/', [ConsignacaoController::class, 'index']);
+        Route::patch('/{id}', [ConsignacaoController::class, 'atualizarStatus']);
+        Route::get('/vencendo', [ConsignacaoController::class, 'vencendo']);
+        Route::get('{id}', [ConsignacaoController::class, 'show']);
+    });
 
 });

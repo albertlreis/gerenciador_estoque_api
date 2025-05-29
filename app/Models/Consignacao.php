@@ -36,6 +36,6 @@ class Consignacao extends Model
      */
     public function produtoVariacao(): BelongsTo
     {
-        return $this->belongsTo(ProdutoVariacao::class);
+        return $this->belongsTo(ProdutoVariacao::class, 'produto_variacao_id');
     }
 }

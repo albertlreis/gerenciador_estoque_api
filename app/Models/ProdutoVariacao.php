@@ -45,9 +45,15 @@ class ProdutoVariacao extends Model
 
     public function getNomeCompletoAttribute(): string
     {
-        $produtoNome = $this->produto->nome ?? '';
-        $variacaoNome = $this->nome ?? '';
-        return trim("$produtoNome - $variacaoNome") ?: '-';
-    }
+        $produto = $this->produto->nome ?? '';
 
+        $atributos = $this->atributos()
+            ->get()
+            ->map(fn($attr) => "{$attr->atributo}: {$attr->valor}")
+            ->implode(' - ');
+
+        $complemento = trim($atributos ?: '');
+
+        return trim("$produto - $complemento") ?: '-';
+    }
 }

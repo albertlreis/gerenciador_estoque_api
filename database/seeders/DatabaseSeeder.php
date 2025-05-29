@@ -26,6 +26,7 @@ class DatabaseSeeder extends Seeder
             EstoqueTableSeeder::class,
             EstoqueMovimentacoesTableSeeder::class,
             ProdutoVariacaoVinculosSeeder::class,
+            ConsignacaoSeeder::class,
         ]);
     }
 }

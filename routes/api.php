@@ -1,9 +1,9 @@
 <?php
 
 use Illuminate\Support\Facades\Route;
-use App\Http\Controllers\{
-    CarrinhoItemController,
+use App\Http\Controllers\{CarrinhoItemController,
     CategoriaController,
+    ConsignacaoController,
     ProdutoController,
     ProdutoImagemController,
     ProdutoOutletController,
@@ -17,8 +17,7 @@ use App\Http\Controllers\{
     PedidoController,
     PedidoItemController,
     CarrinhoController,
-    ConfiguracaoController
-};
+    ConfiguracaoController};
 
 Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
     // Configurações do sistema
@@ -74,5 +73,9 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
     Route::post('/carrinho-itens', [CarrinhoItemController::class, 'store']);
     Route::delete('/carrinho-itens/{id}', [CarrinhoItemController::class, 'destroy']);
     Route::delete('/carrinho-itens/limpar/{idCarrinho}', [CarrinhoItemController::class, 'clear']);
+
+    Route::get('/consignacoes', [ConsignacaoController::class, 'index']);
+    Route::patch('/consignacoes/{id}', [ConsignacaoController::class, 'atualizarStatus']);
+    Route::get('/consignacoes/vencendo', [ConsignacaoController::class, 'vencendo']);
 
 });

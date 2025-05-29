@@ -35,9 +35,9 @@ class UpdateProdutoRequest extends FormRequest
             'variacoes.*.nome'          => 'required|string|max:255',
             'variacoes.*.preco'         => 'required|numeric|min:0',
             'variacoes.*.custo'         => 'required|numeric|min:0',
-            'variacoes.*.sku'           => [
+            'variacoes.*.referencia'    => [
                 'required', 'string', 'max:100',
-                Rule::unique('produto_variacoes', 'sku')->ignore($this->input('variacoes.*.id'))
+                Rule::unique('produto_variacoes', 'referencia')->ignore($this->input('variacoes.*.id'))
             ],
             'variacoes.*.codigo_barras' => [
                 'nullable', 'string', 'max:100',

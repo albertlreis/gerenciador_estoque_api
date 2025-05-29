@@ -33,7 +33,7 @@ class StoreProdutoRequest extends FormRequest
             'variacoes.*.nome'          => 'required|string|max:255',
             'variacoes.*.preco'         => 'required|numeric|min:0',
             'variacoes.*.custo'         => 'required|numeric|min:0',
-            'variacoes.*.sku'           => 'required|string|max:100|unique:produto_variacoes,sku',
+            'variacoes.*.referencia'    => 'required|string|max:100|unique:produto_variacoes,referencia',
             'variacoes.*.codigo_barras' => 'nullable|string|max:100|unique:produto_variacoes,codigo_barras',
             'variacoes.*.atributos'     => 'nullable|array',
             'variacoes.*.atributos.*.atributo' => 'required_with:variacoes.*.atributos|string|max:100',

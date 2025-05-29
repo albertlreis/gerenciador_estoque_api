@@ -239,7 +239,7 @@ class ProdutoController extends Controller
                     ]);
 
                     $variacao = $produto->variacoes()->create([
-                        'sku' => 'IMP-' . uniqid(),
+                        'referencia' => $item['referencia'],
                         'nome' => $item['descricao_xml'],
                         'preco' => $item['preco_unitario'],
                         'custo' => $item['preco_unitario'],

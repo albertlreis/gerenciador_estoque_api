@@ -18,7 +18,7 @@ class ProdutoVariacaoResource extends JsonResource
             'preco' => $preco,
             'preco_promocional' => ($promocional !== null && $promocional < $preco) ? $promocional : null,
             'custo' => $this->custo,
-            'sku' => $this->sku,
+            'referencia' => $this->referencia,
             'codigo_barras' => $this->codigo_barras,
             'estoque' => [
                 'quantidade' => $this->estoque->quantidade ?? 0,

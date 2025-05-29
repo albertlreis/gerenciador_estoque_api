@@ -17,7 +17,7 @@ class ProdutoVariacaoController extends Controller
     public function store(Request $request, Produto $produto)
     {
         $validated = $request->validate([
-            'sku' => 'required|string|max:100|unique:produto_variacoes,sku',
+            'referencia' => 'required|string|max:100|unique:produto_variacoes,referencia',
             'nome' => 'required|string|max:255',
             'preco' => 'required|numeric',
             'custo' => 'required|numeric',
@@ -50,7 +50,7 @@ class ProdutoVariacaoController extends Controller
         }
 
         $validated = $request->validate([
-            'sku' => 'sometimes|required|string|max:100|unique:produto_variacoes,sku,' . $variacao->id,
+            'referencia' => 'sometimes|required|string|max:100|unique:produto_variacoes,referencia,' . $variacao->id,
             'nome' => 'sometimes|required|string|max:255',
             'preco' => 'sometimes|required|numeric',
             'custo' => 'sometimes|required|numeric',
@@ -86,7 +86,7 @@ class ProdutoVariacaoController extends Controller
             $busca = $request->input('search');
             $query->where(function ($q) use ($busca) {
                 $q->where('nome', 'like', "%{$busca}%")
-                    ->orWhere('sku', 'like', "%{$busca}%")
+                    ->orWhere('referencia', 'like', "%{$busca}%")
                     ->orWhere('codigo_barras', 'like', "%{$busca}%");
             });
         }

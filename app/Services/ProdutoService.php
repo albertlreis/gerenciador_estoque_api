@@ -26,7 +26,7 @@ class ProdutoService
                 'nome' => $var['nome'],
                 'preco' => $var['preco'],
                 'custo' => $var['custo'],
-                'sku' => $var['sku'],
+                'referencia' => $var['referencia'],
                 'codigo_barras' => $var['codigo_barras'] ?? null,
             ]);
 
@@ -64,7 +64,7 @@ class ProdutoService
                 'nome' => $var['nome'],
                 'preco' => $var['preco'],
                 'custo' => $var['custo'],
-                'sku' => $var['sku'],
+                'referencia' => $var['referencia'],
                 'codigo_barras' => $var['codigo_barras'] ?? null,
             ])->save();
 

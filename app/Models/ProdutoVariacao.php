@@ -9,14 +9,14 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
 
 /**
  * Representa uma variação específica de um produto,
- * com preço, SKU e código de barras próprios.
+ * com preço, referencia e código de barras próprios.
  */
 class ProdutoVariacao extends Model
 {
     protected $table = 'produto_variacoes';
 
     protected $fillable = [
-        'produto_id', 'sku', 'nome', 'preco', 'custo', 'codigo_barras'
+        'produto_id', 'referencia', 'nome', 'preco', 'custo', 'codigo_barras'
     ];
 
     protected $appends = ['nome_completo', 'estoque_total'];

@@ -4,6 +4,7 @@ namespace Database\Seeders;
 
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Carbon\Carbon;
 
 class ProdutoVariacaoAtributosSeeder extends Seeder
@@ -13,22 +14,27 @@ class ProdutoVariacaoAtributosSeeder extends Seeder
         $now = Carbon::now();
         $atributos = [];
 
-        // Mapeamento de atributos por categoria
         $atributosPorCategoria = [
             'Sofá' => [
-                ['cor', 'preto'], ['cor', 'cinza'], ['cor', 'bege'], ['tecido', 'veludo'], ['tecido', 'linho']
+                ['cor', 'preto'], ['cor', 'cinza'], ['cor', 'bege'],
+                ['tecido', 'veludo'], ['tecido', 'linho'],
             ],
             'Mesa' => [
-                ['tipo_madeira', 'carvalho'], ['tipo_madeira', 'nogueira'], ['formato', 'redonda'], ['formato', 'retangular']
+                ['tipo_madeira', 'carvalho'], ['tipo_madeira', 'nogueira'],
+                ['formato', 'redonda'], ['formato', 'retangular'],
             ],
             'Cadeira' => [
-                ['estrutura', 'ferro'], ['estrutura', 'alumínio'], ['cor', 'preto'], ['revestimento', 'couro'], ['revestimento', 'tecido']
+                ['estrutura', 'ferro'], ['estrutura', 'alumínio'],
+                ['cor', 'preto'], ['cor', 'cinza'],
+                ['revestimento', 'couro'], ['revestimento', 'tecido'],
             ],
             'Cama' => [
-                ['tamanho', 'solteiro'], ['tamanho', 'casal'], ['material', 'madeira'], ['material', 'mdf']
+                ['tamanho', 'solteiro'], ['tamanho', 'casal'],
+                ['material', 'madeira'], ['material', 'mdf'],
             ],
             'Estante' => [
-                ['material', 'mdf'], ['material', 'madeira'], ['acabamento', 'fosco'], ['acabamento', 'brilhante']
+                ['material', 'mdf'], ['material', 'madeira'],
+                ['acabamento', 'fosco'], ['acabamento', 'brilhante'],
             ],
         ];
 
@@ -39,25 +45,26 @@ class ProdutoVariacaoAtributosSeeder extends Seeder
             ->get();
 
         foreach ($variacoes as $variacao) {
-            // Detecta a categoria base (ex: Sofá de Canto => Sofá)
-            $categoriaBase = strtolower($variacao->categoria_nome);
-            $base = collect($atributosPorCategoria)->first(function ($_, $key) use ($categoriaBase) {
-                return str_contains($categoriaBase, strtolower($key));
-            });
+            $categoriaNome = strtolower($variacao->categoria_nome);
 
-            // Se não encontrou categoria compatível, usa fallback genérico
-            $opcoes = $base ?? [['cor', 'preto'], ['material', 'madeira']];
+            $baseAtributos = collect($atributosPorCategoria)->first(
+                fn($_, $key) => Str::contains($categoriaNome, strtolower($key))
+            );
 
-            // Seleciona 2 a 3 atributos distintos
-            $atributosSelecionados = collect($opcoes)->shuffle()->take(rand(2, 3));
+            $opcoes = $baseAtributos ?? [['cor', 'preto'], ['material', 'madeira']];
+            $agrupados = collect($opcoes)->groupBy(fn($item) => $item[0]);
 
-            foreach ($atributosSelecionados as [$atributo, $valor]) {
+            $chavesSelecionadas = $agrupados->keys()->shuffle()->take(rand(2, 3));
+
+            foreach ($chavesSelecionadas as $chave) {
+                $valor = $agrupados[$chave]->random();
+
                 $atributos[] = [
                     'id_variacao' => $variacao->variacao_id,
-                    'atributo'    => $atributo,
-                    'valor'       => $valor,
-                    'created_at'  => $now,
-                    'updated_at'  => $now,
+                    'atributo' => $valor[0],
+                    'valor' => $valor[1],
+                    'created_at' => $now,
+                    'updated_at' => $now,
                 ];
             }
         }

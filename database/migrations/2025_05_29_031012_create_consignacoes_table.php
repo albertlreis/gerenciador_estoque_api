@@ -22,6 +22,7 @@ return new class extends Migration
             $table->integer('quantidade');
             $table->date('data_envio');
             $table->date('prazo_resposta');
+            $table->timestamp('data_resposta')->nullable();
             $table->enum('status', ['pendente', 'comprado', 'devolvido'])->default('pendente');
 
             $table->timestamps();

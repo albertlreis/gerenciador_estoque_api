@@ -15,6 +15,7 @@ class ConsignacaoDetalhadaResource extends JsonResource
             'quantidade' => $this->quantidade,
             'data_envio' => optional($this->data_envio)->format('d/m/Y'),
             'prazo_resposta' => optional($this->prazo_resposta)->format('d/m/Y'),
+            'data_resposta' => optional($this->data_resposta)->format('d/m/Y'),
             'status' => $this->status,
             'observacoes' => $this->observacoes,
             'produto_nome' => optional($this->produtoVariacao)->nome_completo,

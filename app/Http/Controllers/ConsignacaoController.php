@@ -56,11 +56,25 @@ class ConsignacaoController extends Controller
 
     public function atualizarStatus($id, Request $request): JsonResponse
     {
+        $request->validate([
+            'status' => 'required|in:pendente,comprado,devolvido',
+        ]);
+
         $consignacao = Consignacao::findOrFail($id);
+
+        // Se já finalizada, não permitir alteração
+        if (in_array($consignacao->status, ['aceita', 'devolvida'])) {
+            return response()->json(['erro' => 'Consignação já finalizada.'], 422);
+        }
+
         $consignacao->status = $request->status;
+        $consignacao->data_resposta = now();
         $consignacao->save();
 
-        return response()->json(['message' => 'Status atualizado com sucesso']);
+        return response()->json([
+            'mensagem' => 'Status atualizado com sucesso.',
+            'consignacao' => new ConsignacaoDetalhadaResource($consignacao->fresh(['pedido.cliente', 'produtoVariacao.produto'])),
+        ]);
     }
 
     public function vencendo(): Collection|array

@@ -27,6 +27,7 @@ class DatabaseSeeder extends Seeder
             EstoqueMovimentacoesTableSeeder::class,
             ProdutoVariacaoVinculosSeeder::class,
             ConsignacaoSeeder::class,
+            PedidoStatusHistoricoSeeder::class,
         ]);
     }
 }

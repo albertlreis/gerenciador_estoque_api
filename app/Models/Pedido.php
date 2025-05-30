@@ -3,14 +3,12 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
- * Model Pedido
- *
- * Representa um pedido realizado no sistema, associado a um cliente,
- * registrado por um usuário (vendedor) e podendo ter um parceiro (arquiteto, designer, etc.).
+ * Representa um pedido no sistema.
  */
 class Pedido extends Model
 {
@@ -59,5 +57,21 @@ class Pedido extends Model
     public function isConsignado(): bool
     {
         return $this->consignacoes()->exists();
+    }
+
+    /**
+     * Retorna o histórico completo de status do pedido.
+     */
+    public function historicoStatus(): HasMany
+    {
+        return $this->hasMany(PedidoStatusHistorico::class);
+    }
+
+    /**
+     * Retorna o status mais recente do pedido.
+     */
+    public function statusAtual(): HasOne
+    {
+        return $this->hasOne(PedidoStatusHistorico::class)->latestOfMany();
     }
 }

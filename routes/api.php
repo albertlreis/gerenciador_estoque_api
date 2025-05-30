@@ -4,6 +4,7 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\{CarrinhoItemController,
     CategoriaController,
     ConsignacaoController,
+    PedidoStatusHistoricoController,
     ProdutoController,
     ProdutoImagemController,
     ProdutoOutletController,
@@ -60,7 +61,14 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
     Route::get('pedidos/estatisticas', [PedidoController::class, 'estatisticas']);
     Route::post('pedidos/importar-pdf', [PedidoController::class, 'importarPDF']);
     Route::post('pedidos/importar-pdf/confirmar', [PedidoController::class, 'confirmarImportacaoPDF']);
-    Route::patch('pedidos/{pedido}/status', [PedidoController::class, 'updateStatus']);
+
+    Route::prefix('pedidos/{pedido}')->group(function () {
+        Route::patch('{pedido}/status', [PedidoController::class, 'updateStatus']);
+        Route::get('historico-status', [PedidoStatusHistoricoController::class, 'historico']);
+        Route::get('previsoes', [PedidoStatusHistoricoController::class, 'previsoes']);
+    });
+
+
     Route::apiResource('pedidos', PedidoController::class);
     Route::apiResource('pedidos.itens', PedidoItemController::class)->parameters(['itens' => 'item']);
 

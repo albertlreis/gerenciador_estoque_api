@@ -4,33 +4,28 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Http\JsonResponse;
 
 class ConfiguracaoController extends Controller
 {
-    /**
-     * Lista todas as configurações do sistema como { chave: valor }
-     */
-    public function listar(): JsonResponse
+    public function listar()
     {
-        $dados = DB::table('configuracoes')->pluck('valor', 'chave');
-        return response()->json($dados);
+        return DB::table('configuracoes')
+            ->select('chave', 'valor', 'label', 'tipo')
+            ->orderBy('chave')
+            ->get();
     }
 
-    /**
-     * Atualiza uma configuração com base na chave fornecida
-     */
-    public function atualizar(Request $request, string $chave): JsonResponse
+    public function atualizar(Request $request, string $chave)
     {
         $request->validate([
-            'valor' => 'required'
+            'valor' => 'required|string|max:255',
         ]);
 
-        DB::table('configuracoes')->updateOrInsert(
-            ['chave' => $chave],
-            ['valor' => $request->valor]
-        );
+        $atualizado = DB::table('configuracoes')
+            ->where('chave', $chave)
+            ->update(['valor' => $request->valor, 'updated_at' => now()]);
 
-        return response()->json(['success' => true]);
+        return response()->json(['success' => (bool) $atualizado]);
     }
 }
+

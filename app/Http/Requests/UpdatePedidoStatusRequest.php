@@ -3,6 +3,8 @@
 namespace App\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
+use App\Enums\PedidoStatus;
+use Illuminate\Validation\Rules\Enum;
 
 /**
  * Valida a atualização de status de um pedido.
@@ -17,14 +19,8 @@ class UpdatePedidoStatusRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'status' => 'required|string|in:rascunho,confirmado,cancelado',
-        ];
-    }
-
-    public function messages(): array
-    {
-        return [
-            'status.in' => 'Status inválido. Valores permitidos: rascunho, confirmado, cancelado.',
+            'status' => ['required', new Enum(PedidoStatus::class)],
+            'observacoes' => ['nullable', 'string', 'max:1000'],
         ];
     }
 }

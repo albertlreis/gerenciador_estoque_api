@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\PedidoStatus;
 use App\Exports\PedidosExport;
 use App\Http\Requests\StorePedidoRequest;
 use App\Http\Requests\UpdatePedidoStatusRequest;
@@ -10,6 +11,7 @@ use App\Models\Consignacao;
 use App\Models\Pedido;
 use App\Models\PedidoItem;
 use App\Models\Carrinho;
+use App\Models\PedidoStatusHistorico;
 use Carbon\Carbon;
 use Exception;
 use Illuminate\Http\JsonResponse;
@@ -213,9 +215,37 @@ class PedidoController extends Controller
     public function updateStatus(UpdatePedidoStatusRequest $request, $id): JsonResponse
     {
         $pedido = Pedido::findOrFail($id);
-        $pedido->update(['status' => $request->status]);
+        $status = PedidoStatus::from($request->status);
 
-        return response()->json(['message' => 'Status atualizado com sucesso.', 'pedido' => $pedido]);
+        // Impede duplicidade de status no mesmo dia
+        $jaExiste = $pedido->historicoStatus()
+            ->where('status', $status->value)
+            ->whereDate('data_status', now()->toDateString())
+            ->exists();
+
+        if ($jaExiste) {
+            return response()->json([
+                'message' => 'Esse status já foi registrado hoje para este pedido.'
+            ], 422);
+        }
+
+        // Atualiza o status principal do pedido (se desejar manter isso)
+        $pedido->update(['status' => $status->value]);
+
+        // Cria entrada no histórico
+        $historico = PedidoStatusHistorico::create([
+            'pedido_id' => $pedido->id,
+            'status' => $status,
+            'data_status' => now(),
+            'usuario_id' => Auth::id(),
+            'observacoes' => $request->observacoes,
+        ]);
+
+        return response()->json([
+            'message' => 'Status atualizado com sucesso.',
+            'historico' => $historico,
+            'pedido' => $pedido->fresh(),
+        ]);
     }
 
     public function exportar(Request $request): Response|BinaryFileResponse|JsonResponse

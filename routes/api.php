@@ -56,21 +56,21 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
     Route::get('clientes/verifica-documento/{documento}/{id?}', [ClienteController::class, 'verificaDocumento']);
     Route::apiResource('parceiros', ParceiroController::class);
 
-    // Pedidos e Carrinho
     Route::get('pedidos/exportar', [PedidoController::class, 'exportar']);
     Route::get('pedidos/estatisticas', [PedidoController::class, 'estatisticas']);
     Route::post('pedidos/importar-pdf', [PedidoController::class, 'importarPDF']);
     Route::post('pedidos/importar-pdf/confirmar', [PedidoController::class, 'confirmarImportacaoPDF']);
 
     Route::prefix('pedidos/{pedido}')->group(function () {
-        Route::patch('{pedido}/status', [PedidoController::class, 'updateStatus']);
+        Route::patch('status', [PedidoController::class, 'updateStatus']);
         Route::get('historico-status', [PedidoStatusHistoricoController::class, 'historico']);
+        Route::delete('historico-status/{id}', [PedidoStatusHistoricoController::class, 'remover']);
         Route::get('previsoes', [PedidoStatusHistoricoController::class, 'previsoes']);
     });
 
-
     Route::apiResource('pedidos', PedidoController::class);
     Route::apiResource('pedidos.itens', PedidoItemController::class)->parameters(['itens' => 'item']);
+
 
     Route::get('/carrinhos', [CarrinhoController::class, 'index']);
     Route::get('/carrinhos/{id}', [CarrinhoController::class, 'show']);

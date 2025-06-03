@@ -3,42 +3,33 @@
 namespace App\Http\Controllers;
 
 use App\Enums\PedidoStatus;
-use App\Helpers\PedidoHelper;
 use App\Models\Pedido;
+use App\Models\PedidoStatusHistorico;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class PedidoStatusHistoricoController extends Controller
 {
-    public function previsoes(Pedido $pedido): JsonResponse
-    {
-        $historico = $pedido->historicoStatus()->get()->keyBy('status');
-
-        $datas = $historico->mapWithKeys(fn($h) => [$h->status => $h->data_status])->toArray();
-
-        $prazos = [
-            'envio_fabrica' => (int) DB::table('configuracoes')->where('chave', 'prazo_envio_fabrica')->value('valor') ?? 5,
-            'entrega_estoque' => (int) DB::table('configuracoes')->where('chave', 'prazo_entrega_estoque')->value('valor') ?? 7,
-            'envio_cliente' => (int) DB::table('configuracoes')->where('chave', 'prazo_envio_cliente')->value('valor') ?? 3,
-            'prazo_consignacao' => (int) DB::table('configuracoes')->where('chave', 'prazo_consignacao')->value('valor') ?? 15,
-        ];
-
-        $previsoes = PedidoHelper::previsoes($datas, $prazos);
-
-        return response()->json($previsoes);
-    }
+    const STATUS_CRITICOS = [
+        PedidoStatus::ENTREGA_CLIENTE,
+        PedidoStatus::FINALIZADO,
+    ];
 
     public function historico(Pedido $pedido): JsonResponse
     {
+        $usuario = auth()->user();
+
         $historico = $pedido->historicoStatus()
             ->with('usuario')
             ->orderBy('data_status')
             ->get()
-            ->map(function ($item) {
+            ->map(function ($item, $index) use ($pedido, $usuario) {
                 $statusEnum = $item->status instanceof PedidoStatus ? $item->status : PedidoStatus::tryFrom($item->status);
-                $statusString = $item->status instanceof PedidoStatus ? $item->status->value : $item->status;
+                $statusString = $statusEnum instanceof PedidoStatus ? $statusEnum->value : (string) $item->status;
 
                 return [
+                    'id' => $item->id,
                     'status' => $statusString,
                     'label' => $statusEnum?->label() ?? ucfirst(str_replace('_', ' ', $statusString)),
                     'icone' => self::iconePorStatus($statusString),
@@ -46,10 +37,19 @@ class PedidoStatusHistoricoController extends Controller
                     'data_status' => $item->data_status,
                     'observacoes' => $item->observacoes,
                     'usuario' => $item->usuario?->name,
+                    'isUltimo' => $index === $pedido->historicoStatus->count() - 1,
+                    'podeRemover' => !in_array($statusEnum, self::STATUS_CRITICOS) || $usuario->can('remover-status-critico'),
                 ];
             });
 
         return response()->json($historico);
+    }
+
+    public function cancelarStatus(PedidoStatusHistorico $statusHistorico): JsonResponse
+    {
+        $statusHistorico->delete();
+
+        return response()->json(['message' => 'Status removido com sucesso.']);
     }
 
     private static function iconePorStatus(string $status): string

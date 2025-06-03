@@ -64,10 +64,10 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
     Route::prefix('pedidos/{pedido}')->group(function () {
         Route::patch('status', [PedidoController::class, 'updateStatus']);
         Route::get('historico-status', [PedidoStatusHistoricoController::class, 'historico']);
-        Route::delete('historico-status/{id}', [PedidoStatusHistoricoController::class, 'remover']);
         Route::get('previsoes', [PedidoStatusHistoricoController::class, 'previsoes']);
     });
 
+    Route::delete('pedidos/status/{statusHistorico}', [PedidoStatusHistoricoController::class, 'cancelarStatus']);
     Route::apiResource('pedidos', PedidoController::class);
     Route::apiResource('pedidos.itens', PedidoItemController::class)->parameters(['itens' => 'item']);
 

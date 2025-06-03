@@ -5,9 +5,7 @@ namespace App\Http\Controllers;
 use App\Enums\PedidoStatus;
 use App\Models\Pedido;
 use App\Models\PedidoStatusHistorico;
-use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Support\Facades\Log;
 
 class PedidoStatusHistoricoController extends Controller
 {
@@ -48,6 +46,18 @@ class PedidoStatusHistoricoController extends Controller
     public function cancelarStatus(PedidoStatusHistorico $statusHistorico): JsonResponse
     {
         $statusHistorico->delete();
+
+        activity('pedido_status')
+            ->performedOn($statusHistorico->pedido)
+            ->causedBy(auth()->user())
+            ->withProperties([
+                'acao' => 'cancelamento',
+                'nivel' => 'warn',
+                'usuario' => auth()->user()?->email,
+                'status_cancelado' => $statusHistorico->status,
+                'data_status' => $statusHistorico->data_status,
+            ])
+            ->log("Status '$statusHistorico->status' removido do Pedido #$statusHistorico->pedido_id.");
 
         return response()->json(['message' => 'Status removido com sucesso.']);
     }

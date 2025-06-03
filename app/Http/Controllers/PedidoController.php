@@ -32,7 +32,7 @@ use Throwable;
  */
 class PedidoController extends Controller
 {
-    public function index(Request $request)
+    public function index(Request $request): JsonResponse
     {
         $query = Pedido::with(['cliente', 'parceiro', 'itens.variacao.produto']);
 
@@ -84,7 +84,6 @@ class PedidoController extends Controller
             });
         }
 
-
         // Ordenação
         $ordenarPor = $request->get('ordenarPor', 'data_pedido');
         $ordem = $request->get('ordem', 'desc');
@@ -118,7 +117,6 @@ class PedidoController extends Controller
 
         return response()->json($paginado);
     }
-
 
     public function store(StorePedidoRequest $request)
     {
@@ -164,6 +162,23 @@ class PedidoController extends Controller
                 }
             }
 
+            activity('pedido')
+                ->performedOn($pedido)
+                ->causedBy(auth()->user())
+                ->withProperties([
+                    'acao' => 'criação',
+                    'nivel' => 'info',
+                    'usuario' => auth()->user()?->email,
+                    'cliente' => $pedido->cliente?->nome,
+                    'valor_total' => $pedido->valor_total,
+                    'itens' => $pedido->itens->map(fn($item) => [
+                        'produto' => optional($item->variacao->produto)->nome,
+                        'variacao' => optional($item->variacao)->descricao,
+                        'quantidade' => $item->quantidade,
+                    ]),
+                ])
+                ->log("Pedido #$pedido->id criado com sucesso.");
+
             $carrinho->itens()->delete();
 
             return response()->json([
@@ -172,7 +187,6 @@ class PedidoController extends Controller
             ], 201);
         });
     }
-
 
     private function registrarConsignacoes(Pedido $pedido, $itens, int $prazoDias): void
     {
@@ -241,6 +255,18 @@ class PedidoController extends Controller
             'observacoes' => $request->observacoes,
         ]);
 
+        activity('pedido_status')
+            ->performedOn($pedido)
+            ->causedBy(auth()->user())
+            ->withProperties([
+                'acao' => 'atualizacao',
+                'nivel' => 'info',
+                'usuario' => auth()->user()?->email,
+                'novo_status' => $status->value,
+                'observacoes' => $request->observacoes,
+            ])
+            ->log("Status do Pedido #$pedido->id atualizado para '$status->value'.");
+
         return response()->json([
             'message' => 'Status atualizado com sucesso.',
             'historico' => $historico,
@@ -256,12 +282,35 @@ class PedidoController extends Controller
         $pedidos = Pedido::with(['cliente', 'parceiro'])->get();
 
         if ($formato === 'excel') {
+            activity('pedido_exportacao')
+                ->causedBy(auth()->user())
+                ->withProperties([
+                    'acao' => 'exportacao',
+                    'nivel' => 'info',
+                    'usuario' => auth()->user()?->email,
+                    'formato' => $formato,
+                    'detalhado' => $detalhado,
+                ])
+                ->log("Exportação de pedidos no formato $formato.");
+
             return Excel::download(new PedidosExport($pedidos), 'pedidos.xlsx');
         }
 
         if ($formato === 'pdf') {
             $view = $detalhado ? 'exports.pedidos-pdf-detalhado' : 'exports.pedidos-pdf';
             $pdf = Pdf::loadView($view, ['pedidos' => $pedidos]);
+
+            activity('pedido_exportacao')
+                ->causedBy(auth()->user())
+                ->withProperties([
+                    'acao' => 'exportacao',
+                    'nivel' => 'info',
+                    'usuario' => auth()->user()?->email,
+                    'formato' => $formato,
+                    'detalhado' => $detalhado,
+                ])
+                ->log("Exportação de pedidos no formato $formato.");
+
             return $pdf->download($detalhado ? 'pedidos-detalhado.pdf' : 'pedidos.pdf');
         }
 
@@ -321,12 +370,19 @@ class PedidoController extends Controller
         $pdf = $parser->parseFile($path);
         $texto = $pdf->getText();
 
-        // Texto para debug
-        Log::debug('Texto PDF bruto extraído:', ['texto' => $texto]);
-
         $cliente = $this->extrairCliente($texto);
         $pedido = $this->extrairPedido($texto);
         $itens = $this->extrairItens($texto);
+
+        activity('pedido_importacao_preview')
+            ->causedBy(auth()->user())
+            ->withProperties([
+                'acao' => 'leitura_pdf',
+                'nivel' => 'info',
+                'usuario' => auth()->user()?->email,
+                'arquivo' => $request->file('arquivo')->getClientOriginalName(),
+            ])
+            ->log("Leitura de pré-visualização do PDF realizada.");
 
         return response()->json([
             'cliente' => $cliente,
@@ -684,6 +740,20 @@ class PedidoController extends Controller
                     'subtotal' => $item['quantidade'] * $item['valor'],
                 ]);
             }
+
+            activity('pedido')
+                ->performedOn($pedido)
+                ->causedBy(auth()->user())
+                ->withProperties([
+                    'acao' => 'importacao',
+                    'nivel' => 'info',
+                    'usuario' => auth()->user()?->email,
+                    'cliente' => $cliente->nome,
+                    'numero_pdf' => $request->input('pedido.numero'),
+                    'valor_total' => $pedido->valor_total,
+                    'itens' => $itens,
+                ])
+                ->log("Pedido importado via PDF para cliente '$cliente->nome'.");
 
             return response()->json([
                 'message' => 'Pedido importado e salvo com sucesso.',

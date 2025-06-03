@@ -19,10 +19,4 @@ class AcessoUsuario extends Authenticatable
     protected $hidden = [
         'senha',
     ];
-
-    public function perfis()
-    {
-        return $this->belongsToMany(AcessoPerfil::class, 'acesso_usuario_perfil', 'id_usuario', 'id_perfil')
-            ->withTimestamps();
-    }
 }

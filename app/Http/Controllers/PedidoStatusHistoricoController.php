@@ -40,24 +40,31 @@ class PedidoStatusHistoricoController extends Controller
                 ];
             });
 
+        logAuditoria('pedido_status', "Histórico de status visualizado para Pedido #$pedido->id.", [
+            'acao' => 'visualizacao',
+            'nivel' => 'info',
+            'pedido_id' => $pedido->id,
+            'quantidade_registros' => $historico->count(),
+        ], $pedido);
+
         return response()->json($historico);
     }
 
     public function cancelarStatus(PedidoStatusHistorico $statusHistorico): JsonResponse
     {
+        $pedido = $statusHistorico->pedido;
+
+        $statusCancelado = $statusHistorico->status;
+        $dataStatus = $statusHistorico->data_status;
+
         $statusHistorico->delete();
 
-        activity('pedido_status')
-            ->performedOn($statusHistorico->pedido)
-            ->causedBy(auth()->user())
-            ->withProperties([
-                'acao' => 'cancelamento',
-                'nivel' => 'warn',
-                'usuario' => auth()->user()?->email,
-                'status_cancelado' => $statusHistorico->status,
-                'data_status' => $statusHistorico->data_status,
-            ])
-            ->log("Status '$statusHistorico->status' removido do Pedido #$statusHistorico->pedido_id.");
+        logAuditoria('pedido_status', "Status '$statusCancelado' removido do Pedido #$pedido->id.", [
+            'acao' => 'cancelamento',
+            'nivel' => 'warn',
+            'status_cancelado' => $statusCancelado,
+            'data_status' => $dataStatus,
+        ], $pedido);
 
         return response()->json(['message' => 'Status removido com sucesso.']);
     }

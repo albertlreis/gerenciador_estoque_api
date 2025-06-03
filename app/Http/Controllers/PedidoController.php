@@ -132,6 +132,12 @@ class PedidoController extends Controller
             ->first();
 
         if (!$carrinho || $carrinho->itens->isEmpty()) {
+            logAuditoria('pedido', 'Tentativa de criação de pedido com carrinho vazio.', [
+                'acao' => 'falha',
+                'nivel' => 'warning',
+                'id_usuario' => $usuarioLogado->id,
+                'id_carrinho' => $request->id_carrinho,
+            ]);
             return response()->json(['message' => 'Carrinho vazio.'], 422);
         }
 
@@ -162,22 +168,17 @@ class PedidoController extends Controller
                 }
             }
 
-            activity('pedido')
-                ->performedOn($pedido)
-                ->causedBy(auth()->user())
-                ->withProperties([
-                    'acao' => 'criação',
-                    'nivel' => 'info',
-                    'usuario' => auth()->user()?->email,
-                    'cliente' => $pedido->cliente?->nome,
-                    'valor_total' => $pedido->valor_total,
-                    'itens' => $pedido->itens->map(fn($item) => [
-                        'produto' => optional($item->variacao->produto)->nome,
-                        'variacao' => optional($item->variacao)->descricao,
-                        'quantidade' => $item->quantidade,
-                    ]),
-                ])
-                ->log("Pedido #$pedido->id criado com sucesso.");
+            logAuditoria('pedido', "Pedido #$pedido->id criado com sucesso.", [
+                'acao' => 'criação',
+                'nivel' => 'info',
+                'cliente' => $pedido->cliente?->nome,
+                'valor_total' => $pedido->valor_total,
+                'itens' => $pedido->itens->map(fn($item) => [
+                    'produto' => optional($item->variacao->produto)->nome,
+                    'variacao' => optional($item->variacao)->descricao,
+                    'quantidade' => $item->quantidade,
+                ]),
+            ], $pedido);
 
             $carrinho->itens()->delete();
 
@@ -238,6 +239,12 @@ class PedidoController extends Controller
             ->exists();
 
         if ($jaExiste) {
+            logAuditoria('pedido_status', "Tentativa duplicada de registrar status '$status->value' para o Pedido #$pedido->id.", [
+                'acao' => 'falha',
+                'nivel' => 'warning',
+                'status' => $status->value,
+            ], $pedido);
+
             return response()->json([
                 'message' => 'Esse status já foi registrado hoje para este pedido.'
             ], 422);
@@ -255,17 +262,12 @@ class PedidoController extends Controller
             'observacoes' => $request->observacoes,
         ]);
 
-        activity('pedido_status')
-            ->performedOn($pedido)
-            ->causedBy(auth()->user())
-            ->withProperties([
-                'acao' => 'atualizacao',
-                'nivel' => 'info',
-                'usuario' => auth()->user()?->email,
-                'novo_status' => $status->value,
-                'observacoes' => $request->observacoes,
-            ])
-            ->log("Status do Pedido #$pedido->id atualizado para '$status->value'.");
+        logAuditoria('pedido_status', "Status do Pedido #$pedido->id atualizado para '$status->value'.", [
+            'acao' => 'atualizacao',
+            'nivel' => 'info',
+            'novo_status' => $status->value,
+            'observacoes' => $request->observacoes,
+        ], $pedido);
 
         return response()->json([
             'message' => 'Status atualizado com sucesso.',
@@ -282,16 +284,12 @@ class PedidoController extends Controller
         $pedidos = Pedido::with(['cliente', 'parceiro'])->get();
 
         if ($formato === 'excel') {
-            activity('pedido_exportacao')
-                ->causedBy(auth()->user())
-                ->withProperties([
-                    'acao' => 'exportacao',
-                    'nivel' => 'info',
-                    'usuario' => auth()->user()?->email,
-                    'formato' => $formato,
-                    'detalhado' => $detalhado,
-                ])
-                ->log("Exportação de pedidos no formato $formato.");
+            logAuditoria('pedido_exportacao', "Exportação de pedidos no formato $formato.", [
+                'acao' => 'exportacao',
+                'nivel' => 'info',
+                'formato' => $formato,
+                'detalhado' => $detalhado,
+            ]);
 
             return Excel::download(new PedidosExport($pedidos), 'pedidos.xlsx');
         }
@@ -300,16 +298,12 @@ class PedidoController extends Controller
             $view = $detalhado ? 'exports.pedidos-pdf-detalhado' : 'exports.pedidos-pdf';
             $pdf = Pdf::loadView($view, ['pedidos' => $pedidos]);
 
-            activity('pedido_exportacao')
-                ->causedBy(auth()->user())
-                ->withProperties([
-                    'acao' => 'exportacao',
-                    'nivel' => 'info',
-                    'usuario' => auth()->user()?->email,
-                    'formato' => $formato,
-                    'detalhado' => $detalhado,
-                ])
-                ->log("Exportação de pedidos no formato $formato.");
+            logAuditoria('pedido_exportacao', "Exportação de pedidos no formato $formato.", [
+                'acao' => 'exportacao',
+                'nivel' => 'info',
+                'formato' => $formato,
+                'detalhado' => $detalhado,
+            ]);
 
             return $pdf->download($detalhado ? 'pedidos-detalhado.pdf' : 'pedidos.pdf');
         }
@@ -374,15 +368,11 @@ class PedidoController extends Controller
         $pedido = $this->extrairPedido($texto);
         $itens = $this->extrairItens($texto);
 
-        activity('pedido_importacao_preview')
-            ->causedBy(auth()->user())
-            ->withProperties([
-                'acao' => 'leitura_pdf',
-                'nivel' => 'info',
-                'usuario' => auth()->user()?->email,
-                'arquivo' => $request->file('arquivo')->getClientOriginalName(),
-            ])
-            ->log("Leitura de pré-visualização do PDF realizada.");
+        logAuditoria('pedido_importacao_preview', 'Leitura de pré-visualização do PDF realizada.', [
+            'acao' => 'leitura_pdf',
+            'nivel' => 'info',
+            'arquivo' => $request->file('arquivo')->getClientOriginalName(),
+        ]);
 
         return response()->json([
             'cliente' => $cliente,
@@ -741,19 +731,14 @@ class PedidoController extends Controller
                 ]);
             }
 
-            activity('pedido')
-                ->performedOn($pedido)
-                ->causedBy(auth()->user())
-                ->withProperties([
-                    'acao' => 'importacao',
-                    'nivel' => 'info',
-                    'usuario' => auth()->user()?->email,
-                    'cliente' => $cliente->nome,
-                    'numero_pdf' => $request->input('pedido.numero'),
-                    'valor_total' => $pedido->valor_total,
-                    'itens' => $itens,
-                ])
-                ->log("Pedido importado via PDF para cliente '$cliente->nome'.");
+            logAuditoria('pedido', "Pedido importado via PDF para cliente '$cliente->nome'.", [
+                'acao' => 'importacao',
+                'nivel' => 'info',
+                'cliente' => $cliente->nome,
+                'numero_pdf' => $request->input('pedido.numero'),
+                'valor_total' => $pedido->valor_total,
+                'itens' => $itens,
+            ], $pedido);
 
             return response()->json([
                 'message' => 'Pedido importado e salvo com sucesso.',

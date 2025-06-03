@@ -1,35 +1,35 @@
 <?php
 
 use Illuminate\Support\Facades\Route;
-use App\Http\Controllers\{CarrinhoItemController,
-    CategoriaController,
-    ConsignacaoController,
-    PedidoStatusHistoricoController,
-    ProdutoController,
-    ProdutoImagemController,
-    ProdutoOutletController,
-    ProdutoVariacaoController,
-    ProdutoAtributoController,
-    DepositoController,
-    EstoqueController,
-    EstoqueMovimentacaoController,
-    ClienteController,
-    ParceiroController,
-    PedidoController,
-    PedidoItemController,
-    CarrinhoController,
-    ConfiguracaoController};
+use App\Http\Controllers\CarrinhoItemController;
+use App\Http\Controllers\CategoriaController;
+use App\Http\Controllers\ConsignacaoController;
+use App\Http\Controllers\PedidoStatusHistoricoController;
+use App\Http\Controllers\ProdutoController;
+use App\Http\Controllers\ProdutoImagemController;
+use App\Http\Controllers\ProdutoOutletController;
+use App\Http\Controllers\ProdutoVariacaoController;
+use App\Http\Controllers\ProdutoAtributoController;
+use App\Http\Controllers\DepositoController;
+use App\Http\Controllers\EstoqueController;
+use App\Http\Controllers\EstoqueMovimentacaoController;
+use App\Http\Controllers\ClienteController;
+use App\Http\Controllers\ParceiroController;
+use App\Http\Controllers\PedidoController;
+use App\Http\Controllers\PedidoItemController;
+use App\Http\Controllers\CarrinhoController;
+use App\Http\Controllers\ConfiguracaoController;
 
-Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
+Route::middleware('auth:sanctum')->prefix('v1')->group(function () {
     // Configurações do sistema
-    Route::get('/configuracoes', [ConfiguracaoController::class, 'listar']);
-    Route::put('/configuracoes/{chave}', [ConfiguracaoController::class, 'atualizar']);
+    Route::get('configuracoes', [ConfiguracaoController::class, 'listar']);
+    Route::put('configuracoes/{chave}', [ConfiguracaoController::class, 'atualizar']);
 
     // Produtos e Categorias
     Route::apiResource('categorias', CategoriaController::class);
 
-    Route::get('/produtos/outlet', [ProdutoOutletController::class, 'index']);
-    Route::patch('/produtos/{id}/remover-outlet', [ProdutoOutletController::class, 'removerOutlet']);
+    Route::get('produtos/outlet', [ProdutoOutletController::class, 'index']);
+    Route::patch('produtos/{id}/remover-outlet', [ProdutoOutletController::class, 'removerOutlet']);
 
 
     Route::get('atributos', [ProdutoAtributoController::class, 'index']);
@@ -72,20 +72,20 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
     Route::apiResource('pedidos.itens', PedidoItemController::class)->parameters(['itens' => 'item']);
 
 
-    Route::get('/carrinhos', [CarrinhoController::class, 'index']);
-    Route::get('/carrinhos/{id}', [CarrinhoController::class, 'show']);
-    Route::post('/carrinhos', [CarrinhoController::class, 'store']);
-    Route::put('/carrinhos/{id}', [CarrinhoController::class, 'update']);
-    Route::post('/carrinhos/{id}/cancelar', [CarrinhoController::class, 'cancelar']);
+    Route::get('carrinhos', [CarrinhoController::class, 'index']);
+    Route::get('carrinhos/{id}', [CarrinhoController::class, 'show']);
+    Route::post('carrinhos', [CarrinhoController::class, 'store']);
+    Route::put('carrinhos/{id}', [CarrinhoController::class, 'update']);
+    Route::post('carrinhos/{id}/cancelar', [CarrinhoController::class, 'cancelar']);
 
-    Route::post('/carrinho-itens', [CarrinhoItemController::class, 'store']);
-    Route::delete('/carrinho-itens/{id}', [CarrinhoItemController::class, 'destroy']);
-    Route::delete('/carrinho-itens/limpar/{idCarrinho}', [CarrinhoItemController::class, 'clear']);
+    Route::post('carrinho-itens', [CarrinhoItemController::class, 'store']);
+    Route::delete('carrinho-itens/{id}', [CarrinhoItemController::class, 'destroy']);
+    Route::delete('carrinho-itens/limpar/{idCarrinho}', [CarrinhoItemController::class, 'clear']);
 
-    Route::prefix('consignacoes')->middleware('auth:sanctum')->group(function () {
+    Route::prefix('consignacoes')->group(function () {
         Route::get('/', [ConsignacaoController::class, 'index']);
-        Route::patch('/{id}', [ConsignacaoController::class, 'atualizarStatus']);
-        Route::get('/vencendo', [ConsignacaoController::class, 'vencendo']);
+        Route::patch('{id}', [ConsignacaoController::class, 'atualizarStatus']);
+        Route::get('vencendo', [ConsignacaoController::class, 'vencendo']);
         Route::get('{id}', [ConsignacaoController::class, 'show']);
     });
 

@@ -12,6 +12,7 @@ use App\Models\Pedido;
 use App\Models\PedidoItem;
 use App\Models\Carrinho;
 use App\Models\PedidoStatusHistorico;
+use App\Services\LogService;
 use Carbon\Carbon;
 use Exception;
 use Illuminate\Http\JsonResponse;
@@ -49,6 +50,8 @@ class PedidoController extends Controller
                 $query->when($dataInicio, fn($q) => $q->where('data_pedido', '>=', $dataInicio));
                 $query->when($dataFim, fn($q) => $q->where('data_pedido', '<=', $dataFim));
             } catch (Exception) {
+                LogService::warning('FiltroData', 'Data inválida recebida.', $request->only(['data_inicio', 'data_fim']));
+
                 return response()->json(['erro' => 'Formato de data inválido. Use AAAA-MM-DD.'], 422);
             }
         }
@@ -132,12 +135,8 @@ class PedidoController extends Controller
             ->first();
 
         if (!$carrinho || $carrinho->itens->isEmpty()) {
-            logAuditoria('pedido', 'Tentativa de criação de pedido com carrinho vazio.', [
-                'acao' => 'falha',
-                'nivel' => 'warning',
-                'id_usuario' => $usuarioLogado->id,
-                'id_carrinho' => $request->id_carrinho,
-            ]);
+            LogService::warning('Pedido', 'Tentativa de criação com carrinho vazio.', ['carrinho_id' => $request->id_carrinho]);
+
             return response()->json(['message' => 'Carrinho vazio.'], 422);
         }
 
@@ -239,11 +238,7 @@ class PedidoController extends Controller
             ->exists();
 
         if ($jaExiste) {
-            logAuditoria('pedido_status', "Tentativa duplicada de registrar status '$status->value' para o Pedido #$pedido->id.", [
-                'acao' => 'falha',
-                'nivel' => 'warning',
-                'status' => $status->value,
-            ], $pedido);
+            LogService::info('StatusPedido', "Status '$status->value' já registrado hoje para o pedido #$pedido->id");
 
             return response()->json([
                 'message' => 'Esse status já foi registrado hoje para este pedido.'
@@ -342,6 +337,8 @@ class PedidoController extends Controller
             $valores[] = (float) ($linha->valor ?? 0);
         }
 
+        LogService::debug('EstatisticasPedido', 'Estatísticas calculadas', ['intervalo_meses' => $intervalo]);
+
         return response()->json([
             'labels' => $labels,
             'quantidades' => $quantidades,
@@ -368,11 +365,7 @@ class PedidoController extends Controller
         $pedido = $this->extrairPedido($texto);
         $itens = $this->extrairItens($texto);
 
-        logAuditoria('pedido_importacao_preview', 'Leitura de pré-visualização do PDF realizada.', [
-            'acao' => 'leitura_pdf',
-            'nivel' => 'info',
-            'arquivo' => $request->file('arquivo')->getClientOriginalName(),
-        ]);
+        LogService::info('ImportacaoPDF', 'Arquivo PDF lido com sucesso.', ['arquivo' => $request->file('arquivo')->getClientOriginalName()]);
 
         return response()->json([
             'cliente' => $cliente,
@@ -421,7 +414,7 @@ class PedidoController extends Controller
             if ($item) $itens[] = $item;
         }
 
-        Log::debug('Itens extraídos:', ['itens' => $itens]);
+        LogService::debug('ImportacaoPDF', 'Itens extraídos do PDF.', ['itens' => $itens]);
         return $itens;
     }
 
@@ -564,18 +557,12 @@ class PedidoController extends Controller
                 return isset($match[1]) ? trim($match[1]) : $fallback;
             }
 
-            Log::debug('Valor não encontrado', [
-                'pattern' => $pattern,
-                'fallback' => $fallback,
-            ]);
+            LogService::debug('ExtracaoRegex', 'Valor não encontrado.');
 
             return $fallback;
         } catch (Throwable $e) {
-            Log::warning('Erro ao extrair valor com regex', [
-                'pattern' => $pattern,
-                'fallback' => $fallback,
-                'erro' => $e->getMessage()
-            ]);
+            LogService::warning('ExtracaoRegex', 'Erro ao extrair valor com regex.');
+
             return $fallback;
         }
     }

@@ -12,6 +12,8 @@ use App\Models\Pedido;
 use App\Models\PedidoItem;
 use App\Models\Carrinho;
 use App\Models\PedidoStatusHistorico;
+use App\Models\Produto;
+use App\Models\ProdutoVariacao;
 use App\Services\LogService;
 use Carbon\Carbon;
 use Exception;
@@ -365,12 +367,30 @@ class PedidoController extends Controller
         $pedido = $this->extrairPedido($texto);
         $itens = $this->extrairItens($texto);
 
+        $itensComVariacao = collect($itens)->map(function ($item) {
+            $variacao = ProdutoVariacao::query()
+                ->where('referencia', $item['ref'] ?? '')
+                ->when(!empty($item['nome']), fn($q) =>
+                $q->whereHas('produto', fn($q2) =>
+                $q2->where('nome', 'like', '%' . $item['nome'] . '%')
+                )
+                )
+                ->first();
+
+            return array_merge($item, [
+                'id_variacao' => $variacao?->id,
+                'produto_id' => $variacao?->produto_id,
+                'variacao_nome' => $variacao?->descricao,
+                'id_categoria' => $variacao?->produto?->id_categoria,
+            ]);
+        });
+
         LogService::info('ImportacaoPDF', 'Arquivo PDF lido com sucesso.', ['arquivo' => $request->file('arquivo')->getClientOriginalName()]);
 
         return response()->json([
             'cliente' => $cliente,
             'pedido' => $pedido,
-            'itens' => $itens,
+            'itens' => $itensComVariacao,
         ]);
     }
 
@@ -708,9 +728,41 @@ class PedidoController extends Controller
 
             // Cria os itens do pedido
             foreach ($itens as $item) {
+                $variacao = ProdutoVariacao::query()
+                    ->where('referencia', $item['ref'] ?? '')
+                    ->when(!empty($item['nome']), fn($q) =>
+                    $q->whereHas('produto', fn($q2) =>
+                    $q2->where('nome', 'like', '%' . $item['nome'] . '%')
+                    )
+                    )
+                    ->first();
+
+                // Se não encontrar, tenta criar
+                if (!$variacao && !empty($item['ref']) && !empty($item['nome'])) {
+                    if (empty($item['id_categoria'])) {
+                        throw new Exception("Item '{$item['descricao']}' está sem categoria definida.");
+                    }
+
+                    $produto = Produto::firstOrCreate([
+                        'nome' => $item['nome'],
+                        'id_categoria' => $item['id_categoria'],
+                    ]);
+
+                    $variacao = ProdutoVariacao::create([
+                        'produto_id' => $produto->id,
+                        'referencia' => $item['ref'],
+                        'nome' => $item['descricao'],
+                        'preco' => $item['valor'],
+                        'custo' => $item['valor'],
+                        'largura' => $item['fixos']['largura'] ?? null,
+                        'profundidade' => $item['fixos']['profundidade'] ?? null,
+                        'altura' => $item['fixos']['altura'] ?? null,
+                    ]);
+                }
+
                 PedidoItem::create([
                     'id_pedido' => $pedido->id,
-                    'id_variacao' => null, // Sem vínculo direto com variação ainda
+                    'id_variacao' => $variacao?->id,
                     'descricao_manual' => $item['descricao'],
                     'quantidade' => $item['quantidade'],
                     'preco_unitario' => $item['valor'],

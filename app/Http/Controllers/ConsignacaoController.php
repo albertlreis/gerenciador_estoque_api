@@ -6,7 +6,6 @@ use App\Helpers\AuthHelper;
 use App\Http\Resources\ConsignacaoDetalhadaResource;
 use App\Http\Resources\ConsignacaoResource;
 use App\Models\Consignacao;
-use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -16,7 +15,17 @@ class ConsignacaoController extends Controller
 
     public function index(Request $request): AnonymousResourceCollection
     {
-        $query = Consignacao::with(['pedido.cliente', 'produtoVariacao.produto']);
+        $query = Consignacao::with([
+            'pedido.cliente:id,nome',
+            'produtoVariacao:id,produto_id',
+            'produtoVariacao.produto:id,nome'
+        ]);
+
+        if (!AuthHelper::hasPermissao('consignacoes.visualizar.todos')) {
+            $query->whereHas('pedido', function ($q) {
+                $q->where('id_usuario', AuthHelper::getUsuarioId());
+            });
+        }
 
         if ($request->filled('status')) {
             $query->where('status', $request->status);
@@ -49,8 +58,13 @@ class ConsignacaoController extends Controller
 
     public function show($id): JsonResponse
     {
-        $consignacao = Consignacao::with(['pedido.cliente', 'produtoVariacao.produto', 'produtoVariacao.atributos'])
-            ->findOrFail($id);
+        $consignacao = Consignacao::with([
+            'pedido.cliente',
+            'pedido.usuario',
+            'produtoVariacao.produto.imagemPrincipal',
+            'produtoVariacao.atributos',
+            'devolucoes'
+        ])->findOrFail($id);
 
         return response()->json(new ConsignacaoDetalhadaResource($consignacao));
     }
@@ -94,6 +108,35 @@ class ConsignacaoController extends Controller
         $consignacoes = $query->get();
 
         return response()->json(ConsignacaoResource::collection($consignacoes));
+    }
+
+    public function registrarDevolucao($id, Request $request): JsonResponse
+    {
+        $request->validate([
+            'quantidade' => 'required|integer|min:1',
+            'observacoes' => 'nullable|string',
+        ]);
+
+        $consignacao = Consignacao::with('devolucoes')->findOrFail($id);
+
+        $restante = $consignacao->quantidade - $consignacao->devolucoes->sum('quantidade');
+        if ($request->quantidade > $restante) {
+            return response()->json(['erro' => 'Quantidade devolvida excede o restante.'], 422);
+        }
+
+        $consignacao->devolucoes()->create([
+            'quantidade' => $request->quantidade,
+            'observacoes' => $request->observacoes,
+        ]);
+
+        $novaQuantidadeDevolvida = $consignacao->quantidadeDevolvida() + $request->quantidade;
+        if ($novaQuantidadeDevolvida >= $consignacao->quantidade) {
+            $consignacao->status = 'devolvido';
+            $consignacao->data_resposta = now();
+            $consignacao->save();
+        }
+        
+        return response()->json(['mensagem' => 'Devolução registrada com sucesso.']);
     }
 
 }

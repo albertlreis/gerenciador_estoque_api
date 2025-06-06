@@ -86,6 +86,7 @@ Route::middleware('auth:sanctum')->prefix('v1')->group(function () {
         Route::get('/', [ConsignacaoController::class, 'index']);
         Route::patch('{id}', [ConsignacaoController::class, 'atualizarStatus']);
         Route::get('vencendo', [ConsignacaoController::class, 'vencendo']);
+        Route::post('{id}/devolucao', [ConsignacaoController::class, 'registrarDevolucao']);
         Route::get('{id}', [ConsignacaoController::class, 'show']);
     });
 

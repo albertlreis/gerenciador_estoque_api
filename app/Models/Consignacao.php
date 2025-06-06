@@ -38,4 +38,20 @@ class Consignacao extends Model
     {
         return $this->belongsTo(ProdutoVariacao::class, 'produto_variacao_id');
     }
+
+    public function devolucoes()
+    {
+        return $this->hasMany(ConsignacaoDevolucao::class);
+    }
+
+    public function quantidadeDevolvida(): int
+    {
+        return $this->devolucoes->sum('quantidade');
+    }
+
+    public function quantidadeRestante(): int
+    {
+        return $this->quantidade - $this->quantidadeDevolvida();
+    }
+
 }

@@ -12,15 +12,14 @@ class EstoqueController extends Controller
 {
     public function listarEstoqueAtual(Request $request, EstoqueService $service): JsonResponse
     {
-        return response()->json(
-            ProdutoEstoqueResource::collection(
-                $service->obterEstoqueAgrupadoPorProdutoEDeposito(
-                    produto: $request->input('produto'),
-                    deposito: $request->input('deposito'),
-                    periodo: $request->input('periodo')
-                )
-            )
+        $result = $service->obterEstoqueAgrupadoPorProdutoEDeposito(
+            produto: $request->input('produto'),
+            deposito: $request->input('deposito'),
+            periodo: $request->input('periodo'),
+            perPage: $request->input('per_page', 10)
         );
+
+        return ProdutoEstoqueResource::collection($result)->response();
     }
 
     public function resumoEstoque(Request $request, EstoqueService $service): JsonResponse

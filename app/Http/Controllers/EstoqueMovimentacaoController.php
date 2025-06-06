@@ -12,7 +12,9 @@ class EstoqueMovimentacaoController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
-        $query = EstoqueMovimentacao::with(['produto', 'usuario', 'depositoOrigem', 'depositoDestino']);
+        $query = EstoqueMovimentacao::with([
+            'variacao.produto', 'variacao.atributos', 'usuario', 'depositoOrigem', 'depositoDestino'
+        ]);
 
         if ($request->filled('tipo')) {
             $query->where('tipo', $request->tipo);

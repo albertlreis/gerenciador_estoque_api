@@ -14,9 +14,9 @@ class MovimentacaoResource extends JsonResource
             'quantidade' => $this->quantidade,
             'data_movimentacao' => optional($this->data_movimentacao)->format('d/m/Y'),
 
-            'produto_id' => $this->produto?->id,
-            'produto_nome' => $this->produto?->nome,
-            'produto_referencia' => $this->produto?->referencia,
+            'produto_id' => $this->variacao?->produto?->id,
+            'produto_nome' => $this->variacao?->nome_completo,
+            'produto_referencia' => $this->variacao?->referencia,
 
             'deposito_origem_id' => $this->depositoOrigem?->id,
             'deposito_origem_nome' => $this->depositoOrigem?->nome,

@@ -9,8 +9,9 @@ class EstoqueService
     public function obterEstoqueAgrupadoPorProdutoEDeposito(
         ?string $produto = null,
         ?int $deposito = null,
-        ?array $periodo = null
-    ): array {
+        ?array $periodo = null,
+        int $perPage = 10
+    ): \Illuminate\Contracts\Pagination\LengthAwarePaginator {
         $query = DB::table('estoque')
             ->join('produto_variacoes', 'estoque.id_variacao', '=', 'produto_variacoes.id')
             ->join('produtos', 'produto_variacoes.produto_id', '=', 'produtos.id')
@@ -33,7 +34,6 @@ class EstoqueService
             $query->where('estoque.id_deposito', $deposito);
         }
 
-        // Filtro de período opcional (se a tabela de estoque tiver coluna 'updated_at' ou similar)
         if ($periodo && count($periodo) === 2) {
             $query->whereBetween('estoque.updated_at', [$periodo[0], $periodo[1]]);
         }
@@ -41,8 +41,7 @@ class EstoqueService
         return $query
             ->groupBy('produtos.id', 'produtos.nome', 'depositos.nome')
             ->orderBy('produtos.nome')
-            ->get()
-            ->toArray();
+            ->paginate($perPage);
     }
 
     public function gerarResumoEstoque(

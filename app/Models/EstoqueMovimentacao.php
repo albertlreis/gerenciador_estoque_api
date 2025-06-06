@@ -10,7 +10,6 @@ class EstoqueMovimentacao extends Model
     protected $table = 'estoque_movimentacoes';
 
     protected $fillable = [
-        'id_produto',
         'id_variacao',
         'id_deposito_origem',
         'id_deposito_destino',
@@ -20,9 +19,13 @@ class EstoqueMovimentacao extends Model
         'data_movimentacao'
     ];
 
-    public function produto(): BelongsTo
+    protected $casts = [
+        'data_movimentacao' => 'datetime',
+    ];
+
+    public function variacao(): BelongsTo
     {
-        return $this->belongsTo(Produto::class, 'id_produto');
+        return $this->belongsTo(ProdutoVariacao::class, 'id_variacao');
     }
 
     public function depositoOrigem(): BelongsTo

@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Enums\PedidoStatus;
 use App\Exports\PedidosExport;
 use App\Helpers\AuthHelper;
+use App\Helpers\StringHelper;
 use App\Http\Requests\StorePedidoRequest;
 use App\Http\Requests\UpdatePedidoStatusRequest;
 use App\Models\Cliente;
@@ -15,6 +16,7 @@ use App\Models\Carrinho;
 use App\Models\PedidoStatusHistorico;
 use App\Models\Produto;
 use App\Models\ProdutoVariacao;
+use App\Models\ProdutoVariacaoAtributo;
 use App\Services\LogService;
 use Carbon\Carbon;
 use Exception;
@@ -756,7 +758,6 @@ class PedidoController extends Controller
             $itens = $request->itens;
             $usuario = Auth::user();
 
-            // Verifica se cliente já existe
             $cliente = Cliente::firstOrCreate(
                 ['documento' => $dadosCliente['documento']],
                 [
@@ -767,7 +768,6 @@ class PedidoController extends Controller
                 ]
             );
 
-            // Cria o pedido
             $pedido = Pedido::create([
                 'id_cliente' => $cliente->id,
                 'id_usuario' => $usuario->id,
@@ -778,7 +778,6 @@ class PedidoController extends Controller
                 'observacoes' => $dadosPedido['observacoes'] ?? null,
             ]);
 
-            // Cria os itens do pedido
             foreach ($itens as $item) {
                 $variacao = ProdutoVariacao::query()
                     ->where('referencia', $item['ref'] ?? '')
@@ -789,7 +788,6 @@ class PedidoController extends Controller
                     )
                     ->first();
 
-                // Se não encontrar, tenta criar
                 if (!$variacao && !empty($item['ref']) && !empty($item['nome'])) {
                     if (empty($item['id_categoria'])) {
                         throw new Exception("Item '{$item['descricao']}' está sem categoria definida.");
@@ -800,16 +798,37 @@ class PedidoController extends Controller
                         'id_categoria' => $item['id_categoria'],
                     ]);
 
+                    $produto->update([
+                        'largura' => $item['fixos']['largura'] ?? null,
+                        'profundidade' => $item['fixos']['profundidade'] ?? null,
+                        'altura' => $item['fixos']['altura'] ?? null,
+                    ]);
+
                     $variacao = ProdutoVariacao::create([
                         'produto_id' => $produto->id,
                         'referencia' => $item['ref'],
                         'nome' => $item['descricao'],
                         'preco' => $item['valor'],
                         'custo' => $item['valor'],
-                        'largura' => $item['fixos']['largura'] ?? null,
-                        'profundidade' => $item['fixos']['profundidade'] ?? null,
-                        'altura' => $item['fixos']['altura'] ?? null,
                     ]);
+
+                    if (!empty($item['atributos'])) {
+                        foreach ($item['atributos'] as $grupo => $atributosGrupo) {
+                            foreach ($atributosGrupo as $atributo => $valor) {
+                                if (trim($valor) === '') continue;
+
+                                ProdutoVariacaoAtributo::updateOrCreate(
+                                    [
+                                        'id_variacao' => $variacao->id,
+                                        'atributo' => StringHelper::normalizarAtributo("$grupo:$atributo"),
+                                    ],
+                                    [
+                                        'valor' => $valor,
+                                    ]
+                                );
+                            }
+                        }
+                    }
                 }
 
                 PedidoItem::create([
@@ -819,6 +838,10 @@ class PedidoController extends Controller
                     'quantidade' => $item['quantidade'],
                     'preco_unitario' => $item['valor'],
                     'subtotal' => $item['quantidade'] * $item['valor'],
+                    'observacoes' => collect([
+                        ...($item['atributos']['observacoes'] ?? []),
+                        'observacao_extra' => $item['atributos']['observacoes_observacao_extra'] ?? null
+                    ])->filter()->implode("\n"),
                 ]);
             }
 

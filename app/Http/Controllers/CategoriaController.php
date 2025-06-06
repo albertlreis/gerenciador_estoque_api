@@ -9,7 +9,7 @@ class CategoriaController extends Controller
 {
     public function index()
     {
-        return response()->json(Categoria::with('subcategorias')->whereNull('categoria_pai_id')->get());
+        return response()->json(Categoria::with('subcategorias')->get());
     }
 
     public function store(Request $request)

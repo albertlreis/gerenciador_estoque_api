@@ -13,19 +13,18 @@ return new class extends Migration
     public function up(): void
     {
         Schema::create('produtos', function (Blueprint $table) {
-            $table->increments('id'); // Identificador do produto
-            $table->string('nome', 255); // Nome do produto
-            $table->text('descricao')->nullable(); // Descrição opcional
-            $table->unsignedInteger('id_categoria'); // Categoria do produto
-            $table->unsignedInteger('id_fornecedor')->nullable(); // Fornecedor do produto
-            $table->decimal('altura', 10, 2)->default(0); // Altura em centímetros
-            $table->decimal('largura', 10, 2)->default(0); // Largura em centímetros
-            $table->decimal('profundidade', 10, 2)->default(0); // Profundidade em centímetros
-            $table->decimal('peso', 10, 2)->default(0); // Peso em quilos
-            $table->boolean('ativo')->default(true); // Produto está ativo no sistema?
+            $table->increments('id')->comment('Identificador do produto');
+            $table->string('nome', 255)->comment('Nome do produto');
+            $table->text('descricao')->nullable()->comment('Descrição opcional do produto');
+            $table->unsignedInteger('id_categoria')->comment('Categoria do produto');
+            $table->unsignedInteger('id_fornecedor')->nullable()->comment('Fornecedor do produto');
+            $table->decimal('altura', 10, 2)->nullable()->comment('Altura em centímetros');
+            $table->decimal('largura', 10, 2)->nullable()->comment('Largura em centímetros');
+            $table->decimal('profundidade', 10, 2)->nullable()->comment('Profundidade em centímetros');
+            $table->decimal('peso', 10, 2)->nullable()->comment('Peso em quilos');
+            $table->boolean('ativo')->default(true)->comment('Produto está ativo no sistema');
             $table->timestamps();
 
-            // Chaves estrangeiras
             $table->foreign('id_categoria')->references('id')->on('categorias')->onDelete('cascade');
             $table->foreign('id_fornecedor')->references('id')->on('fornecedores')->onDelete('set null');
         });

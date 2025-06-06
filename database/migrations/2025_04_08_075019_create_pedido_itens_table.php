@@ -25,7 +25,8 @@ return new class extends Migration
 
             $table->integer('quantidade')->comment('Quantidade da variação no pedido');
             $table->decimal('preco_unitario', 10, 2)->comment('Preço unitário no momento do pedido');
-            $table->decimal('subtotal', 10, 2)->comment('Subtotal = quantidade * preço_unitário');
+            $table->decimal('subtotal', 10)->comment('Subtotal = quantidade * preço_unitário');
+            $table->text('observacoes')->nullable();
 
             $table->timestamps();
 

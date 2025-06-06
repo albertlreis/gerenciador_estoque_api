@@ -21,6 +21,7 @@ return new class extends Migration
 
             // Chave estrangeira para a variação
             $table->foreign('id_variacao')->references('id')->on('produto_variacoes')->onDelete('cascade');
+            $table->unique(['id_variacao', 'atributo']);
         });
     }
 

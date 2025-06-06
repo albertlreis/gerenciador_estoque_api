@@ -592,25 +592,28 @@ class PedidoController extends Controller
         }
     }
 
-    private function extrairNome(string $descricao): array|string|null
+    private function extrairNome(string $descricao): string
     {
-        // Limpa e normaliza
+        // Limpa símbolos indesejados
         $descricao = str_replace(['Ø', "\u{00a0}"], '', $descricao);
-        $descricao = preg_replace('/\s+/', ' ', $descricao);
+        $descricao = preg_replace('/\s+/', ' ', trim($descricao));
 
-        // Tenta isolar nome até o '*', se existir
+        // Tenta isolar até o '*', se existir
         if (str_contains($descricao, '*')) {
             [$possivelNome] = explode('*', $descricao, 2);
         } else {
-            // Alternativa: corta antes de palavras-chave ou medidas
-            preg_match('/^(.*?)(?=\b(MED|COR|TECIDO|PESP|MÁRMORE|PRONTA|PEDIDO|\d{2,3}\s*[xX]\s*\d{2,3}))/iu', $descricao, $match);
+            // Alternativa: isola até palavras-chave ou medidas
+            preg_match('/^(.*?)(?=\b(MED|COR|TECIDO|PESP|MÁRMORE|PRONTA|PEDIDO|\d{2,3}\s*[xXØ]\s*\d{2,3}))/iu', $descricao, $match);
             $possivelNome = $match[1] ?? $descricao;
         }
 
-        // Remove medidas explícitas do nome
-        $possivelNome = preg_replace('/\b\d{2,3}\s*[xX]\s*\d{2,3}(\s*[xX]\s*\d{2,3})?\b/', '', $possivelNome);
+        // Remove medidas no final, inclusive coladas (ex: 53X5X81CM, 260X122X78)
+        $possivelNome = preg_replace('/\d{2,3}[xXØ]\d{1,3}(?:[xXØ]\d{1,3})?(CM)?$/u', '', trim($possivelNome));
 
-        // Limpa e preserva letras com acento, números e separadores simples
+        // Remove ' CM' solto no final
+        $possivelNome = preg_replace('/\s+CM$/u', '', $possivelNome);
+
+        // Permite letras com acento, números e separadores simples
         $nome = trim(preg_replace('/[^\p{L}\p{N} \/]/u', '', $possivelNome));
         $nome = preg_replace('/\s+/', ' ', $nome);
 
@@ -619,6 +622,7 @@ class PedidoController extends Controller
 
     private function extrairProduto(string $descricao): array
     {
+        // Limpeza inicial
         $descricao = str_replace(['Ø', "\u{00a0}"], '', $descricao);
         $descricao = preg_replace('/\s+/', ' ', $descricao);
 
@@ -626,7 +630,6 @@ class PedidoController extends Controller
         $nome = $this->extrairNome($descricao);
         $restante = $partes[1] ?? $partes[0];
 
-        $restante = $partes[1] ?? '';
         $atributos = [
             'cores' => [],
             'tecidos' => [],
@@ -663,7 +666,7 @@ class PedidoController extends Controller
             }
         }
 
-        // Medidas
+        // Extrair bloco de medidas após MED:
         preg_match('/MED:\s*(.+?)(?=\s+[A-Z]{3,}|$)/u', $restante, $matchMedidas);
         if (!$matchMedidas && preg_match('/(\d{2,3})\s*[xXØ]\s*(\d{2,3})\s*[xXØ]\s*(\d{2,3})/', $descricao, $matchFallback)) {
             $matchMedidas[1] = $matchFallback[0];
@@ -671,7 +674,8 @@ class PedidoController extends Controller
 
         $blocoMedida = $matchMedidas[1] ?? $restante ?? $descricao;
         $medidas = $this->extrairMedidas($blocoMedida);
-        // Fallback: tenta extrair medidas do nome caso nada tenha sido encontrado
+
+        // Fallback: tenta extrair medidas do nome
         if (!$medidas[0] && !$medidas[1] && !$medidas[2]) {
             $medidas = $this->extrairMedidas($nome);
         }
@@ -686,7 +690,7 @@ class PedidoController extends Controller
             $observacaoExtra = str_replace($matchObs[0], '', $observacaoExtra);
         }
 
-        // Limpeza final da observação extra
+        // Observação extra limpa
         $extra = trim(preg_replace('/\s+/', ' ', $observacaoExtra));
         if ($extra !== '') {
             $atributos['observacoes']['observacao_extra'] = $extra;
@@ -702,6 +706,7 @@ class PedidoController extends Controller
             ],
         ];
     }
+
 
     private function extrairMedidas(string $texto): array
     {

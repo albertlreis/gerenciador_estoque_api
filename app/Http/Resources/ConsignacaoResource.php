@@ -12,6 +12,9 @@ class ConsignacaoResource extends JsonResource
         return [
             'id' => $this->id,
             'pedido_id' => $this->pedido_id,
+            'pedido' => [
+                'id' => $this->pedido_id
+            ],
 
             // Nome resumido do cliente e produto para listagem
             'cliente_nome' => optional($this->pedido->cliente)->nome,

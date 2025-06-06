@@ -23,8 +23,8 @@ class PedidoStatusHistoricoController extends Controller
             ->orderBy('data_status')
             ->get()
             ->map(function ($item, $index) use ($pedido, $usuario) {
-                $statusEnum = $item->status instanceof PedidoStatus ? $item->status : PedidoStatus::tryFrom($item->status);
-                $statusString = $statusEnum instanceof PedidoStatus ? $statusEnum->value : (string) $item->status;
+                $statusEnum = PedidoStatus::tryFrom($item->getRawOriginal('status'));
+                $statusString = $statusEnum?->value ?? (string) $item->status;
 
                 return [
                     'id' => $item->id,
@@ -32,7 +32,7 @@ class PedidoStatusHistoricoController extends Controller
                     'label' => $statusEnum?->label() ?? ucfirst(str_replace('_', ' ', $statusString)),
                     'icone' => self::iconePorStatus($statusString),
                     'cor' => self::corPorStatus($statusString),
-                    'data_status' => $item->data_status,
+                    'data_status' => $item->getAttribute('data_status'),
                     'observacoes' => $item->observacoes,
                     'usuario' => $item->usuario?->name,
                     'isUltimo' => $index === $pedido->historicoStatus->count() - 1,

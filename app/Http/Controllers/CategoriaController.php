@@ -9,7 +9,11 @@ class CategoriaController extends Controller
 {
     public function index()
     {
-        return response()->json(Categoria::with('subcategorias')->get());
+        return response()->json(
+            Categoria::with('subcategorias')
+                ->orderBy('nome')
+                ->get()
+        );
     }
 
     public function store(Request $request)

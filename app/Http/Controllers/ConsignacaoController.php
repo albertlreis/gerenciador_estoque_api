@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Helpers\AuthHelper;
 use App\Http\Resources\ConsignacaoDetalhadaResource;
 use App\Http\Resources\ConsignacaoResource;
 use App\Models\Consignacao;
@@ -77,13 +78,22 @@ class ConsignacaoController extends Controller
         ]);
     }
 
-    public function vencendo(): Collection|array
+    public function vencendo(): JsonResponse
     {
-        return Consignacao::with('produtoVariacao')
+        $query = Consignacao::with(['pedido.cliente', 'produtoVariacao.produto'])
             ->where('status', 'pendente')
             ->whereDate('prazo_resposta', '<=', now()->addDays(2))
-            ->orderBy('prazo_resposta')
-            ->get();
+            ->orderBy('prazo_resposta');
+
+        if (!AuthHelper::hasPermissao('consignacoes.vencendo.todos')) {
+            $query->whereHas('pedido', function ($q) {
+                $q->where('id_usuario', AuthHelper::getUsuarioId());
+            });
+        }
+
+        $consignacoes = $query->get();
+
+        return response()->json(ConsignacaoResource::collection($consignacoes));
     }
 
 }

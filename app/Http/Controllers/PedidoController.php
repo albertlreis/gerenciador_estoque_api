@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Enums\PedidoStatus;
 use App\Exports\PedidosExport;
+use App\Helpers\AuthHelper;
 use App\Http\Requests\StorePedidoRequest;
 use App\Http\Requests\UpdatePedidoStatusRequest;
 use App\Models\Cliente;
@@ -37,9 +38,12 @@ class PedidoController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
-        $query = Pedido::with(['cliente', 'parceiro', 'itens.variacao.produto']);
+        $query = Pedido::with(['cliente:id,nome', 'parceiro:id,nome', 'itens.variacao.produto:id,nome']);
 
-        // Filtros recebidos via query
+        if (!AuthHelper::hasPermissao('pedidos.visualizar.todos')) {
+            $query->where('id_usuario', AuthHelper::getUsuarioId());
+        }
+
         if ($request->filled('status')) {
             $query->where('status', $request->status);
         }
@@ -53,20 +57,17 @@ class PedidoController extends Controller
                 $query->when($dataFim, fn($q) => $q->where('data_pedido', '<=', $dataFim));
             } catch (Exception) {
                 LogService::warning('FiltroData', 'Data inválida recebida.', $request->only(['data_inicio', 'data_fim']));
-
                 return response()->json(['erro' => 'Formato de data inválido. Use AAAA-MM-DD.'], 422);
             }
         }
 
         if ($request->filled('busca')) {
             $busca = strtolower($request->busca);
-            $tipo = $request->get('tipo_busca', 'todos'); // valores: cliente, parceiro, vendedor, todos
+            $tipo = $request->get('tipo_busca', 'todos');
 
             $query->where(function ($q) use ($busca, $tipo) {
-                if (in_array($tipo, ['todos', 'id'])) {
-                    if (is_numeric($busca)) {
-                        $q->orWhere('id', (int) $busca);
-                    }
+                if (in_array($tipo, ['todos', 'id']) && is_numeric($busca)) {
+                    $q->orWhere('id', (int) $busca);
                 }
 
                 if (in_array($tipo, ['todos', 'cliente'])) {
@@ -89,9 +90,8 @@ class PedidoController extends Controller
             });
         }
 
-        // Ordenação
-        $ordenarPor = $request->get('ordenarPor', 'data_pedido');
-        $ordem = $request->get('ordem', 'desc');
+        $ordenarPor = in_array($request->get('ordenarPor'), ['data_pedido', 'numero', 'valor_total']) ? $request->get('ordenarPor') : 'data_pedido';
+        $ordem = in_array($request->get('ordem'), ['asc', 'desc']) ? $request->get('ordem') : 'desc';
 
         $query->orderBy($ordenarPor, $ordem);
 

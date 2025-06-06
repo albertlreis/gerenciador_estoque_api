@@ -4,50 +4,41 @@ namespace Database\Seeders;
 
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\DB;
+use Faker\Factory as Faker;
 use Carbon\Carbon;
 
 class ClientesSeeder extends Seeder
 {
-    public function run()
+    public function run(): void
     {
+        $faker = Faker::create('pt_BR');
         $now = Carbon::now();
-        DB::table('clientes')->insert([
-            [
-                'nome'       => 'João Silva',
-                'documento'  => '123456789',
-                'email'      => 'joao.silva@example.com',
-                'telefone'   => '1112345678',
-                'endereco'   => 'Rua A, 123',
+        $clientes = [];
+
+        for ($i = 0; $i < 20; $i++) {
+            $isPJ = $faker->boolean(30); // 30% PJ
+
+            $clientes[] = [
+                'nome' => $isPJ ? $faker->company : $faker->name,
+                'nome_fantasia' => $isPJ ? $faker->companySuffix . ' ' . $faker->word : null,
+                'documento' => $isPJ ? $faker->cnpj(false) : $faker->cpf(false),
+                'inscricao_estadual' => $isPJ ? $faker->numerify('###########') : null,
+                'email' => $faker->unique()->safeEmail,
+                'telefone' => $faker->phoneNumber,
+                'whatsapp' => $faker->phoneNumber,
+                'endereco' => $faker->streetName,
+                'numero' => $faker->buildingNumber,
+                'bairro' => $faker->randomElement(['Marco', 'Umarizal', 'Pedreira', 'Batista Campos', 'Nazaré']),
+                'cidade' => 'Belém',
+                'estado' => 'PA',
+                'cep' => $faker->postcode,
+                'complemento' => $faker->optional()->secondaryAddress,
+                'tipo' => $isPJ ? 'pj' : 'pf',
                 'created_at' => $now,
                 'updated_at' => $now,
-            ],
-            [
-                'nome'       => 'Maria Oliveira',
-                'documento'  => '987654321',
-                'email'      => 'maria.oliveira@example.com',
-                'telefone'   => '2223456789',
-                'endereco'   => 'Av. B, 456',
-                'created_at' => $now,
-                'updated_at' => $now,
-            ],
-            [
-                'nome'       => 'Pedro Santos',
-                'documento'  => '456123789',
-                'email'      => 'pedro.santos@example.com',
-                'telefone'   => '3334567890',
-                'endereco'   => 'Rua C, 789',
-                'created_at' => $now,
-                'updated_at' => $now,
-            ],
-            [
-                'nome'       => 'Ana Costa',
-                'documento'  => '789123456',
-                'email'      => 'ana.costa@example.com',
-                'telefone'   => '4445678901',
-                'endereco'   => 'Av. D, 321',
-                'created_at' => $now,
-                'updated_at' => $now,
-            ],
-        ]);
+            ];
+        }
+
+        DB::table('clientes')->insert($clientes);
     }
 }

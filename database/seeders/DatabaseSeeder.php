@@ -11,23 +11,22 @@ class DatabaseSeeder extends Seeder
      *
      * @return void
      */
-    public function run()
+    public function run(): void
     {
         $this->call([
             CategoriasSeeder::class,
-            DepositosTableSeeder::class,
             FornecedoresSeeder::class,
             ProdutosSeeder::class,
-            ProdutoVariacaoAtributosSeeder::class,
+            ProdutoVariacoesSeeder::class,
             ProdutoImagensSeeder::class,
+            DepositosSeeder::class,
+            EstoqueSeeder::class,
+            EstoqueMovimentacoesSeeder::class,
             ClientesSeeder::class,
-            ParceiroSeeder::class,
+            ParceirosSeeder::class,
+            CarrinhosSeeder::class,
             PedidosSeeder::class,
-            EstoqueTableSeeder::class,
-            EstoqueMovimentacoesTableSeeder::class,
-            ProdutoVariacaoVinculosSeeder::class,
-            ConsignacaoSeeder::class,
-            PedidoStatusHistoricoSeeder::class,
+            ConsignacoesSeeder::class,
             ConfiguracoesSeeder::class,
         ]);
     }

@@ -11,24 +11,24 @@ class ProdutoImagensSeeder extends Seeder
     public function run(): void
     {
         $now = Carbon::now();
-        $produtos = DB::table('produtos')->pluck('id');
+        $produtos = DB::table('produtos')->select('id', 'nome')->get();
 
-        $imagens = [];
+        foreach ($produtos as $produto) {
+            $qtdImagens = rand(1, 3);
+            $imagens = [];
 
-        foreach ($produtos as $produtoId) {
-            $qtd = rand(1, 3);
+            for ($i = 1; $i <= $qtdImagens; $i++) {
 
-            for ($i = 1; $i <= $qtd; $i++) {
                 $imagens[] = [
-                    'id_produto' => $produtoId,
-                    'url' => "https://placehold.co/600x400?text=Produto+{$produtoId}+Img{$i}",
-                    'principal' => $i === 1,
+                    'id_produto' => $produto->id,
+                    'url' => "https://placehold.co/600x400?text=" . urlencode($produto->nome),
+                    'principal' => $i === 1 ? 1 : 0,
                     'created_at' => $now,
                     'updated_at' => $now,
                 ];
             }
-        }
 
-        DB::table('produto_imagens')->insert($imagens);
+            DB::table('produto_imagens')->insert($imagens);
+        }
     }
 }

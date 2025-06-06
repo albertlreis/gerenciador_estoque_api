@@ -5,74 +5,116 @@ namespace Database\Seeders;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\DB;
 use Carbon\Carbon;
+use App\Enums\PedidoStatus;
 
 class PedidosSeeder extends Seeder
 {
-    public function run()
+    public function run(): void
     {
         $clientes = DB::table('clientes')->pluck('id')->toArray();
         $usuarios = DB::table('acesso_usuarios')->pluck('id')->toArray();
         $parceiros = DB::table('parceiros')->pluck('id')->toArray();
-        $variacoes = DB::table('produto_variacoes')->get();
+        $variacoes = DB::table('produto_variacoes')->pluck('id')->toArray();
+        $statusEnum = PedidoStatus::cases();
+        $now = Carbon::now();
 
-        // Gera pedidos para os últimos 6 meses
-        foreach (range(0, 5) as $i) {
-            $dataBase = Carbon::now()->subMonths($i)->startOfMonth();
+        $itens = [];
+        $statusHistorico = [];
 
-            // Gera de 5 a 15 pedidos por mês
-            $qtdPedidos = rand(5, 15);
+        $observacoesPedidoPool = [
+            'Cliente solicitou entrega após o dia 10.',
+            'Verificar disponibilidade de tecido antes da produção.',
+            'Pedido com urgência, combinar transporte direto.',
+            'Cliente pediu acabamento em tom mais escuro.',
+            'Aguardando confirmação de endereço de entrega.',
+            'Solicitado ajuste no modelo da cadeira antes da produção.',
+            'Desconto de 10% aplicado conforme negociação.',
+            'Parceria com arquiteto, comissionamento incluso.',
+            'Cliente deseja ser avisado antes do envio.',
+            'Montagem será feita por equipe terceirizada.',
+            null,
+        ];
 
-            for ($j = 0; $j < $qtdPedidos; $j++) {
-                $id_cliente = fake()->randomElement($clientes);
-                $id_usuario = fake()->randomElement($usuarios);
-                $id_parceiro = fake()->optional()->randomElement($parceiros);
+        $observacoesStatusPool = [
+            'Pedido registrado no sistema.',
+            'Encaminhado para o setor de produção.',
+            'Nota fiscal emitida com sucesso.',
+            'Data de embarque prevista para próxima semana.',
+            'Produto coletado pela transportadora.',
+            'Nota recebida e validada.',
+            'Estoque atualizado após recebimento.',
+            'Separação para envio ao cliente em andamento.',
+            'Entrega programada para amanhã.',
+            'Cliente confirmou o recebimento sem avarias.',
+            'Consignado entregue conforme agendamento.',
+            'Produto devolvido pelo cliente, aguardando vistoria.',
+            'Pedido encerrado com sucesso.',
+            null,
+        ];
 
-                $dataPedido = $dataBase->copy()->addDays(rand(0, 27))->setTime(rand(8, 18), rand(0, 59));
-                $status = fake()->randomElement(['confirmado', 'cancelado', 'rascunho']);
-                $observacoes = fake()->boolean(40) ? fake()->sentence() : null;
+        for ($i = 0; $i < 100; $i++) {
+            $idCliente = fake()->randomElement($clientes);
+            $idUsuario = fake()->randomElement($usuarios);
+            $idParceiro = fake()->optional()->randomElement($parceiros);
 
-                // Insere o pedido (valor total zerado por enquanto)
-                $id_pedido = DB::table('pedidos')->insertGetId([
-                    'id_cliente'   => $id_cliente,
-                    'id_usuario'   => $id_usuario,
-                    'id_parceiro'  => $id_parceiro,
-                    'data_pedido'  => $dataPedido,
-                    'status'       => $status,
-                    'valor_total'  => 0,
-                    'observacoes'  => $observacoes,
-                    'created_at'   => now(),
-                    'updated_at'   => now(),
-                ]);
+            $maxStatusIndex = fake()->biasedNumberBetween(0, count($statusEnum) - 1, fn() => 0.7);
+            $statusAtual = $statusEnum[$maxStatusIndex]->value;
+            $dataPedido = $statusAtual === PedidoStatus::PEDIDO_CRIADO->value ? null : fake()->dateTimeBetween('-30 days');
 
-                // Insere de 1 a 4 itens no pedido
-                $itens = [];
-                $valorTotal = 0;
+            $pedidoId = DB::table('pedidos')->insertGetId([
+                'id_cliente' => $idCliente,
+                'id_usuario' => $idUsuario,
+                'id_parceiro' => $idParceiro,
+                'data_pedido' => $dataPedido,
+                'status' => $statusAtual,
+                'valor_total' => 0,
+                'observacoes' => fake()->randomElement($observacoesPedidoPool),
+                'created_at' => $now,
+                'updated_at' => $now,
+            ]);
 
-                foreach (fake()->randomElements($variacoes, rand(1, 4)) as $variacao) {
-                    $qtd = fake()->numberBetween(1, 5);
-                    $preco = $variacao->preco ?? fake()->randomFloat(2, 10, 100);
-                    $subtotal = $qtd * $preco;
+            // Itens do pedido
+            $qtdItens = rand(1, 4);
+            $valorTotal = 0;
+            $variacoesSelecionadas = collect($variacoes)->shuffle()->take($qtdItens);
 
-                    $itens[] = [
-                        'id_pedido'      => $id_pedido,
-                        'id_variacao'    => $variacao->id,
-                        'quantidade'     => $qtd,
-                        'preco_unitario' => $preco,
-                        'subtotal'       => $subtotal,
-                        'created_at'     => now(),
-                        'updated_at'     => now(),
-                    ];
+            foreach ($variacoesSelecionadas as $idVariacao) {
+                $quantidade = rand(1, 5);
+                $preco = fake()->randomFloat(2, 300, 2000);
+                $subtotal = $quantidade * $preco;
 
-                    $valorTotal += $subtotal;
-                }
+                $itens[] = [
+                    'id_pedido' => $pedidoId,
+                    'id_variacao' => $idVariacao,
+                    'quantidade' => $quantidade,
+                    'preco_unitario' => $preco,
+                    'subtotal' => $subtotal,
+                    'created_at' => $now,
+                    'updated_at' => $now,
+                ];
 
-                DB::table('pedido_itens')->insert($itens);
+                $valorTotal += $subtotal;
+            }
 
-                // Atualiza valor total do pedido
-                DB::table('pedidos')->where('id', $id_pedido)->update([
-                    'valor_total' => $valorTotal,
-                ]);
+            DB::table('pedidos')->where('id', $pedidoId)->update(['valor_total' => $valorTotal]);
+
+            // Histórico de status
+            $dataStatus = $now->copy()->subDays(rand(1, 30));
+            for ($s = 0; $s <= $maxStatusIndex; $s++) {
+                $statusHistorico[] = [
+                    'pedido_id' => $pedidoId,
+                    'status' => $statusEnum[$s]->value,
+                    'data_status' => $dataStatus,
+                    'usuario_id' => $idUsuario,
+                    'observacoes' => fake()->randomElement($observacoesStatusPool),
+                    'created_at' => $now,
+                    'updated_at' => $now,
+                ];
+                $dataStatus->addDays();
             }
         }
+
+        DB::table('pedido_itens')->insert($itens);
+        DB::table('pedido_status_historico')->insert($statusHistorico);
     }
 }

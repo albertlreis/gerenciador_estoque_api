@@ -8,11 +8,11 @@ use Carbon\Carbon;
 
 class CategoriasSeeder extends Seeder
 {
-    public function run()
+    public function run(): void
     {
         $now = Carbon::now();
 
-        // Categorias de nível raiz
+        // === CATEGORIAS DE NÍVEL RAIZ ===
         $sofasId = DB::table('categorias')->insertGetId([
             'nome' => 'Sofás',
             'descricao' => 'Sofás modernos e confortáveis para ambientes residenciais e corporativos',
@@ -48,7 +48,28 @@ class CategoriasSeeder extends Seeder
             'updated_at' => $now,
         ]);
 
-        // Subcategorias de Sofás
+        $jardimVarandaId = DB::table('categorias')->insertGetId([
+            'nome' => 'Jardim e Varanda',
+            'descricao' => 'Móveis resistentes e elegantes para áreas externas',
+            'created_at' => $now,
+            'updated_at' => $now,
+        ]);
+
+        $infantilId = DB::table('categorias')->insertGetId([
+            'nome' => 'Infantil',
+            'descricao' => 'Móveis funcionais e seguros para o quarto das crianças',
+            'created_at' => $now,
+            'updated_at' => $now,
+        ]);
+
+        $cozinhaId = DB::table('categorias')->insertGetId([
+            'nome' => 'Cozinha',
+            'descricao' => 'Móveis otimizados para praticidade no dia a dia',
+            'created_at' => $now,
+            'updated_at' => $now,
+        ]);
+
+        // === SUBCATEGORIAS DE SOFÁS ===
         $sofaRetratilId = DB::table('categorias')->insertGetId([
             'nome' => 'Sofá Retrátil',
             'descricao' => 'Sofás com sistema retrátil para conforto extra',
@@ -65,7 +86,6 @@ class CategoriasSeeder extends Seeder
             'updated_at' => $now,
         ]);
 
-        // Sub-subcategoria de Sofá de Canto
         DB::table('categorias')->insert([
             [
                 'nome' => 'Sofá de Canto com Chaise',
@@ -81,9 +101,16 @@ class CategoriasSeeder extends Seeder
                 'created_at' => $now,
                 'updated_at' => $now,
             ],
+            [
+                'nome' => 'Sofá Cama',
+                'descricao' => 'Móveis multifuncionais ideais para espaços compactos',
+                'categoria_pai_id' => $sofasId,
+                'created_at' => $now,
+                'updated_at' => $now,
+            ],
         ]);
 
-        // Subcategorias de Mesas
+        // === SUBCATEGORIAS DE MESAS ===
         $mesaJantarId = DB::table('categorias')->insertGetId([
             'nome' => 'Mesa de Jantar',
             'descricao' => 'Mesas para refeições em família',
@@ -115,9 +142,16 @@ class CategoriasSeeder extends Seeder
                 'created_at' => $now,
                 'updated_at' => $now,
             ],
+            [
+                'nome' => 'Escrivaninha',
+                'descricao' => 'Mesas compactas para estudos ou trabalho em casa',
+                'categoria_pai_id' => $mesasId,
+                'created_at' => $now,
+                'updated_at' => $now,
+            ],
         ]);
 
-        // Subcategorias de Cadeiras
+        // === SUBCATEGORIAS DE CADEIRAS ===
         $cadeiraEscritorioId = DB::table('categorias')->insertGetId([
             'nome' => 'Cadeira de Escritório',
             'descricao' => 'Conforto e ergonomia para longas horas de trabalho',
@@ -149,9 +183,16 @@ class CategoriasSeeder extends Seeder
                 'created_at' => $now,
                 'updated_at' => $now,
             ],
+            [
+                'nome' => 'Poltrona',
+                'descricao' => 'Assento individual para descanso e leitura',
+                'categoria_pai_id' => $cadeirasId,
+                'created_at' => $now,
+                'updated_at' => $now,
+            ],
         ]);
 
-        // Subcategorias de Camas
+        // === SUBCATEGORIAS DE CAMAS ===
         DB::table('categorias')->insert([
             [
                 'nome' => 'Cama de Casal',
@@ -174,9 +215,16 @@ class CategoriasSeeder extends Seeder
                 'created_at' => $now,
                 'updated_at' => $now,
             ],
+            [
+                'nome' => 'Cama Infantil',
+                'descricao' => 'Modelos temáticos e adaptados para crianças',
+                'categoria_pai_id' => $infantilId,
+                'created_at' => $now,
+                'updated_at' => $now,
+            ],
         ]);
 
-        // Subcategorias de Estantes
+        // === SUBCATEGORIAS DE ESTANTES ===
         DB::table('categorias')->insert([
             [
                 'nome' => 'Estante para Livros',
@@ -189,6 +237,38 @@ class CategoriasSeeder extends Seeder
                 'nome' => 'Estante para Sala',
                 'descricao' => 'Decoração e armazenamento para salas',
                 'categoria_pai_id' => $estantesId,
+                'created_at' => $now,
+                'updated_at' => $now,
+            ],
+            [
+                'nome' => 'Estante Modular',
+                'descricao' => 'Permite composições personalizadas e versáteis',
+                'categoria_pai_id' => $estantesId,
+                'created_at' => $now,
+                'updated_at' => $now,
+            ],
+            [
+                'nome' => 'Aparador',
+                'descricao' => 'Peça decorativa para halls e salas',
+                'categoria_pai_id' => $estantesId,
+                'created_at' => $now,
+                'updated_at' => $now,
+            ],
+            [
+                'nome' => 'Nichos Decorativos',
+                'descricao' => 'Estrutura leve para exposição de objetos',
+                'categoria_pai_id' => $estantesId,
+                'created_at' => $now,
+                'updated_at' => $now,
+            ],
+        ]);
+
+        // === SUBCATEGORIAS DE COZINHA ===
+        DB::table('categorias')->insert([
+            [
+                'nome' => 'Balcão de Cozinha',
+                'descricao' => 'Móvel de apoio para preparação de refeições',
+                'categoria_pai_id' => $cozinhaId,
                 'created_at' => $now,
                 'updated_at' => $now,
             ],

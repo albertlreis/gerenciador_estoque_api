@@ -4,72 +4,65 @@ namespace Database\Seeders;
 
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\DB;
+use Carbon\Carbon;
 
 class ConfiguracoesSeeder extends Seeder
 {
     public function run(): void
     {
-        $agora = now();
+        $now = Carbon::now();
 
         $configuracoes = [
-            // Configurações do Outlet
             [
-                'chave' => 'dias_para_outlet',
-                'valor' => '180',
-                'label' => 'Dias sem movimentação para considerar Outlet',
-                'tipo' => 'number',
-                'created_at' => $agora,
-                'updated_at' => $agora,
+                'chave' => 'dias_previsao_envio_fabrica',
+                'label' => 'Dias para Envio à Fábrica após Criação',
+                'tipo' => 'integer',
+                'valor' => '2',
+                'created_at' => $now,
+                'updated_at' => $now,
             ],
             [
-                'chave' => 'desconto_maximo_outlet',
-                'valor' => '30',
-                'label' => 'Percentual máximo de desconto no Outlet (%)',
-                'tipo' => 'number',
-                'created_at' => $agora,
-                'updated_at' => $agora,
-            ],
-
-            // Prazos do fluxo de pedidos
-            [
-                'chave' => 'prazo_envio_fabrica',
-                'valor' => '5',
-                'label' => 'Prazo envio fábrica (dias)',
-                'tipo' => 'number',
-                'created_at' => $agora,
-                'updated_at' => $agora,
-            ],
-            [
-                'chave' => 'prazo_entrega_estoque',
+                'chave' => 'dias_previsao_embarque_fabrica',
+                'label' => 'Dias para Embarque da Fábrica após Nota Emitida',
+                'tipo' => 'integer',
                 'valor' => '7',
-                'label' => 'Prazo entrega ao estoque (dias)',
-                'tipo' => 'number',
-                'created_at' => $agora,
-                'updated_at' => $agora,
+                'created_at' => $now,
+                'updated_at' => $now,
             ],
             [
-                'chave' => 'prazo_envio_cliente',
+                'chave' => 'dias_previsao_entrega_estoque',
+                'label' => 'Dias para Entrega ao Estoque após Embarque',
+                'tipo' => 'integer',
                 'valor' => '3',
-                'label' => 'Prazo envio ao cliente (dias)',
-                'tipo' => 'number',
-                'created_at' => $agora,
-                'updated_at' => $agora,
+                'created_at' => $now,
+                'updated_at' => $now,
             ],
             [
-                'chave' => 'prazo_consignacao',
-                'valor' => '15',
-                'label' => 'Prazo consignação (dias)',
-                'tipo' => 'number',
-                'created_at' => $agora,
-                'updated_at' => $agora,
+                'chave' => 'dias_previsao_envio_cliente',
+                'label' => 'Dias para Envio ao Cliente após Estoque',
+                'tipo' => 'integer',
+                'valor' => '2',
+                'created_at' => $now,
+                'updated_at' => $now,
+            ],
+            [
+                'chave' => 'dias_resposta_consignacao',
+                'label' => 'Prazo Padrão de Resposta de Consignação (dias)',
+                'tipo' => 'integer',
+                'valor' => '10',
+                'created_at' => $now,
+                'updated_at' => $now,
+            ],
+            [
+                'chave' => 'estoque_critico',
+                'label' => 'Limite para Estoque Crítico',
+                'tipo' => 'integer',
+                'valor' => '10',
+                'created_at' => $now,
+                'updated_at' => $now,
             ],
         ];
 
-        foreach ($configuracoes as $config) {
-            DB::table('configuracoes')->updateOrInsert(
-                ['chave' => $config['chave']],
-                $config
-            );
-        }
+        DB::table('configuracoes')->insert($configuracoes);
     }
 }

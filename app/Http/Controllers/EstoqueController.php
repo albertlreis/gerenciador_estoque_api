@@ -2,58 +2,24 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\Deposito;
-use App\Models\Estoque;
-use Illuminate\Http\Request;
+use App\Http\Resources\ProdutoEstoqueResource;
+use App\Http\Resources\ResumoEstoqueResource;
+use App\Services\EstoqueService;
+use Illuminate\Http\JsonResponse;
 
 class EstoqueController extends Controller
 {
-    public function index(Deposito $deposito)
+    public function listarEstoqueAtual(EstoqueService $service): JsonResponse
     {
-        return response()->json($deposito->estoque);
+        $dados = $service->obterEstoqueAgrupadoPorProdutoEDeposito();
+        return response()->json(
+            ProdutoEstoqueResource::collection($service->obterEstoqueAgrupadoPorProdutoEDeposito())
+        );
     }
 
-    public function store(Request $request, Deposito $deposito)
+    public function resumoEstoque(EstoqueService $service): JsonResponse
     {
-        $validated = $request->validate([
-            'id_produto' => 'required|exists:produto,id',
-            'quantidade'  => 'required|integer',
-        ]);
-
-        $validated['id_deposito'] = $deposito->id;
-        $estoque = Estoque::create($validated);
-        return response()->json($estoque, 201);
+        return response()->json(new ResumoEstoqueResource($service->gerarResumoEstoque()));
     }
 
-    public function show(Deposito $deposito, Estoque $estoque)
-    {
-        if ($estoque->id_deposito !== $deposito->id) {
-            return response()->json(['error' => 'Registro de estoque não pertence a este depósito'], 404);
-        }
-        return response()->json($estoque);
-    }
-
-    public function update(Request $request, Deposito $deposito, Estoque $estoque)
-    {
-        if ($estoque->id_deposito !== $deposito->id) {
-            return response()->json(['error' => 'Registro de estoque não pertence a este depósito'], 404);
-        }
-
-        $validated = $request->validate([
-            'quantidade' => 'sometimes|required|integer',
-        ]);
-
-        $estoque->update($validated);
-        return response()->json($estoque);
-    }
-
-    public function destroy(Deposito $deposito, Estoque $estoque)
-    {
-        if ($estoque->id_deposito !== $deposito->id) {
-            return response()->json(['error' => 'Registro de estoque não pertence a este depósito'], 404);
-        }
-
-        $estoque->delete();
-        return response()->json(null, 204);
-    }
 }

@@ -135,7 +135,7 @@ class ConsignacaoController extends Controller
             $consignacao->data_resposta = now();
             $consignacao->save();
         }
-        
+
         return response()->json(['mensagem' => 'Devolução registrada com sucesso.']);
     }
 

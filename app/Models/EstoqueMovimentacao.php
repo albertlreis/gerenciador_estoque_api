@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class EstoqueMovimentacao extends Model
 {
@@ -19,18 +20,23 @@ class EstoqueMovimentacao extends Model
         'data_movimentacao'
     ];
 
-    public function produto()
+    public function produto(): BelongsTo
     {
         return $this->belongsTo(Produto::class, 'id_produto');
     }
 
-    public function depositoOrigem()
+    public function depositoOrigem(): BelongsTo
     {
         return $this->belongsTo(Deposito::class, 'id_deposito_origem');
     }
 
-    public function depositoDestino()
+    public function depositoDestino(): BelongsTo
     {
         return $this->belongsTo(Deposito::class, 'id_deposito_destino');
+    }
+
+    public function usuario(): BelongsTo
+    {
+        return $this->belongsTo(Usuario::class, 'id_usuario');
     }
 }

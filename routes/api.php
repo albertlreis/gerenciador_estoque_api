@@ -48,8 +48,22 @@ Route::middleware('auth:sanctum')->prefix('v1')->group(function () {
 
     // Depósitos e Estoque
     Route::apiResource('depositos', DepositoController::class);
+
+    // Rotas de estoque e movimentações
+    Route::prefix('estoque')->group(function () {
+        Route::get('atual', [EstoqueController::class, 'listarEstoqueAtual']);
+        Route::get('resumo', [EstoqueController::class, 'resumoEstoque']);
+
+        // Movimentações
+        Route::get('movimentacoes', [EstoqueMovimentacaoController::class, 'index']);
+        Route::post('produtos/{produto}/movimentacoes', [EstoqueMovimentacaoController::class, 'store']);
+        Route::get('produtos/{produto}/movimentacoes/{movimentacao}', [EstoqueMovimentacaoController::class, 'show']);
+        Route::put('produtos/{produto}/movimentacoes/{movimentacao}', [EstoqueMovimentacaoController::class, 'update']);
+        Route::delete('produtos/{produto}/movimentacoes/{movimentacao}', [EstoqueMovimentacaoController::class, 'destroy']);
+    });
+
+    // Estoque por depósito
     Route::apiResource('depositos.estoque', EstoqueController::class)->shallow();
-    Route::apiResource('depositos.movimentacoes', EstoqueMovimentacaoController::class)->shallow();
 
     // Clientes e Parceiros
     Route::apiResource('clientes', ClienteController::class);

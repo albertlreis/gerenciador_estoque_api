@@ -2,17 +2,47 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Resources\MovimentacaoResource;
 use App\Models\Produto;
 use App\Models\EstoqueMovimentacao;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class EstoqueMovimentacaoController extends Controller
 {
-    public function index(Produto $produto)
+    public function index(Request $request): JsonResponse
     {
-        // Retorna todas as movimentações que pertencem ao produto.
-        $movimentacoes = EstoqueMovimentacao::where('id_produto', $produto->id)->get();
-        return response()->json($movimentacoes);
+        $query = EstoqueMovimentacao::with(['produto', 'usuario', 'depositoOrigem', 'depositoDestino']);
+
+        if ($request->filled('tipo')) {
+            $query->where('tipo', $request->tipo);
+        }
+
+        if ($request->filled('produto')) {
+            $query->whereHas('produto', fn($q) =>
+            $q->where('nome', 'like', "%{$request->produto}%")
+                ->orWhere('referencia', 'like', "%{$request->produto}%")
+            );
+        }
+
+        if ($request->filled('deposito')) {
+            $query->where(function ($q) use ($request) {
+                $q->where('id_deposito_origem', $request->deposito)
+                    ->orWhere('id_deposito_destino', $request->deposito);
+            });
+        }
+
+        if ($request->filled('periodo')) {
+            $inicio = $request->periodo[0];
+            $fim = $request->periodo[1];
+            $query->whereBetween('data_movimentacao', [$inicio, $fim]);
+        }
+
+        return response()->json(
+            MovimentacaoResource::collection(
+                $query->orderByDesc('data_movimentacao')->get()
+            )
+        );
     }
 
     public function store(Request $request, Produto $produto)

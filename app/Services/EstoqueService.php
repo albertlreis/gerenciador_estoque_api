@@ -6,9 +6,12 @@ use Illuminate\Support\Facades\DB;
 
 class EstoqueService
 {
-    public function obterEstoqueAgrupadoPorProdutoEDeposito(): array
-    {
-        return DB::table('estoque')
+    public function obterEstoqueAgrupadoPorProdutoEDeposito(
+        ?string $produto = null,
+        ?int $deposito = null,
+        ?array $periodo = null
+    ): array {
+        $query = DB::table('estoque')
             ->join('produto_variacoes', 'estoque.id_variacao', '=', 'produto_variacoes.id')
             ->join('produtos', 'produto_variacoes.produto_id', '=', 'produtos.id')
             ->join('depositos', 'estoque.id_deposito', '=', 'depositos.id')
@@ -17,20 +20,59 @@ class EstoqueService
                 'produtos.nome as produto_nome',
                 'depositos.nome as deposito_nome',
                 DB::raw('SUM(estoque.quantidade) as quantidade')
-            )
+            );
+
+        if ($produto) {
+            $query->where(function ($q) use ($produto) {
+                $q->where('produtos.nome', 'like', "%{$produto}%")
+                    ->orWhere('produtos.referencia', 'like', "%{$produto}%");
+            });
+        }
+
+        if ($deposito) {
+            $query->where('estoque.id_deposito', $deposito);
+        }
+
+        // Filtro de período opcional (se a tabela de estoque tiver coluna 'updated_at' ou similar)
+        if ($periodo && count($periodo) === 2) {
+            $query->whereBetween('estoque.updated_at', [$periodo[0], $periodo[1]]);
+        }
+
+        return $query
             ->groupBy('produtos.id', 'produtos.nome', 'depositos.nome')
             ->orderBy('produtos.nome')
             ->get()
             ->toArray();
     }
 
-    public function gerarResumoEstoque(): array
-    {
+    public function gerarResumoEstoque(
+        ?string $produto = null,
+        ?int $deposito = null,
+        ?array $periodo = null
+    ): array {
+        $estoqueQuery = DB::table('estoque')
+            ->join('produto_variacoes', 'estoque.id_variacao', '=', 'produto_variacoes.id')
+            ->join('produtos', 'produto_variacoes.produto_id', '=', 'produtos.id');
+
+        if ($produto) {
+            $estoqueQuery->where(function ($q) use ($produto) {
+                $q->where('produtos.nome', 'like', "%{$produto}%")
+                    ->orWhere('produtos.referencia', 'like', "%{$produto}%");
+            });
+        }
+
+        if ($deposito) {
+            $estoqueQuery->where('estoque.id_deposito', $deposito);
+        }
+
+        if ($periodo && count($periodo) === 2) {
+            $estoqueQuery->whereBetween('estoque.updated_at', [$periodo[0], $periodo[1]]);
+        }
+
         return [
             'totalProdutos' => DB::table('produtos')->count(),
-            'totalPecas' => DB::table('estoque')->sum('quantidade'),
+            'totalPecas' => $estoqueQuery->sum('estoque.quantidade'),
             'totalDepositos' => DB::table('depositos')->count(),
         ];
     }
-
 }

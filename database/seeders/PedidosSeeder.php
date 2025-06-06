@@ -59,7 +59,9 @@ class PedidosSeeder extends Seeder
 
             $maxStatusIndex = fake()->biasedNumberBetween(0, count($statusEnum) - 1, fn() => 0.7);
             $statusAtual = $statusEnum[$maxStatusIndex]->value;
-            $dataPedido = $statusAtual === PedidoStatus::PEDIDO_CRIADO->value ? null : fake()->dateTimeBetween('-30 days');
+            $dataPedido = $statusAtual === PedidoStatus::PEDIDO_CRIADO->value
+                ? null
+                : fake()->dateTimeBetween('-6 months', 'now');
 
             $pedidoId = DB::table('pedidos')->insertGetId([
                 'id_cliente' => $idCliente,
@@ -99,12 +101,13 @@ class PedidosSeeder extends Seeder
             DB::table('pedidos')->where('id', $pedidoId)->update(['valor_total' => $valorTotal]);
 
             // Histórico de status
-            $dataStatus = $now->copy()->subDays(rand(1, 30));
+            $dataStatus = $dataPedido ? Carbon::parse($dataPedido)->copy() : $now->copy()->subDays(rand(1, 180));
+
             for ($s = 0; $s <= $maxStatusIndex; $s++) {
                 $statusHistorico[] = [
                     'pedido_id' => $pedidoId,
                     'status' => $statusEnum[$s]->value,
-                    'data_status' => $dataStatus,
+                    'data_status' => $dataStatus->copy(),
                     'usuario_id' => $idUsuario,
                     'observacoes' => fake()->randomElement($observacoesStatusPool),
                     'created_at' => $now,

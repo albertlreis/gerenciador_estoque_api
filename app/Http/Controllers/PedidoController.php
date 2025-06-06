@@ -206,11 +206,18 @@ class PedidoController extends Controller
         }
     }
 
-    public function show($id): array
+    public function completo(Pedido $pedido): JsonResponse
     {
-        $pedido = Pedido::with(['cliente', 'parceiro', 'itens.variacao.produto'])->findOrFail($id);
+        $pedido->load([
+            'cliente:id,nome,email,telefone',
+            'parceiro:id,nome',
+            'itens.variacao.produto',
+            'itens.variacao.produto.imagens',
+            'itens.variacao.atributos',
+            'historicoStatus.usuario:id,nome',
+        ]);
 
-        return [
+        $dados = [
             'id' => $pedido->id,
             'numero' => $pedido->numero,
             'data_pedido' => $pedido->data_pedido,
@@ -219,16 +226,34 @@ class PedidoController extends Controller
             'valor_total' => $pedido->valor_total,
             'status' => $pedido->status,
             'observacoes' => $pedido->observacoes,
-            'produtos' => $pedido->itens->map(function ($item) {
+            'itens' => $pedido->itens->map(function ($item) {
                 return [
-                    'nome' => $item->variacao->produto->nome ?? '-',
-                    'variacao' => $item->variacao->descricao ?? '-',
+                    'nome_produto' => $item->variacao->produto->nome ?? '-',
+                    'referencia' => $item->variacao->referencia ?? '-',
                     'quantidade' => $item->quantidade,
                     'preco_unitario' => $item->preco_unitario,
+                    'subtotal' => $item->subtotal,
+                    'imagem' => $item->variacao->produto?->imagens?->first()?->url,
+                    'atributos' => $item->variacao->atributos->map(fn($a) => [
+                        'atributo' => $a->atributo,
+                        'valor' => $a->valor,
+                    ]),
                 ];
-            })
+            })->values(),
+            'historico' => $pedido->historicoStatus->map(function ($status) {
+                return [
+                    'status' => $status->status,
+                    'label' => $status->status ? ucwords(str_replace('_', ' ', $status->status->name)) : '—',
+                    'data_status' => $status->data_status,
+                    'observacoes' => $status->observacoes,
+                    'usuario' => $status->usuario->nome ?? '—',
+                ];
+            })->sortBy('data_status')->values(),
         ];
+
+        return response()->json($dados);
     }
+
 
     public function updateStatus(UpdatePedidoStatusRequest $request, $id): JsonResponse
     {

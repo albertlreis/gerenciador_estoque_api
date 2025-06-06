@@ -65,6 +65,7 @@ Route::middleware('auth:sanctum')->prefix('v1')->group(function () {
         Route::patch('status', [PedidoController::class, 'updateStatus']);
         Route::get('historico-status', [PedidoStatusHistoricoController::class, 'historico']);
         Route::get('previsoes', [PedidoStatusHistoricoController::class, 'previsoes']);
+        Route::get('completo', [PedidoController::class, 'completo']);
     });
 
     Route::delete('pedidos/status/{statusHistorico}', [PedidoStatusHistoricoController::class, 'cancelarStatus']);

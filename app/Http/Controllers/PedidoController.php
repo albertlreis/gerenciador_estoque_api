@@ -458,15 +458,20 @@ class PedidoController extends Controller
         }
 
         $quantidade = (float) str_replace(',', '.', $match['quantidade']);
+
         $descricao = trim($match['descricao']);
+        $descricaoLimpa = preg_replace('/\s+/', ' ', mb_strtoupper($descricao, 'UTF-8'));
+        $descricaoLimpa = preg_replace('/[^\\p{L}\\p{N}\*\:\(\)\/\-\.\, ]+/u', ' ', $descricaoLimpa);
+        $descricaoLimpa = str_replace(['Ø', "\u{00a0}"], ' ', $descricaoLimpa);
+
         $tipo = strtoupper(trim($match['tipo'] ?? ''));
         $ref = strtoupper(trim($match['ref'] ?? ''));
 
-        if ($quantidade <= 0 || $valor <= 0 || strlen($descricao) < 10) {
+        if ($quantidade <= 0 || $valor <= 0 || strlen($descricaoLimpa) < 10) {
             return null;
         }
 
-        $produto = $this->extrairProduto($descricao);
+        $produto = $this->extrairProduto($descricaoLimpa);
         $fixos = $produto['fixos'] ?? [
             'largura' => null,
             'profundidade' => null,
@@ -474,7 +479,7 @@ class PedidoController extends Controller
         ];
 
         return [
-            'descricao' => $descricao,
+            'descricao' => $descricaoLimpa,
             'quantidade' => $quantidade,
             'valor' => $valor,
             'nome' => $produto['nome'],
@@ -587,14 +592,39 @@ class PedidoController extends Controller
         }
     }
 
+    private function extrairNome(string $descricao): array|string|null
+    {
+        // Limpa e normaliza
+        $descricao = str_replace(['Ø', "\u{00a0}"], '', $descricao);
+        $descricao = preg_replace('/\s+/', ' ', $descricao);
+
+        // Tenta isolar nome até o '*', se existir
+        if (str_contains($descricao, '*')) {
+            [$possivelNome] = explode('*', $descricao, 2);
+        } else {
+            // Alternativa: corta antes de palavras-chave ou medidas
+            preg_match('/^(.*?)(?=\b(MED|COR|TECIDO|PESP|MÁRMORE|PRONTA|PEDIDO|\d{2,3}\s*[xX]\s*\d{2,3}))/iu', $descricao, $match);
+            $possivelNome = $match[1] ?? $descricao;
+        }
+
+        // Remove medidas explícitas do nome
+        $possivelNome = preg_replace('/\b\d{2,3}\s*[xX]\s*\d{2,3}(\s*[xX]\s*\d{2,3})?\b/', '', $possivelNome);
+
+        // Limpa e preserva letras com acento, números e separadores simples
+        $nome = trim(preg_replace('/[^\p{L}\p{N} \/]/u', '', $possivelNome));
+        $nome = preg_replace('/\s+/', ' ', $nome);
+
+        return $nome;
+    }
+
     private function extrairProduto(string $descricao): array
     {
-        $descricaoLimpa = preg_replace('/\s+/', ' ', mb_strtoupper($descricao, 'UTF-8'));
-        $descricaoLimpa = preg_replace('/[^A-Z0-9\*\:\(\)\/\-\.\, ]+/u', '', $descricaoLimpa);
+        $descricao = str_replace(['Ø', "\u{00a0}"], '', $descricao);
+        $descricao = preg_replace('/\s+/', ' ', $descricao);
 
-        $partes = explode('*', $descricaoLimpa, 2);
-        $nome = isset($partes[0]) ? trim(preg_replace('/[^A-Z0-9 \/]/u', '', $partes[0])) : 'DESCONHECIDO';
-        $nome = preg_replace('/\s+/', ' ', $nome); // evita colagem
+        $partes = explode('*', $descricao, 2);
+        $nome = $this->extrairNome($descricao);
+        $restante = $partes[1] ?? $partes[0];
 
         $restante = $partes[1] ?? '';
         $atributos = [
@@ -635,11 +665,17 @@ class PedidoController extends Controller
 
         // Medidas
         preg_match('/MED:\s*(.+?)(?=\s+[A-Z]{3,}|$)/u', $restante, $matchMedidas);
-        if (!$matchMedidas && preg_match('/(\d{2,3})\s*[xXØ]\s*(\d{2,3})\s*[xXØ]\s*(\d{2,3})/', $descricaoLimpa, $matchFallback)) {
+        if (!$matchMedidas && preg_match('/(\d{2,3})\s*[xXØ]\s*(\d{2,3})\s*[xXØ]\s*(\d{2,3})/', $descricao, $matchFallback)) {
             $matchMedidas[1] = $matchFallback[0];
         }
 
-        $medidas = $this->extrairMedidas($matchMedidas[1] ?? '');
+        $blocoMedida = $matchMedidas[1] ?? $restante ?? $descricao;
+        $medidas = $this->extrairMedidas($blocoMedida);
+        // Fallback: tenta extrair medidas do nome caso nada tenha sido encontrado
+        if (!$medidas[0] && !$medidas[1] && !$medidas[2]) {
+            $medidas = $this->extrairMedidas($nome);
+        }
+
         if (isset($matchMedidas[0])) {
             $observacaoExtra = str_replace($matchMedidas[0], '', $observacaoExtra);
         }
@@ -657,7 +693,7 @@ class PedidoController extends Controller
         }
 
         return [
-            'nome' => str_replace(' ', '', $nome), // opcional: pode retornar com espaços
+            'nome' => $nome,
             'atributos' => $atributos,
             'fixos' => [
                 'largura' => $medidas[0],
@@ -669,18 +705,29 @@ class PedidoController extends Controller
 
     private function extrairMedidas(string $texto): array
     {
-        $texto = mb_strtoupper(trim($texto));
-        $texto = preg_replace('/[^0-9xXØ]/u', '', $texto);
+        $texto = mb_strtoupper($texto);
         $texto = str_replace(['Ø', 'X'], 'x', $texto);
+        $texto = preg_replace('/[^0-9x]/u', '', $texto); // remove tudo exceto números e 'x'
 
-        $partes = explode('x', $texto);
-        $partes = array_map('trim', $partes);
+        // Captura medidas tipo 53x5x81 ou coladas como 53x5x81 (sem espaços)
+        if (preg_match('/(\d{2,3})x(\d{1,3})(?:x(\d{1,3}))?/i', $texto, $matches)) {
+            return [
+                (int) $matches[1],
+                (int) $matches[2],
+                isset($matches[3]) ? (int) $matches[3] : null,
+            ];
+        }
 
-        return [
-            isset($partes[0]) ? (int) $partes[0] : null,
-            isset($partes[1]) ? (int) $partes[1] : null,
-            isset($partes[2]) ? (int) $partes[2] : null,
-        ];
+        // Captura padrão colado como 53X5X81CM no nome (sem separadores visuais)
+        if (preg_match('/(\d{2,3})\s*[xX]\s*(\d{1,3})\s*[xX]\s*(\d{1,3})/u', $texto, $matchAlt)) {
+            return [
+                (int) $matchAlt[1],
+                (int) $matchAlt[2],
+                (int) $matchAlt[3],
+            ];
+        }
+
+        return [null, null, null];
     }
 
     public function confirmarImportacaoPDF(Request $request): JsonResponse

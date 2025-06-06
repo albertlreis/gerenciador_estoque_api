@@ -20,7 +20,6 @@ class AuthHelper
         return in_array($slug, $permissoes);
     }
 
-
     /**
      * Retorna o ID do usuário logado.
      */

@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\DashboardController;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\CarrinhoItemController;
 use App\Http\Controllers\CategoriaController;
@@ -24,6 +25,8 @@ Route::middleware('auth:sanctum')->prefix('v1')->group(function () {
     // Configurações do sistema
     Route::get('configuracoes', [ConfiguracaoController::class, 'listar']);
     Route::put('configuracoes/{chave}', [ConfiguracaoController::class, 'atualizar']);
+
+    Route::get('/dashboard/resumo', [DashboardController::class, 'resumo']);
 
     // Produtos e Categorias
     Route::apiResource('categorias', CategoriaController::class);

@@ -43,6 +43,10 @@ class ConsignacaoDetalhadaResource extends JsonResource
                     'quantidade' => $devolucao->quantidade,
                     'observacoes' => $devolucao->observacoes,
                     'data_devolucao' => optional($devolucao->data_devolucao)->format('d/m/Y H:i'),
+                    'usuario' => [
+                        'id' => $devolucao->usuario->id ?? null,
+                        'nome' => $devolucao->usuario->nome ?? null,
+                    ],
                 ];
             }),
         ];

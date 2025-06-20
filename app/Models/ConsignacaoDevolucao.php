@@ -9,7 +9,7 @@ class ConsignacaoDevolucao extends Model
 {
     protected $table = 'consignacao_devolucoes';
 
-    protected $fillable = ['consignacao_id', 'quantidade', 'observacoes', 'data_devolucao'];
+    protected $fillable = ['consignacao_id', 'usuario_id', 'quantidade', 'observacoes', 'data_devolucao'];
 
     protected $casts = [
         'data_devolucao' => 'datetime',
@@ -18,5 +18,10 @@ class ConsignacaoDevolucao extends Model
     public function consignacao(): BelongsTo
     {
         return $this->belongsTo(Consignacao::class);
+    }
+
+    public function usuario(): BelongsTo
+    {
+        return $this->belongsTo(Usuario::class, 'usuario_id');
     }
 }

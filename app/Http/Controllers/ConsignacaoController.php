@@ -55,6 +55,33 @@ class ConsignacaoController extends Controller
         );
     }
 
+    public function porPedido($pedido_id): JsonResponse
+    {
+        $consignacoes = Consignacao::with([
+            'pedido.cliente',
+            'produtoVariacao.produto.imagemPrincipal',
+            'produtoVariacao.atributos',
+            'devolucoes.usuario',
+        ])
+            ->where('pedido_id', $pedido_id)
+            ->get();
+
+        if ($consignacoes->isEmpty()) {
+            return response()->json(['erro' => 'Nenhuma consignação encontrada para este pedido.'], 404);
+        }
+
+        $pedido = $consignacoes->first()->pedido;
+
+        return response()->json([
+            'pedido' => [
+                'id' => $pedido->id,
+                'cliente' => $pedido->cliente->nome ?? '-',
+                'data_envio' => optional($pedido->data_envio)->format('d/m/Y'),
+            ],
+            'consignacoes' => ConsignacaoDetalhadaResource::collection($consignacoes)
+        ]);
+    }
+
     public function show($id): JsonResponse
     {
         $consignacao = Consignacao::with([

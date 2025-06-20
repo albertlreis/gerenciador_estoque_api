@@ -28,7 +28,7 @@ class DashboardController extends Controller
             $inicioMes = $agora->copy()->startOfMonth();
             $fimMes = $agora->copy()->endOfMonth();
 
-            $query = Pedido::with('cliente')
+            $query = Pedido::with(['cliente', 'statusAtual'])
                 ->whereBetween('data_pedido', [$inicioMes, $fimMes]);
 
             if ($filtrarPorUsuario) {
@@ -46,9 +46,11 @@ class DashboardController extends Controller
                 ->filter()
                 ->count();
 
-            $statusCount = collect($pedidos->groupBy('status'))->map(fn($group) => $group->count())->all();
+            $statusCount = $pedidos->groupBy(function ($pedido) {
+                return optional($pedido->statusAtual)->status?->value ?? 'sem_status';
+            });
 
-            $ultimosPedidos = Pedido::with('cliente')
+            $ultimosPedidos = Pedido::with(['cliente', 'statusAtual'])
                 ->when($filtrarPorUsuario, fn($q) => $q->where('id_usuario', $usuarioId))
                 ->orderByDesc('data_pedido')
                 ->take(5)
@@ -57,7 +59,7 @@ class DashboardController extends Controller
                     return [
                         'cliente' => optional($p->cliente)->nome ?? 'Cliente não informado',
                         'valor'   => number_format($p->valor_total ?? 0, 2, ',', '.'),
-                        'status'  => $p->status,
+                        'status'  => optional($p->statusAtual)->status ?? 'sem_status',
                     ];
                 });
 
@@ -95,4 +97,5 @@ class DashboardController extends Controller
 
         return response()->json($resumo);
     }
+
 }

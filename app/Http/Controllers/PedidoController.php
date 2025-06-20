@@ -155,7 +155,6 @@ class PedidoController extends Controller
                 'id_usuario'   => $idUsuarioFinal,
                 'id_parceiro'  => $request->id_parceiro,
                 'data_pedido'  => now(),
-                'status'       => 'confirmado',
                 'valor_total'  => $total,
                 'observacoes'  => $request->observacoes,
             ]);
@@ -227,7 +226,6 @@ class PedidoController extends Controller
             'cliente' => $pedido->cliente,
             'parceiro' => $pedido->parceiro,
             'valor_total' => $pedido->valor_total,
-            'status' => $pedido->status,
             'observacoes' => $pedido->observacoes,
             'itens' => $pedido->itens->map(function ($item) {
                 return [
@@ -275,9 +273,6 @@ class PedidoController extends Controller
                 'message' => 'Esse status já foi registrado hoje para este pedido.'
             ], 422);
         }
-
-        // Atualiza o status principal do pedido (se desejar manter isso)
-        $pedido->update(['status' => $status->value]);
 
         // Cria entrada no histórico
         $historico = PedidoStatusHistorico::create([

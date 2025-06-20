@@ -12,9 +12,15 @@ class ConsignacoesSeeder extends Seeder
     {
         $now = Carbon::now();
 
-        $pedidosConsignados = DB::table('pedidos')
-            ->where('status', 'consignado')
-            ->pluck('id');
+        // Buscar os pedidos cujo último status registrado foi 'consignado'
+        $pedidosConsignados = DB::table('pedido_status_historico as h')
+            ->select('h.pedido_id')
+            ->join(DB::raw('(SELECT pedido_id, MAX(data_status) as max_data FROM pedido_status_historico GROUP BY pedido_id) as ultimos'), function ($join) {
+                $join->on('h.pedido_id', '=', 'ultimos.pedido_id')
+                    ->on('h.data_status', '=', 'ultimos.max_data');
+            })
+            ->where('h.status', 'consignado')
+            ->pluck('h.pedido_id');
 
         if ($pedidosConsignados->isEmpty()) {
             return;
@@ -46,14 +52,12 @@ class ConsignacoesSeeder extends Seeder
                 'updated_at' => $now,
             ];
 
-            // Busca o depósito com mais estoque para considerar como origem
             $estoqueOrigem = DB::table('estoque')
                 ->where('id_variacao', $item->id_variacao)
                 ->orderByDesc('quantidade')
                 ->first();
 
             if ($estoqueOrigem && $estoqueOrigem->quantidade >= $item->quantidade) {
-                // Movimentação de envio
                 $movimentacoes[] = [
                     'id_variacao' => $item->id_variacao,
                     'id_deposito_origem' => $estoqueOrigem->id_deposito,
@@ -70,9 +74,7 @@ class ConsignacoesSeeder extends Seeder
                     ->where('id', $estoqueOrigem->id)
                     ->decrement('quantidade', $item->quantidade);
 
-                // Movimentação de retorno
                 if ($status === 'devolvido') {
-                    // Volta para o mesmo depósito de origem
                     DB::table('estoque')->updateOrInsert(
                         [
                             'id_variacao' => $item->id_variacao,

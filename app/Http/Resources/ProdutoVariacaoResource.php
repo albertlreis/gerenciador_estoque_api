@@ -40,6 +40,19 @@ class ProdutoVariacaoResource extends JsonResource
                 ] : null;
             }),
 
+            'outlets' => $this->whenLoaded('outlets', function () {
+                return $this->outlets->map(function ($outlet) {
+                    return [
+                        'id' => $outlet->id,
+                        'motivo' => $outlet->motivo,
+                        'quantidade' => $outlet->quantidade,
+                        'quantidade_restante' => $outlet->quantidade_restante,
+                        'percentual_desconto' => $outlet->percentual_desconto,
+                    ];
+                });
+            }),
+
+
             'atributos' => ProdutoVariacaoAtributoResource::collection($this->whenLoaded('atributos')),
         ];
     }

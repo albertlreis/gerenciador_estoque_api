@@ -5,10 +5,13 @@ namespace App\Http\Controllers;
 use App\Helpers\AuthHelper;
 use App\Http\Resources\ConsignacaoDetalhadaResource;
 use App\Http\Resources\ConsignacaoResource;
+use App\Models\AcessoUsuario;
+use App\Models\Cliente;
 use App\Models\Consignacao;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+use Illuminate\Pagination\LengthAwarePaginator;
 
 class ConsignacaoController extends Controller
 {
@@ -19,6 +22,7 @@ class ConsignacaoController extends Controller
             'pedido.cliente:id,nome',
             'pedido.usuario:id,nome',
             'pedido.statusAtual',
+            'produtoVariacao.produto',
         ]);
 
         if (!AuthHelper::hasPermissao('consignacoes.visualizar.todos')) {
@@ -27,14 +31,9 @@ class ConsignacaoController extends Controller
             });
         }
 
-        if ($request->filled('status')) {
-            $query->where('status', $request->status);
-        }
-
-        if ($request->filled('cliente')) {
-            $cliente = $request->cliente;
-            $query->whereHas('pedido.cliente', function ($q) use ($cliente) {
-                $q->where('nome', 'like', "%$cliente%");
+        if ($request->filled('cliente_id')) {
+            $query->whereHas('pedido.cliente', function ($q) use ($request) {
+                $q->where('id', $request->cliente_id);
             });
         }
 
@@ -49,11 +48,57 @@ class ConsignacaoController extends Controller
             $query->whereDate('prazo_resposta', '<=', now()->addDays(3));
         }
 
+        if ($request->filled('vendedor_id')) {
+            $query->whereHas('pedido', function ($q) use ($request) {
+                $q->where('id_usuario', $request->vendedor_id);
+            });
+        }
+
         $query->orderBy('prazo_resposta');
 
-        return ConsignacaoResource::collection(
-            $query->paginate($request->get('per_page', 10))
+        // Sem paginação por enquanto
+        $consignacoes = $query->get();
+
+        // Agrupa por pedido_id
+        $agrupadas = $consignacoes
+            ->groupBy('pedido_id')
+            ->map(function ($grupo) {
+                $primeira = $grupo->first();
+                $primeira->todas_consignacoes = $grupo;
+                return $primeira;
+            });
+
+        // Se houver filtro de status, aplica após cálculo
+        if ($request->filled('status')) {
+            $statusDesejado = $request->status;
+            $hoje = now();
+
+            $agrupadas = $agrupadas->filter(function ($consignacao) use ($statusDesejado, $hoje) {
+                $status = $consignacao->status;
+
+                if ($status === 'pendente' && $consignacao->prazo_resposta && $consignacao->prazo_resposta->lt($hoje)) {
+                    $status = 'vencido';
+                }
+
+                if ($consignacao->todas_consignacoes->groupBy('status')->count() > 1) {
+                    $status = 'parcial';
+                }
+
+                return $status === $statusDesejado;
+            });
+        }
+
+        // Paginação manual
+        $pagina = $request->get('page', 1);
+        $porPagina = $request->get('per_page', 10);
+        $paginado = new LengthAwarePaginator(
+            $agrupadas->forPage($pagina, $porPagina)->values(),
+            $agrupadas->count(),
+            $porPagina,
+            $pagina
         );
+
+        return ConsignacaoResource::collection($paginado);
     }
 
     public function porPedido($pedido_id): JsonResponse
@@ -166,6 +211,28 @@ class ConsignacaoController extends Controller
         }
 
         return response()->json(['mensagem' => 'Devolução registrada com sucesso.']);
+    }
+
+    public function clientes(): JsonResponse
+    {
+        $clientes = Cliente::whereHas('pedidos.consignacoes')
+            ->select('id', 'nome')
+            ->distinct()
+            ->orderBy('nome')
+            ->get();
+
+        return response()->json($clientes);
+    }
+
+    public function vendedores(): JsonResponse
+    {
+        $vendedores = AcessoUsuario::whereHas('pedidos.consignacoes')
+            ->select('id', 'nome')
+            ->distinct()
+            ->orderBy('nome')
+            ->get();
+
+        return response()->json($vendedores);
     }
 
 }

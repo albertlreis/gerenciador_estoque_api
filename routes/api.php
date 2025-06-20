@@ -105,6 +105,8 @@ Route::middleware('auth:sanctum')->prefix('v1')->group(function () {
         Route::patch('{id}', [ConsignacaoController::class, 'atualizarStatus']);
         Route::get('pedido/{pedido_id}', [ConsignacaoController::class, 'porPedido']);
         Route::get('vencendo', [ConsignacaoController::class, 'vencendo']);
+        Route::get('clientes', [ConsignacaoController::class, 'clientes']);
+        Route::get('vendedores', [ConsignacaoController::class, 'vendedores']);
         Route::post('{id}/devolucao', [ConsignacaoController::class, 'registrarDevolucao']);
         Route::get('{id}', [ConsignacaoController::class, 'show']);
     });

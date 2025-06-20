@@ -28,14 +28,12 @@ class ProdutoVariacoesSeeder extends Seeder
             for ($i = 1; $i <= $quantidadeVariacoes; $i++) {
                 $preco = rand(800, 3000);
                 $custo = rand(500, $preco - 100);
-                $precoPromocional = $produto->is_outlet ? round($preco * (1 - rand(10, 40) / 100), 2) : null;
 
                 $variacaoId = DB::table('produto_variacoes')->insertGetId([
                     'produto_id' => $produto->id,
                     'referencia' => strtoupper(Str::random(6)) . '-' . $produto->id . $i,
                     'nome' => 'Variação ' . $i,
                     'preco' => $preco,
-                    'preco_promocional' => $precoPromocional,
                     'custo' => $custo,
                     'codigo_barras' => '789' . rand(100000000, 999999999),
                     'created_at' => $now,

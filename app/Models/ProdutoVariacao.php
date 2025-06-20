@@ -56,4 +56,14 @@ class ProdutoVariacao extends Model
 
         return trim("$produto - $complemento") ?: '-';
     }
+
+    public function outlet(): HasOne
+    {
+        return $this->hasOne(ProdutoVariacaoOutlet::class, 'produto_variacao_id');
+    }
+
+    public function getIsOutletAttribute(): bool
+    {
+        return $this->outlet !== null;
+    }
 }

@@ -18,6 +18,7 @@ class DatabaseSeeder extends Seeder
             FornecedoresSeeder::class,
             ProdutosSeeder::class,
             ProdutoVariacoesSeeder::class,
+            ProdutoVariacaoOutletSeeder::class,
             ProdutoImagensSeeder::class,
             DepositosSeeder::class,
             EstoqueSeeder::class,

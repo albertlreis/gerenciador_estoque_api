@@ -21,32 +21,38 @@ class EstoqueSeeder extends Seeder
             throw new Exception('Depósitos não encontrados.');
         }
 
-        $variacoes = DB::table('produto_variacoes')
-            ->join('produtos', 'produto_variacoes.produto_id', '=', 'produtos.id')
-            ->select('produto_variacoes.id as variacao_id', 'produtos.is_outlet')
-            ->get();
-
-        if ($variacoes->isEmpty()) {
+        // Todas as variações
+        $variacoes = DB::table('produto_variacoes')->pluck('id')->toArray();
+        if (empty($variacoes)) {
             throw new Exception('Variações não encontradas.');
         }
 
-        $variacoesOutlet = $variacoes->where('is_outlet', true);
-        $variacoesNormais = $variacoes->where('is_outlet', false);
+        // Variações em outlet ativo
+        $variacoesOutlet = DB::table('produto_variacao_outlets')
+            ->where('quantidade_restante', '>', 0)
+            ->pluck('produto_variacao_id')
+            ->unique()
+            ->toArray();
 
+        // Variações normais (não estão em outlet ativo)
+        $variacoesNormais = array_diff($variacoes, $variacoesOutlet);
+
+        // 15% sem estoque
         $percentualSemEstoque = 15;
-        $quantidadeSemEstoque = intval($variacoesNormais->count() * $percentualSemEstoque / 100);
-        $variacoesSemEstoque = $variacoesNormais->shuffle()->take($quantidadeSemEstoque);
-        $variacoesComEstoque = $variacoesNormais
-            ->filter(fn ($v) => !$variacoesSemEstoque->contains('variacao_id', $v->variacao_id))
-            ->merge($variacoesOutlet);
+        $quantidadeSemEstoque = intval(count($variacoesNormais) * $percentualSemEstoque / 100);
 
-        foreach ($variacoesComEstoque as $v) {
+        $variacoesSemEstoque = collect($variacoesNormais)->shuffle()->take($quantidadeSemEstoque)->toArray();
+
+        $variacoesComEstoque = collect($variacoes)
+            ->filter(fn($id) => !in_array($id, $variacoesSemEstoque));
+
+        foreach ($variacoesComEstoque as $idVariacao) {
             $quantidadeDepositos = rand(1, min(2, count($depositos)));
             $depositosSelecionados = collect($depositos)->shuffle()->take($quantidadeDepositos);
 
             foreach ($depositosSelecionados as $idDeposito) {
                 DB::table('estoque')->updateOrInsert([
-                    'id_variacao' => $v->variacao_id,
+                    'id_variacao' => $idVariacao,
                     'id_deposito' => $idDeposito,
                 ], [
                     'quantidade' => rand(5, 100),

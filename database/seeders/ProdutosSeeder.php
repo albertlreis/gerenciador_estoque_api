@@ -55,10 +55,6 @@ class ProdutosSeeder extends Seeder
                 continue;
             }
 
-            $isOutlet = $i >= 40;
-            $dias = $isOutlet ? rand(200, 500) : rand(5, 60);
-            $dataUltimaSaida = $now->copy()->subDays($dias)->toDateString();
-
             DB::table('produtos')->insert([
                 'nome' => $nomeFinal,
                 'descricao' => "O produto $nomeBase da $linha combina funcionalidade e design elegante para sua casa.",
@@ -69,8 +65,6 @@ class ProdutosSeeder extends Seeder
                 'profundidade' => rand(50, 150),
                 'peso' => rand(10, 100),
                 'ativo' => true,
-                'is_outlet' => $isOutlet,
-                'data_ultima_saida' => $dataUltimaSaida,
                 'created_at' => $now,
                 'updated_at' => $now,
             ]);

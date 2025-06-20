@@ -109,6 +109,7 @@ Route::middleware('auth:sanctum')->prefix('v1')->group(function () {
         Route::get('vendedores', [ConsignacaoController::class, 'vendedores']);
         Route::post('{id}/devolucao', [ConsignacaoController::class, 'registrarDevolucao']);
         Route::get('{id}', [ConsignacaoController::class, 'show']);
+        Route::get('/{id}/pdf', [ConsignacaoController::class, 'gerarPdf']);
     });
 
 });

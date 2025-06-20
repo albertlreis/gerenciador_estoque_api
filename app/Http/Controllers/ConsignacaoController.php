@@ -8,9 +8,12 @@ use App\Http\Resources\ConsignacaoResource;
 use App\Models\AcessoUsuario;
 use App\Models\Cliente;
 use App\Models\Consignacao;
+use App\Models\Pedido;
+use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+use Illuminate\Http\Response;
 use Illuminate\Pagination\LengthAwarePaginator;
 
 class ConsignacaoController extends Controller
@@ -212,6 +215,33 @@ class ConsignacaoController extends Controller
 
         return response()->json(['mensagem' => 'Devolução registrada com sucesso.']);
     }
+
+    public function gerarPdf(int $id): Response
+    {
+        $pedido = Pedido::with([
+            'cliente',
+            'usuario',
+            'consignacoes.deposito',
+            'consignacoes.produtoVariacao.produto.imagemPrincipal',
+            'consignacoes.produtoVariacao.produto',
+            'consignacoes.produtoVariacao.atributos',
+        ])->findOrFail($id);
+
+        $grupos = $pedido->consignacoes->groupBy(fn($item) => $item->deposito->nome ?? 'Sem depósito');
+
+        logAuditoria('consignacao_pdf', 'Geração de PDF de roteiro de consignação', [
+            'acao' => 'gerar_pdf',
+            'pedido_id' => $id,
+        ]);
+
+        $pdf = Pdf::loadView('exports.roteiro-consignacao', [
+            'pedido' => $pedido,
+            'grupos' => $grupos,
+        ])->setPaper('a4');
+
+        return $pdf->download("roteiro_consignacao_$id.pdf");
+    }
+
 
     public function clientes(): JsonResponse
     {

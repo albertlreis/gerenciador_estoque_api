@@ -20,6 +20,7 @@ use App\Models\ProdutoVariacaoAtributo;
 use App\Services\LogService;
 use Carbon\Carbon;
 use Exception;
+use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -104,7 +105,7 @@ class PedidoController extends Controller
         $paginado->getCollection()->transform(function ($pedido) {
             return [
                 'id' => $pedido->id,
-                'numero' => $pedido->numero,
+                'numero_externo' => $pedido->numero_externo,
                 'data' => $pedido->data_pedido,
                 'cliente' => $pedido->cliente,
                 'parceiro' => $pedido->parceiro,
@@ -254,7 +255,6 @@ class PedidoController extends Controller
 
         return response()->json($dados);
     }
-
 
     public function updateStatus(UpdatePedidoStatusRequest $request, $id): JsonResponse
     {
@@ -424,19 +424,16 @@ class PedidoController extends Controller
 
         $itensComVariacao = collect($itens)->map(function ($item) {
             $variacao = ProdutoVariacao::query()
+                ->with('produto')
                 ->where('referencia', $item['ref'] ?? '')
-                ->when(!empty($item['nome']), fn($q) =>
-                $q->whereHas('produto', fn($q2) =>
-                $q2->where('nome', 'like', '%' . $item['nome'] . '%')
-                )
-                )
                 ->first();
 
             return array_merge($item, [
-                'id_variacao' => $variacao?->id,
-                'produto_id' => $variacao?->produto_id,
+                'id_variacao'   => $variacao?->id,
+                'produto_id'    => $variacao?->produto_id,
                 'variacao_nome' => $variacao?->descricao,
-                'id_categoria' => $variacao?->produto?->id_categoria,
+                'id_categoria'  => $variacao?->produto?->id_categoria,
+                'nome'          => $variacao?->produto?->nome ?? $item['nome'],
             ]);
         });
 
@@ -575,12 +572,14 @@ class PedidoController extends Controller
             }
         }
 
-        $numero = $this->extrairValor('/PEDIDO DE VENDA[:\s]*([0-9]+)/i', $texto, ''); // ajustado para aceitar \t e espaços invisíveis
+        $texto = preg_replace('/[\x{00a0}\x{2000}-\x{200B}]/u', ' ', $texto);
+
+        $numero = $this->extrairValor('/PEDIDO DE VENDA[:\s\u00a0]*([0-9]+)/iu', $texto);
         $dataVenda = $this->extrairValor('/DATA VENDA\s+(\d{2}\/\d{2}\/\d{4})/i', $texto);
         $vendedor = $this->extrairValor('/VENDEDOR RESPONSÁVEL\s+(.+)/i', $texto);
         $formaPagamento = $this->extrairValor('/FORMA DE PAGAMENTO[:\s]+(.+)/i', $texto) ?: 'À vista';
 
-        $valorExtraido = $this->extrairValor('/VALOR FINAL\s*-\s*R\$[\s\u00a0]*([\d\.,]+)/iu', $texto);
+        $valorExtraido = $this->extrairValor('/VALOR FINAL\s*-\s*R\$[\s\u00a0]*([\d\.,]+)(?=\s|\'|$)/iu', $texto);
         $valorTotal = null;
         if ($valorExtraido) {
             $valorTotal = (float) str_replace(['.', ','], ['', '.'], $valorExtraido);
@@ -602,7 +601,7 @@ class PedidoController extends Controller
         };
 
         Log::debug('[extrairPedido] Detalhes extraídos do pedido', [
-            'numero' => $numero,
+            'numero_externo' => $numero,
             'data_venda' => $dataVenda,
             'vendedor' => $vendedor,
             'forma_pagamento' => $formaPagamento,
@@ -614,7 +613,7 @@ class PedidoController extends Controller
         ]);
 
         return [
-            'numero' => $numero,
+            'numero_externo' => $numero,
             'data_venda' => $dataVenda,
             'vendedor' => $vendedor,
             'forma_pagamento' => $formaPagamento,
@@ -795,7 +794,7 @@ class PedidoController extends Controller
         $request->validate([
             'cliente.nome' => 'required|string|max:255',
             'cliente.documento' => 'required|string|max:20',
-            'pedido.numero' => 'nullable|string|max:50',
+            'pedido.numero_externo' => 'nullable|string|max:50|unique:pedidos,numero_externo',
             'pedido.vendedor' => 'nullable|string|max:255',
             'pedido.total' => 'nullable|numeric',
             'pedido.observacoes' => 'nullable|string',
@@ -805,112 +804,124 @@ class PedidoController extends Controller
             'itens.*.valor' => 'required|numeric|min:0',
         ]);
 
-        return DB::transaction(function () use ($request) {
-            $dadosCliente = $request->cliente;
-            $dadosPedido = $request->pedido;
-            $itens = $request->itens;
-            $usuario = Auth::user();
+        try {
+            return DB::transaction(function () use ($request) {
+                $dadosCliente = $request->cliente;
+                $dadosPedido = $request->pedido;
+                $itens = $request->itens;
+                $usuario = Auth::user();
 
-            $cliente = Cliente::firstOrCreate(
-                ['documento' => $dadosCliente['documento']],
-                [
-                    'nome' => $dadosCliente['nome'],
-                    'email' => $dadosCliente['email'] ?? null,
-                    'telefone' => $dadosCliente['telefone'] ?? null,
-                    'endereco' => $dadosCliente['endereco'] ?? null,
-                ]
-            );
+                $cliente = Cliente::firstOrCreate(
+                    ['documento' => $dadosCliente['documento']],
+                    [
+                        'nome' => $dadosCliente['nome'],
+                        'email' => $dadosCliente['email'] ?? null,
+                        'telefone' => $dadosCliente['telefone'] ?? null,
+                        'endereco' => $dadosCliente['endereco'] ?? null,
+                    ]
+                );
 
-            $pedido = Pedido::create([
-                'id_cliente' => $cliente->id,
-                'id_usuario' => $usuario->id,
-                'data_pedido' => now(),
-                'numero' => $dadosPedido['numero'] ?? null,
-                'status' => 'confirmado',
-                'valor_total' => $dadosPedido['total'] ?? array_sum(array_map(fn($item) => $item['quantidade'] * $item['valor'], $itens)),
-                'observacoes' => $dadosPedido['observacoes'] ?? null,
-            ]);
+                $pedido = Pedido::create([
+                    'id_cliente' => $cliente->id,
+                    'id_usuario' => $usuario->id,
+                    'data_pedido' => now(),
+                    'numero_externo' => $dadosPedido['numero_externo'] ?? null,
+                    'status' => 'confirmado',
+                    'valor_total' => $dadosPedido['total'] ?? array_sum(array_map(fn($item) => $item['quantidade'] * $item['valor'], $itens)),
+                    'observacoes' => $dadosPedido['observacoes'] ?? null,
+                ]);
 
-            foreach ($itens as $item) {
-                $variacao = ProdutoVariacao::query()
-                    ->where('referencia', $item['ref'] ?? '')
-                    ->when(!empty($item['nome']), fn($q) =>
-                    $q->whereHas('produto', fn($q2) =>
-                    $q2->where('nome', 'like', '%' . $item['nome'] . '%')
-                    )
-                    )
-                    ->first();
+                foreach ($itens as $item) {
+                    $variacao = ProdutoVariacao::query()
+                        ->where('referencia', $item['ref'] ?? '')
+                        ->when(!empty($item['nome']), fn($q) =>
+                        $q->whereHas('produto', fn($q2) =>
+                        $q2->where('nome', 'like', '%' . $item['nome'] . '%')
+                        )
+                        )
+                        ->first();
 
-                if (!$variacao && !empty($item['ref']) && !empty($item['nome'])) {
-                    if (empty($item['id_categoria'])) {
-                        throw new Exception("Item '{$item['descricao']}' está sem categoria definida.");
-                    }
+                    if (!$variacao && !empty($item['ref']) && !empty($item['nome'])) {
+                        if (empty($item['id_categoria'])) {
+                            throw new Exception("Item '{$item['descricao']}' está sem categoria definida.");
+                        }
 
-                    $produto = Produto::firstOrCreate([
-                        'nome' => $item['nome'],
-                        'id_categoria' => $item['id_categoria'],
-                    ]);
+                        $produto = Produto::firstOrCreate([
+                            'nome' => $item['nome'],
+                            'id_categoria' => $item['id_categoria'],
+                        ]);
 
-                    $produto->update([
-                        'largura' => $item['fixos']['largura'] ?? null,
-                        'profundidade' => $item['fixos']['profundidade'] ?? null,
-                        'altura' => $item['fixos']['altura'] ?? null,
-                    ]);
+                        $produto->update([
+                            'largura' => $item['fixos']['largura'] ?? null,
+                            'profundidade' => $item['fixos']['profundidade'] ?? null,
+                            'altura' => $item['fixos']['altura'] ?? null,
+                        ]);
 
-                    $variacao = ProdutoVariacao::create([
-                        'produto_id' => $produto->id,
-                        'referencia' => $item['ref'],
-                        'nome' => $item['descricao'],
-                        'preco' => $item['valor'],
-                        'custo' => $item['valor'],
-                    ]);
+                        $variacao = ProdutoVariacao::create([
+                            'produto_id' => $produto->id,
+                            'referencia' => $item['ref'],
+                            'nome' => $item['descricao'],
+                            'preco' => $item['valor'],
+                            'custo' => $item['valor'],
+                        ]);
 
-                    if (!empty($item['atributos'])) {
-                        foreach ($item['atributos'] as $grupo => $atributosGrupo) {
-                            foreach ($atributosGrupo as $atributo => $valor) {
-                                if (trim($valor) === '') continue;
+                        if (!empty($item['atributos'])) {
+                            foreach ($item['atributos'] as $grupo => $atributosGrupo) {
+                                foreach ($atributosGrupo as $atributo => $valor) {
+                                    if (trim($valor) === '') continue;
 
-                                ProdutoVariacaoAtributo::updateOrCreate(
-                                    [
-                                        'id_variacao' => $variacao->id,
-                                        'atributo' => StringHelper::normalizarAtributo("$grupo:$atributo"),
-                                    ],
-                                    [
-                                        'valor' => $valor,
-                                    ]
-                                );
+                                    ProdutoVariacaoAtributo::updateOrCreate(
+                                        [
+                                            'id_variacao' => $variacao->id,
+                                            'atributo' => StringHelper::normalizarAtributo("$grupo:$atributo"),
+                                        ],
+                                        [
+                                            'valor' => $valor,
+                                        ]
+                                    );
+                                }
                             }
                         }
                     }
+
+                    PedidoItem::create([
+                        'id_pedido' => $pedido->id,
+                        'id_variacao' => $variacao?->id,
+                        'descricao_manual' => $item['descricao'],
+                        'quantidade' => $item['quantidade'],
+                        'preco_unitario' => $item['valor'],
+                        'subtotal' => $item['quantidade'] * $item['valor'],
+                        'observacoes' => collect([
+                            ...($item['atributos']['observacoes'] ?? []),
+                            'observacao_extra' => $item['atributos']['observacoes_observacao_extra'] ?? null
+                        ])->filter()->implode("\n"),
+                    ]);
                 }
 
-                PedidoItem::create([
-                    'id_pedido' => $pedido->id,
-                    'id_variacao' => $variacao?->id,
-                    'descricao_manual' => $item['descricao'],
-                    'quantidade' => $item['quantidade'],
-                    'preco_unitario' => $item['valor'],
-                    'subtotal' => $item['quantidade'] * $item['valor'],
-                    'observacoes' => collect([
-                        ...($item['atributos']['observacoes'] ?? []),
-                        'observacao_extra' => $item['atributos']['observacoes_observacao_extra'] ?? null
-                    ])->filter()->implode("\n"),
+                logAuditoria('pedido', "Pedido importado via PDF para cliente '$cliente->nome'.", [
+                    'acao' => 'importacao',
+                    'nivel' => 'info',
+                    'cliente' => $cliente->nome,
+                    'numero_pdf' => $request->input('pedido.numero'),
+                    'valor_total' => $pedido->valor_total,
+                    'itens' => $itens,
+                ], $pedido);
+
+                return response()->json([
+                    'message' => 'Pedido importado e salvo com sucesso.',
+                    'pedido_id' => $pedido->id,
                 ]);
+            });
+        } catch (QueryException $e) {
+            if ($e->getCode() === '23000' && str_contains($e->getMessage(), 'numero_externo')) {
+                return response()->json([
+                    'message' => 'Já existe um pedido com esse número externo. Verifique se o pedido já foi importado anteriormente.',
+                ], 422);
             }
 
-            logAuditoria('pedido', "Pedido importado via PDF para cliente '$cliente->nome'.", [
-                'acao' => 'importacao',
-                'nivel' => 'info',
-                'cliente' => $cliente->nome,
-                'numero_pdf' => $request->input('pedido.numero'),
-                'valor_total' => $pedido->valor_total,
-                'itens' => $itens,
-            ], $pedido);
+            throw $e;
+        }
 
-            return response()->json([
-                'message' => 'Pedido importado e salvo com sucesso.',
-                'pedido_id' => $pedido->id,
-            ]);
-        });
+
     }
 }

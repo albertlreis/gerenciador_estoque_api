@@ -29,6 +29,8 @@ return new class extends Migration
             // Relacionamento com parceiro (arquiteto, designer, opcional)
             $table->unsignedInteger('id_parceiro')->nullable()->comment('ID do parceiro vinculado ao pedido');
 
+            $table->string('numero_externo', 50)->nullable()->unique()->comment('Número do pedido em sistema externo');
+
             $table->timestamp('data_pedido')->nullable()->comment('Data em que o pedido foi confirmado');
             $table->string('status', 50)->comment("Status do pedido: rascunho, confirmado, cancelado, etc.");
             $table->decimal('valor_total', 10, 2)->nullable()->comment('Valor total do pedido');

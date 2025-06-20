@@ -18,6 +18,7 @@ class Pedido extends Model
         'id_cliente',
         'id_usuario',
         'id_parceiro',
+        'numero_externo',
         'data_pedido',
         'status',
         'valor_total',

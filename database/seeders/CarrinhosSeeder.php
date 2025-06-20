@@ -10,7 +10,10 @@ class CarrinhosSeeder extends Seeder
 {
     public function run(): void
     {
-        $usuarios = DB::table('acesso_usuarios')->pluck('id')->toArray();
+        $vendedores = DB::table('acesso_usuarios')
+            ->whereIn('email', ['vendedor1@teste.com', 'vendedor2@teste.com', 'vendedor3@teste.com'])
+            ->pluck('id')
+            ->toArray();
         $clientes = DB::table('clientes')->pluck('id')->toArray();
         $parceiros = DB::table('parceiros')->pluck('id')->toArray();
         $variacoes = DB::table('produto_variacoes')->pluck('id')->toArray();
@@ -20,9 +23,9 @@ class CarrinhosSeeder extends Seeder
         $carrinhoItens = [];
         $clientesComRascunho = [];
 
-        for ($i = 0; $i < 50; $i++) {
-            $status = fake()->randomElement(['rascunho', 'finalizado', 'cancelado']);
-            $idUsuario = fake()->randomElement($usuarios);
+        for ($i = 0; $i < 15; $i++) {
+            $status = fake()->randomElement(['rascunho']);
+            $idUsuario = fake()->randomElement($vendedores);
             $idCliente = fake()->optional()->randomElement($clientes);
             $idParceiro = fake()->optional()->randomElement($parceiros);
 

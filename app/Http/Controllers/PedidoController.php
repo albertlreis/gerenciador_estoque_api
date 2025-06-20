@@ -127,7 +127,6 @@ class PedidoController extends Controller
         return response()->json($paginado);
     }
 
-
     public function store(StorePedidoRequest $request)
     {
         $usuarioLogado = Auth::user();
@@ -147,7 +146,7 @@ class PedidoController extends Controller
             return response()->json(['message' => 'Carrinho vazio.'], 422);
         }
 
-        return DB::transaction(function () use ($request, $carrinho, $idUsuarioFinal) {
+        return DB::transaction(function () use ($request, $carrinho, $idUsuarioFinal, $usuarioLogado) {
             $total = $carrinho->itens->sum('subtotal');
 
             $pedido = Pedido::create([
@@ -168,6 +167,14 @@ class PedidoController extends Controller
                     'subtotal'       => $item->subtotal,
                 ]);
             }
+
+            PedidoStatusHistorico::create([
+                'pedido_id'   => $pedido->id,
+                'status'      => PedidoStatus::PEDIDO_CRIADO,
+                'data_status' => now(),
+                'usuario_id'  => $usuarioLogado->id,
+                'observacoes' => 'Pedido criado no sistema.',
+            ]);
 
             if ($request->boolean('modo_consignacao')) {
                 $this->registrarConsignacoes($pedido, $carrinho->itens, $request->prazo_consignacao);
@@ -194,9 +201,10 @@ class PedidoController extends Controller
         });
     }
 
-
     private function registrarConsignacoes(Pedido $pedido, $itens, int $prazoDias): void
     {
+        $usuarioLogado = Auth::user();
+        
         $agora = now();
         $prazo = $agora->copy()->addDays($prazoDias);
 
@@ -213,6 +221,14 @@ class PedidoController extends Controller
                 'updated_at'          => $agora,
             ]);
         }
+
+        PedidoStatusHistorico::create([
+            'pedido_id'   => $pedido->id,
+            'status'      => PedidoStatus::CONSIGNADO,
+            'data_status' => now(),
+            'usuario_id'  => $usuarioLogado->id,
+            'observacoes' => 'Pedido criado no sistema.',
+        ]);
     }
 
     public function completo(Pedido $pedido): JsonResponse

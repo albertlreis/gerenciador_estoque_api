@@ -118,7 +118,7 @@
                     <tr>
                         <td>
                             @if($produto->imagemPrincipal)
-                                <img src="{{ public_path('uploads/produtos/teste.png') }}" width="80" height="60" alt="Imagem produto"/>
+                                <img src="{{ public_path('teste.png') }}" width="80" height="60" alt="Imagem produto"/>
                             @endif
                         </td>
                         <td>{{ $item->quantidade }}</td>

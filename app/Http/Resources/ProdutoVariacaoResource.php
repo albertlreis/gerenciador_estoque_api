@@ -21,14 +21,13 @@ class ProdutoVariacaoResource extends JsonResource
             'referencia' => $this->referencia,
             'codigo_barras' => $this->codigo_barras,
 
-            // Estoque e outlet
-            'estoque_total' => $this->estoque_total,
-            'estoque_outlet_total' => $this->estoque_outlet_total,
-            'outlet_restante_total' => $this->outlet_restante_total,
+            'estoque_total' => $this->getRelationValue('estoque')?->quantidade ?? 0,
+            'estoque_outlet_total' => $this->getRelationValue('outlets')?->sum('quantidade') ?? 0,
+            'outlet_restante_total' => $this->getRelationValue('outlets')?->sum('quantidade_restante') ?? 0,
 
-            'estoque' => [
+            'estoque' => $this->whenLoaded('estoque', fn() => [
                 'quantidade' => $this->estoque->quantidade ?? 0,
-            ],
+            ]),
 
             'outlet' => $this->whenLoaded('outlet', function () {
                 return $this->outlet ? [
@@ -52,8 +51,8 @@ class ProdutoVariacaoResource extends JsonResource
                 });
             }),
 
-
             'atributos' => ProdutoVariacaoAtributoResource::collection($this->whenLoaded('atributos')),
         ];
     }
 }
+

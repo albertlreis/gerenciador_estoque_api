@@ -42,4 +42,20 @@ class CarrinhoItem extends Model
     {
         return $this->belongsTo(Deposito::class, 'id_deposito');
     }
+
+    /**
+     * Retorna o nome do produto relacionado, se carregado.
+     */
+    public function getNomeProdutoAttribute(): ?string
+    {
+        return $this->variacao->getRelationValue('produto')?->nome ?? null;
+    }
+
+    /**
+     * Retorna o nome completo da variação (produto + atributos), se disponível.
+     */
+    public function getNomeCompletoAttribute(): ?string
+    {
+        return $this->variacao->getRelationValue('nome_completo') ?? null;
+    }
 }

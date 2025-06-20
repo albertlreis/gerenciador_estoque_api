@@ -26,8 +26,6 @@ class ProdutoVariacao extends Model
         'outlet_restante_total',
     ];
 
-    protected $with = ['produto'];
-
     public function produto(): BelongsTo
     {
         return $this->belongsTo(Produto::class, 'produto_id');
@@ -50,14 +48,17 @@ class ProdutoVariacao extends Model
 
     public function getNomeCompletoAttribute(): string
     {
-        $produto = $this->produto->nome ?? '';
+        $produto = $this->getRelationValue('produto')?->nome ?? '';
 
-        $atributos = $this->atributos()
-            ->get()
+        $atributos = $this->relationLoaded('atributos')
+            ? $this->atributos
+            : $this->atributos()->get();
+
+        $atributosTexto = $atributos
             ->map(fn($attr) => "{$attr->atributo}: {$attr->valor}")
             ->implode(' - ');
 
-        $complemento = trim($atributos ?: '');
+        $complemento = trim($atributosTexto ?: '');
 
         return trim("$produto - $complemento") ?: '-';
     }

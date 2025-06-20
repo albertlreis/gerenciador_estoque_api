@@ -2,6 +2,10 @@
 
 namespace App\Http\Controllers;
 
+use App\Helpers\AuthHelper;
+use App\Http\Requests\StoreCarrinhoRequest;
+use App\Http\Requests\UpdateCarrinhoRequest;
+use App\Http\Resources\CarrinhoResource;
 use App\Models\Carrinho;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -16,12 +20,13 @@ class CarrinhoController extends Controller
      */
     public function index()
     {
-        $carrinhos = Carrinho::with('cliente', 'itens.variacao')
-            ->where('id_usuario', Auth::id())
-            ->where('status', 'rascunho')
-            ->get();
+        $query = Carrinho::where('status', 'rascunho');
 
-        return response()->json($carrinhos);
+        if (!AuthHelper::hasPermissao('carrinhos.visualizar.todos')) {
+            $query->where('id_usuario', Auth::id());
+        }
+
+        return CarrinhoResource::collection($query->with('cliente')->get());
     }
 
     /**
@@ -31,21 +36,21 @@ class CarrinhoController extends Controller
     {
         $carrinho = Carrinho::with([
             'cliente',
-            'itens.variacao.produto.imagemPrincipal', // traz a imagem principal
-            'itens.variacao.produto',                 // nome do produto
-            'itens.variacao.estoque',                 // quantidade disponível
-            'itens.variacao.atributos'                // atributos da variação
+            'itens.variacao.produto.imagemPrincipal',
+            'itens.variacao.produto',
+            'itens.variacao.estoque',
+            'itens.variacao.atributos'
         ])
             ->where('id_usuario', Auth::id())
             ->findOrFail($id);
 
-        return response()->json($carrinho);
+        return new CarrinhoResource($carrinho);
     }
 
     /**
      * Cria um novo carrinho vinculado a um cliente.
      */
-    public function store(Request $request)
+    public function store(StoreCarrinhoRequest $request)
     {
         $request->validate([
             'id_cliente' => 'required|exists:clientes,id'
@@ -63,7 +68,7 @@ class CarrinhoController extends Controller
     /**
      * Atualiza o cliente e/ou parceiro vinculados ao carrinho.
      */
-    public function update(Request $request, $id)
+    public function update(UpdateCarrinhoRequest $request, $id)
     {
         $request->validate([
             'id_cliente' => 'nullable|exists:clientes,id',

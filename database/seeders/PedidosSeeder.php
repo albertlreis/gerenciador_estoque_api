@@ -75,7 +75,7 @@ class PedidosSeeder extends Seeder
                 'id_cliente' => $idCliente,
                 'id_usuario' => $idUsuario,
                 'id_parceiro' => $idParceiro,
-                'numero_externo' => 'EXT-' . fake()->numberBetween(1000, 9999),
+                'numero_externo' => fake()->numberBetween(1000, 9999),
                 'data_pedido' => $dataPedido,
                 'valor_total' => 0,
                 'observacoes' => fake()->randomElement($observacoesPedidoPool),

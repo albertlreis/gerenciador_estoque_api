@@ -17,8 +17,7 @@ class ConsignacaoController extends Controller
     {
         $query = Consignacao::with([
             'pedido.cliente:id,nome',
-            'produtoVariacao:id,produto_id',
-            'produtoVariacao.produto:id,nome'
+            'pedido.usuario:id,nome'
         ]);
 
         if (!AuthHelper::hasPermissao('consignacoes.visualizar.todos')) {
@@ -63,7 +62,8 @@ class ConsignacaoController extends Controller
             'pedido.usuario',
             'produtoVariacao.produto.imagemPrincipal',
             'produtoVariacao.atributos',
-            'devolucoes'
+            'devolucoes',
+            'devolucoes.usuario'
         ])->findOrFail($id);
 
         return response()->json(new ConsignacaoDetalhadaResource($consignacao));
@@ -127,6 +127,7 @@ class ConsignacaoController extends Controller
         $consignacao->devolucoes()->create([
             'quantidade' => $request->quantidade,
             'observacoes' => $request->observacoes,
+            'usuario_id' => AuthHelper::getUsuarioId(),
         ]);
 
         $novaQuantidadeDevolvida = $consignacao->quantidadeDevolvida() + $request->quantidade;

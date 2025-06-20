@@ -17,12 +17,14 @@ return new class extends Migration
         Schema::create('consignacao_devolucoes', function (Blueprint $table) {
             $table->id();
             $table->unsignedBigInteger('consignacao_id');
+            $table->unsignedBigInteger('usuario_id');
             $table->integer('quantidade');
             $table->text('observacoes')->nullable();
             $table->timestamp('data_devolucao')->default(DB::raw('CURRENT_TIMESTAMP'));
             $table->timestamps();
 
             $table->foreign('consignacao_id')->references('id')->on('consignacoes')->onDelete('cascade');
+            $table->foreign('usuario_id')->references('id')->on('usuarios');
         });
     }
 

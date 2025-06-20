@@ -100,7 +100,7 @@ class ProdutoService
 
     public function listarProdutosFiltrados($request): LengthAwarePaginator
     {
-        $query = Produto::with(['variacoes.atributos', 'variacoes.estoque', 'variacoes.outlet', 'imagemPrincipal']);
+        $query = Produto::with(['variacoes.atributos', 'variacoes.estoque', 'variacoes.outlet', 'variacoes.outlets', 'imagemPrincipal']);
 
         if (!empty($request->nome)) {
             $query->where('nome', 'ILIKE', '%' . $request->nome . '%');

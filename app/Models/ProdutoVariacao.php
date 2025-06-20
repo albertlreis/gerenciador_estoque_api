@@ -19,7 +19,12 @@ class ProdutoVariacao extends Model
         'produto_id', 'referencia', 'nome', 'preco', 'custo', 'codigo_barras'
     ];
 
-    protected $appends = ['nome_completo', 'estoque_total'];
+    protected $appends = [
+        'nome_completo',
+        'estoque_total',
+        'estoque_outlet_total',
+        'outlet_restante_total',
+    ];
 
     protected $with = ['produto'];
 
@@ -57,13 +62,26 @@ class ProdutoVariacao extends Model
         return trim("$produto - $complemento") ?: '-';
     }
 
-    public function outlet(): HasOne
+    public function outlets(): HasMany
     {
-        return $this->hasOne(ProdutoVariacaoOutlet::class, 'produto_variacao_id');
+        return $this->hasMany(ProdutoVariacaoOutlet::class, 'produto_variacao_id');
     }
 
-    public function getIsOutletAttribute(): bool
+    public function outlet(): HasOne
     {
-        return $this->outlet !== null;
+        return $this->hasOne(ProdutoVariacaoOutlet::class, 'produto_variacao_id')
+            ->where('quantidade_restante', '>', 0)
+            ->latest();
     }
+
+    public function getEstoqueOutletTotalAttribute(): int
+    {
+        return $this->outlets->sum('quantidade') ?? 0;
+    }
+
+    public function getOutletRestanteTotalAttribute(): int
+    {
+        return $this->outlets->sum('quantidade_restante') ?? 0;
+    }
+
 }

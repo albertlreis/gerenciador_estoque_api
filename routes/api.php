@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\ProdutoVariacaoOutletController;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\CarrinhoItemController;
 use App\Http\Controllers\CategoriaController;
@@ -39,6 +40,9 @@ Route::middleware('auth:sanctum')->prefix('v1')->group(function () {
 
     // Variações
     Route::get('variacoes', [ProdutoVariacaoController::class, 'buscar']);
+    Route::get('variacoes/{id}/outlet', [ProdutoVariacaoOutletController::class, 'buscar']);
+    Route::post('variacoes/{id}/outlet', [ProdutoVariacaoOutletController::class, 'store']);
+
     Route::prefix('produtos')->group(function () {
         Route::get('estoque-baixo', [ProdutoController::class, 'estoqueBaixo']);
         Route::post('importar-xml', [ProdutoController::class, 'importarXML']);

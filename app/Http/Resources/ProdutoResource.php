@@ -25,6 +25,7 @@ class ProdutoResource extends JsonResource
                 return $variacao->outlet && $variacao->outlet->quantidade_restante > 0;
             }),
             'estoque_total' => $this->estoque_total,
+            'estoque_outlet_total' => $this->estoque_outlet_total,
             'imagem_principal' => $this->imagemPrincipal?->url,
             'data_ultima_saida' => $this->data_ultima_saida,
             'created_at' => $this->created_at,

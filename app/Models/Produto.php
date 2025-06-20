@@ -13,6 +13,8 @@ class Produto extends Model
         'altura', 'largura', 'profundidade', 'peso', 'ativo'
     ];
 
+    protected $appends = ['estoque_outlet_total'];
+
     public function categoria(): BelongsTo
     {
         return $this->belongsTo(Categoria::class, 'id_categoria');
@@ -45,4 +47,10 @@ class Produto extends Model
             ->sum();
     }
 
+    public function getEstoqueOutletTotalAttribute(): int
+    {
+        return $this->variacoes->sum(function ($variacao) {
+            return $variacao->outlets->sum('quantidade') ?? 0;
+        });
+    }
 }

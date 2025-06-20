@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Consignacao extends Model
 {
@@ -12,6 +13,7 @@ class Consignacao extends Model
     protected $fillable = [
         'pedido_id',
         'produto_variacao_id',
+        'deposito_id',
         'quantidade',
         'data_envio',
         'prazo_resposta',
@@ -39,7 +41,7 @@ class Consignacao extends Model
         return $this->belongsTo(ProdutoVariacao::class, 'produto_variacao_id');
     }
 
-    public function devolucoes()
+    public function devolucoes(): HasMany
     {
         return $this->hasMany(ConsignacaoDevolucao::class);
     }
@@ -52,6 +54,11 @@ class Consignacao extends Model
     public function quantidadeRestante(): int
     {
         return $this->quantidade - $this->quantidadeDevolvida();
+    }
+
+    public function deposito(): BelongsTo
+    {
+        return $this->belongsTo(Deposito::class, 'deposito_id');
     }
 
 }

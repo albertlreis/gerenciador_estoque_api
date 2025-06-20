@@ -5,6 +5,8 @@ namespace App\Http\Controllers;
 use App\Http\Requests\StoreCarrinhoItemRequest;
 use App\Models\Carrinho;
 use App\Models\CarrinhoItem;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 
 class CarrinhoItemController extends Controller
@@ -50,5 +52,20 @@ class CarrinhoItemController extends Controller
         $carrinho->itens()->delete();
 
         return response()->json(['message' => 'Carrinho limpo com sucesso.']);
+    }
+
+    public function atualizarDeposito(Request $request): JsonResponse
+    {
+        $request->validate([
+            'id_carrinho_item' => 'required|exists:carrinho_itens,id',
+            'id_deposito' => 'nullable|exists:depositos,id',
+        ]);
+
+        $item = CarrinhoItem::findOrFail($request->id_carrinho_item);
+
+        $item->id_deposito = $request->id_deposito;
+        $item->save();
+
+        return response()->json(['success' => true]);
     }
 }

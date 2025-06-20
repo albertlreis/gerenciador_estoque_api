@@ -14,6 +14,7 @@ class CarrinhosSeeder extends Seeder
         $clientes = DB::table('clientes')->pluck('id')->toArray();
         $parceiros = DB::table('parceiros')->pluck('id')->toArray();
         $variacoes = DB::table('produto_variacoes')->pluck('id')->toArray();
+        $depositos = DB::table('depositos')->pluck('id')->toArray();
         $now = Carbon::now();
 
         $carrinhoItens = [];
@@ -28,7 +29,7 @@ class CarrinhosSeeder extends Seeder
             // Limitar 1 carrinho rascunho por cliente
             if ($status === 'rascunho') {
                 if (!$idCliente || in_array($idCliente, $clientesComRascunho)) {
-                    continue; // pula e tenta outro carrinho
+                    continue;
                 }
                 $clientesComRascunho[] = $idCliente;
             }
@@ -49,15 +50,17 @@ class CarrinhosSeeder extends Seeder
                 $quantidade = rand(1, 3);
                 $preco = fake()->randomFloat(2, 300, 3000);
                 $subtotal = $quantidade * $preco;
+                $idDeposito = fake()->randomElement($depositos);
 
                 $carrinhoItens[] = [
-                    'id_carrinho' => $carrinhoId,
-                    'id_variacao' => $idVariacao,
-                    'quantidade' => $quantidade,
-                    'preco_unitario' => $preco,
-                    'subtotal' => $subtotal,
-                    'created_at' => $now,
-                    'updated_at' => $now,
+                    'id_carrinho'     => $carrinhoId,
+                    'id_variacao'     => $idVariacao,
+                    'quantidade'      => $quantidade,
+                    'preco_unitario'  => $preco,
+                    'subtotal'        => $subtotal,
+                    'id_deposito'     => $idDeposito,
+                    'created_at'      => $now,
+                    'updated_at'      => $now,
                 ];
             }
         }

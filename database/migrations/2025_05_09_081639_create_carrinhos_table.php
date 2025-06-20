@@ -38,6 +38,8 @@ return new class extends Migration
 
             $table->unsignedInteger('id_carrinho')->comment('Referência ao carrinho');
             $table->unsignedInteger('id_variacao')->comment('Referência à variação de produto');
+            $table->unsignedInteger('id_deposito')->comment('Referência ao depósito de saída do produto');
+
             $table->integer('quantidade')->comment('Quantidade da variação no carrinho');
             $table->decimal('preco_unitario', 10, 2)->comment('Preço unitário no momento');
             $table->decimal('subtotal', 10, 2)->comment('Subtotal do item');
@@ -46,6 +48,8 @@ return new class extends Migration
 
             $table->foreign('id_carrinho')->references('id')->on('carrinhos')->onDelete('cascade');
             $table->foreign('id_variacao')->references('id')->on('produto_variacoes')->onDelete('cascade');
+            $table->foreign('id_deposito')->references('id')->on('depositos')->onDelete('cascade');
+
         });
     }
 

@@ -167,10 +167,10 @@ class PedidoController extends Controller
                     'preco_unitario' => $item->preco_unitario,
                     'subtotal'       => $item->subtotal,
                 ]);
+            }
 
-                if ($request->boolean('modo_consignacao')) {
-                    $this->registrarConsignacoes($pedido, $carrinho->itens, $request->prazo_consignacao);
-                }
+            if ($request->boolean('modo_consignacao')) {
+                $this->registrarConsignacoes($pedido, $carrinho->itens, $request->prazo_consignacao);
             }
 
             logAuditoria('pedido', "Pedido #$pedido->id criado com sucesso.", [
@@ -194,16 +194,23 @@ class PedidoController extends Controller
         });
     }
 
+
     private function registrarConsignacoes(Pedido $pedido, $itens, int $prazoDias): void
     {
+        $agora = now();
+        $prazo = $agora->copy()->addDays($prazoDias);
+
         foreach ($itens as $item) {
-            Consignacao::create([
-                'pedido_id' => $pedido->id,
+            DB::table('consignacoes')->insert([
+                'pedido_id'           => $pedido->id,
                 'produto_variacao_id' => $item->id_variacao,
-                'quantidade' => $item->quantidade,
-                'data_envio' => now(),
-                'prazo_resposta' => now()->addDays($prazoDias),
-                'status' => 'pendente',
+                'quantidade'          => $item->quantidade,
+                'data_envio'          => $agora,
+                'prazo_resposta'      => $prazo,
+                'status'              => 'pendente',
+                'deposito_id'         => $item->id_deposito,
+                'created_at'          => $agora,
+                'updated_at'          => $agora,
             ]);
         }
     }

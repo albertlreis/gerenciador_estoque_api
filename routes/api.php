@@ -99,6 +99,7 @@ Route::middleware('auth:sanctum')->prefix('v1')->group(function () {
     Route::post('carrinho-itens', [CarrinhoItemController::class, 'store']);
     Route::delete('carrinho-itens/{id}', [CarrinhoItemController::class, 'destroy']);
     Route::delete('carrinho-itens/limpar/{idCarrinho}', [CarrinhoItemController::class, 'clear']);
+    Route::post('/carrinho-itens/atualizar-deposito', [CarrinhoItemController::class, 'atualizarDeposito']);
 
     Route::prefix('consignacoes')->group(function () {
         Route::get('/', [ConsignacaoController::class, 'index']);

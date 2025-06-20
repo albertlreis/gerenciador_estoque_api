@@ -60,6 +60,8 @@ class PedidosSeeder extends Seeder
             null,
         ];
 
+        $numerosExternosUsados = [];
+
         for ($i = 0; $i < 100; $i++) {
             $idCliente = fake()->randomElement($clientes);
             $idUsuario = fake()->randomElement($vendedores);
@@ -71,11 +73,17 @@ class PedidosSeeder extends Seeder
                 ? null
                 : fake()->dateTimeBetween('-6 months');
 
+            do {
+                $numeroExterno = fake()->numberBetween(1000, 9999);
+            } while (in_array($numeroExterno, $numerosExternosUsados));
+
+            $numerosExternosUsados[] = $numeroExterno;
+
             $pedidoId = DB::table('pedidos')->insertGetId([
                 'id_cliente' => $idCliente,
                 'id_usuario' => $idUsuario,
                 'id_parceiro' => $idParceiro,
-                'numero_externo' => fake()->numberBetween(1000, 9999),
+                'numero_externo' => $numeroExterno,
                 'data_pedido' => $dataPedido,
                 'valor_total' => 0,
                 'observacoes' => fake()->randomElement($observacoesPedidoPool),

@@ -20,6 +20,7 @@ class CarrinhoItem extends Model
         'quantidade',
         'preco_unitario',
         'subtotal',
+        'id_deposito'
     ];
 
     protected $casts = [
@@ -35,5 +36,10 @@ class CarrinhoItem extends Model
     public function variacao(): BelongsTo
     {
         return $this->belongsTo(ProdutoVariacao::class, 'id_variacao');
+    }
+
+    public function deposito(): BelongsTo
+    {
+        return $this->belongsTo(Deposito::class, 'id_deposito');
     }
 }

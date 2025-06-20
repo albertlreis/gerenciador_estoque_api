@@ -19,6 +19,7 @@ return new class extends Migration
 
             $table->unsignedInteger('pedido_id');
             $table->unsignedInteger('produto_variacao_id');
+            $table->unsignedInteger('deposito_id');
 
             $table->integer('quantidade');
             $table->date('data_envio');
@@ -30,6 +31,7 @@ return new class extends Migration
 
             $table->foreign('pedido_id')->references('id')->on('pedidos')->onDelete('cascade');
             $table->foreign('produto_variacao_id')->references('id')->on('produto_variacoes')->onDelete('cascade');
+            $table->foreign('deposito_id')->references('id')->on('depositos')->onDelete('cascade');
         });
     }
 

@@ -24,6 +24,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use InvalidArgumentException;
@@ -337,42 +338,69 @@ class PedidoController extends Controller
 
     public function estatisticas(Request $request): JsonResponse
     {
+        $inicio = microtime(true);
+
         $intervalo = (int) $request->query('meses', 6);
+        $usuarioId = AuthHelper::getUsuarioId();
+        $temPermissaoTotal = AuthHelper::hasPermissao('pedidos.visualizar.todos');
 
-        $meses = collect(range(0, $intervalo - 1))
-            ->map(fn($i) => Carbon::now()->subMonths($i)->startOfMonth())
-            ->reverse();
+        $cacheKey = $temPermissaoTotal
+            ? "estatisticas_pedidos_admin_{$intervalo}"
+            : "estatisticas_pedidos_usuario_{$usuarioId}_{$intervalo}";
 
-        $dados = DB::table('pedidos')
-            ->selectRaw("DATE_FORMAT(data_pedido, '%Y-%m-01') as mes, COUNT(*) as total, SUM(valor_total) as valor")
-            ->where('data_pedido', '>=', $meses->first()->format('Y-m-d'))
-            ->whereNotNull('data_pedido')
-            ->groupBy('mes')
-            ->orderBy('mes')
-            ->get();
+        $resultado = Cache::remember($cacheKey, now()->addMinutes(10), function () use ($intervalo, $temPermissaoTotal, $usuarioId, $cacheKey, $inicio) {
+            LogService::debug('EstatisticasCache', 'Gerando novo cache', ['cacheKey' => $cacheKey]);
 
-        $labels = [];
-        $quantidades = [];
-        $valores = [];
+            $meses = collect(range(0, $intervalo - 1))
+                ->map(fn($i) => now()->subMonths($i)->startOfMonth())
+                ->reverse();
 
-        foreach ($meses as $mes) {
-            $chave = $mes->format('Y-m-01');
-            $label = $mes->format('M/Y');
+            $query = DB::table('pedidos')
+                ->selectRaw("DATE_FORMAT(data_pedido, '%Y-%m-01') as mes, COUNT(*) as total, SUM(valor_total) as valor")
+                ->where('data_pedido', '>=', $meses->first()->format('Y-m-d'))
+                ->whereNotNull('data_pedido');
 
-            $linha = $dados->firstWhere('mes', $chave);
+            if (!$temPermissaoTotal) {
+                $query->where('id_usuario', $usuarioId);
+            }
 
-            $labels[] = $label;
-            $quantidades[] = $linha->total ?? 0;
-            $valores[] = (float) ($linha->valor ?? 0);
-        }
+            $dados = $query->groupBy('mes')->orderBy('mes')->get();
 
-        LogService::debug('EstatisticasPedido', 'Estatísticas calculadas', ['intervalo_meses' => $intervalo]);
+            $labels = [];
+            $quantidades = [];
+            $valores = [];
 
-        return response()->json([
-            'labels' => $labels,
-            'quantidades' => $quantidades,
-            'valores' => $valores,
+            foreach ($meses as $mes) {
+                $chave = $mes->format('Y-m-01');
+                $label = $mes->format('M/Y');
+
+                $linha = $dados->firstWhere('mes', $chave);
+
+                $labels[] = $label;
+                $quantidades[] = $linha->total ?? 0;
+                $valores[] = (float) ($linha->valor ?? 0);
+            }
+
+            $fim = microtime(true);
+            LogService::debug('EstatisticasCache', 'Estatísticas calculadas', [
+                'cacheKey' => $cacheKey,
+                'duration_ms' => round(($fim - $inicio) * 1000, 2)
+            ]);
+
+            return [
+                'labels' => $labels,
+                'quantidades' => $quantidades,
+                'valores' => $valores,
+            ];
+        });
+
+        $fim = microtime(true);
+        LogService::debug('EstatisticasCache', 'Estatísticas carregadas via cache ou computadas', [
+            'cacheKey' => $cacheKey,
+            'duration_ms' => round(($fim - $inicio) * 1000, 2)
         ]);
+
+        return response()->json($resultado);
     }
 
     /**

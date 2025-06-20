@@ -2,7 +2,6 @@
 
 namespace App\Http\Resources;
 
-use App\Models\Consignacao;
 use Illuminate\Http\Resources\Json\JsonResource;
 
 class ConsignacaoResource extends JsonResource
@@ -10,36 +9,23 @@ class ConsignacaoResource extends JsonResource
     public function toArray($request): array
     {
         $hoje = now();
-
-        // Carrega todas as consignações do mesmo pedido
-        $itens = Consignacao::where('pedido_id', $this->pedido_id)->get();
+        $itens = $this->todas_consignacoes ?? collect();
 
         $statusPedido = 'pendente';
-        $temPendente = false;
-        $temComprado = false;
-        $temDevolvido = false;
-
-        foreach ($itens as $item) {
-            if ($item->status === 'pendente') {
-                // Verifica se o prazo expirou
-                if ($item->prazo_resposta && $item->prazo_resposta->lt($hoje)) {
-                    $statusPedido = 'vencido';
-                    break;
-                }
-                $temPendente = true;
-            }
-            if ($item->status === 'comprado') $temComprado = true;
-            if ($item->status === 'devolvido') $temDevolvido = true;
-        }
+        $temPendente = $itens->contains('status', 'pendente');
+        $temComprado = $itens->contains('status', 'comprado');
+        $temDevolvido = $itens->contains('status', 'devolvido');
 
         if ($temPendente) {
-            $statusPedido = 'pendente';
-        } elseif ($temComprado && !$temDevolvido) {
-            $statusPedido = 'comprado';
-        } elseif ($temDevolvido && !$temComprado) {
-            $statusPedido = 'devolvido';
+            if ($itens->where('status', 'pendente')->pluck('prazo_resposta')->contains(fn($prazo) => $prazo && $hoje->gt($prazo))) {
+                $statusPedido = 'vencido';
+            }
         } elseif ($temComprado && $temDevolvido) {
-            $statusPedido = 'parcial'; // Se quiser suportar status parcial
+            $statusPedido = 'parcial';
+        } elseif ($temComprado) {
+            $statusPedido = 'comprado';
+        } elseif ($temDevolvido) {
+            $statusPedido = 'devolvido';
         }
 
         return [

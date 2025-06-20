@@ -57,41 +57,59 @@ class ConsignacaoController extends Controller
             });
         }
 
+        if (in_array($request->status, ['pendente', 'vencido'])) {
+            $query->where('status', 'pendente');
+        }
+
         $query->orderBy('prazo_resposta');
 
-        // Sem paginação por enquanto
         $consignacoes = $query->get();
 
-        // Agrupa por pedido_id
-        $agrupadas = $consignacoes
-            ->groupBy('pedido_id')
-            ->map(function ($grupo) {
-                $primeira = $grupo->first();
-                $primeira->todas_consignacoes = $grupo;
-                return $primeira;
-            });
+        $agrupadas = $consignacoes->groupBy('pedido_id')->map(function ($grupo) {
+            $primeira = $grupo->first();
+            $primeira->todas_consignacoes = $grupo;
+            return $primeira;
+        });
 
-        // Se houver filtro de status, aplica após cálculo
         if ($request->filled('status')) {
             $statusDesejado = $request->status;
             $hoje = now();
 
             $agrupadas = $agrupadas->filter(function ($consignacao) use ($statusDesejado, $hoje) {
-                $status = $consignacao->status;
+                $status = 'pendente';
+                $temPendente = false;
+                $temComprado = false;
+                $temDevolvido = false;
 
-                if ($status === 'pendente' && $consignacao->prazo_resposta && $consignacao->prazo_resposta->lt($hoje)) {
-                    $status = 'vencido';
+                foreach ($consignacao->todas_consignacoes as $item) {
+                    if ($item->status === 'pendente') {
+                        if ($item->prazo_resposta && $item->prazo_resposta->lt($hoje)) {
+                            $status = 'vencido';
+                            break;
+                        }
+                        $temPendente = true;
+                    }
+                    if ($item->status === 'comprado') $temComprado = true;
+                    if ($item->status === 'devolvido') $temDevolvido = true;
                 }
 
-                if ($consignacao->todas_consignacoes->groupBy('status')->count() > 1) {
+                if ($temPendente) {
+                    $status = 'pendente';
+                    if ($consignacao->todas_consignacoes->where('status', 'pendente')->pluck('prazo_resposta')->contains(fn($p) => $p && $p->lt($hoje))) {
+                        $status = 'vencido';
+                    }
+                } elseif ($temComprado && $temDevolvido) {
                     $status = 'parcial';
+                } elseif ($temComprado) {
+                    $status = 'comprado';
+                } elseif ($temDevolvido) {
+                    $status = 'devolvido';
                 }
 
                 return $status === $statusDesejado;
             });
         }
 
-        // Paginação manual
         $pagina = $request->get('page', 1);
         $porPagina = $request->get('per_page', 10);
         $paginado = new LengthAwarePaginator(

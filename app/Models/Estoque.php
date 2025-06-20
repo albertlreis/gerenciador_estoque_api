@@ -12,7 +12,10 @@ class Estoque extends Model
     protected $fillable = [
         'id_variacao',
         'id_deposito',
-        'quantidade'
+        'quantidade',
+        'corredor',
+        'prateleira',
+        'nivel',
     ];
 
     protected $casts = [

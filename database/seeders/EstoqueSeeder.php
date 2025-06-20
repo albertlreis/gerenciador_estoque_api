@@ -30,11 +30,9 @@ class EstoqueSeeder extends Seeder
             throw new Exception('Variações não encontradas.');
         }
 
-        // Separa outlet e não-outlet
         $variacoesOutlet = $variacoes->where('is_outlet', true);
         $variacoesNormais = $variacoes->where('is_outlet', false);
 
-        // Define % das variações normais que ficarão SEM estoque
         $percentualSemEstoque = 15;
         $quantidadeSemEstoque = intval($variacoesNormais->count() * $percentualSemEstoque / 100);
         $variacoesSemEstoque = $variacoesNormais->shuffle()->take($quantidadeSemEstoque);
@@ -50,7 +48,11 @@ class EstoqueSeeder extends Seeder
                 DB::table('estoque')->updateOrInsert([
                     'id_variacao' => $v->variacao_id,
                     'id_deposito' => $idDeposito,
+                ], [
                     'quantidade' => rand(5, 100),
+                    'corredor' => chr(rand(65, 70)), // A-F
+                    'prateleira' => (string) rand(1, 5),
+                    'nivel' => (string) rand(1, 3),
                     'created_at' => $now,
                     'updated_at' => $now,
                 ]);

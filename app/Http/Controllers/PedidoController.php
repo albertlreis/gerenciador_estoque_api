@@ -204,7 +204,7 @@ class PedidoController extends Controller
     private function registrarConsignacoes(Pedido $pedido, $itens, int $prazoDias): void
     {
         $usuarioLogado = Auth::user();
-        
+
         $agora = now();
         $prazo = $agora->copy()->addDays($prazoDias);
 

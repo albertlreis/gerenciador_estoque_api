@@ -17,7 +17,8 @@ class ConsignacaoController extends Controller
     {
         $query = Consignacao::with([
             'pedido.cliente:id,nome',
-            'pedido.usuario:id,nome'
+            'pedido.usuario:id,nome',
+            'pedido.statusAtual',
         ]);
 
         if (!AuthHelper::hasPermissao('consignacoes.visualizar.todos')) {

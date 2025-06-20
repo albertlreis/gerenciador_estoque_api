@@ -21,7 +21,9 @@ class ProdutoResource extends JsonResource
             'categoria' => $this->whenLoaded('categoria'),
             'fabricante' => $this->fabricante,
             'ativo' => $this->ativo,
-            'is_outlet' => $this->is_outlet,
+            'is_outlet' => $this->variacoes->contains(function ($variacao) {
+                return $variacao->outlet && $variacao->outlet->quantidade_restante > 0;
+            }),
             'estoque_total' => $this->estoque_total,
             'imagem_principal' => $this->imagemPrincipal?->url,
             'data_ultima_saida' => $this->data_ultima_saida,

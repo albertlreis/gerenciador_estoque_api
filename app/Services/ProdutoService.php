@@ -100,7 +100,7 @@ class ProdutoService
 
     public function listarProdutosFiltrados($request): LengthAwarePaginator
     {
-        $query = Produto::with(['variacoes.atributos', 'variacoes.estoque', 'imagemPrincipal']);
+        $query = Produto::with(['variacoes.atributos', 'variacoes.estoque', 'variacoes.outlet', 'imagemPrincipal']);
 
         if (!empty($request->nome)) {
             $query->where('nome', 'ILIKE', '%' . $request->nome . '%');
@@ -118,12 +118,15 @@ class ProdutoService
 
         if (!is_null($request->is_outlet)) {
             if ($request->is_outlet) {
-                $query->where('is_outlet', true)
-                    ->whereHas('variacoes.estoque', function ($q) {
-                        $q->where('quantidade', '>', 0);
-                    });
+                $query->whereHas('variacoes.outlet', function ($q) {
+                    $q->where('quantidade_restante', '>', 0);
+                })->whereHas('variacoes.estoque', function ($q) {
+                    $q->where('quantidade', '>', 0);
+                });
             } else {
-                $query->where('is_outlet', false);
+                $query->whereDoesntHave('variacoes.outlet', function ($q) {
+                    $q->where('quantidade_restante', '>', 0);
+                });
             }
         } elseif (!empty($request->estoque_status)) {
             if ($request->estoque_status === 'com_estoque') {

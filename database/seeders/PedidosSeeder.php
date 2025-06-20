@@ -12,7 +12,15 @@ class PedidosSeeder extends Seeder
     public function run(): void
     {
         $clientes = DB::table('clientes')->pluck('id')->toArray();
-        $usuarios = DB::table('acesso_usuarios')->pluck('id')->toArray();
+        $vendedores = DB::table('acesso_usuarios')
+            ->whereIn('email', ['vendedor1@teste.com', 'vendedor2@teste.com', 'vendedor3@teste.com'])
+            ->pluck('id')
+            ->toArray();
+        $admins = DB::table('acesso_usuarios')
+            ->whereIn('email', ['admin@teste.com'])
+            ->pluck('id')
+            ->toArray();
+
         $parceiros = DB::table('parceiros')->pluck('id')->toArray();
         $variacoes = DB::table('produto_variacoes')->pluck('id')->toArray();
         $statusEnum = PedidoStatus::cases();
@@ -54,14 +62,14 @@ class PedidosSeeder extends Seeder
 
         for ($i = 0; $i < 100; $i++) {
             $idCliente = fake()->randomElement($clientes);
-            $idUsuario = fake()->randomElement($usuarios);
+            $idUsuario = fake()->randomElement($vendedores);
             $idParceiro = fake()->optional()->randomElement($parceiros);
 
-            $maxStatusIndex = fake()->biasedNumberBetween(0, count($statusEnum) - 1, fn() => 0.7);
+            $maxStatusIndex = fake()->biasedNumberBetween(0, count($statusEnum) - 1, fn () => 0.7);
             $statusAtual = $statusEnum[$maxStatusIndex]->value;
             $dataPedido = $statusAtual === PedidoStatus::PEDIDO_CRIADO->value
                 ? null
-                : fake()->dateTimeBetween('-6 months', 'now');
+                : fake()->dateTimeBetween('-6 months');
 
             $pedidoId = DB::table('pedidos')->insertGetId([
                 'id_cliente' => $idCliente,
@@ -69,7 +77,6 @@ class PedidosSeeder extends Seeder
                 'id_parceiro' => $idParceiro,
                 'numero_externo' => 'EXT-' . fake()->numberBetween(1000, 9999),
                 'data_pedido' => $dataPedido,
-                'status' => $statusAtual,
                 'valor_total' => 0,
                 'observacoes' => fake()->randomElement($observacoesPedidoPool),
                 'created_at' => $now,
@@ -105,11 +112,15 @@ class PedidosSeeder extends Seeder
             $dataStatus = $dataPedido ? Carbon::parse($dataPedido)->copy() : $now->copy()->subDays(rand(1, 180));
 
             for ($s = 0; $s <= $maxStatusIndex; $s++) {
+                $responsavelId = fake()->boolean(80)
+                    ? $idUsuario // 80% das vezes o próprio vendedor
+                    : fake()->randomElement($admins); // 20% das vezes um admin
+
                 $statusHistorico[] = [
                     'pedido_id' => $pedidoId,
                     'status' => $statusEnum[$s]->value,
                     'data_status' => $dataStatus->copy(),
-                    'usuario_id' => $idUsuario,
+                    'usuario_id' => $responsavelId,
                     'observacoes' => fake()->randomElement($observacoesStatusPool),
                     'created_at' => $now,
                     'updated_at' => $now,

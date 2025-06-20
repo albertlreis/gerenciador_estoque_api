@@ -42,14 +42,21 @@ class PedidoController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
-        $query = Pedido::with(['cliente:id,nome', 'parceiro:id,nome', 'itens.variacao.produto:id,nome']);
+        $query = Pedido::with([
+            'cliente:id,nome',
+            'parceiro:id,nome',
+            'usuario:id,nome',
+            'statusAtual',
+        ]);
 
         if (!AuthHelper::hasPermissao('pedidos.visualizar.todos')) {
             $query->where('id_usuario', AuthHelper::getUsuarioId());
         }
 
         if ($request->filled('status')) {
-            $query->where('status', $request->status);
+            $query->whereHas('statusAtual', function ($q) use ($request) {
+                $q->where('status', $request->status);
+            });
         }
 
         if ($request->filled('data_inicio') || $request->filled('data_fim')) {
@@ -94,7 +101,7 @@ class PedidoController extends Controller
             });
         }
 
-        $ordenarPor = in_array($request->get('ordenarPor'), ['data_pedido', 'numero', 'valor_total']) ? $request->get('ordenarPor') : 'data_pedido';
+        $ordenarPor = in_array($request->get('ordenarPor'), ['data_pedido', 'numero_externo', 'valor_total']) ? $request->get('ordenarPor') : 'data_pedido';
         $ordem = in_array($request->get('ordem'), ['asc', 'desc']) ? $request->get('ordem') : 'desc';
 
         $query->orderBy($ordenarPor, $ordem);
@@ -109,23 +116,17 @@ class PedidoController extends Controller
                 'data' => $pedido->data_pedido,
                 'cliente' => $pedido->cliente,
                 'parceiro' => $pedido->parceiro,
+                'vendedor' => $pedido->usuario,
+                'data_ultimo_status' => optional($pedido->statusAtual)->data_status,
                 'valor_total' => $pedido->valor_total,
-                'status' => $pedido->status,
+                'status' => optional($pedido->statusAtual)->status,
                 'observacoes' => $pedido->observacoes,
-                'produtos' => $pedido->itens->map(function ($item) {
-                    return [
-                        'nome' => $item->variacao->produto->nome ?? '-',
-                        'variacao' => $item->variacao->descricao ?? '-',
-                        'quantidade' => $item->quantidade,
-                        'preco_unitario' => $item->preco_unitario,
-                        'subtotal' => $item->subtotal,
-                    ];
-                })
             ];
         });
 
         return response()->json($paginado);
     }
+
 
     public function store(StorePedidoRequest $request)
     {
@@ -826,9 +827,15 @@ class PedidoController extends Controller
                     'id_usuario' => $usuario->id,
                     'data_pedido' => now(),
                     'numero_externo' => $dadosPedido['numero_externo'] ?? null,
-                    'status' => 'confirmado',
                     'valor_total' => $dadosPedido['total'] ?? array_sum(array_map(fn($item) => $item['quantidade'] * $item['valor'], $itens)),
                     'observacoes' => $dadosPedido['observacoes'] ?? null,
+                ]);
+
+                $pedido = PedidoStatusHistorico::create([
+                    'pedido_id' => $pedido->id,
+                    'status' => 'pedido_criado',
+                    'data_status' => now(),
+                    'usuario_id' => $usuario->id
                 ]);
 
                 foreach ($itens as $item) {

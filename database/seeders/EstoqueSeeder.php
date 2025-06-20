@@ -47,7 +47,7 @@ class EstoqueSeeder extends Seeder
             $depositosSelecionados = collect($depositos)->shuffle()->take($quantidadeDepositos);
 
             foreach ($depositosSelecionados as $idDeposito) {
-                DB::table('estoque')->insert([
+                DB::table('estoque')->updateOrInsert([
                     'id_variacao' => $v->variacao_id,
                     'id_deposito' => $idDeposito,
                     'quantidade' => rand(5, 100),

@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
@@ -20,7 +21,6 @@ class Pedido extends Model
         'id_parceiro',
         'numero_externo',
         'data_pedido',
-        'status',
         'valor_total',
         'observacoes',
     ];
@@ -73,6 +73,11 @@ class Pedido extends Model
      */
     public function statusAtual(): HasOne
     {
-        return $this->hasOne(PedidoStatusHistorico::class)->latestOfMany();
+        return $this->hasOne(PedidoStatusHistorico::class, 'pedido_id')->latestOfMany();
+    }
+
+    protected function status(): Attribute
+    {
+        return Attribute::get(fn () => $this->statusAtual?->status);
     }
 }

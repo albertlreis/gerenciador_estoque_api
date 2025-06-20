@@ -34,7 +34,7 @@ class PedidoStatusHistoricoController extends Controller
                     'cor' => self::corPorStatus($statusString),
                     'data_status' => $item->getAttribute('data_status'),
                     'observacoes' => $item->observacoes,
-                    'usuario' => $item->usuario?->name,
+                    'usuario' => $item->usuario?->nome,
                     'isUltimo' => $index === $pedido->historicoStatus->count() - 1,
                     'podeRemover' => !in_array($statusEnum, self::STATUS_CRITICOS) || $usuario->can('remover-status-critico'),
                 ];

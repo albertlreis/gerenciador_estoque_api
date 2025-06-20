@@ -32,7 +32,6 @@ return new class extends Migration
             $table->string('numero_externo', 50)->nullable()->unique()->comment('Número do pedido em sistema externo');
 
             $table->timestamp('data_pedido')->nullable()->comment('Data em que o pedido foi confirmado');
-            $table->string('status', 50)->comment("Status do pedido: rascunho, confirmado, cancelado, etc.");
             $table->decimal('valor_total', 10, 2)->nullable()->comment('Valor total do pedido');
             $table->text('observacoes')->nullable()->comment('Observações adicionais do pedido');
             $table->timestamps();

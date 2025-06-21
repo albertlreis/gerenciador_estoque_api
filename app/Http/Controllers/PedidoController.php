@@ -5,10 +5,12 @@ namespace App\Http\Controllers;
 use App\Enums\PedidoStatus;
 use App\Exports\PedidosExport;
 use App\Helpers\AuthHelper;
+use App\Helpers\PedidoHelper;
 use App\Helpers\StringHelper;
 use App\Http\Requests\StorePedidoRequest;
 use App\Http\Resources\PedidoCompletoResource;
 use App\Models\Cliente;
+use App\Models\Configuracao;
 use App\Models\Pedido;
 use App\Models\PedidoItem;
 use App\Models\Carrinho;
@@ -46,6 +48,7 @@ class PedidoController extends Controller
             'parceiro:id,nome',
             'usuario:id,nome',
             'statusAtual',
+            'historicoStatus'
         ]);
 
         if (!AuthHelper::hasPermissao('pedidos.visualizar.todos')) {
@@ -109,6 +112,14 @@ class PedidoController extends Controller
         $paginado = $query->paginate($perPage)->appends($request->query());
 
         $paginado->getCollection()->transform(function ($pedido) {
+            $statusAtualEnum = optional($pedido->statusAtual)->status;
+            $dataUltimoStatus = optional($pedido->statusAtual)->data_status;
+
+            $proximoStatus = PedidoHelper::proximoStatusEsperado($pedido);
+            $previsao = PedidoHelper::previsaoProximoStatus($pedido);
+
+            $atrasado = $previsao && Carbon::now()->greaterThan($previsao);
+
             return [
                 'id' => $pedido->id,
                 'numero_externo' => $pedido->numero_externo,
@@ -116,9 +127,14 @@ class PedidoController extends Controller
                 'cliente' => $pedido->cliente,
                 'parceiro' => $pedido->parceiro,
                 'vendedor' => $pedido->usuario,
-                'data_ultimo_status' => optional($pedido->statusAtual)->data_status,
+                'data_ultimo_status' => $dataUltimoStatus,
                 'valor_total' => $pedido->valor_total,
-                'status' => optional($pedido->statusAtual)->status,
+                'status' => $statusAtualEnum?->value,
+                'status_label' => $statusAtualEnum?->label(),
+                'proximo_status' => $proximoStatus?->value,
+                'proximo_status_label' => $proximoStatus?->label(),
+                'previsao' => $previsao?->toDateString(),
+                'atrasado' => $atrasado,
                 'observacoes' => $pedido->observacoes,
             ];
         });

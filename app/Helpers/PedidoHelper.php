@@ -2,6 +2,7 @@
 
 namespace App\Helpers;
 
+use App\Models\Configuracao;
 use App\Models\Pedido;
 use App\Enums\PedidoStatus;
 use Illuminate\Support\Carbon;
@@ -99,6 +100,55 @@ class PedidoHelper
                 PedidoStatus::FINALIZADO
             ]
         );
+    }
+
+    public static function proximoStatusEsperado(Pedido $pedido): ?PedidoStatus
+    {
+        $fluxo = self::fluxoPorTipo($pedido);
+
+        $statusAtual = $pedido->statusAtual?->status;
+        if (!$statusAtual) {
+            return null;
+        }
+
+        // Encontra o índice do status atual no fluxo
+        $indice = array_search($statusAtual, $fluxo, true);
+
+        // Retorna o próximo status se existir
+        return $indice !== false && isset($fluxo[$indice + 1])
+            ? $fluxo[$indice + 1]
+            : null;
+    }
+
+    public static function previsaoProximoStatus(Pedido $pedido): ?Carbon
+    {
+        $statusAtual = $pedido->statusAtual?->status;
+        $dataUltimoStatus = $pedido->statusAtual?->data_status;
+        $proximoStatus = self::proximoStatusEsperado($pedido);
+        if (!$statusAtual || !$dataUltimoStatus || !$proximoStatus) {
+            return null;
+        }
+
+        $prazos = Configuracao::pegarTodosComoArray();
+
+        // Mapeia os status para as chaves de configuração correspondentes
+        $mapa = [
+            PedidoStatus::ENVIADO_FABRICA->value => 'prazo_envio_fabrica',
+            PedidoStatus::PREVISAO_EMBARQUE_FABRICA->value => 'dias_previsao_embarque_fabrica',
+            PedidoStatus::PREVISAO_ENTREGA_ESTOQUE->value => 'prazo_entrega_estoque',
+            PedidoStatus::PREVISAO_ENVIO_CLIENTE->value => 'prazo_envio_cliente',
+            PedidoStatus::ENTREGA_CLIENTE->value => 'dias_previsao_entrega_cliente',
+            PedidoStatus::DEVOLUCAO_CONSIGNACAO->value => 'prazo_consignacao',
+        ];
+
+        $chavePrazo = $mapa[$proximoStatus->value] ?? null;
+        $dias = $chavePrazo && isset($prazos[$chavePrazo]) ? (int) $prazos[$chavePrazo] : null;
+
+        if ($dias) {
+            return Carbon::parse($dataUltimoStatus)->addDays($dias);
+        }
+
+        return null;
     }
 
 }

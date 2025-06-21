@@ -80,7 +80,7 @@ class ProdutoController extends Controller
      */
     public function show(int $id): ProdutoResource
     {
-        $produto = Produto::with(['variacoes.atributos'])->findOrFail($id);
+        $produto = Produto::with(['variacoes.atributos', 'fornecedor'])->findOrFail($id);
         return new ProdutoResource($produto);
     }
 

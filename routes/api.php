@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\FornecedorController;
 use App\Http\Controllers\ProdutoVariacaoOutletController;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\CarrinhoItemController;
@@ -55,6 +56,8 @@ Route::middleware('auth:sanctum')->prefix('v1')->group(function () {
 
     // Depósitos e Estoque
     Route::apiResource('depositos', DepositoController::class);
+
+    Route::get('/fornecedores', [FornecedorController::class, 'index']);
 
     // Rotas de estoque e movimentações
     Route::prefix('estoque')->group(function () {

@@ -7,7 +7,6 @@ use App\Http\Requests\StoreCarrinhoRequest;
 use App\Http\Requests\UpdateCarrinhoRequest;
 use App\Http\Resources\CarrinhoResource;
 use App\Models\Carrinho;
-use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 
 /**

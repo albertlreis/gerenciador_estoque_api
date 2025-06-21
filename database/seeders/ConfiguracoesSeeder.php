@@ -90,6 +90,14 @@ class ConfiguracoesSeeder extends Seeder
                 'valor' => '15',
                 'descricao' => 'Prazo total, em dias, para uma consignação permanecer válida sem resposta.',
             ],
+            [
+                'chave' => 'dias_previsao_entrega_cliente',
+                'label' => 'Dias para Entrega ao Cliente após Envio',
+                'tipo' => 'integer',
+                'valor' => '3',
+                'descricao' => 'Número de dias estimado para o cliente receber o produto após o envio.',
+            ],
+
         ];
 
         foreach ($configuracoes as &$config) {

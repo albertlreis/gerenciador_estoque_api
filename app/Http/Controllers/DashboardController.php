@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\PedidoStatus;
 use App\Helpers\AuthHelper;
 use App\Models\Pedido;
 use App\Services\LogService;
@@ -47,7 +48,8 @@ class DashboardController extends Controller
                 ->count();
 
             $statusCount = $pedidos->groupBy(function ($pedido) {
-                return optional($pedido->statusAtual)->status?->value ?? 'sem_status';
+                $status = optional($pedido->statusAtual)->status;
+                return $status instanceof PedidoStatus ? $status->value : 'sem_status';
             });
 
             $ultimosPedidos = Pedido::with(['cliente', 'statusAtual'])

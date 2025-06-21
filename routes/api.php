@@ -83,9 +83,10 @@ Route::middleware('auth:sanctum')->prefix('v1')->group(function () {
     Route::post('pedidos/importar-pdf/confirmar', [PedidoController::class, 'confirmarImportacaoPDF']);
 
     Route::prefix('pedidos/{pedido}')->group(function () {
-        Route::patch('status', [PedidoController::class, 'updateStatus']);
+        Route::patch('status', [PedidoStatusHistoricoController::class, 'atualizarStatus']);
         Route::get('historico-status', [PedidoStatusHistoricoController::class, 'historico']);
         Route::get('previsoes', [PedidoStatusHistoricoController::class, 'previsoes']);
+        Route::get('fluxo-status', [PedidoStatusHistoricoController::class, 'fluxoStatus']);
         Route::get('completo', [PedidoController::class, 'completo']);
     });
 

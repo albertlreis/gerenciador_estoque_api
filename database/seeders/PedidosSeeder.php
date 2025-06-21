@@ -4,8 +4,9 @@ namespace Database\Seeders;
 
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\DB;
-use Carbon\Carbon;
+use Carbon\CarbonImmutable;
 use App\Enums\PedidoStatus;
+use App\Helpers\PedidoHelper;
 
 class PedidosSeeder extends Seeder
 {
@@ -23,8 +24,9 @@ class PedidosSeeder extends Seeder
 
         $parceiros = DB::table('parceiros')->pluck('id')->toArray();
         $variacoes = DB::table('produto_variacoes')->pluck('id')->toArray();
-        $statusEnum = PedidoStatus::cases();
-        $now = Carbon::now();
+        $fluxo = PedidoHelper::fluxo();
+        $statusOrdenados = $fluxo;
+        $now = CarbonImmutable::now();
 
         $itens = [];
         $statusHistorico = [];
@@ -67,8 +69,8 @@ class PedidosSeeder extends Seeder
             $idUsuario = fake()->randomElement($vendedores);
             $idParceiro = fake()->optional()->randomElement($parceiros);
 
-            $maxStatusIndex = fake()->biasedNumberBetween(0, count($statusEnum) - 1, fn () => 0.7);
-            $statusAtual = $statusEnum[$maxStatusIndex]->value;
+            $maxStatusIndex = fake()->biasedNumberBetween(0, count($statusOrdenados) - 1, fn () => 0.7);
+            $statusAtual = $statusOrdenados[$maxStatusIndex];
             $dataPedido = $statusAtual === PedidoStatus::PEDIDO_CRIADO->value
                 ? null
                 : fake()->dateTimeBetween('-6 months');
@@ -117,23 +119,27 @@ class PedidosSeeder extends Seeder
             DB::table('pedidos')->where('id', $pedidoId)->update(['valor_total' => $valorTotal]);
 
             // Histórico de status
-            $dataStatus = $dataPedido ? Carbon::parse($dataPedido)->copy() : $now->copy()->subDays(rand(1, 180));
+            $dataStatus = $dataPedido
+                ? CarbonImmutable::parse($dataPedido)
+                : $now->subDays(rand(1, 180));
 
             for ($s = 0; $s <= $maxStatusIndex; $s++) {
+                $status = $statusOrdenados[$s];
                 $responsavelId = fake()->boolean(80)
-                    ? $idUsuario // 80% das vezes o próprio vendedor
-                    : fake()->randomElement($admins); // 20% das vezes um admin
+                    ? $idUsuario
+                    : fake()->randomElement($admins);
 
                 $statusHistorico[] = [
                     'pedido_id' => $pedidoId,
-                    'status' => $statusEnum[$s]->value,
-                    'data_status' => $dataStatus->copy(),
+                    'status' => $status,
+                    'data_status' => $dataStatus,
                     'usuario_id' => $responsavelId,
                     'observacoes' => fake()->randomElement($observacoesStatusPool),
                     'created_at' => $now,
                     'updated_at' => $now,
                 ];
-                $dataStatus->addDays();
+
+                $dataStatus = $dataStatus->addDays(rand(1, 3));
             }
         }
 

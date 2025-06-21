@@ -7,9 +7,7 @@ use App\Exports\PedidosExport;
 use App\Helpers\AuthHelper;
 use App\Helpers\StringHelper;
 use App\Http\Requests\StorePedidoRequest;
-use App\Http\Requests\UpdatePedidoStatusRequest;
 use App\Models\Cliente;
-use App\Models\Consignacao;
 use App\Models\Pedido;
 use App\Models\PedidoItem;
 use App\Models\Carrinho;
@@ -276,48 +274,6 @@ class PedidoController extends Controller
         ];
 
         return response()->json($dados);
-    }
-
-    public function updateStatus(UpdatePedidoStatusRequest $request, $id): JsonResponse
-    {
-        $pedido = Pedido::findOrFail($id);
-        $status = PedidoStatus::from($request->status);
-
-        // Impede duplicidade de status no mesmo dia
-        $jaExiste = $pedido->historicoStatus()
-            ->where('status', $status->value)
-            ->whereDate('data_status', now()->toDateString())
-            ->exists();
-
-        if ($jaExiste) {
-            LogService::info('StatusPedido', "Status '$status->value' já registrado hoje para o pedido #$pedido->id");
-
-            return response()->json([
-                'message' => 'Esse status já foi registrado hoje para este pedido.'
-            ], 422);
-        }
-
-        // Cria entrada no histórico
-        $historico = PedidoStatusHistorico::create([
-            'pedido_id' => $pedido->id,
-            'status' => $status,
-            'data_status' => now(),
-            'usuario_id' => Auth::id(),
-            'observacoes' => $request->observacoes,
-        ]);
-
-        logAuditoria('pedido_status', "Status do Pedido #$pedido->id atualizado para '$status->value'.", [
-            'acao' => 'atualizacao',
-            'nivel' => 'info',
-            'novo_status' => $status->value,
-            'observacoes' => $request->observacoes,
-        ], $pedido);
-
-        return response()->json([
-            'message' => 'Status atualizado com sucesso.',
-            'historico' => $historico,
-            'pedido' => $pedido->fresh(),
-        ]);
     }
 
     public function exportar(Request $request): Response|BinaryFileResponse|JsonResponse

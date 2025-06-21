@@ -102,6 +102,7 @@ class ProdutoService
     {
         $query = Produto::with([
             'categoria',
+            'fornecedor',
             'variacoes.atributos',
             'variacoes.estoque',
             'variacoes.outlet',
@@ -114,9 +115,19 @@ class ProdutoService
         }
 
         if (!empty($request->id_categoria)) {
-            $idsSelecionados = is_array($request->id_categoria) ? $request->id_categoria : [$request->id_categoria];
-            $idsExpandidos = Categoria::expandirIdsComFilhos($idsSelecionados);
-            $query->whereIn('id_categoria', $idsExpandidos);
+            $ids = is_array($request->id_categoria)
+                ? array_filter($request->id_categoria)
+                : [$request->id_categoria];
+
+            $query->whereIn('id_categoria', $ids);
+        }
+
+        if (!empty($request->fornecedor_id)) {
+            $ids = is_array($request->fornecedor_id)
+                ? array_filter($request->fornecedor_id)
+                : [$request->fornecedor_id];
+
+            $query->whereIn('id_fornecedor', $ids);
         }
 
         if (!is_null($request->ativo)) {

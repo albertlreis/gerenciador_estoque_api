@@ -21,7 +21,6 @@ class ProdutoResource extends JsonResource
             'profundidade' => $this->profundidade,
             'peso' => $this->peso,
             'categoria' => $this->whenLoaded('categoria'),
-            'fabricante' => $this->fabricante,
             'ativo' => $this->ativo,
             'is_outlet' => $variacoes->contains(fn ($v) =>
                 $v->relationLoaded('outlet') && $v->outlet?->quantidade_restante > 0
@@ -32,6 +31,7 @@ class ProdutoResource extends JsonResource
             'data_ultima_saida' => $this->data_ultima_saida,
             'created_at' => $this->created_at,
             'updated_at' => $this->updated_at,
+            'fornecedor' => $this->fornecedor,
             'variacoes' => ProdutoVariacaoResource::collection($this->whenLoaded('variacoes')),
         ];
     }

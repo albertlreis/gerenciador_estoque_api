@@ -33,16 +33,16 @@ Route::middleware('auth:sanctum')->prefix('v1')->group(function () {
     // Produtos e Categorias
     Route::apiResource('categorias', CategoriaController::class);
 
-    Route::get('produtos/outlet', [ProdutoOutletController::class, 'index']);
-    Route::patch('produtos/{id}/remover-outlet', [ProdutoOutletController::class, 'removerOutlet']);
-
-
     Route::get('atributos', [ProdutoAtributoController::class, 'index']);
 
     // Variações
     Route::get('variacoes', [ProdutoVariacaoController::class, 'buscar']);
-    Route::get('variacoes/{id}/outlet', [ProdutoVariacaoOutletController::class, 'buscar']);
-    Route::post('variacoes/{id}/outlet', [ProdutoVariacaoOutletController::class, 'store']);
+    Route::prefix('variacoes/{id}/outlet')->group(function () {
+        Route::get('/', [ProdutoVariacaoOutletController::class, 'buscar']);
+        Route::post('/', [ProdutoVariacaoOutletController::class, 'store']);
+        Route::put('{outletId}', [ProdutoVariacaoOutletController::class, 'update']);
+        Route::delete('{outletId}', [ProdutoVariacaoOutletController::class, 'destroy']);
+    });
 
     Route::prefix('produtos')->group(function () {
         Route::get('estoque-baixo', [ProdutoController::class, 'estoqueBaixo']);

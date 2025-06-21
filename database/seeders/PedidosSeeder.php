@@ -7,6 +7,7 @@ use Illuminate\Support\Facades\DB;
 use Carbon\CarbonImmutable;
 use App\Enums\PedidoStatus;
 use App\Helpers\PedidoHelper;
+use App\Models\Pedido;
 
 class PedidosSeeder extends Seeder
 {
@@ -15,21 +16,17 @@ class PedidosSeeder extends Seeder
         $clientes = DB::table('clientes')->pluck('id')->toArray();
         $vendedores = DB::table('acesso_usuarios')
             ->whereIn('email', ['vendedor1@teste.com', 'vendedor2@teste.com', 'vendedor3@teste.com'])
-            ->pluck('id')
-            ->toArray();
+            ->pluck('id')->toArray();
         $admins = DB::table('acesso_usuarios')
             ->whereIn('email', ['admin@teste.com'])
-            ->pluck('id')
-            ->toArray();
-
+            ->pluck('id')->toArray();
         $parceiros = DB::table('parceiros')->pluck('id')->toArray();
         $variacoes = DB::table('produto_variacoes')->pluck('id')->toArray();
-        $fluxo = PedidoHelper::fluxo();
-        $statusOrdenados = $fluxo;
-        $now = CarbonImmutable::now();
 
+        $now = CarbonImmutable::now();
         $itens = [];
         $statusHistorico = [];
+        $numerosExternosUsados = [];
 
         $observacoesPedidoPool = [
             'Cliente solicitou entrega após o dia 10.',
@@ -62,15 +59,26 @@ class PedidosSeeder extends Seeder
             null,
         ];
 
-        $numerosExternosUsados = [];
-
         for ($i = 0; $i < 100; $i++) {
             $idCliente = fake()->randomElement($clientes);
             $idUsuario = fake()->randomElement($vendedores);
             $idParceiro = fake()->optional()->randomElement($parceiros);
 
+            $tipo = fake()->randomElement(['normal', 'via_estoque', 'consignado']);
+            $viaEstoque = $tipo === 'via_estoque';
+            $consignado = $tipo === 'consignado';
+
+            $pedidoFake = new Pedido([
+                'via_estoque' => $viaEstoque,
+                'consignado' => $consignado,
+            ]);
+
+            $fluxoTipo = PedidoHelper::fluxoPorTipo($pedidoFake);
+
+            $statusOrdenados = array_map(fn($s) => $s->value, $fluxoTipo);
             $maxStatusIndex = fake()->biasedNumberBetween(0, count($statusOrdenados) - 1, fn () => 0.7);
             $statusAtual = $statusOrdenados[$maxStatusIndex];
+
             $dataPedido = $statusAtual === PedidoStatus::PEDIDO_CRIADO->value
                 ? null
                 : fake()->dateTimeBetween('-6 months');
@@ -114,6 +122,20 @@ class PedidosSeeder extends Seeder
                 ];
 
                 $valorTotal += $subtotal;
+
+                if ($consignado) {
+                    DB::table('consignacoes')->insert([
+                        'pedido_id' => $pedidoId,
+                        'produto_variacao_id' => $idVariacao,
+                        'deposito_id' => fake()->numberBetween(1, 3),
+                        'quantidade' => $quantidade,
+                        'data_envio' => $dataPedido ?: $now,
+                        'prazo_resposta' => $now->addDays(15),
+                        'status' => 'pendente',
+                        'created_at' => $now,
+                        'updated_at' => $now,
+                    ]);
+                }
             }
 
             DB::table('pedidos')->where('id', $pedidoId)->update(['valor_total' => $valorTotal]);

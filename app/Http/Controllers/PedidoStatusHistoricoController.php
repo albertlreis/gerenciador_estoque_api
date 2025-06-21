@@ -102,7 +102,6 @@ class PedidoStatusHistoricoController extends Controller
         return response()->json($resultadoFinal);
     }
 
-
     public function atualizarStatus(Request $request, Pedido $pedido): JsonResponse
     {
         $request->validate([
@@ -112,6 +111,10 @@ class PedidoStatusHistoricoController extends Controller
 
         $novoStatus = $request->status;
         $fluxo = PedidoHelper::fluxoPorTipo($pedido);
+
+        if ($pedido->historicoStatus()->where('status', $novoStatus)->exists()) {
+            return response()->json(['message' => 'Este status já foi registrado para o pedido.'], 422);
+        }
 
         $posNovo = array_search($novoStatus, array_map(fn($s) => $s->value, $fluxo));
         if ($posNovo === false) {

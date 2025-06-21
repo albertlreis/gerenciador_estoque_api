@@ -21,6 +21,11 @@ class ConsignacaoController extends Controller
 
     public function index(Request $request): AnonymousResourceCollection
     {
+        $request->validate([
+            'data_ini' => 'nullable|date_format:Y-m-d',
+            'data_fim' => 'nullable|date_format:Y-m-d',
+        ]);
+
         $query = Consignacao::with([
             'pedido.cliente:id,nome',
             'pedido.usuario:id,nome',
@@ -55,6 +60,14 @@ class ConsignacaoController extends Controller
             $query->whereHas('pedido', function ($q) use ($request) {
                 $q->where('id_usuario', $request->vendedor_id);
             });
+        }
+
+        if ($request->filled('data_ini')) {
+            $query->whereDate('prazo_resposta', '>=', $request->input('data_ini'));
+        }
+
+        if ($request->filled('data_fim')) {
+            $query->whereDate('prazo_resposta', '<=', $request->input('data_fim'));
         }
 
         if (in_array($request->status, ['pendente', 'vencido'])) {
@@ -142,6 +155,7 @@ class ConsignacaoController extends Controller
         return response()->json([
             'pedido' => [
                 'id' => $pedido->id,
+                'numero_externo' => $pedido->numero_externo,
                 'cliente' => $pedido->cliente->nome ?? '-',
                 'data_envio' => optional($pedido->data_envio)->format('d/m/Y'),
             ],

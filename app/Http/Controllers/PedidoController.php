@@ -7,6 +7,7 @@ use App\Exports\PedidosExport;
 use App\Helpers\AuthHelper;
 use App\Helpers\StringHelper;
 use App\Http\Requests\StorePedidoRequest;
+use App\Http\Resources\PedidoCompletoResource;
 use App\Models\Cliente;
 use App\Models\Pedido;
 use App\Models\PedidoItem;
@@ -234,46 +235,13 @@ class PedidoController extends Controller
         $pedido->load([
             'cliente:id,nome,email,telefone',
             'parceiro:id,nome',
-            'itens.variacao.produto',
+            'usuario:id,nome',
             'itens.variacao.produto.imagens',
             'itens.variacao.atributos',
             'historicoStatus.usuario:id,nome',
         ]);
 
-        $dados = [
-            'id' => $pedido->id,
-            'numero' => $pedido->numero,
-            'data_pedido' => $pedido->data_pedido,
-            'cliente' => $pedido->cliente,
-            'parceiro' => $pedido->parceiro,
-            'valor_total' => $pedido->valor_total,
-            'observacoes' => $pedido->observacoes,
-            'itens' => $pedido->itens->map(function ($item) {
-                return [
-                    'nome_produto' => $item->variacao->produto->nome ?? '-',
-                    'referencia' => $item->variacao->referencia ?? '-',
-                    'quantidade' => $item->quantidade,
-                    'preco_unitario' => $item->preco_unitario,
-                    'subtotal' => $item->subtotal,
-                    'imagem' => $item->variacao->produto?->imagens?->first()?->url,
-                    'atributos' => $item->variacao->atributos->map(fn($a) => [
-                        'atributo' => $a->atributo,
-                        'valor' => $a->valor,
-                    ]),
-                ];
-            })->values(),
-            'historico' => $pedido->historicoStatus->map(function ($status) {
-                return [
-                    'status' => $status->status,
-                    'label' => $status->status ? ucwords(str_replace('_', ' ', $status->status->name)) : '—',
-                    'data_status' => $status->data_status,
-                    'observacoes' => $status->observacoes,
-                    'usuario' => $status->usuario->nome ?? '—',
-                ];
-            })->sortBy('data_status')->values(),
-        ];
-
-        return response()->json($dados);
+        return response()->json(new PedidoCompletoResource($pedido));
     }
 
     public function exportar(Request $request): Response|BinaryFileResponse|JsonResponse

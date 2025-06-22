@@ -10,7 +10,6 @@ use App\Http\Controllers\ConsignacaoController;
 use App\Http\Controllers\PedidoStatusHistoricoController;
 use App\Http\Controllers\ProdutoController;
 use App\Http\Controllers\ProdutoImagemController;
-use App\Http\Controllers\ProdutoOutletController;
 use App\Http\Controllers\ProdutoVariacaoController;
 use App\Http\Controllers\ProdutoAtributoController;
 use App\Http\Controllers\DepositoController;

@@ -127,8 +127,24 @@ class ProdutoController extends Controller
     {
         try {
             DB::beginTransaction();
+
             $produto = Produto::with('variacoes.atributos')->findOrFail($id);
 
+            // Verificar se há vínculos com vendas
+            $variacaoIds = $produto->variacoes->pluck('id')->toArray();
+
+            $existeEmPedidos = DB::table('pedido_itens')
+                ->whereIn('id_variacao', $variacaoIds)
+                ->exists();
+
+            if ($existeEmPedidos) {
+                DB::rollBack();
+                return response()->json([
+                    'message' => 'Este produto não pode ser excluído pois está vinculado a um pedido.',
+                ], 422);
+            }
+
+            // Excluir atributos e variações
             foreach ($produto->variacoes as $variacao) {
                 $variacao->atributos->each->delete();
                 $variacao->delete();
@@ -138,6 +154,7 @@ class ProdutoController extends Controller
             DB::commit();
 
             return response()->json(['message' => 'Produto excluído com sucesso.']);
+
         } catch (Throwable $e) {
             DB::rollBack();
             return response()->json([

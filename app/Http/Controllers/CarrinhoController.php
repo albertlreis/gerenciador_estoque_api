@@ -7,6 +7,8 @@ use App\Http\Requests\StoreCarrinhoRequest;
 use App\Http\Requests\UpdateCarrinhoRequest;
 use App\Http\Resources\CarrinhoResource;
 use App\Models\Carrinho;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Support\Facades\Auth;
 
 /**
@@ -17,7 +19,7 @@ class CarrinhoController extends Controller
     /**
      * Lista todos os carrinhos em rascunho do usuário logado.
      */
-    public function index()
+    public function index(): AnonymousResourceCollection
     {
         $query = Carrinho::where('status', 'rascunho');
 
@@ -30,18 +32,24 @@ class CarrinhoController extends Controller
 
     /**
      * Retorna os dados de um carrinho específico do usuário logado.
+     *
+     * @param int $id
+     * @return \App\Http\Resources\CarrinhoResource
      */
-    public function show($id)
+    public function show(int $id): CarrinhoResource
     {
-        $carrinho = Carrinho::with([
+        $query = Carrinho::with([
             'cliente',
             'itens.variacao.produto.imagemPrincipal',
-            'itens.variacao.produto',
             'itens.variacao.estoque',
-            'itens.variacao.atributos'
-        ])
-            ->where('id_usuario', Auth::id())
-            ->findOrFail($id);
+            'itens.variacao.atributos',
+        ])->where('id', $id);
+
+        if (!AuthHelper::hasPermissao('carrinhos.visualizar.todos')) {
+            $query->where('id_usuario', Auth::id());
+        }
+
+        $carrinho = $query->firstOrFail();
 
         return new CarrinhoResource($carrinho);
     }
@@ -49,7 +57,7 @@ class CarrinhoController extends Controller
     /**
      * Cria um novo carrinho vinculado a um cliente.
      */
-    public function store(StoreCarrinhoRequest $request)
+    public function store(StoreCarrinhoRequest $request): JsonResponse
     {
         $request->validate([
             'id_cliente' => 'required|exists:clientes,id'
@@ -67,7 +75,7 @@ class CarrinhoController extends Controller
     /**
      * Atualiza o cliente e/ou parceiro vinculados ao carrinho.
      */
-    public function update(UpdateCarrinhoRequest $request, $id)
+    public function update(UpdateCarrinhoRequest $request, $id): JsonResponse
     {
         $request->validate([
             'id_cliente' => 'nullable|exists:clientes,id',
@@ -86,7 +94,7 @@ class CarrinhoController extends Controller
     /**
      * Marca um carrinho como cancelado.
      */
-    public function cancelar($id)
+    public function cancelar($id): JsonResponse
     {
         $carrinho = Carrinho::where('id', $id)
             ->where('id_usuario', Auth::id())

@@ -47,6 +47,7 @@ Route::middleware('auth:sanctum')->prefix('v1')->group(function () {
         Route::get('estoque-baixo', [ProdutoController::class, 'estoqueBaixo']);
         Route::post('importar-xml', [ProdutoController::class, 'importarXML']);
         Route::post('importar-xml/confirmar', [ProdutoController::class, 'confirmarImportacao']);
+        Route::post('/{produto}/imagens/{imagem}/definir-principal', [ProdutoImagemController::class, 'definirPrincipal']);
         Route::apiResource('{produto}/imagens', ProdutoImagemController::class)->parameters(['imagens' => 'imagem']);
         Route::apiResource('{produto}/variacoes', ProdutoVariacaoController::class)->parameters(['variacoes' => 'variacao']);
     });

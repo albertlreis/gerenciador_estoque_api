@@ -32,7 +32,9 @@ class Produto extends Model
 
     public function imagens(): HasMany
     {
-        return $this->hasMany(ProdutoImagem::class, 'id_produto');
+        return $this->hasMany(ProdutoImagem::class, 'id_produto')
+            ->orderByDesc('principal')
+            ->orderBy('id');
     }
 
     public function imagemPrincipal()

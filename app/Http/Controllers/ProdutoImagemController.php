@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Produto;
 use App\Models\ProdutoImagem;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Throwable;
@@ -118,5 +119,30 @@ class ProdutoImagemController extends Controller
         // Remove o registro do banco de dados
         $imagemFound->delete();
         return response()->json(null, 204);
+    }
+
+    /**
+     * Define uma imagem como principal de um produto.
+     */
+    public function definirPrincipal(int $produto, int $imagem): JsonResponse
+    {
+        $produto = Produto::findOrFail($produto);
+
+        $imagemSelecionada = $produto->imagens()->where('id', $imagem)->firstOrFail();
+
+        if ($imagemSelecionada->id_produto !== $produto->id) {
+            abort(403, 'Imagem não pertence ao produto.');
+        }
+
+        // Zera o campo 'principal' de todas as imagens do produto
+        $produto->imagens()->update(['principal' => false]);
+
+        // Marca a imagem desejada como principal
+        $imagemSelecionada->update(['principal' => true]);
+
+        return response()->json([
+            'message' => 'Imagem principal definida com sucesso.',
+            'imagem' => $imagemSelecionada
+        ]);
     }
 }

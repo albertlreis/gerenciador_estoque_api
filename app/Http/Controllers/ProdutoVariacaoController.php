@@ -7,8 +7,6 @@ use App\Models\ProdutoVariacao;
 use App\Services\ProdutoVariacaoService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Validation\ValidationException;
 use Throwable;
 
 class ProdutoVariacaoController extends Controller
@@ -22,13 +20,8 @@ class ProdutoVariacaoController extends Controller
     {
         $validated = $request->validate([
             'referencia' => 'required|string|max:100|unique:produto_variacoes,referencia',
-            'nome' => 'required|string|max:255',
             'preco' => 'required|numeric',
             'custo' => 'required|numeric',
-            'peso' => 'required|numeric',
-            'altura' => 'required|numeric',
-            'largura' => 'required|numeric',
-            'profundidade' => 'required|numeric',
             'codigo_barras' => 'nullable|string|max:100',
         ]);
 

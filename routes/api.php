@@ -51,6 +51,7 @@ Route::middleware('auth:sanctum')->prefix('v1')->group(function () {
         Route::post('importar-xml/confirmar', [ProdutoController::class, 'confirmarImportacao']);
         Route::post('/{produto}/imagens/{imagem}/definir-principal', [ProdutoImagemController::class, 'definirPrincipal']);
         Route::apiResource('{produto}/imagens', ProdutoImagemController::class)->parameters(['imagens' => 'imagem']);
+        Route::put('/{produto}/variacoes', [ProdutoVariacaoController::class, 'update']);
         Route::apiResource('{produto}/variacoes', ProdutoVariacaoController::class)->parameters(['variacoes' => 'variacao']);
     });
 

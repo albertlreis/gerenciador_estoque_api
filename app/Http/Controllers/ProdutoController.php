@@ -84,7 +84,8 @@ class ProdutoController extends Controller
             'variacoes.atributos',
             'variacoes.estoque',
             'variacoes.outlets',
-            'fornecedor'
+            'fornecedor',
+            'imagens'
         ])->findOrFail($id);
         return new ProdutoResource($produto);
     }

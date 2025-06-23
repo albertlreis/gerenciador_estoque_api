@@ -33,6 +33,13 @@ class ProdutoResource extends JsonResource
             'updated_at' => $this->updated_at,
             'fornecedor' => $this->fornecedor,
             'variacoes' => ProdutoVariacaoResource::collection($this->whenLoaded('variacoes')),
+            'imagens' => $this->imagens->map(function ($imagem) {
+                return [
+                    'id' => $imagem->id,
+                    'url' => $imagem->url,
+                    'principal' => $imagem->principal,
+                ];
+            }),
         ];
     }
 

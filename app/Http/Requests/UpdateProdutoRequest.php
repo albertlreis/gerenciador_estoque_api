@@ -3,50 +3,50 @@
 namespace App\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
-use Illuminate\Validation\Rule;
 
 class UpdateProdutoRequest extends FormRequest
 {
     /**
-     * Determine if the user is authorized to make this request.
+     * Determina se o usuário está autorizado a atualizar o produto.
      *
      * @return bool
      */
     public function authorize(): bool
     {
-        return false;
+        return true;
     }
 
     /**
-     * Get the validation rules that apply to the request.
+     * Regras de validação para atualização de produto.
      *
-     * @return array<string, mixed>
+     * @return array<string, \Illuminate\Contracts\Validation\Rule|array|string>
      */
     public function rules(): array
     {
         return [
-            'nome'          => 'required|string|max:255',
-            'descricao'     => 'nullable|string',
-            'id_categoria'  => 'required|exists:categorias,id',
-            'fabricante'    => 'nullable|string|max:255',
-            'ativo'         => 'boolean',
-            'variacoes'     => 'required|array|min:1',
-            'variacoes.*.id'            => 'nullable|exists:produto_variacoes,id',
-            'variacoes.*.nome'          => 'required|string|max:255',
-            'variacoes.*.preco'         => 'required|numeric|min:0',
-            'variacoes.*.custo'         => 'required|numeric|min:0',
-            'variacoes.*.referencia'    => [
-                'required', 'string', 'max:100',
-                Rule::unique('produto_variacoes', 'referencia')->ignore($this->input('variacoes.*.id'))
-            ],
-            'variacoes.*.codigo_barras' => [
-                'nullable', 'string', 'max:100',
-                Rule::unique('produto_variacoes', 'codigo_barras')->ignore($this->input('variacoes.*.id'))
-            ],
-            'variacoes.*.atributos'     => 'nullable|array',
-            'variacoes.*.atributos.*.id'       => 'nullable|exists:produto_variacao_atributos,id',
-            'variacoes.*.atributos.*.atributo' => 'required_with:variacoes.*.atributos|string|max:100',
-            'variacoes.*.atributos.*.valor'    => 'required_with:variacoes.*.atributos|string|max:100',
+            'nome' => 'required|string|max:255',
+            'descricao' => 'nullable|string|max:1000',
+            'id_categoria' => 'required|integer|exists:categorias,id',
+            'id_fornecedor' => 'nullable|integer|exists:fornecedores,id',
+            'altura' => 'nullable|numeric|min:0',
+            'largura' => 'nullable|numeric|min:0',
+            'profundidade' => 'nullable|numeric|min:0',
+            'peso' => 'nullable|numeric|min:0',
+        ];
+    }
+
+    /**
+     * Mensagens de erro personalizadas.
+     *
+     * @return array<string, string>
+     */
+    public function messages(): array
+    {
+        return [
+            'nome.required' => 'O nome do produto é obrigatório.',
+            'id_categoria.required' => 'A categoria é obrigatória.',
+            'id_categoria.exists' => 'A categoria selecionada não existe.',
+            'id_fornecedor.exists' => 'O fornecedor selecionado não existe.',
         ];
     }
 }

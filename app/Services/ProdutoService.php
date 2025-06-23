@@ -3,100 +3,61 @@
 namespace App\Services;
 
 use App\Models\Produto;
-use App\Models\ProdutoVariacao;
-use App\Models\ProdutoVariacaoAtributo;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 
 class ProdutoService
 {
+    /**
+     * Cria um novo produto base.
+     *
+     * @param array $data
+     * @return Produto
+     */
     public function store(array $data): Produto
     {
-        $produto = Produto::create([
+        return Produto::create([
             'nome' => $data['nome'],
             'descricao' => $data['descricao'] ?? null,
             'id_categoria' => $data['id_categoria'],
-            'fabricante' => $data['fabricante'] ?? null,
+            'id_fornecedor' => $data['id_fornecedor'] ?? null,
+            'altura' => $data['altura'] ?? null,
+            'largura' => $data['largura'] ?? null,
+            'profundidade' => $data['profundidade'] ?? null,
+            'peso' => $data['peso'] ?? null,
             'ativo' => $data['ativo'] ?? true,
         ]);
-
-        foreach ($data['variacoes'] as $var) {
-            $variacao = ProdutoVariacao::create([
-                'produto_id' => $produto->id,
-                'nome' => $var['nome'],
-                'preco' => $var['preco'],
-                'custo' => $var['custo'],
-                'referencia' => $var['referencia'],
-                'codigo_barras' => $var['codigo_barras'] ?? null,
-            ]);
-
-            foreach ($var['atributos'] ?? [] as $attr) {
-                ProdutoVariacaoAtributo::create([
-                    'id_variacao' => $variacao->id,
-                    'atributo' => $attr['atributo'],
-                    'valor' => $attr['valor'],
-                ]);
-            }
-        }
-
-        return $produto->load('variacoes.atributos');
     }
 
+    /**
+     * Atualiza os dados do produto base.
+     *
+     * @param Produto $produto
+     * @param array $data
+     * @return Produto
+     */
     public function update(Produto $produto, array $data): Produto
     {
         $produto->update([
             'nome' => $data['nome'],
             'descricao' => $data['descricao'] ?? null,
             'id_categoria' => $data['id_categoria'],
-            'fabricante' => $data['fabricante'] ?? null,
+            'id_fornecedor' => $data['id_fornecedor'] ?? null,
+            'altura' => $data['altura'] ?? null,
+            'largura' => $data['largura'] ?? null,
+            'profundidade' => $data['profundidade'] ?? null,
+            'peso' => $data['peso'] ?? null,
             'ativo' => $data['ativo'] ?? true,
         ]);
 
-        $idsVariacoes = [];
-
-        foreach ($data['variacoes'] as $var) {
-            $variacao = isset($var['id'])
-                ? ProdutoVariacao::findOrFail($var['id'])
-                : new ProdutoVariacao(['produto_id' => $produto->id]);
-
-            $variacao->fill([
-                'produto_id' => $produto->id,
-                'nome' => $var['nome'],
-                'preco' => $var['preco'],
-                'custo' => $var['custo'],
-                'referencia' => $var['referencia'],
-                'codigo_barras' => $var['codigo_barras'] ?? null,
-            ])->save();
-
-            $idsVariacoes[] = $variacao->id;
-
-            $idsAtributos = [];
-
-            foreach ($var['atributos'] ?? [] as $attr) {
-                $atributo = isset($attr['id'])
-                    ? ProdutoVariacaoAtributo::findOrFail($attr['id'])
-                    : new ProdutoVariacaoAtributo(['id_variacao' => $variacao->id]);
-
-                $atributo->fill([
-                    'atributo' => $attr['atributo'],
-                    'valor' => $attr['valor'],
-                ])->save();
-
-                $idsAtributos[] = $atributo->id;
-            }
-
-            $variacao->atributos()->whereNotIn('id', $idsAtributos)->delete();
-        }
-
-        ProdutoVariacao::where('produto_id', $produto->id)
-            ->whereNotIn('id', $idsVariacoes)
-            ->each(function ($v) {
-                $v->atributos()->delete();
-                $v->delete();
-            });
-
-        return $produto->load('variacoes.atributos');
+        return $produto->refresh();
     }
 
+    /**
+     * Lista os produtos com filtros avançados e paginação.
+     *
+     * @param \Illuminate\Http\Request $request
+     * @return LengthAwarePaginator
+     */
     public function listarProdutosFiltrados($request): LengthAwarePaginator
     {
         $query = Produto::with([
@@ -135,15 +96,10 @@ class ProdutoService
 
         if (!is_null($request->is_outlet)) {
             if ($request->is_outlet) {
-                $query->whereHas('variacoes.outlet', function ($q) {
-                    $q->where('quantidade_restante', '>', 0);
-                })->whereHas('variacoes.estoque', function ($q) {
-                    $q->where('quantidade', '>', 0);
-                });
+                $query->whereHas('variacoes.outlet', fn($q) => $q->where('quantidade_restante', '>', 0))
+                    ->whereHas('variacoes.estoque', fn($q) => $q->where('quantidade', '>', 0));
             } else {
-                $query->whereDoesntHave('variacoes.outlet', function ($q) {
-                    $q->where('quantidade_restante', '>', 0);
-                });
+                $query->whereDoesntHave('variacoes.outlet', fn($q) => $q->where('quantidade_restante', '>', 0));
             }
         } elseif (!empty($request->estoque_status)) {
             if ($request->estoque_status === 'com_estoque') {
@@ -171,5 +127,4 @@ class ProdutoService
 
         return $query->paginate($request->get('per_page', 15));
     }
-
 }

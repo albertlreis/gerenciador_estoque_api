@@ -57,16 +57,7 @@ class ProdutoController extends Controller
      */
     public function store(StoreProdutoRequest $request): JsonResponse
     {
-        $produto = Produto::create([
-            'nome' => $request->input('nome'),
-            'descricao' => $request->input('descricao'),
-            'id_categoria' => $request->input('id_categoria'),
-            'id_fornecedor' => $request->input('id_fornecedor'),
-            'altura' => $request->input('altura'),
-            'largura' => $request->input('largura'),
-            'profundidade' => $request->input('profundidade'),
-            'peso' => $request->input('peso'),
-        ]);
+        $produto = $this->produtoService->store($request->validated());
 
         return response()->json([
             'message' => 'Produto cadastrado com sucesso.',
@@ -93,7 +84,7 @@ class ProdutoController extends Controller
     }
 
     /**
-     * Atualiza os dados de um produto e suas variações.
+     * Atualiza os dados básicos de um produto existente.
      *
      * @param UpdateProdutoRequest $request
      * @param int $id
@@ -101,23 +92,13 @@ class ProdutoController extends Controller
      */
     public function update(UpdateProdutoRequest $request, int $id): JsonResponse
     {
-        try {
-            DB::beginTransaction();
-            $produto = Produto::findOrFail($id);
-            $produto = $this->produtoService->update($produto, $request->validated());
-            DB::commit();
+        $produto = Produto::findOrFail($id);
+        $this->produtoService->update($produto, $request->validated());
 
-            return response()->json([
-                'message' => 'Produto atualizado com sucesso.',
-                'produto' => new ProdutoResource($produto)
-            ]);
-        } catch (Throwable $e) {
-            DB::rollBack();
-            return response()->json([
-                'message' => 'Erro ao atualizar produto.',
-                'error' => app()->environment('local') ? $e->getMessage() : null
-            ], 500);
-        }
+        return response()->json([
+            'message' => 'Produto atualizado com sucesso.',
+            'id' => $produto->id,
+        ]);
     }
 
     /**

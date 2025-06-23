@@ -36,6 +36,8 @@ Route::middleware('auth:sanctum')->prefix('v1')->group(function () {
 
     // Variações
     Route::get('variacoes', [ProdutoVariacaoController::class, 'buscar']);
+
+    //Outlet
     Route::prefix('variacoes/{id}/outlet')->group(function () {
         Route::get('/', [ProdutoVariacaoOutletController::class, 'buscar']);
         Route::post('/', [ProdutoVariacaoOutletController::class, 'store']);

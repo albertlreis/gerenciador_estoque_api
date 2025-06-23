@@ -4,8 +4,12 @@ namespace App\Http\Controllers;
 
 use App\Models\Produto;
 use App\Models\ProdutoVariacao;
+use App\Services\ProdutoVariacaoService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
+use Throwable;
 
 class ProdutoVariacaoController extends Controller
 {
@@ -43,26 +47,21 @@ class ProdutoVariacaoController extends Controller
         return response()->json($variacao);
     }
 
-    public function update(Request $request, Produto $produto, ProdutoVariacao $variacao)
+    public function update(Request $request, int $produtoId, ProdutoVariacaoService $service): JsonResponse
     {
-        if ($variacao->produto_id !== $produto->id) {
-            return response()->json(['error' => 'Variação não pertence a este produto'], 404);
+        $dados = $request->all();
+
+        if (!is_array($dados)) {
+            return response()->json(['message' => 'Formato inválido.'], 400);
         }
 
-        $validated = $request->validate([
-            'referencia' => 'sometimes|required|string|max:100|unique:produto_variacoes,referencia,' . $variacao->id,
-            'nome' => 'sometimes|required|string|max:255',
-            'preco' => 'sometimes|required|numeric',
-            'custo' => 'sometimes|required|numeric',
-            'peso' => 'sometimes|required|numeric',
-            'altura' => 'sometimes|required|numeric',
-            'largura' => 'sometimes|required|numeric',
-            'profundidade' => 'sometimes|required|numeric',
-            'codigo_barras' => 'nullable|string|max:100',
-        ]);
-
-        $variacao->update($validated);
-        return response()->json($variacao);
+        try {
+            $service->atualizarLote($produtoId, $dados);
+            return response()->json(['message' => 'Variações atualizadas com sucesso.']);
+        } catch (Throwable $e) {
+            report($e);
+            return response()->json(['message' => 'Erro inesperado.'], 500);
+        }
     }
 
     public function destroy(Produto $produto, ProdutoVariacao $variacao)

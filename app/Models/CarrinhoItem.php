@@ -20,7 +20,8 @@ class CarrinhoItem extends Model
         'quantidade',
         'preco_unitario',
         'subtotal',
-        'id_deposito'
+        'id_deposito',
+        'outlet_id',
     ];
 
     protected $casts = [

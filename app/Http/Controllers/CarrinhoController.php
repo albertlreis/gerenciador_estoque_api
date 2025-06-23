@@ -27,7 +27,17 @@ class CarrinhoController extends Controller
             $query->where('id_usuario', Auth::id());
         }
 
-        return CarrinhoResource::collection($query->with('cliente')->get());
+        return CarrinhoResource::collection(
+            $query->with([
+                'cliente',
+                'itens.variacao.outlet',
+                'itens.variacao.outlets',
+                'itens.variacao.estoque',
+                'itens.variacao.atributos',
+                'itens.variacao.produto.imagemPrincipal',
+                'itens.deposito',
+            ])->get()
+        );
     }
 
     /**

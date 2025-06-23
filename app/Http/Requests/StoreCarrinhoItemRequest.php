@@ -20,6 +20,7 @@ class StoreCarrinhoItemRequest extends FormRequest
             'id_variacao'    => 'required|exists:produto_variacoes,id',
             'quantidade'     => 'required|integer|min:1',
             'preco_unitario' => 'required|numeric|min:0',
+            'outlet_id' => 'nullable|exists:produto_variacao_outlets,id',
         ];
     }
 

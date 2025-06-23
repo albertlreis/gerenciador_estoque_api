@@ -33,6 +33,7 @@ class CarrinhoItemResource extends JsonResource
             'preco_unitario' => $this->preco_unitario,
             'subtotal'       => $this->subtotal,
             'id_deposito'    => $this->id_deposito,
+            'outlet_id'    => $this->outlet_id,
             'nome_produto'   => $this->nome_produto,
             'nome_completo'  => $this->nome_completo,
             'variacao'       => new ProdutoVariacaoResource($this->whenLoaded('variacao')),

@@ -40,6 +40,7 @@ class CarrinhoItemController extends Controller
                 'quantidade'     => $request->quantidade,
                 'preco_unitario' => $request->preco_unitario,
                 'subtotal'       => $request->quantidade * $request->preco_unitario,
+                'outlet_id'      => $request->outlet_id ?? null,
             ]
         );
 

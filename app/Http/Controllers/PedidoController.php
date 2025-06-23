@@ -10,7 +10,6 @@ use App\Helpers\StringHelper;
 use App\Http\Requests\StorePedidoRequest;
 use App\Http\Resources\PedidoCompletoResource;
 use App\Models\Cliente;
-use App\Models\Configuracao;
 use App\Models\Pedido;
 use App\Models\PedidoItem;
 use App\Models\Carrinho;
@@ -144,16 +143,14 @@ class PedidoController extends Controller
 
     public function store(StorePedidoRequest $request)
     {
-        $usuarioLogado = Auth::user();
+        $usuarioId = AuthHelper::getUsuarioId();
 
-        $idUsuarioFinal = $usuarioLogado->perfil === 'Administrador'
-            ? ($request->id_usuario ?? $usuarioLogado->id)
-            : $usuarioLogado->id;
+        $idUsuarioFinal = $request->id_usuario;
 
         $query = Carrinho::where('id', $request->id_carrinho)->with('itens');
 
         if (!AuthHelper::hasPermissao('carrinhos.visualizar.todos')) {
-            $query->where('id_usuario', $usuarioLogado->id);
+            $query->where('id_usuario', $usuarioId);
         }
 
         $carrinho = $query->first();
@@ -164,7 +161,7 @@ class PedidoController extends Controller
             return response()->json(['message' => 'Carrinho vazio.'], 422);
         }
 
-        return DB::transaction(function () use ($request, $carrinho, $idUsuarioFinal, $usuarioLogado) {
+        return DB::transaction(function () use ($request, $carrinho, $idUsuarioFinal) {
             $total = $carrinho->itens->sum('subtotal');
 
             $pedido = Pedido::create([
@@ -190,7 +187,7 @@ class PedidoController extends Controller
                 'pedido_id'   => $pedido->id,
                 'status'      => PedidoStatus::PEDIDO_CRIADO,
                 'data_status' => now(),
-                'usuario_id'  => $usuarioLogado->id,
+                'usuario_id'  => $idUsuarioFinal,
                 'observacoes' => 'Pedido criado no sistema.',
             ]);
 

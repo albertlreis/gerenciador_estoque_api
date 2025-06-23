@@ -7,37 +7,50 @@ use Illuminate\Foundation\Http\FormRequest;
 class StoreProdutoRequest extends FormRequest
 {
     /**
-     * Determine if the user is authorized to make this request.
+     * Determina se o usuário está autorizado a fazer esta requisição.
      *
      * @return bool
      */
     public function authorize(): bool
     {
-        return false;
+        return true; // Ajuste para regras de permissão se necessário
     }
 
     /**
-     * Get the validation rules that apply to the request.
+     * Regras de validação para cadastro de produto.
      *
-     * @return array<string, mixed>
+     * @return array<string, \Illuminate\Contracts\Validation\Rule|array|string>
      */
     public function rules(): array
     {
         return [
-            'nome'          => 'required|string|max:255',
-            'descricao'     => 'nullable|string',
-            'id_categoria'  => 'required|exists:categorias,id',
-            'fabricante'    => 'nullable|string|max:255',
-            'ativo'         => 'boolean',
-            'variacoes'     => 'required|array|min:1',
-            'variacoes.*.nome'          => 'required|string|max:255',
-            'variacoes.*.preco'         => 'required|numeric|min:0',
-            'variacoes.*.custo'         => 'required|numeric|min:0',
-            'variacoes.*.referencia'    => 'required|string|max:100|unique:produto_variacoes,referencia',
-            'variacoes.*.codigo_barras' => 'nullable|string|max:100|unique:produto_variacoes,codigo_barras',
-            'variacoes.*.atributos'     => 'nullable|array',
-            'variacoes.*.atributos.*.atributo' => 'required_with:variacoes.*.atributos|string|max:100',
-            'variacoes.*.atributos.*.valor'    => 'required_with:variacoes.*.atributos|string|max:100',
+            'nome' => 'required|string|max:255',
+            'descricao' => 'nullable|string|max:1000',
+            'id_categoria' => 'required|integer|exists:categorias,id',
+            'id_fornecedor' => 'nullable|integer|exists:fornecedores,id',
+            'altura' => 'nullable|numeric|min:0',
+            'largura' => 'nullable|numeric|min:0',
+            'profundidade' => 'nullable|numeric|min:0',
+            'peso' => 'nullable|numeric|min:0',
+        ];
+    }
+
+    /**
+     * Mensagens de erro personalizadas.
+     *
+     * @return array<string, string>
+     */
+    public function messages(): array
+    {
+        return [
+            'nome.required' => 'O nome do produto é obrigatório.',
+            'id_categoria.required' => 'A categoria é obrigatória.',
+            'id_categoria.exists' => 'A categoria selecionada não existe.',
+            'id_fornecedor.exists' => 'O fornecedor selecionado não existe.',
+            'altura.numeric' => 'A altura deve ser um número.',
+            'largura.numeric' => 'A largura deve ser um número.',
+            'profundidade.numeric' => 'A profundidade deve ser um número.',
+            'peso.numeric' => 'O peso deve ser um número.',
         ];
     }
 }

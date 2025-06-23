@@ -2,7 +2,6 @@
 
 namespace App\Services;
 
-use App\Models\Categoria;
 use App\Models\Produto;
 use App\Models\ProdutoVariacao;
 use App\Models\ProdutoVariacaoAtributo;

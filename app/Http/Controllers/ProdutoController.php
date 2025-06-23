@@ -47,29 +47,31 @@ class ProdutoController extends Controller
     }
 
     /**
-     * Cadastra um novo produto com suas variações e atributos.
+     * Cadastra um novo produto no sistema.
+     *
+     * Observação: as variações e imagens são cadastradas separadamente
+     * via endpoints específicos após o produto base ser criado.
      *
      * @param StoreProdutoRequest $request
      * @return JsonResponse
      */
     public function store(StoreProdutoRequest $request): JsonResponse
     {
-        try {
-            DB::beginTransaction();
-            $produto = $this->produtoService->store($request->validated());
-            DB::commit();
+        $produto = Produto::create([
+            'nome' => $request->input('nome'),
+            'descricao' => $request->input('descricao'),
+            'id_categoria' => $request->input('id_categoria'),
+            'id_fornecedor' => $request->input('id_fornecedor'),
+            'altura' => $request->input('altura'),
+            'largura' => $request->input('largura'),
+            'profundidade' => $request->input('profundidade'),
+            'peso' => $request->input('peso'),
+        ]);
 
-            return response()->json([
-                'message' => 'Produto cadastrado com sucesso.',
-                'produto' => new ProdutoResource($produto)
-            ], 201);
-        } catch (Throwable $e) {
-            DB::rollBack();
-            return response()->json([
-                'message' => 'Erro ao cadastrar produto.',
-                'error' => app()->environment('local') ? $e->getMessage() : null
-            ], 500);
-        }
+        return response()->json([
+            'message' => 'Produto cadastrado com sucesso.',
+            'id' => $produto->id,
+        ], 201);
     }
 
     /**

@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Http\Resources\ProdutoEstoqueResource;
 use App\Http\Resources\ResumoEstoqueResource;
+use App\Models\Estoque;
 use App\Services\EstoqueService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -33,5 +34,22 @@ class EstoqueController extends Controller
                 )
             )
         );
+    }
+
+    public function porVariacao($id_variacao): JsonResponse
+    {
+        $estoques = Estoque::with('deposito')
+            ->where('id_variacao', $id_variacao)
+            ->where('quantidade', '>', 0)
+            ->get()
+            ->map(function ($e) {
+                return [
+                    'id' => $e->deposito->id,
+                    'nome' => $e->deposito->nome,
+                    'quantidade' => $e->quantidade
+                ];
+            });
+
+        return response()->json($estoques);
     }
 }

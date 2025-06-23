@@ -48,19 +48,19 @@ class ProdutoVariacao extends Model
 
     public function getNomeCompletoAttribute(): string
     {
-        $produto = $this->getRelationValue('produto')?->nome ?? '';
+        // Evita lazy loading caso não esteja carregado
+        $produto = $this->relationLoaded('produto') ? $this->produto : null;
+        $produtoNome = $produto?->nome ?? '';
 
-        $atributos = $this->relationLoaded('atributos')
-            ? $this->atributos
-            : $this->atributos()->get();
+        // Evita lazy loading também para atributos
+        $atributos = $this->relationLoaded('atributos') ? $this->atributos : collect();
 
-        $atributosTexto = $atributos
-            ->map(fn($attr) => "{$attr->atributo}: {$attr->valor}")
+        $atributosTexto = $atributos->map(fn($attr) => "{$attr->atributo}: {$attr->valor}")
             ->implode(' - ');
 
         $complemento = trim($atributosTexto ?: '');
 
-        return trim("$produto - $complemento") ?: '-';
+        return trim("{$produtoNome} - {$complemento}") ?: '-';
     }
 
     public function outlets(): HasMany

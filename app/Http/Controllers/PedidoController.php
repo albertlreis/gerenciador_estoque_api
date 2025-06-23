@@ -150,10 +150,13 @@ class PedidoController extends Controller
             ? ($request->id_usuario ?? $usuarioLogado->id)
             : $usuarioLogado->id;
 
-        $carrinho = Carrinho::where('id', $request->id_carrinho)
-            ->where('id_usuario', $usuarioLogado->id)
-            ->with('itens')
-            ->first();
+        $query = Carrinho::where('id', $request->id_carrinho)->with('itens');
+
+        if (!AuthHelper::hasPermissao('carrinhos.visualizar.todos')) {
+            $query->where('id_usuario', $usuarioLogado->id);
+        }
+
+        $carrinho = $query->first();
 
         if (!$carrinho || $carrinho->itens->isEmpty()) {
             LogService::warning('Pedido', 'Tentativa de criação com carrinho vazio.', ['carrinho_id' => $request->id_carrinho]);
@@ -208,6 +211,7 @@ class PedidoController extends Controller
             ], $pedido);
 
             $carrinho->itens()->delete();
+            $carrinho->update(['status' => 'finalizado']);
 
             return response()->json([
                 'message' => 'Pedido criado com sucesso.',

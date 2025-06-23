@@ -92,9 +92,13 @@ class CarrinhoController extends Controller
             'id_parceiro' => 'nullable|exists:parceiros,id'
         ]);
 
-        $carrinho = Carrinho::where('id', $id)
-            ->where('id_usuario', Auth::id())
-            ->firstOrFail();
+        $query = Carrinho::where('id', $id);
+
+        if (!AuthHelper::hasPermissao('carrinhos.visualizar.todos')) {
+            $query->where('id_usuario', Auth::id());
+        }
+
+        $carrinho = $query->firstOrFail();
 
         $carrinho->update($request->only(['id_cliente', 'id_parceiro']));
 
@@ -106,9 +110,13 @@ class CarrinhoController extends Controller
      */
     public function cancelar($id): JsonResponse
     {
-        $carrinho = Carrinho::where('id', $id)
-            ->where('id_usuario', Auth::id())
-            ->firstOrFail();
+        $query = Carrinho::where('id', $id);
+
+        if (!AuthHelper::hasPermissao('carrinhos.visualizar.todos')) {
+            $query->where('id_usuario', Auth::id());
+        }
+
+        $carrinho = $query->firstOrFail();
 
         $carrinho->update(['status' => 'cancelado']);
 

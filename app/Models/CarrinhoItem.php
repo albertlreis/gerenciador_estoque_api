@@ -49,7 +49,7 @@ class CarrinhoItem extends Model
      */
     public function getNomeProdutoAttribute(): ?string
     {
-        return $this->variacao->getRelationValue('produto')?->nome ?? null;
+        return $this->variacao?->produto?->nome;
     }
 
     /**
@@ -57,6 +57,6 @@ class CarrinhoItem extends Model
      */
     public function getNomeCompletoAttribute(): ?string
     {
-        return $this->variacao->getRelationValue('nome_completo') ?? null;
+        return $this->variacao?->nome_completo;
     }
 }

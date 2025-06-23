@@ -42,19 +42,17 @@ class Produto extends Model
 
     public function getEstoqueTotalAttribute(): int
     {
-        $variacoes = $this->getRelationValue('variacoes') ?? collect();
+        $variacoes = $this->relationLoaded('variacoes') ? $this->variacoes : collect();
 
-        return $variacoes
-            ->map(fn($v) => $v->estoque?->quantidade ?? 0)
-            ->sum();
+        return $variacoes->sum(fn($v) => $v->relationLoaded('estoque') ? ($v->estoque->quantidade ?? 0) : 0);
     }
 
     public function getEstoqueOutletTotalAttribute(): int
     {
-        $variacoes = $this->getRelationValue('variacoes') ?? collect();
+        $variacoes = $this->relationLoaded('variacoes') ? $this->variacoes : collect();
 
         return $variacoes->reduce(function ($acc, $variacao) {
-            return $acc + ($variacao->outlets?->sum('quantidade') ?? 0);
+            return $acc + ($variacao->relationLoaded('outlets') ? $variacao->outlets->sum('quantidade') : 0);
         }, 0);
     }
 }

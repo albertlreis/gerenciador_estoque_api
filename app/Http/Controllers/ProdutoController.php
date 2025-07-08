@@ -89,6 +89,7 @@ class ProdutoController extends Controller
      * @param UpdateProdutoRequest $request
      * @param int $id
      * @return JsonResponse
+     * @throws \Exception
      */
     public function update(UpdateProdutoRequest $request, int $id): JsonResponse
     {

@@ -3,6 +3,7 @@
 namespace App\Http\Resources;
 
 use Illuminate\Http\Resources\Json\JsonResource;
+use Illuminate\Support\Facades\Storage;
 
 class ProdutoResource extends JsonResource
 {
@@ -29,6 +30,9 @@ class ProdutoResource extends JsonResource
             'estoque_outlet_total' => $this->getEstoqueOutletTotalAttributeSafely(),
             'imagem_principal' => $this->imagemPrincipal?->url,
             'data_ultima_saida' => $this->data_ultima_saida,
+            'manual_conservacao' => $this->manual_conservacao
+                ? Storage::url($this->manual_conservacao)
+                : null,
             'created_at' => $this->created_at,
             'updated_at' => $this->updated_at,
             'fornecedor' => $this->fornecedor,

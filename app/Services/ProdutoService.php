@@ -3,7 +3,11 @@
 namespace App\Services;
 
 use App\Models\Produto;
+use Exception;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Log;
+use Throwable;
 
 class ProdutoService
 {
@@ -15,6 +19,12 @@ class ProdutoService
      */
     public function store(array $data): Produto
     {
+        $manualPath = null;
+
+        if (isset($data['manual_conservacao']) && $data['manual_conservacao'] instanceof UploadedFile) {
+            $manualPath = $data['manual_conservacao']->store('manuais');
+        }
+
         return Produto::create([
             'nome' => $data['nome'],
             'descricao' => $data['descricao'] ?? null,
@@ -24,7 +34,8 @@ class ProdutoService
             'largura' => $data['largura'] ?? null,
             'profundidade' => $data['profundidade'] ?? null,
             'peso' => $data['peso'] ?? null,
-            'ativo' => $data['ativo'] ?? true,
+            'manual_conservacao' => $manualPath,
+            'ativo' => true,
         ]);
     }
 
@@ -34,10 +45,11 @@ class ProdutoService
      * @param Produto $produto
      * @param array $data
      * @return Produto
+     * @throws \Exception
      */
     public function update(Produto $produto, array $data): Produto
     {
-        $produto->update([
+        $updateData = [
             'nome' => $data['nome'],
             'descricao' => $data['descricao'] ?? null,
             'id_categoria' => $data['id_categoria'],
@@ -47,9 +59,63 @@ class ProdutoService
             'profundidade' => $data['profundidade'] ?? null,
             'peso' => $data['peso'] ?? null,
             'ativo' => $data['ativo'] ?? true,
-        ]);
+        ];
+
+        if (isset($data['manual_conservacao']) && $data['manual_conservacao'] instanceof UploadedFile) {
+            $this->salvarManualConservacao($produto, $data['manual_conservacao']);
+        }
+
+        $produto->update($updateData);
 
         return $produto->refresh();
+    }
+
+    /**
+     * @throws \Exception
+     */
+    public function salvarManualConservacao(Produto $produto, UploadedFile $file): string
+    {
+        try {
+            // Valida extensão (garantia extra além do FormRequest)
+            if ($file->getClientOriginalExtension() !== 'pdf') {
+                throw new Exception('Arquivo deve ser um PDF.');
+            }
+
+            $hash = md5(uniqid(rand(), true));
+            $filename = $hash . '.' . $file->getClientOriginalExtension();
+            $folder = public_path('uploads/manuais');
+
+            if (!is_dir($folder)) {
+                mkdir($folder, 0755, true);
+            }
+
+            // Remove o arquivo anterior se existir
+            if (!empty($produto->manual_conservacao)) {
+                $caminhoAntigo = public_path("uploads/manuais/$produto->manual_conservacao");
+                if (file_exists($caminhoAntigo)) {
+                    unlink($caminhoAntigo);
+                }
+            }
+
+            // Move o novo arquivo
+            $file->move($folder, $filename);
+
+            // Atualiza o campo no banco
+            $produto->manual_conservacao = $filename;
+            $produto->save();
+
+            return $filename;
+
+        } catch (Throwable $e) {
+            Log::error('Erro ao salvar manual de conservação', [
+                'produto_id' => $produto->id,
+                'file' => $file?->getClientOriginalName(),
+                'size' => $file?->getSize(),
+                'erro' => $e->getMessage(),
+            ]);
+
+            throw new Exception("Erro ao salvar o manual: " . $e->getMessage());
+        }
     }
 
     /**

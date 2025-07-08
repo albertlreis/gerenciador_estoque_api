@@ -32,6 +32,7 @@ class UpdateProdutoRequest extends FormRequest
             'largura' => 'nullable|numeric|min:0',
             'profundidade' => 'nullable|numeric|min:0',
             'peso' => 'nullable|numeric|min:0',
+            'manual_conservacao' => 'nullable|file|mimes:pdf|max:5120',
         ];
     }
 

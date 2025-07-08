@@ -2,6 +2,8 @@
 
 namespace App\Services;
 
+use App\Models\ProdutoVariacao;
+use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
 
 class EstoqueService
@@ -11,37 +13,25 @@ class EstoqueService
         ?int $deposito = null,
         ?array $periodo = null,
         int $perPage = 10
-    ): \Illuminate\Contracts\Pagination\LengthAwarePaginator {
-        $query = DB::table('estoque')
-            ->join('produto_variacoes', 'estoque.id_variacao', '=', 'produto_variacoes.id')
-            ->join('produtos', 'produto_variacoes.produto_id', '=', 'produtos.id')
-            ->join('depositos', 'estoque.id_deposito', '=', 'depositos.id')
-            ->select(
-                'produtos.id as produto_id',
-                'produtos.nome as produto_nome',
-                'depositos.nome as deposito_nome',
-                DB::raw('SUM(estoque.quantidade) as quantidade')
-            );
+    ): LengthAwarePaginator {
+        $query = ProdutoVariacao::with(['produto', 'atributos', 'estoque', 'estoque.deposito'])
+            ->withSum(['estoque as quantidade_estoque' => function ($q) use ($deposito, $periodo) {
+                if ($deposito) {
+                    $q->where('id_deposito', $deposito);
+                }
+                if ($periodo && count($periodo) === 2) {
+                    $q->whereBetween('updated_at', [$periodo[0], $periodo[1]]);
+                }
+            }], 'quantidade');
 
         if ($produto) {
-            $query->where(function ($q) use ($produto) {
-                $q->where('produtos.nome', 'like', "%{$produto}%")
-                    ->orWhere('produtos.referencia', 'like', "%{$produto}%");
+            $query->whereHas('produto', function ($q) use ($produto) {
+                $q->where('nome', 'like', "%{$produto}%")
+                    ->orWhere('referencia', 'like', "%{$produto}%");
             });
         }
 
-        if ($deposito) {
-            $query->where('estoque.id_deposito', $deposito);
-        }
-
-        if ($periodo && count($periodo) === 2) {
-            $query->whereBetween('estoque.updated_at', [$periodo[0], $periodo[1]]);
-        }
-
-        return $query
-            ->groupBy('produtos.id', 'produtos.nome', 'depositos.nome')
-            ->orderBy('produtos.nome')
-            ->paginate($perPage);
+        return $query->paginate($perPage);
     }
 
     public function gerarResumoEstoque(

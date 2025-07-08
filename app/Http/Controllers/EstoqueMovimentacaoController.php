@@ -40,11 +40,12 @@ class EstoqueMovimentacaoController extends Controller
             $query->whereBetween('data_movimentacao', [$inicio, $fim]);
         }
 
-        return response()->json(
-            MovimentacaoResource::collection(
-                $query->orderByDesc('data_movimentacao')->get()
-            )
-        );
+        $perPage = $request->input('per_page', 10);
+
+        return MovimentacaoResource::collection(
+            $query->orderByDesc('data_movimentacao')->paginate($perPage)
+        )->response();
+
     }
 
     public function store(Request $request, Produto $produto)

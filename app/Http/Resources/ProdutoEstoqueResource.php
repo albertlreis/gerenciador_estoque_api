@@ -9,10 +9,10 @@ class ProdutoEstoqueResource extends JsonResource
     public function toArray($request): array
     {
         return [
-            'produto_id' => $this->produto_id,
-            'produto_nome' => $this->produto_nome,
-            'deposito_nome' => $this->deposito_nome,
-            'quantidade' => (int) $this->quantidade,
+            'produto_id' => $this->produto_id ?? $this->produto?->id,
+            'produto_nome' => $this->nome_completo,
+            'deposito_nome' => $this->estoque?->deposito?->nome ?? '—',
+            'quantidade' => (int) $this->quantidade_estoque,
         ];
     }
 }

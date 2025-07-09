@@ -29,6 +29,7 @@ class DatabaseSeeder extends Seeder
             PedidosSeeder::class,
             ConsignacoesSeeder::class,
             ConfiguracoesSeeder::class,
+            LocalizacaoEstoqueSeeder::class,
         ]);
     }
 }

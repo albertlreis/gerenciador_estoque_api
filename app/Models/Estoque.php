@@ -37,4 +37,10 @@ class Estoque extends Model
     {
         return $this->belongsTo(Deposito::class, 'id_deposito')->withDefault();
     }
+
+    public function localizacao()
+    {
+        return $this->hasOne(LocalizacaoEstoque::class);
+    }
+
 }

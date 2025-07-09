@@ -9,6 +9,13 @@ use Illuminate\Support\Carbon;
 
 class PedidoHelper
 {
+    /**
+     * Retorna previsões baseadas em datas e prazos configurados.
+     *
+     * @param array $datas
+     * @param array $prazos
+     * @return array<string, Carbon|null>
+     */
     public static function previsoes(array $datas, array $prazos): array
     {
         return [
@@ -44,6 +51,12 @@ class PedidoHelper
         ];
     }
 
+    /**
+     * Retorna o fluxo de status de acordo com o tipo do pedido.
+     *
+     * @param Pedido $pedido
+     * @return PedidoStatus[]
+     */
     public static function fluxoPorTipo(Pedido $pedido): array
     {
         if ($pedido->consignado) {
@@ -51,7 +64,7 @@ class PedidoHelper
                 PedidoStatus::PEDIDO_CRIADO,
                 PedidoStatus::CONSIGNADO,
                 PedidoStatus::DEVOLUCAO_CONSIGNACAO,
-                PedidoStatus::FINALIZADO
+                PedidoStatus::FINALIZADO,
             ];
         }
 
@@ -61,7 +74,7 @@ class PedidoHelper
                 PedidoStatus::ENTREGA_ESTOQUE,
                 PedidoStatus::ENVIO_CLIENTE,
                 PedidoStatus::ENTREGA_CLIENTE,
-                PedidoStatus::FINALIZADO
+                PedidoStatus::FINALIZADO,
             ];
         }
 
@@ -77,61 +90,49 @@ class PedidoHelper
             PedidoStatus::PREVISAO_ENVIO_CLIENTE,
             PedidoStatus::ENVIO_CLIENTE,
             PedidoStatus::ENTREGA_CLIENTE,
-            PedidoStatus::FINALIZADO
+            PedidoStatus::FINALIZADO,
         ];
     }
 
-    public static function fluxo(): array
-    {
-        return array_map(
-            fn ($status) => $status->value,
-            [
-                PedidoStatus::PEDIDO_CRIADO,
-                PedidoStatus::ENVIADO_FABRICA,
-                PedidoStatus::NOTA_EMITIDA,
-                PedidoStatus::PREVISAO_EMBARQUE_FABRICA,
-                PedidoStatus::EMBARQUE_FABRICA,
-                PedidoStatus::NOTA_RECEBIDA_COMPRA,
-                PedidoStatus::PREVISAO_ENTREGA_ESTOQUE,
-                PedidoStatus::ENTREGA_ESTOQUE,
-                PedidoStatus::PREVISAO_ENVIO_CLIENTE,
-                PedidoStatus::ENVIO_CLIENTE,
-                PedidoStatus::ENTREGA_CLIENTE,
-                PedidoStatus::FINALIZADO
-            ]
-        );
-    }
-
+    /**
+     * Retorna o próximo status esperado no fluxo do pedido.
+     *
+     * @param Pedido $pedido
+     * @return PedidoStatus|null
+     */
     public static function proximoStatusEsperado(Pedido $pedido): ?PedidoStatus
     {
         $fluxo = self::fluxoPorTipo($pedido);
-
         $statusAtual = $pedido->statusAtual?->status;
+
         if (!$statusAtual) {
             return null;
         }
 
-        // Encontra o índice do status atual no fluxo
         $indice = array_search($statusAtual, $fluxo, true);
-
-        // Retorna o próximo status se existir
         return $indice !== false && isset($fluxo[$indice + 1])
             ? $fluxo[$indice + 1]
             : null;
     }
 
+    /**
+     * Calcula a data prevista para o próximo status.
+     *
+     * @param Pedido $pedido
+     * @return Carbon|null
+     */
     public static function previsaoProximoStatus(Pedido $pedido): ?Carbon
     {
         $statusAtual = $pedido->statusAtual?->status;
         $dataUltimoStatus = $pedido->statusAtual?->data_status;
         $proximoStatus = self::proximoStatusEsperado($pedido);
+
         if (!$statusAtual || !$dataUltimoStatus || !$proximoStatus) {
             return null;
         }
 
         $prazos = Configuracao::pegarTodosComoArray();
 
-        // Mapeia os status para as chaves de configuração correspondentes
         $mapa = [
             PedidoStatus::ENVIADO_FABRICA->value => 'prazo_envio_fabrica',
             PedidoStatus::PREVISAO_EMBARQUE_FABRICA->value => 'dias_previsao_embarque_fabrica',
@@ -141,14 +142,22 @@ class PedidoHelper
             PedidoStatus::DEVOLUCAO_CONSIGNACAO->value => 'prazo_consignacao',
         ];
 
-        $chavePrazo = $mapa[$proximoStatus->value] ?? null;
-        $dias = $chavePrazo && isset($prazos[$chavePrazo]) ? (int) $prazos[$chavePrazo] : null;
+        $chave = $mapa[$proximoStatus->value] ?? null;
+        $dias = $chave && isset($prazos[$chave]) ? (int) $prazos[$chave] : null;
 
-        if ($dias) {
-            return Carbon::parse($dataUltimoStatus)->addDays($dias);
-        }
-
-        return null;
+        return $dias ? Carbon::parse($dataUltimoStatus)->addDays($dias) : null;
     }
 
+    /**
+     * Retorna todos os status do fluxo principal.
+     *
+     * @return string[]
+     */
+    public static function fluxo(): array
+    {
+        return array_map(
+            fn($status) => $status->value,
+            self::fluxoPorTipo(new Pedido())
+        );
+    }
 }

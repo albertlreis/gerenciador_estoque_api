@@ -6,29 +6,50 @@ use Illuminate\Support\Collection;
 use Maatwebsite\Excel\Concerns\FromCollection;
 use Maatwebsite\Excel\Concerns\WithHeadings;
 
+/**
+ * Exporta uma coleção de pedidos para planilha Excel.
+ */
 class PedidosExport implements FromCollection, WithHeadings
 {
-    protected $pedidos;
+    /**
+     * @var Collection
+     */
+    protected Collection $pedidos;
 
+    /**
+     * Construtor
+     *
+     * @param Collection $pedidos
+     */
     public function __construct(Collection $pedidos)
     {
         $this->pedidos = $pedidos;
     }
 
-    public function collection()
+    /**
+     * Retorna a coleção formatada para exportação.
+     *
+     * @return Collection
+     */
+    public function collection(): Collection
     {
         return $this->pedidos->map(function ($pedido) {
             return [
-                $pedido->numero,
-                $pedido->data,
-                $pedido->cliente->nome ?? '',
-                $pedido->parceiro->nome ?? '',
-                number_format($pedido->valor_total , 2, ',', '.'),
-                ucfirst($pedido->status),
+                'numero' => $pedido->numero ?? '',
+                'data' => optional($pedido->data)->format('d/m/Y') ?? '',
+                'cliente' => $pedido->cliente->nome ?? '',
+                'parceiro' => $pedido->parceiro->nome ?? '',
+                'valor_total' => number_format((float) $pedido->valor_total, 2, ',', '.'),
+                'status' => ucfirst($pedido->status ?? ''),
             ];
         });
     }
 
+    /**
+     * Define os cabeçalhos da planilha.
+     *
+     * @return array<int, string>
+     */
     public function headings(): array
     {
         return [

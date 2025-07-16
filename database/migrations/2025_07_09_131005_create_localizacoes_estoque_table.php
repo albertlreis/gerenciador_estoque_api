@@ -15,7 +15,7 @@ return new class extends Migration
     {
         Schema::create('localizacoes_estoque', function (Blueprint $table) {
             $table->id();
-            $table->unsignedBigInteger('estoque_id');
+            $table->unsignedInteger('estoque_id');
             $table->string('corredor', 10)->nullable();
             $table->string('prateleira', 10)->nullable();
             $table->string('coluna', 10)->nullable();

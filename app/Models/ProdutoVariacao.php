@@ -85,4 +85,10 @@ class ProdutoVariacao extends Model
         return $this->outlets->sum('quantidade_restante') ?? 0;
     }
 
+    public function estoquesComLocalizacao(): HasMany
+    {
+        return $this->hasMany(Estoque::class, 'id_variacao')
+            ->with(['localizacao', 'deposito']);
+    }
+
 }

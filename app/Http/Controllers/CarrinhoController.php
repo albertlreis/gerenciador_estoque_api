@@ -21,14 +21,14 @@ class CarrinhoController extends Controller
      */
     public function index(): AnonymousResourceCollection
     {
-        $query = Carrinho::where('status', 'rascunho');
+        $carrinho = Carrinho::where('status', 'rascunho');
 
         if (!AuthHelper::hasPermissao('carrinhos.visualizar.todos')) {
-            $query->where('id_usuario', Auth::id());
+            $carrinho->where('id_usuario', Auth::id());
         }
 
         return CarrinhoResource::collection(
-            $query->with([
+            $carrinho->with([
                 'cliente',
                 'itens.variacao.outlet',
                 'itens.variacao.outlets',

@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\FornecedorController;
+use App\Http\Controllers\LocalizacaoEstoqueController;
 use App\Http\Controllers\ProdutoVariacaoOutletController;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\CarrinhoItemController;
@@ -76,6 +77,8 @@ Route::middleware('auth:sanctum')->prefix('v1')->group(function () {
         Route::put('produtos/{produto}/movimentacoes/{movimentacao}', [EstoqueMovimentacaoController::class, 'update']);
         Route::delete('produtos/{produto}/movimentacoes/{movimentacao}', [EstoqueMovimentacaoController::class, 'destroy']);
     });
+
+    Route::apiResource('localizacoes-estoque', LocalizacaoEstoqueController::class);
 
     // Estoque por depósito
     Route::apiResource('depositos.estoque', EstoqueController::class)->shallow();

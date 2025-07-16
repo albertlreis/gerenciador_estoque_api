@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class LocalizacaoEstoque extends Model
 {
@@ -23,8 +24,8 @@ class LocalizacaoEstoque extends Model
     /**
      * Estoque relacionado
      */
-    public function estoque()
+    public function estoque(): BelongsTo
     {
-        return $this->belongsTo(Estoque::class);
+        return $this->belongsTo(Estoque::class, 'estoque_id');
     }
 }

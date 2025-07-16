@@ -8,13 +8,26 @@ use Illuminate\Support\Facades\DB;
 
 class EstoqueService
 {
+    /**
+     * Consulta de estoque agrupado por produto e depósito, com filtros e paginação.
+     *
+     * @param string|null $produto
+     * @param int|null $deposito
+     * @param array|null $periodo
+     * @param int $perPage
+     * @return LengthAwarePaginator
+     */
     public function obterEstoqueAgrupadoPorProdutoEDeposito(
         ?string $produto = null,
         ?int $deposito = null,
         ?array $periodo = null,
         int $perPage = 10
     ): LengthAwarePaginator {
-        $query = ProdutoVariacao::with(['produto', 'atributos', 'estoque', 'estoque.deposito'])
+        $query = ProdutoVariacao::with([
+            'produto',
+            'atributos',
+            'estoquesComLocalizacao'
+        ])
             ->withSum(['estoque as quantidade_estoque' => function ($q) use ($deposito, $periodo) {
                 if ($deposito) {
                     $q->where('id_deposito', $deposito);
@@ -26,14 +39,22 @@ class EstoqueService
 
         if ($produto) {
             $query->whereHas('produto', function ($q) use ($produto) {
-                $q->where('nome', 'like', "%{$produto}%")
-                    ->orWhere('referencia', 'like', "%{$produto}%");
+                $q->where('nome', 'like', "%$produto%")
+                    ->orWhere('referencia', 'like', "%$produto%");
             });
         }
 
         return $query->paginate($perPage);
     }
 
+    /**
+     * Gera o resumo de estoque com totais.
+     *
+     * @param string|null $produto
+     * @param int|null $deposito
+     * @param array|null $periodo
+     * @return array<string, int>
+     */
     public function gerarResumoEstoque(
         ?string $produto = null,
         ?int $deposito = null,
@@ -45,8 +66,8 @@ class EstoqueService
 
         if ($produto) {
             $estoqueQuery->where(function ($q) use ($produto) {
-                $q->where('produtos.nome', 'like', "%{$produto}%")
-                    ->orWhere('produtos.referencia', 'like', "%{$produto}%");
+                $q->where('produtos.nome', 'like', "%$produto%")
+                    ->orWhere('produtos.referencia', 'like', "%$produto%");
             });
         }
 

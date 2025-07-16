@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class Estoque extends Model
 {
@@ -38,9 +39,9 @@ class Estoque extends Model
         return $this->belongsTo(Deposito::class, 'id_deposito')->withDefault();
     }
 
-    public function localizacao()
+    public function localizacao(): HasOne
     {
-        return $this->hasOne(LocalizacaoEstoque::class);
+        return $this->hasOne(LocalizacaoEstoque::class, 'estoque_id');
     }
 
 }

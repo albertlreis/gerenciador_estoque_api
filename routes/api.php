@@ -135,6 +135,7 @@ Route::middleware('auth:sanctum')->prefix('v1')->group(function () {
         Route::get('/', [PedidoFabricaController::class, 'index']);
         Route::post('/', [PedidoFabricaController::class, 'store']);
         Route::get('{id}', [PedidoFabricaController::class, 'show']);
+        Route::put('{id}', [PedidoFabricaController::class, 'update']);
         Route::patch('{id}/status', [PedidoFabricaController::class, 'updateStatus']);
         Route::delete('{id}', [PedidoFabricaController::class, 'destroy']);
     });

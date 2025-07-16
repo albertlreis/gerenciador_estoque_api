@@ -39,12 +39,19 @@ class PedidoRepository
         }
 
         if ($request->filled('busca')) {
-            $busca = strtolower($request->busca);
+            $busca = strtolower(iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $request->busca));
+
             $query->where(function ($q) use ($busca) {
-                $q->orWhere('numero_externo', 'like', "%$busca%")
-                    ->orWhereHas('cliente', fn($q) => $q->whereRaw('LOWER(nome) LIKE ?', ["%$busca%"]))
-                    ->orWhereHas('parceiro', fn($q) => $q->whereRaw('LOWER(nome) LIKE ?', ["%$busca%"]))
-                    ->orWhereHas('usuario', fn($q) => $q->whereRaw('LOWER(nome) LIKE ?', ["%$busca%"]));
+                $q->orWhereRaw("LOWER(numero_externo) COLLATE utf8mb4_general_ci LIKE ?", ["%$busca%"])
+                    ->orWhereHas('cliente', fn($sub) =>
+                    $sub->whereRaw("LOWER(nome) COLLATE utf8mb4_general_ci LIKE ?", ["%$busca%"])
+                    )
+                    ->orWhereHas('parceiro', fn($sub) =>
+                    $sub->whereRaw("LOWER(nome) COLLATE utf8mb4_general_ci LIKE ?", ["%$busca%"])
+                    )
+                    ->orWhereHas('usuario', fn($sub) =>
+                    $sub->whereRaw("LOWER(nome) COLLATE utf8mb4_general_ci LIKE ?", ["%$busca%"])
+                    );
             });
         }
 

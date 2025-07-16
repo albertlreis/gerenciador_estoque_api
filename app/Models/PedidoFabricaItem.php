@@ -13,6 +13,7 @@ class PedidoFabricaItem extends Model
         'pedido_fabrica_id',
         'produto_variacao_id',
         'quantidade',
+        'deposito_id',
         'pedido_venda_id',
         'observacoes',
     ];
@@ -20,6 +21,11 @@ class PedidoFabricaItem extends Model
     public function pedidoFabrica(): BelongsTo
     {
         return $this->belongsTo(PedidoFabrica::class, 'pedido_fabrica_id');
+    }
+
+    public function deposito(): BelongsTo
+    {
+        return $this->belongsTo(Deposito::class);
     }
 
     public function variacao(): BelongsTo

@@ -55,12 +55,12 @@ class ProdutoVariacao extends Model
         // Evita lazy loading também para atributos
         $atributos = $this->relationLoaded('atributos') ? $this->atributos : collect();
 
-        $atributosTexto = $atributos->map(fn($attr) => "{$attr->atributo}: {$attr->valor}")
+        $atributosTexto = $atributos->map(fn($attr) => "$attr->atributo: $attr->valor")
             ->implode(' - ');
 
         $complemento = trim($atributosTexto ?: '');
 
-        return trim("{$produtoNome} - {$complemento}") ?: '-';
+        return trim("$produtoNome - $complemento") ?: '-';
     }
 
     public function outlets(): HasMany

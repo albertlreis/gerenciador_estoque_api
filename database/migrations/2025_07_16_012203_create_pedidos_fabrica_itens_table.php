@@ -22,6 +22,8 @@ return new class extends Migration
                 ->on('produto_variacoes')
                 ->onDelete('cascade');
             $table->integer('quantidade');
+            $table->unsignedInteger('deposito_id')->nullable();
+            $table->foreign('deposito_id')->references('id')->on('depositos')->nullOnDelete();
             $table->unsignedInteger('pedido_venda_id')->nullable();
             $table->foreign('pedido_venda_id')
                 ->references('id')

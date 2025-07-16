@@ -70,25 +70,28 @@ class ProdutoVariacaoController extends Controller
     public function buscar(Request $request): JsonResponse
     {
         $query = ProdutoVariacao::query()
-            ->with('produto')
-//            ->limit(50)
-            ->orderBy('nome');
+            ->with(['produto', 'atributos'])
+            ->orderBy('id', 'desc');
 
         if ($request->filled('search')) {
-            $busca = $request->input('search');
+            $busca = strtolower(iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $request->input('search')));
+
             $query->where(function ($q) use ($busca) {
-                $q->where('nome', 'like', "%{$busca}%")
-                    ->orWhere('referencia', 'like', "%{$busca}%")
-                    ->orWhere('codigo_barras', 'like', "%{$busca}%");
+                $q->whereRaw("LOWER(referencia) COLLATE utf8mb4_general_ci LIKE ?", ["%{$busca}%"])
+                    ->orWhereRaw("LOWER(codigo_barras) COLLATE utf8mb4_general_ci LIKE ?", ["%{$busca}%"])
+                    ->orWhereHas('produto', function ($qp) use ($busca) {
+                        $qp->whereRaw("LOWER(nome) COLLATE utf8mb4_general_ci LIKE ?", ["%{$busca}%"]);
+                    });
             });
         }
 
+        $variacoes = $query->get();
+
         return response()->json(
-            $query->get()->map(function ($v) {
+            $variacoes->map(function ($v) {
                 return [
                     'id' => $v->id,
-                    'nome_completo' => $v->nome_completo,
-                    'descricao' => $v->nome_completo,
+                    'nome_completo' => $v->nome_completo
                 ];
             })
         );

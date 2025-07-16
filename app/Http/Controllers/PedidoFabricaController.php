@@ -13,7 +13,7 @@ class PedidoFabricaController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        $query = PedidoFabrica::with('itens.variacao.produto');
+        $query = PedidoFabrica::with('itens.variacao.produto', 'itens.deposito');
 
         if ($request->has('status')) {
             $query->where('status', $request->status);
@@ -48,6 +48,7 @@ class PedidoFabricaController extends Controller
                 'produto_variacao_id' => $item['produto_variacao_id'],
                 'quantidade' => $item['quantidade'],
                 'pedido_venda_id' => $item['pedido_venda_id'] ?? null,
+                'deposito_id' => $item['deposito_id'] ?? null,
                 'observacoes' => $item['observacoes'] ?? null,
             ]);
         }
@@ -94,5 +95,40 @@ class PedidoFabricaController extends Controller
         $pedido->delete();
 
         return response()->json(['message' => 'Pedido removido com sucesso.']);
+    }
+
+    public function update(Request $request, int $id): JsonResponse
+    {
+        $pedido = PedidoFabrica::findOrFail($id);
+
+        $data = $request->validate([
+            'data_previsao_entrega' => 'nullable|date',
+            'observacoes' => 'nullable|string',
+            'itens' => 'required|array|min:1',
+            'itens.*.produto_variacao_id' => 'required|exists:produto_variacoes,id',
+            'itens.*.quantidade' => 'required|integer|min:1',
+            'itens.*.pedido_venda_id' => 'nullable|exists:pedidos,id',
+            'itens.*.deposito_id' => 'nullable|exists:depositos,id',
+            'itens.*.observacoes' => 'nullable|string',
+        ]);
+
+        $pedido->update([
+            'data_previsao_entrega' => $data['data_previsao_entrega'] ?? null,
+            'observacoes' => $data['observacoes'] ?? null,
+        ]);
+
+        $pedido->itens()->delete();
+
+        foreach ($data['itens'] as $item) {
+            $pedido->itens()->create([
+                'produto_variacao_id' => $item['produto_variacao_id'],
+                'quantidade' => $item['quantidade'],
+                'pedido_venda_id' => $item['pedido_venda_id'] ?? null,
+                'deposito_id' => $item['deposito_id'] ?? null,
+                'observacoes' => $item['observacoes'] ?? null,
+            ]);
+        }
+
+        return response()->json($pedido->load('itens.variacao.produto'));
     }
 }

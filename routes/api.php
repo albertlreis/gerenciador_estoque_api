@@ -3,6 +3,7 @@
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\FornecedorController;
 use App\Http\Controllers\LocalizacaoEstoqueController;
+use App\Http\Controllers\PedidoFabricaController;
 use App\Http\Controllers\ProdutoVariacaoOutletController;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\CarrinhoItemController;
@@ -128,6 +129,14 @@ Route::middleware('auth:sanctum')->prefix('v1')->group(function () {
         Route::post('{id}/devolucao', [ConsignacaoController::class, 'registrarDevolucao']);
         Route::get('{id}', [ConsignacaoController::class, 'show']);
         Route::get('/{id}/pdf', [ConsignacaoController::class, 'gerarPdf']);
+    });
+
+    Route::prefix('pedidos-fabrica')->group(function () {
+        Route::get('/', [PedidoFabricaController::class, 'index']);
+        Route::post('/', [PedidoFabricaController::class, 'store']);
+        Route::get('{id}', [PedidoFabricaController::class, 'show']);
+        Route::patch('{id}/status', [PedidoFabricaController::class, 'updateStatus']);
+        Route::delete('{id}', [PedidoFabricaController::class, 'destroy']);
     });
 
 });

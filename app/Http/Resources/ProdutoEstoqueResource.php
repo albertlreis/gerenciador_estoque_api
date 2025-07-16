@@ -24,11 +24,13 @@ class ProdutoEstoqueResource extends JsonResource
 
         return [
             'produto_id' => $this->produto_id ?? $this->produto?->id,
+            'estoque_id' => $estoque?->id,
             'produto_nome' => $this->nome_completo,
             'deposito_nome' => $deposito?->nome ?? '—',
             'quantidade' => (int) $this->quantidade_estoque,
 
             'localizacao' => [
+                'id' => $localizacao?->id,
                 'corredor' => $localizacao?->corredor,
                 'prateleira' => $localizacao?->prateleira,
                 'coluna' => $localizacao?->coluna,

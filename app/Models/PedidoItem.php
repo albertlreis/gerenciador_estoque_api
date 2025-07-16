@@ -26,6 +26,8 @@ class PedidoItem extends Model
     protected $casts = [
         'preco_unitario' => 'decimal:2',
         'subtotal' => 'decimal:2',
+        'entrega_pendente' => 'boolean',
+        'data_liberacao_entrega' => 'datetime',
     ];
 
     public function pedido(): BelongsTo
@@ -36,5 +38,13 @@ class PedidoItem extends Model
     public function variacao(): BelongsTo
     {
         return $this->belongsTo(ProdutoVariacao::class, 'id_variacao');
+    }
+
+    /**
+     * Retorna se o item está com entrega pendente (sem liberação).
+     */
+    public function getIsEntregaPendenteAttribute(): bool
+    {
+        return $this->entrega_pendente && is_null($this->data_liberacao_entrega);
     }
 }

@@ -104,7 +104,8 @@ Route::middleware('auth:sanctum')->prefix('v1')->group(function () {
     Route::delete('pedidos/status/{statusHistorico}', [PedidoStatusHistoricoController::class, 'cancelarStatus']);
     Route::apiResource('pedidos', PedidoController::class);
     Route::apiResource('pedidos.itens', PedidoItemController::class)->parameters(['itens' => 'item']);
-
+    Route::get('/pedido-itens', [PedidoItemController::class, 'indexGlobal']);
+    Route::post('/pedido-itens/{id}/liberar-entrega', [PedidoItemController::class, 'liberarEntrega']);
 
     Route::get('carrinhos', [CarrinhoController::class, 'index']);
     Route::get('carrinhos/{id}', [CarrinhoController::class, 'show']);

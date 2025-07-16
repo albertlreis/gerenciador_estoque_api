@@ -111,12 +111,27 @@ class PedidosSeeder extends Seeder
                 $preco = fake()->randomFloat(2, 300, 2000);
                 $subtotal = $quantidade * $preco;
 
+                $entregaPendente = !$consignado && fake()->boolean(40);
+                $observacoesEntrega = $entregaPendente
+                    ? fake()->randomElement([
+                        'Aguardando término da obra.',
+                        'Entrega só após o dia 20.',
+                        'Cliente pediu para reservar por tempo indeterminado.',
+                        'Produto será retirado somente após reforma.',
+                        'Entregar apenas quando o cliente avisar.',
+                        null
+                    ])
+                    : null;
+
                 $itens[] = [
                     'id_pedido' => $pedidoId,
                     'id_variacao' => $idVariacao,
                     'quantidade' => $quantidade,
                     'preco_unitario' => $preco,
                     'subtotal' => $subtotal,
+                    'entrega_pendente' => $entregaPendente,
+                    'data_liberacao_entrega' => null,
+                    'observacao_entrega_pendente' => $observacoesEntrega,
                     'created_at' => $now,
                     'updated_at' => $now,
                 ];

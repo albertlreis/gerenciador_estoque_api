@@ -32,9 +32,6 @@ class LocalizacaoEstoqueResource extends JsonResource
             'coluna' => $this->coluna,
             'nivel' => $this->nivel,
             'observacoes' => $this->observacoes,
-
-            // Dados detalhados do estoque
-            'estoque' => new EstoqueResource($this->whenLoaded('estoque')),
         ];
     }
 }

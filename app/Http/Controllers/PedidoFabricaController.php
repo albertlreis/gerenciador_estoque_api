@@ -77,7 +77,7 @@ class PedidoFabricaController extends Controller
      */
     public function show(int $id): JsonResponse
     {
-        $pedido = PedidoFabrica::with('itens.variacao.produto')->findOrFail($id);
+        $pedido = PedidoFabrica::with(['itens.variacao.produto', 'itens.variacao.atributos'])->findOrFail($id);
         return response()->json($pedido);
     }
 

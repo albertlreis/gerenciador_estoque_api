@@ -8,6 +8,7 @@ use Illuminate\Http\Resources\Json\JsonResource;
  * @property int $id
  * @property int $produto_id
  * @property string $nome
+ * @property string $nome_completo
  * @property float $preco
  * @property float|null $preco_promocional
  * @property float $custo
@@ -32,6 +33,7 @@ class ProdutoVariacaoResource extends JsonResource
             'id' => $this->id,
             'produto_id' => $this->produto_id,
             'nome' => $this->nome,
+            'nome_completo' => $this->nome_completo,
             'referencia' => $this->referencia,
             'codigo_barras' => $this->codigo_barras,
             'preco' => $preco,

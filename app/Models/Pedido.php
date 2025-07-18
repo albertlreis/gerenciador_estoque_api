@@ -80,4 +80,12 @@ class Pedido extends Model
     {
         return Attribute::get(fn () => $this->statusAtual?->status);
     }
+
+    /**
+     * @return \Illuminate\Database\Eloquent\Relations\HasMany<\App\Models\Devolucao>
+     */
+    public function devolucoes(): HasMany
+    {
+        return $this->hasMany(Devolucao::class);
+    }
 }

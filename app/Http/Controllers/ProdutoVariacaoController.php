@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Resources\ProdutoVariacaoResource;
 use App\Models\Produto;
 use App\Models\ProdutoVariacao;
 use App\Services\ProdutoVariacaoService;
@@ -13,7 +14,11 @@ class ProdutoVariacaoController extends Controller
 {
     public function index(Produto $produto)
     {
-        return response()->json($produto->variacoes);
+        $variacoes = $produto->variacoes()
+            ->with(['atributos', 'produto'])
+            ->get();
+
+        return ProdutoVariacaoResource::collection($variacoes);
     }
 
     public function store(Request $request, Produto $produto)

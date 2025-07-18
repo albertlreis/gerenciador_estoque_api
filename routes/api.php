@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\ConsignacaoRelatorioController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\DevolucaoController;
 use App\Http\Controllers\EstoqueRelatorioController;
 use App\Http\Controllers\FornecedorController;
 use App\Http\Controllers\LocalizacaoEstoqueController;
@@ -148,5 +149,9 @@ Route::middleware('auth:sanctum')->prefix('v1')->group(function () {
         Route::get('pedidos', [PedidosRelatorioController::class, 'pedidosPorPeriodo']);
         Route::get('consignacoes/ativas', [ConsignacaoRelatorioController::class, 'consignacoesAtivas']);
     });
+
+    Route::post('devolucoes', [DevolucaoController::class, 'store']);
+    Route::post('devolucoes/{id}/approve', [DevolucaoController::class, 'approve']);
+    Route::post('devolucoes/{id}/reject',  [DevolucaoController::class, 'reject']);
 
 });

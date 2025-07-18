@@ -1,9 +1,12 @@
 <?php
 
+use App\Http\Controllers\ConsignacaoRelatorioController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\EstoqueRelatorioController;
 use App\Http\Controllers\FornecedorController;
 use App\Http\Controllers\LocalizacaoEstoqueController;
 use App\Http\Controllers\PedidoFabricaController;
+use App\Http\Controllers\PedidosRelatorioController;
 use App\Http\Controllers\ProdutoVariacaoOutletController;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\CarrinhoItemController;
@@ -138,6 +141,12 @@ Route::middleware('auth:sanctum')->prefix('v1')->group(function () {
         Route::put('{id}', [PedidoFabricaController::class, 'update']);
         Route::patch('{id}/status', [PedidoFabricaController::class, 'updateStatus']);
         Route::delete('{id}', [PedidoFabricaController::class, 'destroy']);
+    });
+
+    Route::prefix('relatorios')->group(function () {
+        Route::get('estoque/atual', [EstoqueRelatorioController::class, 'estoqueAtual']);
+        Route::get('pedidos', [PedidosRelatorioController::class, 'pedidosPorPeriodo']);
+        Route::get('consignacoes/ativas', [ConsignacaoRelatorioController::class, 'consignacoesAtivas']);
     });
 
 });

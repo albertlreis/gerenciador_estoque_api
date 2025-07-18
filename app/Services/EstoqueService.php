@@ -44,6 +44,14 @@ class EstoqueService
             });
         }
 
+        if ($deposito) {
+            $query->whereHas('estoquesComLocalizacao', function ($q) use ($deposito) {
+                $q->where('id_deposito', $deposito);
+            });
+        }
+
+        $query->toSql();
+
         return $query->paginate($perPage);
     }
 

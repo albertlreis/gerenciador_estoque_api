@@ -79,6 +79,9 @@ class PedidoService
             'itens.variacao.produto.imagens',
             'itens.variacao.atributos',
             'historicoStatus.usuario:id,nome',
+            'devolucoes.itens.pedidoItem.variacao.produto',
+            'devolucoes.itens.trocaItens.variacaoNova.produto',
+            'devolucoes.credito',
         ])->findOrFail($pedidoId);
 
         return new PedidoCompletoResource($pedido);

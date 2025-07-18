@@ -52,6 +52,7 @@ class PedidoListResource extends JsonResource
             'previsao' => $previsao?->toDateString(),
             'atrasado' => $atrasado,
             'observacoes' => $this->observacoes,
+            'tem_devolucao' => $this->devolucoes->isNotEmpty(),
         ];
     }
 }

@@ -31,6 +31,7 @@ class PedidoCompletoResource extends JsonResource
             'observacoes' => $this->observacoes,
             'itens' => PedidoItemResource::collection($this->itens),
             'historico' => PedidoStatusResource::collection($this->historicoStatus->sortBy('data_status')->values()),
+            'devolucoes' => PedidoDevolucaoResource::collection($this->whenLoaded('devolucoes')),
         ];
     }
 }

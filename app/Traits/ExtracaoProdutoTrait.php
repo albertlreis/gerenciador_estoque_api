@@ -2,6 +2,8 @@
 
 namespace App\Traits;
 
+use Illuminate\Support\Facades\Log;
+
 /**
  * Trait com métodos auxiliares para extrair dados de produtos, medidas e atributos do texto.
  */
@@ -15,29 +17,83 @@ trait ExtracaoProdutoTrait
      */
     protected function extrairItens(string $texto): array
     {
-        $linhas = explode("\n", $texto);
+        $linhas = preg_split('/\r\n|\n|\r/', $texto);
         $itens = [];
+        $bloco = '';
+
+        $padraoQuantidade = '/^\d{1,2}\.\d{4}/';
+        $padraoValor = '/\d{1,3}(?:\.\d{3})*,\d{2}$/';
 
         foreach ($linhas as $linha) {
-            if (!preg_match('/\b\d+\b.*?x/i', $linha)) {
-                continue;
+            $linha = trim($linha);
+            if ($linha === '') continue;
+
+            if (preg_match($padraoQuantidade, $linha)) {
+                if (!empty($bloco)) {
+                    $item = $this->processarBlocoProduto($bloco);
+                    if ($item) $itens[] = $item;
+                    $bloco = '';
+                }
             }
 
-            $descricao = trim($linha);
-            $produto = $this->extrairProduto($descricao);
+            $bloco .= ' ' . $linha;
 
-            $itens[] = [
-                'descricao' => $descricao,
-                'quantidade' => $this->extrairQuantidade($descricao),
-                'valor' => $this->extrairPreco($descricao),
-                'ref' => $this->extrairReferencia($descricao),
-                'nome' => $produto['nome'],
-                'fixos' => $produto['fixos'],
-                'atributos' => $produto['atributos'],
-            ];
+            if (preg_match($padraoValor, $linha)) {
+                $item = $this->processarBlocoProduto($bloco);
+                if ($item) $itens[] = $item;
+                $bloco = '';
+            }
+        }
+
+        if (!empty($bloco)) {
+            $item = $this->processarBlocoProduto($bloco);
+            if ($item) $itens[] = $item;
         }
 
         return $itens;
+    }
+
+    /**
+     * Processa um bloco de texto referente a um item do pedido.
+     */
+    protected function processarBlocoProduto(string $bloco): ?array
+    {
+        $bloco = trim(preg_replace('/\s+/', ' ', $bloco));
+
+        if (!preg_match('/(?<valor>\d{1,3}(?:\.\d{3})*,\d{2})$/', $bloco, $valorMatch)) {
+            return null;
+        }
+
+        $valor = (float) str_replace(['.', ','], ['', '.'], $valorMatch['valor']);
+        $blocoSemValor = trim(str_replace($valorMatch[0], '', $bloco));
+
+        if (!preg_match('/^(?<quantidade>\d{1,2}\.\d{4})\s*(?:(?<tipo>PEDIDO|PRONTA\s+ENTREGA))?\s*(?<ref>[A-Z0-9\-]+)?\s+(?<descricao>.+)$/i', $blocoSemValor, $match)) {
+            return null;
+        }
+
+        $quantidade = (float) str_replace(',', '.', $match['quantidade']);
+        $tipo = strtoupper(trim($match['tipo'] ?? ''));
+        $ref = strtoupper(trim($match['ref'] ?? ''));
+
+        $descricaoOriginal = trim($match['descricao']);
+        $descricaoNormalizada = $this->normalizarDescricao($descricaoOriginal);
+
+        if ($quantidade <= 0 || $valor <= 0 || mb_strlen($descricaoNormalizada) < 10) {
+            return null;
+        }
+
+        $produto = $this->extrairProduto($descricaoNormalizada);
+
+        return [
+            'descricao' => $descricaoNormalizada,
+            'quantidade' => $quantidade,
+            'valor' => $valor,
+            'ref' => $ref,
+            'tipo' => $tipo,
+            'nome' => $produto['nome'],
+            'fixos' => $produto['fixos'],
+            'atributos' => $produto['atributos'],
+        ];
     }
 
     /**
@@ -67,59 +123,113 @@ trait ExtracaoProdutoTrait
      */
     protected function extrairProduto(string $descricao): array
     {
-        $nome = $this->extrairNomeProduto($descricao);
-        $medidas = $this->extrairMedidas($descricao);
-        $atributos = $this->extrairAtributos($descricao, $nome);
+        $descricao = $this->normalizarDescricao($descricao);
 
         return [
-            'nome' => $nome,
-            'fixos' => $medidas,
-            'atributos' => $atributos,
+            'nome' => $this->extrairNomeProduto($descricao),
+            'fixos' => $this->extrairMedidas($descricao),
+            'atributos' => $this->extrairAtributos($descricao),
         ];
     }
 
     /**
-     * Extrai nome base do produto.
+     * Extrai nome base do produto, removendo medidas, atributos e espaços invisíveis.
      *
      * @param string $descricao
      * @return string
      */
     protected function extrairNomeProduto(string $descricao): string
     {
-        if (preg_match('/^(.*?)\s+\d{1,3},?\d{0,2}\s*[x×]/i', $descricao, $match)) {
-            return trim($match[1]);
+        $descricao = $this->normalizarDescricao($descricao);
+
+        // Se contiver '*', divide e pega antes
+        if (str_contains($descricao, '*')) {
+            [$possivelNome] = explode('*', $descricao, 2);
+        } else {
+            // Interrompe antes de atributos ou medidas (mesmo coladas)
+            preg_match(
+                '/^(.*?)(?=\s*(COR\b|TECIDO\b|MED\b|PESP\b|MÁRMORE\b|PRONTA\b|PEDIDO\b)|\d{2,3}\s*[xXØ]\s*\d{1,3}(?:\s*[xXØ]\s*\d{1,3})?(?:\s*CM)?\b)/iu',
+                $descricao,
+                $match
+            );
+
+            $possivelNome = $match[1] ?? $descricao;
         }
 
-        return mb_substr($descricao, 0, 50);
+        // Remove medidas coladas ao final como "53X5X81CM", "260X122X78"
+        $possivelNome = preg_replace('/\d{2,3}\s*[xXØ]\s*\d{1,3}(?:\s*[xXØ]\s*\d{1,3})?(?:\s*CM)?\b/iu', '', $possivelNome);
+
+        // Limpeza final
+        $nome = trim(preg_replace('/[^\p{L}\p{N} \/]/u', '', $possivelNome));
+        $nome = preg_replace('/\s+/', ' ', $nome);
+
+        Log::info($nome);
+
+        return $nome;
     }
 
+
     /**
-     * Extrai medidas de largura, profundidade e altura.
+     * Extrai medidas de largura, profundidade e altura da descrição.
      *
      * @param string $descricao
-     * @return array
+     * @return array{largura: int|null, profundidade: int|null, altura: int|null}
      */
     protected function extrairMedidas(string $descricao): array
     {
-        if (preg_match('/(\d{1,3},?\d{0,2})\s*[x×]\s*(\d{1,3},?\d{0,2})\s*[x×]\s*(\d{1,3},?\d{0,2})/i', $descricao, $match)) {
+        $descricao = mb_strtoupper($this->normalizarDescricao($descricao));
+        $descricao = str_replace(['Ø', 'X'], 'x', $descricao);
+
+        // Captura medidas tipo 53x40x75 ou 53 x 40 x 75 (com ou sem espaços)
+        if (preg_match('/(\d{2,3})\s*x\s*(\d{2,3})\s*x\s*(\d{2,3})/', $descricao, $matches)) {
             return [
-                'largura' => str_replace(',', '.', $match[1]),
-                'profundidade' => str_replace(',', '.', $match[2]),
-                'altura' => str_replace(',', '.', $match[3]),
+                'largura' => (int) $matches[1],
+                'profundidade' => (int) $matches[2],
+                'altura' => (int) $matches[3],
             ];
         }
 
-        return ['largura' => null, 'profundidade' => null, 'altura' => null];
+        // Captura medidas parciais tipo 53x40 (sem altura)
+        if (preg_match('/(\d{2,3})\s*x\s*(\d{2,3})/', $descricao, $matches)) {
+            return [
+                'largura' => (int) $matches[1],
+                'profundidade' => (int) $matches[2],
+                'altura' => null,
+            ];
+        }
+
+        // Captura medidas tipo 53x5x81 ou coladas como 53x5x81 (sem espaços)
+        if (preg_match('/(\d{2,3})x(\d{1,3})(?:x(\d{1,3}))?/i', $descricao, $matches)) {
+            return [
+                'largura' => (int) $matches[1],
+                'profundidade' => (int) $matches[2],
+                'altura' => isset($matches[3]) ? (int) $matches[3] : null,
+            ];
+        }
+
+        // Captura padrão colado como 53X5X81CM no nome (sem separadores visuais)
+        if (preg_match('/(\d{2,3})\s*[xX]\s*(\d{1,3})\s*[xX]\s*(\d{1,3})/u', $descricao, $matchAlt)) {
+            return [
+                'largura' => (int) $matchAlt[1],
+                'profundidade' => (int) $matchAlt[2],
+                'altura' => (int) $matchAlt[3],
+            ];
+        }
+
+        return [
+            'largura' => null,
+            'profundidade' => null,
+            'altura' => null,
+        ];
     }
 
     /**
      * Extrai atributos (cor, tecido, acabamento, observações).
      *
      * @param string $descricao
-     * @param string $nome
      * @return array
      */
-    protected function extrairAtributos(string $descricao, string $nome): array
+    protected function extrairAtributos(string $descricao): array
     {
         $atributos = [
             'cores' => [],
@@ -128,25 +238,24 @@ trait ExtracaoProdutoTrait
             'observacoes' => [],
         ];
 
-        $partes = preg_split('/\*+/', $descricao);
+        $descricao = $this->normalizarDescricao($descricao);
 
-        foreach ($partes as $parte) {
-            $parte = trim($parte);
-            if ($parte === '' || stripos($parte, $nome) !== false) {
-                continue;
+        $mapas = [
+            'cores' => ['COR DO FERRO', 'COR INOX', 'COR'],
+            'tecidos' => ['TECIDO', 'TEC'],
+            'acabamentos' => ['PESP', 'MÁRMORE', 'MARMORE'],
+        ];
+
+        foreach ($mapas as $grupo => $chaves) {
+            foreach ($chaves as $chave) {
+                if (preg_match('/' . preg_quote($chave, '/') . '[:\s]*([^:*]+)(?=\s+[A-Z]{3,}|$)/iu', $descricao, $match)) {
+                    $atributos[$grupo][] = trim($match[1]);
+                }
             }
+        }
 
-            $parteUpper = mb_strtoupper($parte, 'UTF-8');
-
-            if (str_contains($parteUpper, 'COR')) {
-                $atributos['cores'][] = trim(str_ireplace('COR', '', $parte));
-            } elseif (str_contains($parteUpper, 'TECIDO')) {
-                $atributos['tecidos'][] = trim(str_ireplace('TECIDO', '', $parte));
-            } elseif (str_contains($parteUpper, 'ACABAMENTO')) {
-                $atributos['acabamentos'][] = trim(str_ireplace('ACABAMENTO', '', $parte));
-            } else {
-                $atributos['observacoes'][] = $parte;
-            }
+        if (preg_match('/\(([^)]+)\)/u', $descricao, $matchObs)) {
+            $atributos['observacoes'][] = trim($matchObs[1]);
         }
 
         return $atributos;
@@ -192,5 +301,19 @@ trait ExtracaoProdutoTrait
             return trim($match[1]);
         }
         return null;
+    }
+
+    /**
+     * Normaliza a descrição removendo símbolos especiais, espaços invisíveis e excesso de espaços.
+     *
+     * @param string $descricao
+     * @return string
+     */
+    protected function normalizarDescricao(string $descricao): string
+    {
+        $descricao = str_replace(['Ø', "\xC2\xA0"], ' ', $descricao);
+        $descricao = preg_replace('/[\x{2000}-\x{200B}]/u', ' ', $descricao);
+        $descricao = preg_replace('/[^\p{L}\p{N}\*\:\(\)\/\-\.\, ]+/u', '', $descricao);
+        return preg_replace('/\s+/', ' ', trim($descricao));
     }
 }

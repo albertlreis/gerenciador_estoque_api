@@ -14,6 +14,7 @@ use App\Helpers\StringHelper;
 use App\Traits\ExtracaoClienteTrait;
 use App\Traits\ExtracaoProdutoTrait;
 use App\Services\Parsers\PedidoPDFParser;
+use Exception;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -36,7 +37,7 @@ class ImportacaoPedidoService
      * @return \Illuminate\Http\JsonResponse
      * @throws ValidationException
      */
-    public function importarPDF(Request $request)
+    public function importarPDF(Request $request): JsonResponse
     {
         $validator = Validator::make($request->all(), [
             'arquivo' => 'required|file|mimes:pdf',
@@ -120,7 +121,7 @@ class ImportacaoPedidoService
 
                 if (!$variacao && !empty($item['ref']) && !empty($item['nome'])) {
                     if (empty($item['id_categoria'])) {
-                        throw new \Exception("Item '{$item['descricao']}' está sem categoria definida.");
+                        throw new Exception("Item '{$item['descricao']}' está sem categoria definida.");
                     }
 
                     $produto = Produto::firstOrCreate([

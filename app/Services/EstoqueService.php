@@ -26,7 +26,11 @@ class EstoqueService
         $query = ProdutoVariacao::with([
             'produto',
             'atributos',
-            'estoquesComLocalizacao'
+            'estoquesComLocalizacao' => function ($q) use ($deposito) {
+                if ($deposito) {
+                    $q->where('id_deposito', $deposito);
+                }
+            }
         ])
             ->withSum(['estoque as quantidade_estoque' => function ($q) use ($deposito, $periodo) {
                 if ($deposito) {
@@ -49,8 +53,6 @@ class EstoqueService
                 $q->where('id_deposito', $deposito);
             });
         }
-
-        $query->toSql();
 
         return $query->paginate($perPage);
     }

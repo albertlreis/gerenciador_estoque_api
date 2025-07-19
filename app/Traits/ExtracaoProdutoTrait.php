@@ -161,11 +161,7 @@ trait ExtracaoProdutoTrait
 
         // Limpeza final
         $nome = trim(preg_replace('/[^\p{L}\p{N} \/]/u', '', $possivelNome));
-        $nome = preg_replace('/\s+/', ' ', $nome);
-
-        Log::info($nome);
-
-        return $nome;
+        return preg_replace('/\s+/', ' ', $nome);
     }
 
 
@@ -224,38 +220,56 @@ trait ExtracaoProdutoTrait
     }
 
     /**
-     * Extrai atributos (cor, tecido, acabamento, observações).
+     * Extrai atributos do produto agrupados por tipo: cores, tecidos e acabamento.
      *
      * @param string $descricao
-     * @return array
+     * @return array<string, array<string, string>>
      */
     protected function extrairAtributos(string $descricao): array
     {
+        $descricao = $this->normalizarDescricao($descricao);
         $atributos = [
             'cores' => [],
             'tecidos' => [],
-            'acabamentos' => [],
-            'observacoes' => [],
+            'acabamento' => [],
         ];
 
-        $descricao = $this->normalizarDescricao($descricao);
+        // Substituições manuais para padronização
+        $substituicoes = [
+            'CALACA TA POLIDO' => 'CALACATA POLIDO',
+            'CALACA TA'         => 'CALACATA',
+        ];
+        $descricao = str_ireplace(array_keys($substituicoes), array_values($substituicoes), $descricao);
 
-        $mapas = [
-            'cores' => ['COR DO FERRO', 'COR INOX', 'COR'],
-            'tecidos' => ['TECIDO', 'TEC'],
-            'acabamentos' => ['PESP', 'MÁRMORE', 'MARMORE'],
+        // Ordem importa: padrões mais específicos primeiro
+        $mapaAtributos = [
+            'COR DO FERRO' => ['grupo' => 'cores', 'chave' => 'cor_do_ferro'],
+            'COR INOX'     => ['grupo' => 'cores', 'chave' => 'cor_inox'],
+            'COR'          => ['grupo' => 'cores', 'chave' => 'cor'],
+            'TECIDO UNICO' => ['grupo' => 'tecidos', 'chave' => 'tecido'],
+            'TECIDO'       => ['grupo' => 'tecidos', 'chave' => 'tecido'],
+            'TEC'          => ['grupo' => 'tecidos', 'chave' => 'tec'],
+            'PESP'         => ['grupo' => 'tecidos', 'chave' => 'pesp'],
+            'MÁRMORE'      => ['grupo' => 'acabamentos', 'chave' => 'marmore'],
+            'MARMORE'      => ['grupo' => 'acabamentos', 'chave' => 'marmore'],
+            'ACABAMENTO'   => ['grupo' => 'acabamentos', 'chave' => 'acabamento'],
         ];
 
-        foreach ($mapas as $grupo => $chaves) {
-            foreach ($chaves as $chave) {
-                if (preg_match('/' . preg_quote($chave, '/') . '[:\s]*([^:*]+)(?=\s+[A-Z]{3,}|$)/iu', $descricao, $match)) {
-                    $atributos[$grupo][] = trim($match[1]);
+        foreach ($mapaAtributos as $padrao => $dados) {
+            $regex = '/\b' . preg_quote($padrao, '/') . '\b[:\s]*(.+?)(?=\s+\b[A-Z]{2,}\b[:\s]| MED:|\*|$)/iu';
+
+            if (preg_match($regex, $descricao, $match)) {
+                $valor = trim($match[1]);
+
+                if (!empty($valor)) {
+                    $grupo = $dados['grupo'];
+                    $chave = $dados['chave'];
+
+                    if (!isset($atributos[$grupo][$chave])) {
+                        $atributos[$grupo][$chave] = $valor;
+                    }
                 }
             }
-        }
-
-        if (preg_match('/\(([^)]+)\)/u', $descricao, $matchObs)) {
-            $atributos['observacoes'][] = trim($matchObs[1]);
         }
 
         return $atributos;

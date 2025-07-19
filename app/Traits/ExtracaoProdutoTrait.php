@@ -112,7 +112,40 @@ trait ExtracaoProdutoTrait
             'vendedor' => $this->extrairValor('/VEND(?:EDOR|A)\\s+(.+)/i', $texto),
             'total' => array_sum(array_map(fn($item) => $item['quantidade'] * $item['valor'], $itens)),
             'observacoes' => null,
+            'parcelas' => $this->extrairParcelas($texto)
         ];
+    }
+
+    /**
+     * Extrai as parcelas do pedido a partir do texto bruto, mesmo quando está tudo em uma linha.
+     *
+     * @param string $texto
+     * @return array<int, array{parcela: string, vencimento: string, forma_pagamento: string, valor: float}>
+     */
+    protected function extrairParcelas(string $texto): array
+    {
+        $parcelas = [];
+
+        // Normaliza espaços invisíveis e formatação
+        $texto = preg_replace('/\xC2\xA0/', ' ', $texto);
+        $texto = preg_replace('/\s+/', ' ', $texto);
+        $texto = mb_strtoupper($texto);
+
+        // Tenta localizar a seção de DADOS DO PARCELAMENTO
+        $padrao = '/(?:DADOS DO PARCEL(?:AMENTO|MENTO)).*?(Entrada|\d+)\s+(\d{2}\/\d{2}\/\d{4})\s+([A-Z ]+?)\s+([\d\.]+,\d{2})/iu';
+
+        if (preg_match_all($padrao, $texto, $matches, PREG_SET_ORDER)) {
+            foreach ($matches as $match) {
+                $parcelas[] = [
+                    'parcela' => trim($match[1]),
+                    'vencimento' => $match[2],
+                    'forma_pagamento' => trim($match[3]),
+                    'valor' => (float) str_replace(['.', ','], ['', '.'], $match[4]),
+                ];
+            }
+        }
+
+        return $parcelas;
     }
 
     /**

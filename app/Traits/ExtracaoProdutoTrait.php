@@ -64,7 +64,7 @@ trait ExtracaoProdutoTrait
             return null;
         }
 
-        $valor = (float) str_replace(['.', ','], ['', '.'], $valorMatch['valor']);
+        $valorTotal = (float) str_replace(['.', ','], ['', '.'], $valorMatch['valor']);
         $blocoSemValor = trim(str_replace($valorMatch[0], '', $bloco));
 
         if (!preg_match('/^(?<quantidade>\d{1,2}\.\d{4})\s*(?:(?<tipo>PEDIDO|PRONTA\s+ENTREGA))?\s*(?<ref>[A-Z0-9\-]+)?\s+(?<descricao>.+)$/i', $blocoSemValor, $match)) {
@@ -78,16 +78,19 @@ trait ExtracaoProdutoTrait
         $descricaoOriginal = trim($match['descricao']);
         $descricaoNormalizada = $this->normalizarDescricao($descricaoOriginal);
 
-        if ($quantidade <= 0 || $valor <= 0 || mb_strlen($descricaoNormalizada) < 10) {
+        if ($quantidade <= 0 || $valorTotal <= 0 || mb_strlen($descricaoNormalizada) < 10) {
             return null;
         }
+
+        $valorUnitario = number_format($valorTotal / $quantidade, 2, '.', '');
 
         $produto = $this->extrairProduto($descricaoNormalizada);
 
         return [
             'descricao' => $descricaoNormalizada,
             'quantidade' => $quantidade,
-            'valor' => $valor,
+            'valor' => (float) $valorUnitario,
+            'valor_total' => $valorTotal,
             'ref' => $ref,
             'tipo' => $tipo,
             'nome' => $produto['nome'],
@@ -108,9 +111,8 @@ trait ExtracaoProdutoTrait
         return [
             'numero_externo' => $this->extrairValor('/PEDIDO\s+DE\s+VENDA[:\s]*([\d\.]+)/iu', $texto),
             'prazo_entrega' => $this->extrairValor('/PRAZO DE ENTREGA\\s+(.+)/i', $texto),
-            'forma_pagamento' => $this->extrairValor('/FORMA DE PAGAMENTO\\s+(.+)/i', $texto),
-            'vendedor' => $this->extrairValor('/VEND(?:EDOR|A)\\s+(.+)/i', $texto),
-            'total' => array_sum(array_map(fn($item) => $item['quantidade'] * $item['valor'], $itens)),
+            'vendedor' => $this->extrairValor('/VENDEDOR RESPONSÁVEL\s+([^\n]+)/iu', $texto),
+            'total' => array_sum(array_column($itens, 'valor_total')),
             'observacoes' => null,
             'parcelas' => $this->extrairParcelas($texto)
         ];

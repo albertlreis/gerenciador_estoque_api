@@ -106,7 +106,7 @@ trait ExtracaoProdutoTrait
     protected function extrairPedido(string $texto, array $itens): array
     {
         return [
-            'numero_externo' => $this->extrairValor('/PEDIDO N.? ?(\d+)/i', $texto),
+            'numero_externo' => $this->extrairValor('/PEDIDO\s+DE\s+VENDA[:\s]*([\d\.]+)/iu', $texto),
             'prazo_entrega' => $this->extrairValor('/PRAZO DE ENTREGA\\s+(.+)/i', $texto),
             'forma_pagamento' => $this->extrairValor('/FORMA DE PAGAMENTO\\s+(.+)/i', $texto),
             'vendedor' => $this->extrairValor('/VEND(?:EDOR|A)\\s+(.+)/i', $texto),

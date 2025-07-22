@@ -84,6 +84,7 @@ class ImportacaoPedidoService
         return DB::transaction(function () use ($request) {
             $usuario = Auth::user();
             $dadosCliente = $request->cliente;
+            $dadosCliente['documento'] = preg_replace('/\D/', '', $dadosCliente['documento']);
             $dadosPedido = $request->pedido;
             $itens = $request->itens;
 
@@ -150,7 +151,7 @@ class ImportacaoPedidoService
                             ProdutoVariacaoAtributo::updateOrCreate(
                                 [
                                     'id_variacao' => $variacao->id,
-                                    'atributo' => StringHelper::normalizarAtributo("$grupo:$atributo"),
+                                    'atributo' => StringHelper::normalizarAtributo("$atributo"),
                                 ],
                                 ['valor' => $valor]
                             );
@@ -168,7 +169,7 @@ class ImportacaoPedidoService
                     'observacoes' => collect([
                         ...($item['atributos']['observacoes'] ?? []),
                         'observacao_extra' => $item['atributos']['observacoes_observacao_extra'] ?? null
-                    ])->filter()->implode("n"),
+                    ])->filter()->implode("\n"),
                 ]);
             }
 
@@ -181,10 +182,22 @@ class ImportacaoPedidoService
                 'itens' => $itens,
             ], $pedido);
 
+            // Após salvar o pedido:
+            $itensConfirmados = $pedido->itens()->with('variacao.produto', 'variacao.atributos')->get();
+
             return response()->json([
                 'message' => 'Pedido importado e salvo com sucesso.',
-                'pedido_id' => $pedido->id,
+                'id' => $pedido->id,
+                'itens' => $itensConfirmados->map(function ($item) {
+                    return [
+                        'id_variacao' => $item->variacao?->id,
+                        'referencia' => $item->variacao?->referencia,
+                        'nome_produto' => $item->variacao?->produto?->nome,
+                        'nome_completo' => $item->variacao?->nomeCompleto ?? $item->variacao?->nome ?? null,
+                    ];
+                }),
             ]);
+
         });
     }
 }

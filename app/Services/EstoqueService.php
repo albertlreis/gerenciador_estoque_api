@@ -15,13 +15,15 @@ class EstoqueService
      * @param int|null $deposito
      * @param array|null $periodo
      * @param int $perPage
+     * @param bool $zerados
      * @return LengthAwarePaginator
      */
     public function obterEstoqueAgrupadoPorProdutoEDeposito(
         ?string $produto = null,
         ?int $deposito = null,
         ?array $periodo = null,
-        int $perPage = 10
+        int $perPage = 10,
+        bool $zerados = false
     ): LengthAwarePaginator {
         $query = ProdutoVariacao::with([
             'produto',
@@ -42,9 +44,10 @@ class EstoqueService
             }], 'quantidade');
 
         if ($produto) {
-            $query->whereHas('produto', function ($q) use ($produto) {
-                $q->where('nome', 'like', "%$produto%")
-                    ->orWhere('referencia', 'like', "%$produto%");
+            $query->where(function ($q) use ($produto) {
+                $q->whereHas('produto', function ($sub) use ($produto) {
+                    $sub->where('nome', 'like', "%$produto%");
+                })->orWhere('referencia', 'like', "%$produto%");
             });
         }
 
@@ -52,6 +55,10 @@ class EstoqueService
             $query->whereHas('estoquesComLocalizacao', function ($q) use ($deposito) {
                 $q->where('id_deposito', $deposito);
             });
+        }
+
+        if ($zerados) {
+            $query->havingRaw('quantidade_estoque = 0 OR quantidade_estoque IS NULL');
         }
 
         return $query->paginate($perPage);
@@ -77,7 +84,7 @@ class EstoqueService
         if ($produto) {
             $estoqueQuery->where(function ($q) use ($produto) {
                 $q->where('produtos.nome', 'like', "%$produto%")
-                    ->orWhere('produtos.referencia', 'like', "%$produto%");
+                    ->orWhere('produto_variacoes.referencia', 'like', "%$produto%");
             });
         }
 

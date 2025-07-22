@@ -30,9 +30,12 @@ class EstoqueMovimentacaoService
 
         if ($request->filled('produto')) {
             $produto = $request->input('produto');
-            $query->whereHas('produto', function ($q) use ($produto) {
-                $q->where('nome', 'like', "%{$produto}%")
-                    ->orWhere('referencia', 'like', "%{$produto}%");
+            $query->where(function ($q) use ($produto) {
+                $q->whereHas('variacao.produto', function ($sub) use ($produto) {
+                    $sub->where('nome', 'like', "%{$produto}%");
+                })->orWhereHas('variacao', function ($sub) use ($produto) {
+                    $sub->where('referencia', 'like', "%{$produto}%");
+                });
             });
         }
 

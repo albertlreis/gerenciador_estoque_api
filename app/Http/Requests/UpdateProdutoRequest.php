@@ -33,6 +33,9 @@ class UpdateProdutoRequest extends FormRequest
             'profundidade' => 'nullable|numeric|min:0',
             'peso' => 'nullable|numeric|min:0',
             'manual_conservacao' => 'nullable|file|mimes:pdf|max:5120',
+            'ativo' => 'boolean',
+            'motivo_desativacao' => 'nullable|string|max:1000',
+            'estoque_minimo' => 'nullable|integer|min:0',
         ];
     }
 
@@ -48,6 +51,10 @@ class UpdateProdutoRequest extends FormRequest
             'id_categoria.required' => 'A categoria é obrigatória.',
             'id_categoria.exists' => 'A categoria selecionada não existe.',
             'id_fornecedor.exists' => 'O fornecedor selecionado não existe.',
+            'manual_conservacao.mimes' => 'O manual deve ser um arquivo PDF.',
+            'manual_conservacao.max' => 'O manual não pode exceder 5MB.',
+            'estoque_minimo.integer' => 'O estoque mínimo deve ser um número inteiro.',
+            'estoque_minimo.min' => 'O estoque mínimo não pode ser negativo.',
         ];
     }
 }

@@ -23,6 +23,8 @@ class ProdutoResource extends JsonResource
             'peso' => $this->peso,
             'categoria' => $this->whenLoaded('categoria'),
             'ativo' => $this->ativo,
+            'motivo_desativacao' => $this->motivo_desativacao,
+            'estoque_minimo' => $this->estoque_minimo,
             'is_outlet' => $variacoes->contains(fn ($v) =>
                 $v->relationLoaded('outlet') && $v->outlet?->quantidade_restante > 0
             ),

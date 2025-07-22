@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Produto;
 use Exception;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Log;
 use Throwable;
@@ -35,7 +36,9 @@ class ProdutoService
             'profundidade' => $data['profundidade'] ?? null,
             'peso' => $data['peso'] ?? null,
             'manual_conservacao' => $manualPath,
-            'ativo' => true,
+            'ativo' => $data['ativo'] ?? true,
+            'motivo_desativacao' => $data['motivo_desativacao'] ?? null,
+            'estoque_minimo' => $data['estoque_minimo'] ?? null,
         ]);
     }
 
@@ -59,6 +62,8 @@ class ProdutoService
             'profundidade' => $data['profundidade'] ?? null,
             'peso' => $data['peso'] ?? null,
             'ativo' => $data['ativo'] ?? true,
+            'motivo_desativacao' => $data['motivo_desativacao'] ?? null,
+            'estoque_minimo' => $data['estoque_minimo'] ?? null,
         ];
 
         if (isset($data['manual_conservacao']) && $data['manual_conservacao'] instanceof UploadedFile) {
@@ -124,7 +129,7 @@ class ProdutoService
      * @param \Illuminate\Http\Request $request
      * @return LengthAwarePaginator
      */
-    public function listarProdutosFiltrados($request): LengthAwarePaginator
+    public function listarProdutosFiltrados(Request $request): LengthAwarePaginator
     {
         $query = Produto::with([
             'categoria',
@@ -137,7 +142,7 @@ class ProdutoService
         ]);
 
         if (!empty($request->nome)) {
-            $query->where('nome', 'ILIKE', '%' . $request->nome . '%');
+            $query->where('nome', 'like', '%' . $request->nome . '%');
         }
 
         if (!empty($request->id_categoria)) {
@@ -156,7 +161,7 @@ class ProdutoService
             $query->whereIn('id_fornecedor', $ids);
         }
 
-        if (!is_null($request->ativo)) {
+        if ($request->filled('ativo')) {
             $query->where('ativo', (bool) $request->ativo);
         }
 

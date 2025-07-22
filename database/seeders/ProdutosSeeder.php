@@ -55,6 +55,9 @@ class ProdutosSeeder extends Seeder
                 continue;
             }
 
+            $ativo = rand(1, 100) > 10;
+            $motivo = $ativo ? null : 'Produto fora de linha';
+
             DB::table('produtos')->insert([
                 'nome' => $nomeFinal,
                 'descricao' => "O produto $nomeBase da $linha combina funcionalidade e design elegante para sua casa.",
@@ -64,7 +67,9 @@ class ProdutosSeeder extends Seeder
                 'largura' => rand(80, 220),
                 'profundidade' => rand(50, 150),
                 'peso' => rand(10, 100),
-                'ativo' => true,
+                'ativo' => $ativo,
+                'motivo_desativacao' => $motivo,
+                'estoque_minimo' => rand(1, 10),
                 'created_at' => $now,
                 'updated_at' => $now,
             ]);

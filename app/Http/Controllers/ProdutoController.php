@@ -300,24 +300,32 @@ class ProdutoController extends Controller
     {
         $inicio = microtime(true);
         $limite = (int) $request->query('limite', 5);
-        $cacheKey = "estoque_baixo_limite_{$limite}";
+        $cacheKey = "estoque_baixo_produto_total_limite_{$limite}";
 
         $dados = Cache::remember($cacheKey, now()->addMinutes(10), function () use ($limite, $cacheKey, $inicio) {
-            LogService::debug('EstoqueCache', 'Gerando novo cache', ['cacheKey' => $cacheKey]);
+            LogService::debug('EstoqueCache', 'Gerando cache de estoque baixo por produto', ['cacheKey' => $cacheKey]);
 
-            $resultado = DB::table('estoque')
+            $subquery = DB::table('estoque')
                 ->join('produto_variacoes', 'estoque.id_variacao', '=', 'produto_variacoes.id')
-                ->join('produtos', 'produto_variacoes.produto_id', '=', 'produtos.id')
-                ->join('depositos', 'estoque.id_deposito', '=', 'depositos.id')
-                ->where('estoque.quantidade', '<', $limite)
                 ->select(
-                    'produtos.nome as produto',
-                    'produto_variacoes.nome as variacao',
-                    'depositos.nome as deposito',
-                    'estoque.quantidade',
-                    'produto_variacoes.preco'
+                    'produto_variacoes.produto_id',
+                    DB::raw('SUM(estoque.quantidade) as quantidade_total')
                 )
-                ->orderBy('estoque.quantidade', 'asc')
+                ->groupBy('produto_variacoes.produto_id');
+
+            $resultado = DB::table('produtos')
+                ->joinSub($subquery, 'estoque_total', function ($join) {
+                    $join->on('produtos.id', '=', 'estoque_total.produto_id');
+                })
+                ->whereColumn('estoque_total.quantidade_total', '<', 'produtos.estoque_minimo')
+                ->select(
+                    'produtos.id',
+                    'produtos.nome',
+                    'produtos.estoque_minimo',
+                    'estoque_total.quantidade_total as estoque_atual'
+                )
+                ->orderBy('estoque_total.quantidade_total', 'asc')
+                ->limit($limite)
                 ->get();
 
             $fim = microtime(true);
@@ -329,13 +337,8 @@ class ProdutoController extends Controller
             return $resultado;
         });
 
-        $fim = microtime(true);
-        LogService::debug('EstoqueCache', 'Estoque crítico carregado via cache ou computado', [
-            'cacheKey' => $cacheKey,
-            'duration_ms' => round(($fim - $inicio) * 1000, 2)
-        ]);
-
         return response()->json($dados);
     }
+
 
 }

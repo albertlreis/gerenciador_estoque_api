@@ -10,7 +10,8 @@ class Produto extends Model
 {
     protected $fillable = [
         'nome', 'descricao', 'id_categoria', 'id_fornecedor',
-        'altura', 'largura', 'profundidade', 'peso', 'ativo', 'manual_conservacao'
+        'altura', 'largura', 'profundidade', 'peso',
+        'ativo', 'manual_conservacao', 'motivo_desativacao', 'estoque_minimo'
     ];
 
     protected $appends = ['estoque_outlet_total'];

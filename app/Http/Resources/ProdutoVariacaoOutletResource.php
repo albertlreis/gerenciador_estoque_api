@@ -13,6 +13,8 @@ class ProdutoVariacaoOutletResource extends JsonResource
             'motivo' => $this->motivo,
             'quantidade' => $this->quantidade,
             'quantidade_restante' => $this->quantidade_restante,
+            'percentual_desconto' => $this->formasPagamento
+                ->max(fn ($fp) => $fp->percentual_desconto ?? 0),
             'formas_pagamento' => ProdutoVariacaoOutletPagamentoResource::collection(
                 $this->whenLoaded('formasPagamento')
             ),

@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\DTOs\FiltroMovimentacaoEstoqueDTO;
 use App\Http\Requests\StoreMovimentacaoRequest;
 use App\Http\Requests\UpdateMovimentacaoRequest;
 use App\Http\Resources\MovimentacaoResource;
@@ -29,14 +30,18 @@ class EstoqueMovimentacaoController extends Controller
     }
 
     /**
-     * Lista movimentações de estoque com filtros opcionais.
+     * Lista movimentações de estoque com filtros opcionais e ordenação.
      *
-     * @param Request $request
-     * @return JsonResponse
+     * @param Request $request Instância da requisição HTTP com os filtros de busca
+     * @param EstoqueMovimentacaoService $service Serviço responsável pela lógica de movimentações
+     * @return JsonResponse Lista paginada de movimentações de estoque
      */
-    public function index(Request $request): JsonResponse
+    public function index(Request $request, EstoqueMovimentacaoService $service): JsonResponse
     {
-        $movimentacoes = $this->service->buscarComFiltros($request);
+        $dto = new FiltroMovimentacaoEstoqueDTO($request->all());
+
+        $movimentacoes = $service->buscarComFiltros($dto);
+
         return MovimentacaoResource::collection($movimentacoes)->response();
     }
 

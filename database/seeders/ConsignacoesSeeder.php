@@ -128,21 +128,6 @@ class ConsignacoesSeeder extends Seeder
                     'updated_at' => $now,
                 ];
             }
-
-            // Compra
-            if ($status === 'comprado') {
-                $movimentacoes[] = [
-                    'id_variacao' => $item->id_variacao,
-                    'id_deposito_origem' => null,
-                    'id_deposito_destino' => null,
-                    'tipo' => 'consignacao_compra',
-                    'quantidade' => $item->quantidade,
-                    'observacao' => 'Produto consignado convertido em venda',
-                    'data_movimentacao' => $dataResposta,
-                    'created_at' => $now,
-                    'updated_at' => $now,
-                ];
-            }
         }
 
         DB::table('estoque_movimentacoes')->insert($movimentacoes);

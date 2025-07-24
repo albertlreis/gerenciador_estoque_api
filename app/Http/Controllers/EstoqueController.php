@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\DTOs\FiltroEstoqueDTO;
 use App\Http\Resources\ProdutoEstoqueResource;
 use App\Http\Resources\ResumoEstoqueResource;
 use App\Models\Estoque;
@@ -12,22 +13,17 @@ use Illuminate\Http\Request;
 class EstoqueController extends Controller
 {
     /**
-     * Lista o estoque atual agrupado por produto e depósito.
+     * Lista o estoque atual agrupado por produto e depósito com filtros e ordenação.
      *
-     * @param Request $request
-     * @param EstoqueService $service
-     * @return JsonResponse
+     * @param Request $request Instância da requisição HTTP com os parâmetros de filtro
+     * @param EstoqueService $service Serviço responsável pela lógica de estoque
+     * @return JsonResponse Lista paginada de produtos com estoque
      */
     public function listarEstoqueAtual(Request $request, EstoqueService $service): JsonResponse
     {
-        $zerados = $request->boolean('zerados');
-        $result = $service->obterEstoqueAgrupadoPorProdutoEDeposito(
-            produto: $request->input('produto'),
-            deposito: $request->input('deposito'),
-            periodo: $request->input('periodo'),
-            perPage: $request->input('per_page', 10),
-            zerados: $zerados
-        );
+        $dto = new FiltroEstoqueDTO($request->all());
+
+        $result = $service->obterEstoqueAgrupadoPorProdutoEDeposito($dto);
 
         return ProdutoEstoqueResource::collection($result)->response();
     }

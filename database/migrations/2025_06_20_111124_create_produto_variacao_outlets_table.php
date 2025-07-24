@@ -28,9 +28,6 @@ class CreateProdutoVariacaoOutletsTable extends Migration
             $table->unsignedInteger('quantidade');
             $table->unsignedInteger('quantidade_restante');
 
-            // Percentual de desconto
-            $table->decimal('percentual_desconto', 5, 2);
-
             // Usuário responsável
             $table->unsignedInteger('usuario_id');
             $table->foreign('usuario_id')

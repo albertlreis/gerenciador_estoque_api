@@ -196,6 +196,17 @@ class ProdutoService
 
         $query->orderByDesc('created_at');
 
-        return $query->paginate($request->get('per_page', 15));
+        $resultado = $query->paginate($request->get('per_page', 15));
+
+        $resultado->getCollection()->each(function ($produto) {
+            $produto->variacoes->each(function ($variacao) {
+                $variacao->loadMissing([
+                    'outlets.formasPagamento',
+                ]);
+            });
+        });
+
+        return $resultado;
+
     }
 }

@@ -10,6 +10,9 @@ class ProdutoResource extends JsonResource
     public function toArray($request): array
     {
         $variacoes = $this->getRelationValue('variacoes') ?? collect();
+        $variacoes->each(function ($v) {
+            $v->loadMissing(['outlets.formasPagamento']);
+        });
 
         return [
             'id' => $this->id,

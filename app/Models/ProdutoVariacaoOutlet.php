@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class ProdutoVariacaoOutlet extends Model
 {
@@ -14,12 +15,10 @@ class ProdutoVariacaoOutlet extends Model
         'motivo',
         'quantidade',
         'quantidade_restante',
-        'percentual_desconto',
         'usuario_id',
     ];
 
     protected $casts = [
-        'percentual_desconto' => 'float',
         'quantidade' => 'integer',
         'quantidade_restante' => 'integer',
     ];
@@ -61,4 +60,10 @@ class ProdutoVariacaoOutlet extends Model
     {
         return $this->quantidade_restante > 0;
     }
+
+    public function formasPagamento(): HasMany
+    {
+        return $this->hasMany(ProdutoVariacaoOutletPagamento::class, 'produto_variacao_outlet_id');
+    }
+
 }

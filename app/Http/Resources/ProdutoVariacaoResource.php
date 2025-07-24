@@ -39,34 +39,15 @@ class ProdutoVariacaoResource extends JsonResource
             'preco' => $preco,
             'preco_promocional' => $temDesconto ? $precoPromocional : null,
             'custo' => $this->custo,
-
             'estoque_total' => $this->whenLoaded('estoque', fn() => $this->estoque->quantidade ?? 0),
             'estoque_outlet_total' => $this->whenLoaded('outlets', fn() => $this->outlets->sum('quantidade')),
             'outlet_restante_total' => $this->whenLoaded('outlets', fn() => $this->outlets->sum('quantidade_restante')),
-
             'estoque' => $this->whenLoaded('estoque', fn() => [
                 'quantidade' => $this->estoque->quantidade ?? 0,
             ]),
-
-            'outlet' => $this->whenLoaded('outlet', fn() => $this->outlet ? [
-                'id' => $this->outlet->id,
-                'motivo' => $this->outlet->motivo,
-                'quantidade' => $this->outlet->quantidade,
-                'quantidade_restante' => $this->outlet->quantidade_restante,
-                'percentual_desconto' => $this->outlet->percentual_desconto,
-            ] : null),
-
-            'outlets' => $this->whenLoaded('outlets', fn() => $this->outlets->map(fn($outlet) => [
-                'id' => $outlet->id,
-                'motivo' => $outlet->motivo,
-                'quantidade' => $outlet->quantidade,
-                'quantidade_restante' => $outlet->quantidade_restante,
-                'percentual_desconto' => $outlet->percentual_desconto,
-            ])
-            ),
-
+            'outlet' => new ProdutoVariacaoOutletResource($this->whenLoaded('outlet')),
+            'outlets' => ProdutoVariacaoOutletResource::collection($this->whenLoaded('outlets')),
             'atributos' => ProdutoVariacaoAtributoResource::collection($this->whenLoaded('atributos')),
-
             'produto' => $this->whenLoaded('produto', fn () => [
                 'id'     => $this->produto->id,
                 'nome'   => $this->produto->nome,

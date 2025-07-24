@@ -16,7 +16,10 @@ class StoreProdutoVariacaoOutletRequest extends FormRequest
         return [
             'motivo' => 'required|string|max:50',
             'quantidade' => 'required|integer|min:1',
-            'percentual_desconto' => 'required|numeric|min:1|max:99.99',
+            'formas_pagamento' => 'required|array|min:1',
+            'formas_pagamento.*.forma_pagamento' => 'required|string|max:30',
+            'formas_pagamento.*.percentual_desconto' => 'required|numeric|min:1|max:99.99',
+            'formas_pagamento.*.max_parcelas' => 'nullable|integer|min:1|max:36',
         ];
     }
 }

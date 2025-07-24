@@ -28,6 +28,11 @@ class ProdutoVariacaoOutletController extends Controller
                 'usuario' => $outlet->usuario?->nome ?? 'Desconhecido',
                 'created_at' => $outlet->created_at?->toDateTimeString(),
                 'updated_at' => $outlet->updated_at?->toDateTimeString(),
+                'formas_pagamento' => $outlet->formasPagamento->map(fn($fp) => [
+                    'forma_pagamento' => $fp->forma_pagamento,
+                    'percentual_desconto' => $fp->percentual_desconto,
+                    'max_parcelas' => $fp->max_parcelas,
+                ]),
             ];
         });
 
@@ -70,11 +75,18 @@ class ProdutoVariacaoOutletController extends Controller
             'motivo' => $request->motivo,
             'quantidade' => $quantidadeNova,
             'quantidade_restante' => $quantidadeNova,
-            'percentual_desconto' => $request->percentual_desconto,
             'usuario_id' => Auth::id(),
         ]);
 
         $variacao->outlets()->save($outlet);
+
+        foreach ($request->formas_pagamento as $fp) {
+            $outlet->formasPagamento()->create([
+                'forma_pagamento' => $fp['forma_pagamento'],
+                'percentual_desconto' => $fp['percentual_desconto'],
+                'max_parcelas' => $fp['max_parcelas'] ?? null,
+            ]);
+        }
 
         return response()->json(['message' => 'Variação registrada como outlet com sucesso.'], 201);
     }

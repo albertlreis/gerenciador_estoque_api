@@ -24,6 +24,10 @@ class EstoqueMovimentacaoService
             'depositoOrigem', 'depositoDestino'
         ]);
 
+        if ($request->filled('variacao')) {
+            $query->where('id_variacao', $request->input('variacao'));
+        }
+
         if ($request->filled('tipo')) {
             $query->where('tipo', $request->input('tipo'));
         }

@@ -73,8 +73,6 @@ Route::middleware('auth:sanctum')->prefix('v1')->group(function () {
         Route::get('atual', [EstoqueController::class, 'listarEstoqueAtual']);
         Route::get('resumo', [EstoqueController::class, 'resumoEstoque']);
         Route::get('/por-variacao/{id_variacao}', [EstoqueController::class, 'porVariacao']);
-
-
         // Movimentações
         Route::get('movimentacoes', [EstoqueMovimentacaoController::class, 'index']);
         Route::post('produtos/{produto}/movimentacoes', [EstoqueMovimentacaoController::class, 'store']);

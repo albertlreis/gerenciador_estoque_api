@@ -8,6 +8,8 @@ use App\Http\Resources\ConsignacaoResource;
 use App\Models\AcessoUsuario;
 use App\Models\Cliente;
 use App\Models\Consignacao;
+use App\Models\Estoque;
+use App\Models\EstoqueMovimentacao;
 use App\Models\Pedido;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\JsonResponse;
@@ -223,14 +225,37 @@ class ConsignacaoController extends Controller
         $request->validate([
             'quantidade' => 'required|integer|min:1',
             'observacoes' => 'nullable|string',
+            'deposito_id' => 'required|exists:depositos,id',
         ]);
 
         $consignacao = Consignacao::with('devolucoes')->findOrFail($id);
 
-        $restante = $consignacao->quantidade - $consignacao->devolucoes->sum('quantidade');
+        $quantidadeDevolvida = $consignacao->devolucoes->sum('quantidade');
+        $restante = $consignacao->quantidade - $quantidadeDevolvida;
+
         if ($request->quantidade > $restante) {
             return response()->json(['erro' => 'Quantidade devolvida excede o restante.'], 422);
         }
+
+        $usuarioId = AuthHelper::getUsuarioId();
+
+        // Registrar movimentação de estoque
+        EstoqueMovimentacao::create([
+            'id_variacao' => $consignacao->produto_variacao_id,
+            'id_deposito_origem' => null,
+            'id_deposito_destino' => $request->deposito_id,
+            'tipo' => 'consignacao_devolucao',
+            'quantidade' => $request->quantidade,
+            'observacao' => $request->observacoes,
+            'data_movimentacao' => now(),
+            'id_usuario' => $usuarioId,
+        ]);
+
+        // Atualizar ou criar estoque
+        $estoque = Estoque::firstOrNew([
+            'id_variacao' => $consignacao->produto_variacao_id,
+            'id_deposito' => $request->deposito_id,
+        ]);
 
         $consignacao->devolucoes()->create([
             'quantidade' => $request->quantidade,
@@ -238,8 +263,11 @@ class ConsignacaoController extends Controller
             'usuario_id' => AuthHelper::getUsuarioId(),
         ]);
 
-        $novaQuantidadeDevolvida = $consignacao->quantidadeDevolvida() + $request->quantidade;
-        if ($novaQuantidadeDevolvida >= $consignacao->quantidade) {
+        $estoque->quantidade = ($estoque->quantidade ?? 0) + $request->quantidade;
+        $estoque->save();
+
+        $novaQtdDevolvida = $quantidadeDevolvida + $request->quantidade;
+        if ($novaQtdDevolvida >= $consignacao->quantidade) {
             $consignacao->status = 'devolvido';
             $consignacao->data_resposta = now();
             $consignacao->save();

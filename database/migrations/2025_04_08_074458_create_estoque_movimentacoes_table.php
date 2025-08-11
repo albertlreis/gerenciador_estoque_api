@@ -18,6 +18,7 @@ return new class extends Migration
             $table->unsignedInteger('id_variacao');
             $table->unsignedInteger('id_deposito_origem')->nullable();
             $table->unsignedInteger('id_deposito_destino')->nullable();
+            $table->unsignedInteger('id_usuario')->nullable();
             $table->string('tipo', 50);
             $table->integer('quantidade');
             $table->text('observacao')->nullable();
@@ -36,6 +37,10 @@ return new class extends Migration
                 ->references('id')
                 ->on('depositos')
                 ->onDelete('cascade');
+            $table->foreign('id_usuario')
+                ->references('id')
+                ->on('usuarios')
+                ->onDelete('set null');
         });
     }
 

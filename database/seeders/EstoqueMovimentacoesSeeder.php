@@ -12,6 +12,7 @@ class EstoqueMovimentacoesSeeder extends Seeder
     {
         $now = Carbon::now();
         $estoque = DB::table('estoque')->get();
+        $usuarioId = DB::table('usuarios')->value('id');
 
         foreach ($estoque as $registro) {
             // ENTRADA OBRIGATÓRIA
@@ -19,6 +20,7 @@ class EstoqueMovimentacoesSeeder extends Seeder
                 'id_variacao' => $registro->id_variacao,
                 'id_deposito_origem' => null,
                 'id_deposito_destino' => $registro->id_deposito,
+                'id_usuario' => $usuarioId,
                 'tipo' => 'entrada',
                 'quantidade' => $registro->quantidade,
                 'observacao' => 'Entrada inicial para popular estoque',
@@ -34,6 +36,7 @@ class EstoqueMovimentacoesSeeder extends Seeder
                     'id_variacao' => $registro->id_variacao,
                     'id_deposito_origem' => $registro->id_deposito,
                     'id_deposito_destino' => null,
+                    'id_usuario' => $usuarioId,
                     'tipo' => 'saida',
                     'quantidade' => $saidaQtd,
                     'observacao' => 'Saída por pedido de venda simulado',
@@ -59,6 +62,7 @@ class EstoqueMovimentacoesSeeder extends Seeder
                 'id_variacao' => $grupo->id_variacao,
                 'id_deposito_origem' => $origem,
                 'id_deposito_destino' => $destino,
+                'id_usuario' => $usuarioId,
                 'tipo' => 'transferencia',
                 'quantidade' => rand(1, 10),
                 'observacao' => 'Transferência entre depósitos simulada',

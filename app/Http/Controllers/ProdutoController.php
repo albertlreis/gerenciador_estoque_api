@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Services\LogService;
+use App\Services\ProdutoSugestoesOutletService;
 use Exception;
 use Illuminate\Support\Facades\Cache;
 use Throwable;
@@ -340,5 +341,26 @@ class ProdutoController extends Controller
         return response()->json($dados);
     }
 
+    /**
+     * Sugestões de produtos para Outlet.
+     *
+     * Parâmetros aceitos:
+     * - limite (int) : qtd máxima (‘default’ 5)
+     * - deposito (int|null) : filtra cálculo pelo depósito
+     * - ordenar (‘string’) : dias|quantidade|nome (‘default’: dias)
+     * - ordem (‘string’) : asc|desc (‘default’: desc)
+     */
+    public function sugestoesOutlet(Request $request, ProdutoSugestoesOutletService $service): JsonResponse
+    {
+        $request->validate([
+            'limite'   => 'sometimes|integer|min:1|max:100',
+            'deposito' => 'sometimes|integer|min:1',
+            'ordenar'  => 'sometimes|in:dias,quantidade,nome',
+            'ordem'    => 'sometimes|in:asc,desc',
+        ]);
 
+        $result = $service->listarPorVariacao($request);
+
+        return response()->json($result);
+    }
 }

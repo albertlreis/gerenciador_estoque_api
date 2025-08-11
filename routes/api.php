@@ -6,6 +6,7 @@ use App\Http\Controllers\DevolucaoController;
 use App\Http\Controllers\EstoqueRelatorioController;
 use App\Http\Controllers\FornecedorController;
 use App\Http\Controllers\LocalizacaoEstoqueController;
+use App\Http\Controllers\OutletCatalogoController;
 use App\Http\Controllers\PedidoFabricaController;
 use App\Http\Controllers\PedidosRelatorioController;
 use App\Http\Controllers\ProdutoVariacaoOutletController;
@@ -50,6 +51,9 @@ Route::middleware('auth:sanctum')->prefix('v1')->group(function () {
         Route::put('{outletId}', [ProdutoVariacaoOutletController::class, 'update']);
         Route::delete('{outletId}', [ProdutoVariacaoOutletController::class, 'destroy']);
     });
+
+    Route::get('/outlet/motivos', [OutletCatalogoController::class,'motivos']);
+    Route::get('/outlet/formas-pagamento', [OutletCatalogoController::class,'formas']);
 
     Route::prefix('produtos')->group(function () {
         Route::get('estoque-baixo', [ProdutoController::class, 'estoqueBaixo']);

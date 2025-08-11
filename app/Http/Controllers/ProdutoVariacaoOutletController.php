@@ -3,6 +3,8 @@
 namespace App\Http\Controllers;
 
 use App\Http\Requests\StoreProdutoVariacaoOutletRequest;
+use App\Models\OutletFormaPagamento;
+use App\Models\OutletMotivo;
 use App\Models\ProdutoVariacao;
 use App\Models\ProdutoVariacaoOutlet;
 use Illuminate\Http\JsonResponse;
@@ -47,6 +49,23 @@ class ProdutoVariacaoOutletController extends Controller
     {
         $variacao = ProdutoVariacao::with(['estoque', 'outlets'])->findOrFail($id);
 
+        $estoqueTotal = (int)($variacao->estoque->quantidade ?? 0);
+        $totalOutletJaRegistrado = (int)$variacao->outlets->sum('quantidade');
+        $quantidadeNova = (int)$request->quantidade;
+
+        $maxDisponivel = max(0, $estoqueTotal - $totalOutletJaRegistrado);
+
+        if ($quantidadeNova < 1 || $quantidadeNova > $maxDisponivel){
+            return response()->json([
+                'message' => "Quantidade inválida. Disponível para outlet: $maxDisponivel (Estoque $estoqueTotal − Outlets $totalOutletJaRegistrado)."
+            ], 422);
+        }
+
+        $motivoId = $request->motivo_id ?? null;
+        if (!$motivoId && $request->motivo){
+            $motivoId = OutletMotivo::where('slug',$request->motivo)->value('id');
+        }
+
         $existeSimilar = $variacao->outlets->first(function ($outlet) use ($request) {
             return $outlet->motivo === $request->motivo &&
                 $outlet->percentual_desconto == $request->percentual_desconto &&
@@ -59,20 +78,8 @@ class ProdutoVariacaoOutletController extends Controller
             ], 422);
         }
 
-        $estoqueTotal = $variacao->estoque->quantidade ?? 0;
-        $totalOutletJaRegistrado = $variacao->outlets->sum('quantidade');
-
-        $quantidadeNova = $request->quantidade;
-        $quantidadeTotalPosInsercao = $totalOutletJaRegistrado + $quantidadeNova;
-
-        if ($quantidadeTotalPosInsercao > $estoqueTotal) {
-            return response()->json([
-                'message' => "A soma das quantidades de outlet existentes ({$totalOutletJaRegistrado}) com a nova ({$quantidadeNova}) ultrapassa o estoque total ({$estoqueTotal})."
-            ], 422);
-        }
-
         $outlet = new ProdutoVariacaoOutlet([
-            'motivo' => $request->motivo,
+            'motivo_id' => $motivoId,
             'quantidade' => $quantidadeNova,
             'quantidade_restante' => $quantidadeNova,
             'usuario_id' => Auth::id(),
@@ -81,8 +88,13 @@ class ProdutoVariacaoOutletController extends Controller
         $variacao->outlets()->save($outlet);
 
         foreach ($request->formas_pagamento as $fp) {
+            $formaId = $fp['forma_pagamento_id'] ?? null;
+            if (!$formaId && !empty($fp['forma_pagamento'])) {
+                $formaId = OutletFormaPagamento::where('slug',$fp['forma_pagamento'])->value('id');
+            }
+
             $outlet->formasPagamento()->create([
-                'forma_pagamento' => $fp['forma_pagamento'],
+                'forma_pagamento_id' => $formaId,
                 'percentual_desconto' => $fp['percentual_desconto'],
                 'max_parcelas' => $fp['max_parcelas'] ?? null,
             ]);

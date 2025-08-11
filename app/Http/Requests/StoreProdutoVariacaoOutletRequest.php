@@ -14,12 +14,12 @@ class StoreProdutoVariacaoOutletRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'motivo' => 'required|string|max:50',
+            'motivo_id' => 'nullable|exists:outlet_motivos,id',
             'quantidade' => 'required|integer|min:1',
             'formas_pagamento' => 'required|array|min:1',
-            'formas_pagamento.*.forma_pagamento' => 'required|string|max:30',
-            'formas_pagamento.*.percentual_desconto' => 'required|numeric|min:1|max:99.99',
-            'formas_pagamento.*.max_parcelas' => 'nullable|integer|min:1|max:36',
+            'formas_pagamento.*.forma_pagamento_id' => 'nullable|exists:outlet_formas_pagamento,id',
+            'formas_pagamento.*.percentual_desconto'=> 'required|numeric|min:0|max:100',
+            'formas_pagamento.*.max_parcelas'       => 'nullable|integer|min:1|max:36',
         ];
     }
 }

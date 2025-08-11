@@ -19,6 +19,7 @@ class DatabaseSeeder extends Seeder
             FornecedoresSeeder::class,
             ProdutosSeeder::class,
             ProdutoVariacoesSeeder::class,
+            OutletTabelasBasicasSeeder::class,
             ProdutoVariacaoOutletSeeder::class,
             ProdutoImagensSeeder::class,
             DepositosSeeder::class,

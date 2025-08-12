@@ -46,7 +46,7 @@ class PedidoController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        return response()->json($this->pedidoService->listarPedidos($request));
+        return $this->pedidoService->listarPedidos($request);
     }
 
     /**

@@ -24,7 +24,7 @@ return new class extends Migration
         });
 
         Schema::table('produto_variacao_outlet_pagamentos', function (Blueprint $t){
-            $t->foreignId('forma_pagamento_id')->nullable()->after('forma_pagamento')
+            $t->foreignId('forma_pagamento_id')->nullable()->after('produto_variacao_outlet_id')
                 ->constrained('outlet_formas_pagamento');
         });
     }

@@ -22,7 +22,7 @@ return new class extends Migration
         });
 
         Schema::table('produto_variacao_outlets', function (Blueprint $t){
-            $t->foreignId('motivo_id')->nullable()->after('motivo')->constrained('outlet_motivos');
+            $t->foreignId('motivo_id')->nullable()->after('produto_variacao_id')->constrained('outlet_motivos');
         });
     }
 

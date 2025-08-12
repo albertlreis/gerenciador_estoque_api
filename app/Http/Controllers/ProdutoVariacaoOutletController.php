@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Http\Requests\StoreProdutoVariacaoOutletRequest;
+use App\Http\Resources\ProdutoVariacaoOutletResource;
 use App\Models\OutletFormaPagamento;
 use App\Models\OutletMotivo;
 use App\Models\ProdutoVariacao;
@@ -18,30 +19,17 @@ class ProdutoVariacaoOutletController extends Controller
      */
     public function index(int $id): JsonResponse
     {
-        $variacao = ProdutoVariacao::with(['outlets.usuario'])->findOrFail($id);
-
-        $outlets = $variacao->outlets->map(function ($outlet) {
-            return [
-                'id' => $outlet->id,
-                'motivo' => $outlet->motivo,
-                'quantidade' => $outlet->quantidade,
-                'quantidade_restante' => $outlet->quantidade_restante,
-                'percentual_desconto' => $outlet->percentual_desconto,
-                'usuario' => $outlet->usuario?->nome ?? 'Desconhecido',
-                'created_at' => $outlet->created_at?->toDateTimeString(),
-                'updated_at' => $outlet->updated_at?->toDateTimeString(),
-                'formas_pagamento' => $outlet->formasPagamento->map(fn($fp) => [
-                    'forma_pagamento' => $fp->forma_pagamento,
-                    'percentual_desconto' => $fp->percentual_desconto,
-                    'max_parcelas' => $fp->max_parcelas,
-                ]),
-            ];
-        });
+        $variacao = ProdutoVariacao::with([
+            'produto',
+            'outlets.usuario',
+            'outlets.motivo',
+            'outlets.formasPagamento.formaPagamento',
+        ])->findOrFail($id);
 
         return response()->json([
             'variacao_id' => $variacao->id,
             'produto' => optional($variacao->produto)->nome,
-            'outlets' => $outlets,
+            'outlets' => ProdutoVariacaoOutletResource::collection($variacao->outlets),
         ]);
     }
 
@@ -61,13 +49,8 @@ class ProdutoVariacaoOutletController extends Controller
             ], 422);
         }
 
-        $motivoId = $request->motivo_id ?? null;
-        if (!$motivoId && $request->motivo){
-            $motivoId = OutletMotivo::where('slug',$request->motivo)->value('id');
-        }
-
         $existeSimilar = $variacao->outlets->first(function ($outlet) use ($request) {
-            return $outlet->motivo === $request->motivo &&
+            return $outlet->motivo_id === $request->motivo_id &&
                 $outlet->percentual_desconto == $request->percentual_desconto &&
                 $outlet->quantidade == $request->quantidade;
         });
@@ -79,7 +62,7 @@ class ProdutoVariacaoOutletController extends Controller
         }
 
         $outlet = new ProdutoVariacaoOutlet([
-            'motivo_id' => $motivoId,
+            'motivo_id' => $request->motivo_id,
             'quantidade' => $quantidadeNova,
             'quantidade_restante' => $quantidadeNova,
             'usuario_id' => Auth::id(),
@@ -100,34 +83,58 @@ class ProdutoVariacaoOutletController extends Controller
             ]);
         }
 
-        return response()->json(['message' => 'Variação registrada como outlet com sucesso.'], 201);
+        $outlet->load(['usuario','motivo','formasPagamento.formaPagamento']);
+
+        return (new ProdutoVariacaoOutletResource($outlet))
+            ->response()
+            ->setStatusCode(201);
     }
 
-    public function update(Request $request, int $id, int $outletId)
+    public function update(Request $request, int $id, int $outletId): ProdutoVariacaoOutletResource|JsonResponse
     {
-        $variacao = ProdutoVariacao::with(['estoque', 'outlets'])->findOrFail($id);
+        $variacao = ProdutoVariacao::with(['estoque','outlets'])->findOrFail($id);
 
-        $estoqueTotal = $variacao->estoque->quantidade ?? 0;
-        $totalOutros = $variacao->outlets->where('id', '!=', $outletId)->sum('quantidade');
-        $novaQtd = $request->quantidade;
+        $estoqueTotal = (int)($variacao->estoque->quantidade ?? 0);
+        $totalOutros = (int)$variacao->outlets->where('id','!=',$outletId)->sum('quantidade');
+        $novaQtd = (int)$request->input('quantidade', 0);
 
-        if (($totalOutros + $novaQtd) > $estoqueTotal) {
+        if ($novaQtd < 1 || ($totalOutros + $novaQtd) > $estoqueTotal) {
+            $maxDisponivel = max(0, $estoqueTotal - $totalOutros);
             return response()->json([
-                'message' => 'A nova quantidade excede o estoque disponível.'
+                'message' => "A nova quantidade excede o disponível. Máximo permitido: {$maxDisponivel}."
             ], 422);
         }
 
-        $outlet = ProdutoVariacaoOutlet::where('produto_variacao_id', $id)->findOrFail($outletId);
+        /** @var ProdutoVariacaoOutlet $outlet */
+        $outlet = ProdutoVariacaoOutlet::where('produto_variacao_id',$id)->findOrFail($outletId);
 
         $data = $request->validate([
             'quantidade' => 'required|integer|min:1',
-            'percentual_desconto' => 'required|numeric|min:0|max:100',
-            'motivo' => 'required|string|max:255',
+            'motivo_id'  => 'required|exists:outlet_motivos,id',
+            'formas_pagamento' => 'sometimes|array|min:1',
+            'formas_pagamento.*.forma_pagamento_id' => 'required_with:formas_pagamento|exists:outlet_formas_pagamento,id',
+            'formas_pagamento.*.percentual_desconto'=> 'required_with:formas_pagamento|numeric|min:0|max:100',
+            'formas_pagamento.*.max_parcelas'       => 'nullable|integer|min:1|max:36',
         ]);
 
-        $outlet->update($data);
+        $outlet->update([
+            'quantidade' => $data['quantidade'],
+            'motivo_id'  => (int)$data['motivo_id'],
+        ]);
 
-        return response()->json($outlet);
+        if ($request->has('formas_pagamento')) {
+            $outlet->formasPagamento()->delete();
+            foreach ($data['formas_pagamento'] as $fp) {
+                $outlet->formasPagamento()->create([
+                    'forma_pagamento_id' => (int)$fp['forma_pagamento_id'],
+                    'percentual_desconto'=> $fp['percentual_desconto'],
+                    'max_parcelas'       => $fp['max_parcelas'] ?? null,
+                ]);
+            }
+        }
+
+        $outlet->load(['usuario','motivo','formasPagamento.formaPagamento']);
+        return new ProdutoVariacaoOutletResource($outlet);
     }
 
     public function destroy(int $id, int $outletId): JsonResponse

@@ -10,7 +10,11 @@ class ProdutoVariacaoOutletResource extends JsonResource
     {
         return [
             'id' => $this->id,
-            'motivo' => $this->motivo,
+            'motivo'   => $this->whenLoaded('motivo', fn() => [
+                'id'   => $this->motivo->id,
+                'slug' => $this->motivo->slug,
+                'nome' => $this->motivo->nome,
+            ]),
             'quantidade' => $this->quantidade,
             'quantidade_restante' => $this->quantidade_restante,
             'percentual_desconto' => $this->formasPagamento
@@ -18,6 +22,9 @@ class ProdutoVariacaoOutletResource extends JsonResource
             'formas_pagamento' => ProdutoVariacaoOutletPagamentoResource::collection(
                 $this->whenLoaded('formasPagamento')
             ),
+            'usuario' => $this->whenLoaded('usuario', fn() => $this->usuario?->nome),
+            'created_at' => optional($this->created_at)->toDateTimeString(),
+            'updated_at' => optional($this->updated_at)->toDateTimeString(),
         ];
     }
 }

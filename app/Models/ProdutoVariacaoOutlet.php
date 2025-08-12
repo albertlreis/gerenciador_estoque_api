@@ -12,7 +12,7 @@ class ProdutoVariacaoOutlet extends Model
 
     protected $fillable = [
         'produto_variacao_id',
-        'motivo',
+        'motivo_id',
         'quantidade',
         'quantidade_restante',
         'usuario_id',
@@ -61,6 +61,10 @@ class ProdutoVariacaoOutlet extends Model
         return $this->quantidade_restante > 0;
     }
 
+    public function motivo(): BelongsTo
+    {
+        return $this->belongsTo(OutletMotivo::class, 'motivo_id');
+    }
     public function formasPagamento(): HasMany
     {
         return $this->hasMany(ProdutoVariacaoOutletPagamento::class, 'produto_variacao_outlet_id');

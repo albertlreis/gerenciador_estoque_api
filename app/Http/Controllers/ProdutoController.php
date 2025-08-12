@@ -78,6 +78,8 @@ class ProdutoController extends Controller
             'variacoes.atributos',
             'variacoes.estoque',
             'variacoes.outlets',
+            'variacoes.outlets.motivo',
+            'variacoes.outlets.formasPagamento.formaPagamento',
             'fornecedor',
             'imagens'
         ])->findOrFail($id);

@@ -4,6 +4,7 @@ use App\Http\Controllers\ConsignacaoRelatorioController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DevolucaoController;
 use App\Http\Controllers\EstoqueRelatorioController;
+use App\Http\Controllers\FeriadoController;
 use App\Http\Controllers\FornecedorController;
 use App\Http\Controllers\LocalizacaoEstoqueController;
 use App\Http\Controllers\OutletCatalogoController;
@@ -156,5 +157,10 @@ Route::middleware('auth:sanctum')->prefix('v1')->group(function () {
     Route::post('devolucoes', [DevolucaoController::class, 'store']);
     Route::post('devolucoes/{id}/approve', [DevolucaoController::class, 'approve']);
     Route::post('devolucoes/{id}/reject',  [DevolucaoController::class, 'reject']);
+
+    Route::prefix('feriados')->group(function () {
+        Route::get('/', [FeriadoController::class, 'index']);
+        Route::post('/sync', [FeriadoController::class, 'sync']);
+    });
 
 });

@@ -15,6 +15,7 @@ class DatabaseSeeder extends Seeder
     {
         $this->call([
             ConfiguracoesSeeder::class,
+            FeriadosSeeder::class,
             CategoriasSeeder::class,
             FornecedoresSeeder::class,
             ProdutosSeeder::class,

@@ -23,11 +23,14 @@ class Pedido extends Model
         'data_pedido',
         'valor_total',
         'observacoes',
+        'prazo_dias_uteis',
+        'data_limite_entrega',
     ];
 
     protected $casts = [
         'data_pedido' => 'datetime',
         'valor_total' => 'decimal:2',
+        'data_limite_entrega' => 'date',
     ];
 
     public function cliente(): BelongsTo

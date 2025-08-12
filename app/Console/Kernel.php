@@ -15,7 +15,16 @@ class Kernel extends ConsoleKernel
      */
     protected function schedule(Schedule $schedule): void
     {
-        $schedule->command('produtos:atualizar-outlet')->daily();
+        // Atualiza ano atual trimestralmente
+        $schedule->command('holidays:sync --year='.now()->year.' --uf=PA --only=all')
+            ->quarterly()
+            ->timezone('America/Belem');
+
+        // Atualiza próximo ano mensalmente (de ago até jan)
+        $schedule->command('holidays:sync --year='.(now()->year+1).' --uf=PA --only=all')
+            ->monthly()
+            ->when(fn() => now()->month >= 8 || now()->month <= 1)
+            ->timezone('America/Belem');
     }
 
     /**

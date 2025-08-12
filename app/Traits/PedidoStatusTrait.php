@@ -67,4 +67,25 @@ trait PedidoStatusTrait
         $previsao = $this->getPrevisaoProximoStatus($pedido);
         return $previsao && Carbon::now()->greaterThan($previsao);
     }
+
+    /**
+     * Informa se o status atual do pedido ainda deve contar para o prazo de entrega ao cliente.
+     */
+    protected function contaPrazoEntrega(?PedidoStatus $status): bool
+    {
+        if (!$status) return false;
+
+        return in_array($status, [
+            PedidoStatus::PEDIDO_CRIADO,
+            PedidoStatus::ENVIADO_FABRICA,
+            PedidoStatus::NOTA_EMITIDA,
+            PedidoStatus::PREVISAO_EMBARQUE_FABRICA,
+            PedidoStatus::EMBARQUE_FABRICA,
+            PedidoStatus::NOTA_RECEBIDA_COMPRA,
+            PedidoStatus::PREVISAO_ENTREGA_ESTOQUE,
+            PedidoStatus::ENTREGA_ESTOQUE,
+            PedidoStatus::PREVISAO_ENVIO_CLIENTE,
+            PedidoStatus::ENVIO_CLIENTE,
+        ], true);
+    }
 }

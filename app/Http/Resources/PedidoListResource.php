@@ -40,19 +40,17 @@ class PedidoListResource extends JsonResource
         $previsao         = $this->getPrevisaoProximoStatus($this->resource);
         $atrasadoFluxo    = $this->isAtrasado($this->resource);
 
-        // Datas
-        $dataLimite   = $this->data_limite_entrega ? Carbon::parse($this->data_limite_entrega) : null;
-        $agoraBelem   = Carbon::now('America/Belem');
+        $agoraBelem = Carbon::now('America/Belem');
+        $dataLimite = $this->data_limite_entrega ? Carbon::parse($this->data_limite_entrega) : null;
 
-        // Dias úteis restantes até a data limite (pode ser negativo)
+        // >>> Só calcula se o status atual conta para o prazo de entrega
         $diasUteisRestantes = null;
-        if ($dataLimite) {
-            // diffInWeekdays($to, $absolute = false) -> negativo se já passou
-            $diasUteisRestantes = $agoraBelem->diffInWeekdays($dataLimite, false);
-        }
+        $atrasadoEntrega = false;
 
-        // Atraso de entrega (com base em data_limite_entrega)
-        $atrasadoEntrega = $dataLimite && $agoraBelem->greaterThan($dataLimite);
+        if ($dataLimite && $this->contaPrazoEntrega($statusAtualEnum)) {
+            $diasUteisRestantes = $agoraBelem->diffInWeekdays($dataLimite, false);
+            $atrasadoEntrega    = $agoraBelem->greaterThan($dataLimite);
+        }
 
         return [
             'id'                     => $this->id,
@@ -64,7 +62,6 @@ class PedidoListResource extends JsonResource
             'data_ultimo_status'     => $dataUltimoStatus,
             'valor_total'            => $this->valor_total,
 
-            // Status (fluxo)
             'status'                 => $statusAtualEnum?->value,
             'status_label'           => $statusAtualEnum?->label(),
             'proximo_status'         => $proximoStatus?->value,
@@ -76,7 +73,7 @@ class PedidoListResource extends JsonResource
             'prazo_dias_uteis'       => $this->prazo_dias_uteis,
             'data_limite_entrega'    => $dataLimite?->toDateString(),
             'entrega_prevista'       => $dataLimite?->format('Y-m-d'),
-            'dias_uteis_restantes'   => $diasUteisRestantes,
+            'dias_uteis_restantes'   => $diasUteisRestantes, // null quando não se aplica
             'atrasado_entrega'       => $atrasadoEntrega,
 
             'observacoes'            => $this->observacoes,

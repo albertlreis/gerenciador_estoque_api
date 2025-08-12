@@ -76,6 +76,7 @@ class PedidoService
             'cliente:id,nome,email,telefone',
             'parceiro:id,nome',
             'usuario:id,nome',
+            'statusAtual',
             'itens.variacao.produto.imagens',
             'itens.variacao.atributos',
             'historicoStatus.usuario:id,nome',

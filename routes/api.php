@@ -1,5 +1,9 @@
 <?php
 
+use App\Http\Controllers\Assistencia\AssistenciaChamadoController;
+use App\Http\Controllers\Assistencia\AssistenciaDefeitosController;
+use App\Http\Controllers\Assistencia\AssistenciaItemController;
+use App\Http\Controllers\Assistencia\AssistenciasController;
 use App\Http\Controllers\ConsignacaoRelatorioController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DevolucaoController;
@@ -161,6 +165,33 @@ Route::middleware('auth:sanctum')->prefix('v1')->group(function () {
     Route::prefix('feriados')->group(function () {
         Route::get('/', [FeriadoController::class, 'index']);
         Route::post('/sync', [FeriadoController::class, 'sync']);
+    });
+
+    Route::prefix('assistencias')->group(function () {
+        // Catálogos
+        Route::get('/autorizadas', [AssistenciasController::class, 'index']);
+        Route::post('/autorizadas', [AssistenciasController::class, 'store']);
+        Route::put('/autorizadas/{id}', [AssistenciasController::class, 'update']);
+        Route::delete('/autorizadas/{id}', [AssistenciasController::class, 'destroy']);
+
+        Route::get('/defeitos', [AssistenciaDefeitosController::class, 'index']);
+        Route::post('/defeitos', [AssistenciaDefeitosController::class, 'store']);
+        Route::put('/defeitos/{id}', [AssistenciaDefeitosController::class, 'update']);
+        Route::delete('/defeitos/{id}', [AssistenciaDefeitosController::class, 'destroy']);
+
+        // Chamados
+        Route::get('/chamados', [AssistenciaChamadoController::class, 'index']);
+        Route::post('/chamados', [AssistenciaChamadoController::class, 'store']);
+        Route::get('/chamados/{id}', [AssistenciaChamadoController::class, 'show']);
+        Route::post('/chamados/{id}/cancelar', [AssistenciaChamadoController::class, 'cancelar']);
+
+        // Itens do chamado
+        Route::post('/chamados/{id}/itens', [AssistenciaItemController::class, 'store']);
+        Route::post('/itens/{itemId}/enviar', [AssistenciaItemController::class, 'enviar']);
+        Route::post('/itens/{itemId}/orcamento', [AssistenciaItemController::class, 'orcamento']);
+        Route::post('/itens/{itemId}/aprovar-orcamento', [AssistenciaItemController::class, 'aprovar']);
+        Route::post('/itens/{itemId}/reprovar-orcamento', [AssistenciaItemController::class, 'reprovar']);
+        Route::post('/itens/{itemId}/retorno', [AssistenciaItemController::class, 'retorno']);
     });
 
 });

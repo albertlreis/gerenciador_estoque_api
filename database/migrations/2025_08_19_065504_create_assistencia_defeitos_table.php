@@ -1,0 +1,36 @@
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    /**
+     * Run the migrations.
+     *
+     * @return void
+     */
+    public function up()
+    {
+        Schema::create('assistencia_defeitos', function (Blueprint $table) {
+            $table->increments('id');
+            $table->string('codigo', 50)->unique();
+            $table->string('descricao', 255);
+            $table->boolean('critico')->default(false);
+            $table->boolean('ativo')->default(true);
+            $table->timestamps();
+            $table->softDeletes();
+        });
+    }
+
+    /**
+     * Reverse the migrations.
+     *
+     * @return void
+     */
+    public function down()
+    {
+        Schema::dropIfExists('assistencia_defeitos');
+    }
+};

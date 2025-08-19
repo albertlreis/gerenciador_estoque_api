@@ -33,6 +33,10 @@ class DatabaseSeeder extends Seeder
             ConsignacoesSeeder::class,
             LocalizacaoEstoqueSeeder::class,
             PedidosFabricaSeeder::class,
+            AssistenciasSeeder::class,
+            AssistenciaDefeitosSeeder::class,
+            AssistenciaDepositoSeeder::class,
+            AssistenciaDemoSeeder::class,
         ]);
     }
 }

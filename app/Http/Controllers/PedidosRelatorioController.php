@@ -2,11 +2,14 @@
 
 namespace App\Http\Controllers;
 
+use App\Exports\Relatorios\PedidosPorPeriodoExport;
 use App\Services\Relatorios\PedidosRelatorioService;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Maatwebsite\Excel\Facades\Excel;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 /**
  * @group Relatórios: Pedidos
@@ -32,28 +35,28 @@ class PedidosRelatorioController extends Controller
      * @queryParam cliente_id int Opcional. Filtrar por cliente.
      * @queryParam status string Opcional. Ex: "finalizado", "pendente".
      * @queryParam vendedor_id int Opcional.
-     *
-     * @response 200 {
-     *   "data": [
-     *     {
-     *       "numero": "PED-0001",
-     *       "cliente": "João da Silva",
-     *       "data": "2024-05-10",
-     *       "total": 1245.50,
-     *       "status": "finalizado"
-     *     }
-     *   ]
-     * }
      */
-    public function pedidosPorPeriodo(Request $request): Response|JsonResponse
+    public function pedidosPorPeriodo(Request $request): Response|JsonResponse|BinaryFileResponse
     {
-        $dados = $this->service->listarPedidosPorPeriodo($request->all());
+        [$dados, $totalGeral] = $this->service->listarPedidosPorPeriodo($request->all());
 
-        if ($request->query('formato') === 'pdf') {
-            $pdf = Pdf::loadView('exports.pedidos-por-periodo', ['dados' => $dados]);
+        $formato = $request->query('formato');
+
+        if ($formato === 'pdf') {
+            $pdf = Pdf::loadView('exports.pedidos-por-periodo', [
+                'dados' => $dados,
+                'totalGeral' => $totalGeral,
+            ]);
             return $pdf->download('relatorio-pedidos.pdf');
         }
 
-        return response()->json(['data' => $dados]);
+        if ($formato === 'excel') {
+            return Excel::download(
+                new PedidosPorPeriodoExport($dados, $totalGeral),
+                'relatorio-pedidos.xlsx'
+            );
+        }
+
+        return response()->json(['data' => $dados, 'total_geral' => $totalGeral]);
     }
 }

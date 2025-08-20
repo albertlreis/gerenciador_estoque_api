@@ -4,14 +4,15 @@ namespace App\Services\Relatorios;
 
 use App\Models\Pedido;
 use Illuminate\Support\Carbon;
+use App\Enums\PedidoStatus;
+use Throwable;
+
 
 class PedidosRelatorioService
 {
     /**
-     * Retorna os pedidos filtrados por período e outros critérios.
-     *
      * @param array $filtros data_inicio, data_fim, cliente_id, status, vendedor_id
-     * @return array
+     * @return array [array $dados, float $totalGeral]
      */
     public function listarPedidosPorPeriodo(array $filtros): array
     {
@@ -35,14 +36,43 @@ class PedidosRelatorioService
             })
             ->orderByDesc('data_pedido');
 
-        return $query->get()->map(function ($pedido) {
+        $lista = $query->get();
+
+        $dados = $lista->map(function ($pedido) {
+            // Pode vir como enum, string ou nulo, dependendo do seu model/relationship
+            $statusValue = $pedido->statusAtual->status ?? $pedido->status ?? null;
+
+            // Resolve label de forma defensiva
+            if ($statusValue instanceof PedidoStatus) {
+                $statusLabel = $statusValue->label();
+                $statusStr   = $statusValue->value;
+            } elseif (is_string($statusValue) && $statusValue !== '') {
+                try {
+                    $statusEnum  = PedidoStatus::from($statusValue);
+                    $statusLabel = $statusEnum->label();
+                    $statusStr   = $statusEnum->value;
+                } catch (Throwable) {
+                    $statusLabel = ucfirst(str_replace('_', ' ', $statusValue)); // fallback legível
+                    $statusStr   = $statusValue;
+                }
+            } else {
+                $statusLabel = '-';
+                $statusStr   = null;
+            }
+
             return [
-                'numero'   => $pedido->numero_externo ?? $pedido->id,
-                'data'     => optional($pedido->data_pedido)->format('Y-m-d'),
-                'cliente'  => $pedido->cliente->nome ?? '-',
-                'total'    => $pedido->valor_total,
-                'status'   => $pedido->status,
+                'numero'       => $pedido->numero_externo ?? $pedido->id,
+                'data'         => optional($pedido->data_pedido)->format('Y-m-d'),
+                'data_br'      => optional($pedido->data_pedido)->format('d/m/Y'),
+                'cliente'      => $pedido->cliente->nome ?? '-',
+                'total'        => (float)($pedido->valor_total ?? 0),
+                'status'       => $statusStr,      // mantém o "valor" se precisar em JSON
+                'status_label' => $statusLabel,    // ✅ usado por PDF/Excel
             ];
-        })->toArray();
+        })->values()->toArray();
+
+        $totalGeral = (float) $lista->sum('valor_total');
+
+        return [$dados, $totalGeral];
     }
 }

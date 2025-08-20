@@ -2,11 +2,14 @@
 
 namespace App\Http\Controllers;
 
+use App\Exports\Relatorios\ConsignacoesExport;
 use App\Services\Relatorios\ConsignacaoRelatorioService;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Maatwebsite\Excel\Facades\Excel;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 /**
  * @group Relatórios: Consignações
@@ -23,34 +26,41 @@ class ConsignacaoRelatorioController extends Controller
     }
 
     /**
-     * Relatório de Consignações Ativas
+     * Relatório de Consignações (ativas ou por filtros)
      *
-     * Retorna consignações abertas com produtos e clientes vinculados.
-     *
-     * @queryParam cliente_id int Opcional. Filtrar por cliente.
-     * @queryParam parceiro_id int Opcional. Filtrar por parceiro.
-     * @queryParam vencimento_ate date Opcional. Consignações com vencimento até esta data.
-     *
-     * @response 200 {
-     *   "data": [
-     *     {
-     *       "cliente": "Maria Oliveira",
-     *       "data_envio": "2024-06-01",
-     *       "status": "aberta",
-     *       "total": 980.00
-     *     }
-     *   ]
-     * }
+     * Filtros:
+     * - status: um dos valores de STATUS_CONSIGNACAO
+     * - envio_inicio, envio_fim (YYYY-MM-DD)
+     * - vencimento_inicio, vencimento_fim (YYYY-MM-DD)
+     * - consolidado: bool (true => agrupar por cliente; false => detalhado)
      */
-    public function consignacoesAtivas(Request $request): Response|JsonResponse
+    public function consignacoesAtivas(Request $request): Response|JsonResponse|BinaryFileResponse
     {
-        $dados = $this->service->listarConsignacoesAtivas($request->all());
+        [$linhas, $totalGeral, $consolidado] = $this->service->listarConsignacoes($request->all());
 
-        if ($request->query('formato') === 'pdf') {
-            $pdf = Pdf::loadView('exports.consignacoes-ativas', ['dados' => $dados]);
+        $formato = $request->query('formato');
+
+        if ($formato === 'pdf') {
+            $pdf = Pdf::loadView('exports.consignacoes-ativas', [
+                'dados'       => $linhas,
+                'totalGeral'  => $totalGeral,
+                'consolidado' => $consolidado,
+            ]);
             return $pdf->download('relatorio-consignacoes.pdf');
         }
 
-        return response()->json(['data' => $dados]);
+        if ($formato === 'excel') {
+            return Excel::download(
+                new ConsignacoesExport($linhas, $totalGeral, $consolidado),
+                'relatorio-consignacoes.xlsx'
+            );
+        }
+
+        return response()->json([
+            'data'         => $linhas,
+            'total_geral'  => $totalGeral,
+            'consolidado'  => $consolidado,
+        ]);
     }
+
 }

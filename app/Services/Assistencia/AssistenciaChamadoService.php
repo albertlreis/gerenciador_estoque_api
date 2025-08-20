@@ -21,7 +21,7 @@ class AssistenciaChamadoService
     ) {}
 
     /**
-     * Abre um chamado de assistência.
+     * Abre um chamado assistência.
      *
      * @param CriarChamadoDTO $dto
      * @param int|null $usuarioId
@@ -126,7 +126,7 @@ class AssistenciaChamadoService
             'status_para' => $statusPara,
             'mensagem'    => $mensagem,
             'meta_json'   => $meta,
-            'user_id'     => $meta['usuario_id'] ?? null,
+            'usuario_id'  => $meta['usuario_id'] ?? null,
         ]);
     }
 }

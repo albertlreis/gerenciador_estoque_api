@@ -11,7 +11,7 @@ return new class extends Migration
      *
      * @return void
      */
-    public function up()
+    public function up(): void
     {
         Schema::create('assistencia_chamado_itens', function (Blueprint $table) {
             $table->increments('id');
@@ -32,8 +32,7 @@ return new class extends Migration
             // vínculos operacionais (ajuste nomes se necessário)
             $table->unsignedInteger('pedido_id')->nullable();
             $table->unsignedInteger('pedido_item_id')->nullable();
-            $table->unsignedInteger('consignacao_id')->nullable();
-            $table->unsignedInteger('consignacao_item_id')->nullable();
+            $table->unsignedBigInteger('consignacao_id')->nullable();
 
             // logística
             $table->unsignedInteger('deposito_origem_id')->nullable();
@@ -45,7 +44,7 @@ return new class extends Migration
             $table->date('data_retorno')->nullable();
 
             // orçamento
-            $table->decimal('valor_orcado', 12, 2)->nullable();
+            $table->decimal('valor_orcado', 12)->nullable();
             $table->string('aprovacao', 20)->default('pendente'); // pendente|aprovado|reprovado
             $table->date('data_aprovacao')->nullable();
 
@@ -65,7 +64,6 @@ return new class extends Migration
             $table->foreign('pedido_item_id')->references('id')->on('pedido_itens')->onDelete('set null');
 
             $table->foreign('consignacao_id')->references('id')->on('consignacoes')->onDelete('set null');
-            $table->foreign('consignacao_item_id')->references('id')->on('consignacao_itens')->onDelete('set null');
 
             $table->foreign('deposito_origem_id')->references('id')->on('depositos')->onDelete('set null');
             $table->foreign('deposito_assistencia_id')->references('id')->on('depositos')->onDelete('set null');
@@ -81,7 +79,7 @@ return new class extends Migration
      *
      * @return void
      */
-    public function down()
+    public function down(): void
     {
         Schema::dropIfExists('assistencia_chamado_itens');
     }

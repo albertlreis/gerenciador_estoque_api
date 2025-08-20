@@ -14,7 +14,7 @@ class AssistenciaChamadoLogResource extends JsonResource
             'status_para' => $this->status_para,
             'mensagem' => $this->mensagem,
             'meta' => $this->meta_json,
-            'user_id' => $this->user_id,
+            'usuario_id' => $this->usuario_id,
             'created_at' => optional($this->created_at)->toDateTimeString(),
         ];
     }

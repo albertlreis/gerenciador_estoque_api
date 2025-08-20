@@ -21,7 +21,6 @@ class AdicionarItemRequest extends FormRequest
             'pedido_id' => ['nullable', 'integer', 'exists:pedidos,id'],
             'pedido_item_id' => ['nullable', 'integer', 'exists:pedido_itens,id'],
             'consignacao_id' => ['nullable', 'integer', 'exists:consignacoes,id'],
-            'consignacao_item_id' => ['nullable', 'integer', 'exists:consignacao_itens,id'],
             'observacoes' => ['nullable', 'string', 'max:5000'],
         ];
     }

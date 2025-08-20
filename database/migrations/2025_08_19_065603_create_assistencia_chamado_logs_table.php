@@ -11,7 +11,7 @@ return new class extends Migration
      *
      * @return void
      */
-    public function up()
+    public function up(): void
     {
         Schema::create('assistencia_chamado_logs', function (Blueprint $table) {
             $table->increments('id');
@@ -26,13 +26,13 @@ return new class extends Migration
             $table->json('meta_json')->nullable();
 
             // no seu projeto a tabela é "usuarios"
-            $table->unsignedInteger('user_id')->nullable();
+            $table->unsignedInteger('usuario_id')->nullable();
 
             $table->timestamps();
 
             $table->foreign('chamado_id')->references('id')->on('assistencia_chamados')->onDelete('cascade');
             $table->foreign('item_id')->references('id')->on('assistencia_chamado_itens')->onDelete('cascade');
-            $table->foreign('user_id')->references('id')->on('usuarios')->onDelete('set null');
+            $table->foreign('usuario_id')->references('id')->on('acesso_usuarios')->onDelete('set null');
 
             $table->index(['chamado_id', 'item_id']);
         });
@@ -43,7 +43,7 @@ return new class extends Migration
      *
      * @return void
      */
-    public function down()
+    public function down(): void
     {
         Schema::dropIfExists('assistencia_chamado_logs');
     }

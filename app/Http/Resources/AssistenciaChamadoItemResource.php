@@ -21,7 +21,6 @@ class AssistenciaChamadoItemResource extends JsonResource
             'pedido_id' => $this->pedido_id,
             'pedido_item_id' => $this->pedido_item_id,
             'consignacao_id' => $this->consignacao_id,
-            'consignacao_item_id' => $this->consignacao_item_id,
             'deposito_origem_id' => $this->deposito_origem_id,
             'assistencia_id' => $this->assistencia_id,
             'deposito_assistencia_id' => $this->deposito_assistencia_id,

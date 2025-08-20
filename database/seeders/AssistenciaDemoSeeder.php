@@ -70,7 +70,6 @@ class AssistenciaDemoSeeder extends Seeder
             'pedido_id' => null,
             'pedido_item_id' => null,
             'consignacao_id' => null,
-            'consignacao_item_id' => null,
             'deposito_origem_id' => $depositoOrigemId,
             'assistencia_id' => $assistenciaId,
             'deposito_assistencia_id' => $depositoAssistId,

@@ -19,7 +19,6 @@ class AdicionarItemDTO
         public ?int    $pedidoId,
         public ?int    $pedidoItemId,
         public ?int    $consignacaoId,
-        public ?int    $consignacaoItemId,
         public ?string $observacoes,
     ) {}
 
@@ -37,7 +36,6 @@ class AdicionarItemDTO
             pedidoId: $data['pedido_id'] ?? null,
             pedidoItemId: $data['pedido_item_id'] ?? null,
             consignacaoId: $data['consignacao_id'] ?? null,
-            consignacaoItemId: $data['consignacao_item_id'] ?? null,
             observacoes: $data['observacoes'] ?? null,
         );
     }

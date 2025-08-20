@@ -16,7 +16,7 @@ class AssistenciaChamadoItem extends Model
     protected $fillable = [
         'chamado_id','produto_id','variacao_id','numero_serie','lote',
         'defeito_id','descricao_defeito_livre','status_item',
-        'pedido_id','pedido_item_id','consignacao_id','consignacao_item_id',
+        'pedido_id','pedido_item_id','consignacao_id',
         'deposito_origem_id','assistencia_id','deposito_assistencia_id',
         'rastreio_envio','rastreio_retorno','data_envio','data_retorno',
         'valor_orcado','aprovacao','data_aprovacao','observacoes'
@@ -41,7 +41,6 @@ class AssistenciaChamadoItem extends Model
     public function pedidoItem()  { return $this->belongsTo(PedidoItem::class, 'pedido_item_id'); }
 
     public function consignacao()     { return $this->belongsTo(Consignacao::class, 'consignacao_id'); }
-    public function consignacaoItem() { return $this->belongsTo(ConsignacaoItem::class, 'consignacao_item_id'); }
 
     public function depositoOrigem()      { return $this->belongsTo(Deposito::class, 'deposito_origem_id'); }
     public function depositoAssistencia() { return $this->belongsTo(Deposito::class, 'deposito_assistencia_id'); }

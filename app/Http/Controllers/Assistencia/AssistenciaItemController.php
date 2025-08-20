@@ -15,7 +15,6 @@ use App\Http\Requests\Assistencia\OrcamentoRequest;
 use App\Http\Requests\Assistencia\RetornoRequest;
 use App\Http\Resources\AssistenciaChamadoItemResource;
 use App\Models\AssistenciaChamado;
-use App\Models\AssistenciaChamadoItem;
 use App\Services\Assistencia\AssistenciaItemService;
 use Illuminate\Http\JsonResponse;
 

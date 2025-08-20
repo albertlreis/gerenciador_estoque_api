@@ -8,8 +8,22 @@ use App\Models\Assistencia;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
+/**
+ * Controlador responsável pelo CRUD de Assistências Técnicas (autorizadas).
+ */
 class AssistenciasController extends Controller
 {
+    /**
+     * Lista assistências com paginação e filtros básicos.
+     *
+     * Filtros aceitos via query string:
+     * - busca: string que pesquisa por nome, cnpj ou email (LIKE)
+     * - ativo: boolean (true/false)
+     * - per_page: inteiro (padrão 15)
+     *
+     * @param  Request  $request
+     * @return JsonResponse
+     */
     public function index(Request $request): JsonResponse
     {
         $q = Assistencia::query();
@@ -23,7 +37,7 @@ class AssistenciasController extends Controller
         }
 
         if ($request->filled('ativo')) {
-            $q->where('ativo', (bool) $request->boolean('ativo'));
+            $q->where('ativo', $request->boolean('ativo'));
         }
 
         $perPage = (int) $request->input('per_page', 15);
@@ -32,6 +46,36 @@ class AssistenciasController extends Controller
         return AssistenciaResource::collection($data)->response();
     }
 
+    /**
+     * Exibe uma assistência específica pelo ID.
+     *
+     * @param  int  $id  ID da assistência
+     * @return JsonResponse
+     */
+    public function show(int $id): JsonResponse
+    {
+        $assist = Assistencia::findOrFail($id);
+
+        return (new AssistenciaResource($assist))->response();
+    }
+
+    /**
+     * Cria uma nova assistência.
+     *
+     * Campos aceitos no corpo (JSON):
+     * - nome: string (obrigatório, máx. 255)
+     * - cnpj: string|null (máx. 20)
+     * - telefone: string|null (máx. 50)
+     * - email: string|null (email, máx. 150)
+     * - contato: string|null (máx. 150)
+     * - endereco_json: array|null (será persistido como JSON)
+     * - prazo_padrao_dias: int|null (1..365)
+     * - ativo: bool|null
+     * - observacoes: string|null
+     *
+     * @param  Request  $request
+     * @return JsonResponse
+     */
     public function store(Request $request): JsonResponse
     {
         $data = $request->validate([
@@ -51,6 +95,13 @@ class AssistenciasController extends Controller
         return (new AssistenciaResource($assist))->response();
     }
 
+    /**
+     * Atualiza parcialmente uma assistência existente.
+     *
+     * @param  int      $id       ID da assistência
+     * @param  Request  $request  Dados parciais para atualização
+     * @return JsonResponse
+     */
     public function update(int $id, Request $request): JsonResponse
     {
         $assist = Assistencia::findOrFail($id);
@@ -72,6 +123,12 @@ class AssistenciasController extends Controller
         return (new AssistenciaResource($assist))->response();
     }
 
+    /**
+     * Remove uma assistência definitivamente.
+     *
+     * @param  int  $id  ID da assistência
+     * @return JsonResponse
+     */
     public function destroy(int $id): JsonResponse
     {
         $assist = Assistencia::findOrFail($id);

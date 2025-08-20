@@ -169,10 +169,11 @@ Route::middleware('auth:sanctum')->prefix('v1')->group(function () {
 
     Route::prefix('assistencias')->group(function () {
         // Catálogos
-        Route::get('/autorizadas', [AssistenciasController::class, 'index']);
-        Route::post('/autorizadas', [AssistenciasController::class, 'store']);
-        Route::put('/autorizadas/{id}', [AssistenciasController::class, 'update']);
-        Route::delete('/autorizadas/{id}', [AssistenciasController::class, 'destroy']);
+        Route::get('/autorizadas', [AssistenciasController::class, 'index'])->name('assistencias.index');
+        Route::get('/autorizadas/{id}', [AssistenciasController::class, 'show'])->name('assistencias.show');
+        Route::post('/autorizadas', [AssistenciasController::class, 'store'])->name('assistencias.store');
+        Route::put('/autorizadas/{id}', [AssistenciasController::class, 'update'])->name('assistencias.update');
+        Route::delete('/autorizadas/{id}', [AssistenciasController::class, 'destroy'])->name('assistencias.destroy');
 
         Route::get('/defeitos', [AssistenciaDefeitosController::class, 'index']);
         Route::post('/defeitos', [AssistenciaDefeitosController::class, 'store']);

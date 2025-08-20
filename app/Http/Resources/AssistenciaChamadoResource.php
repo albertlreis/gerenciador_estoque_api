@@ -17,6 +17,7 @@ class AssistenciaChamadoResource extends JsonResource
             'origem_id' => $this->origem_id,
             'cliente_id' => $this->cliente_id,
             'fornecedor_id' => $this->fornecedor_id,
+            'assistencia_id' => $this->assistencia_id,
             'assistencia' => new AssistenciaResource($this->whenLoaded('assistencia')),
             'sla_data_limite' => $this->sla_data_limite?->toDateString(),
             'canal_abertura' => $this->canal_abertura,

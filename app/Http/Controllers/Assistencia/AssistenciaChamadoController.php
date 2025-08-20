@@ -3,9 +3,11 @@
 namespace App\Http\Controllers\Assistencia;
 
 use App\DTOs\Assistencia\CriarChamadoDTO;
+use App\DTOs\Assistencia\AtualizarChamadoDTO;
 use App\Enums\AssistenciaStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Assistencia\CriarChamadoRequest;
+use App\Http\Requests\Assistencia\AtualizarChamadoRequest;
 use App\Http\Resources\AssistenciaChamadoResource;
 use App\Models\AssistenciaChamado;
 use App\Services\Assistencia\AssistenciaChamadoService;
@@ -19,7 +21,10 @@ class AssistenciaChamadoController extends Controller
     ) {}
 
     /**
-     * Listagem com filtros básicos.
+     * Lista chamados com filtros básicos e paginação.
+     *
+     * @param Request $request
+     * @return JsonResponse
      */
     public function index(Request $request): JsonResponse
     {
@@ -59,10 +64,15 @@ class AssistenciaChamadoController extends Controller
         return AssistenciaChamadoResource::collection($data)->response();
     }
 
+    /**
+     * Cria (abre) um novo chamado de assistência.
+     *
+     * @param CriarChamadoRequest $request
+     * @return JsonResponse
+     */
     public function store(CriarChamadoRequest $request): JsonResponse
     {
         $dto = CriarChamadoDTO::fromArray($request->validated());
-
         $chamado = $this->service->abrirChamado($dto, auth()->id());
 
         return (new AssistenciaChamadoResource(
@@ -70,6 +80,12 @@ class AssistenciaChamadoController extends Controller
         ))->response();
     }
 
+    /**
+     * Exibe um chamado com relacionamentos necessários ao front.
+     *
+     * @param int $id
+     * @return JsonResponse
+     */
     public function show(int $id): JsonResponse
     {
         $chamado = AssistenciaChamado::with([
@@ -81,11 +97,35 @@ class AssistenciaChamadoController extends Controller
         return (new AssistenciaChamadoResource($chamado))->response();
     }
 
+    /**
+     * Atualiza campos básicos do chamado (sem alterar status).
+     *
+     * @param int $id
+     * @param AtualizarChamadoRequest $request
+     * @return JsonResponse
+     */
+    public function update(int $id, AtualizarChamadoRequest $request): JsonResponse
+    {
+        $chamado = AssistenciaChamado::findOrFail($id);
+        $dto = AtualizarChamadoDTO::fromArray($request->validated());
+
+        $atualizado = $this->service->atualizarChamado($chamado, $dto, auth()->id());
+
+        return (new AssistenciaChamadoResource(
+            $atualizado->load(['assistencia'])
+        ))->response();
+    }
+
+    /**
+     * Cancela um chamado (regras de bloqueio para itens processados).
+     *
+     * @param int $id
+     * @return JsonResponse
+     */
     public function cancelar(int $id): JsonResponse
     {
         $chamado = AssistenciaChamado::findOrFail($id);
 
-        // regra simples: só cancela se sem itens enviados/reparados
         $temBloqueio = $chamado->itens()
             ->whereIn('status_item', [
                 AssistenciaStatus::ENVIADO_ASSISTENCIA->value,

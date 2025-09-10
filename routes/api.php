@@ -44,6 +44,8 @@ Route::middleware('auth:sanctum')->prefix('v1')->group(function () {
     // Produtos e Categorias
     Route::apiResource('categorias', CategoriaController::class);
 
+    Route::get('/atributos/sugestoes', [ProdutoAtributoController::class, 'nomes']);
+    Route::get('/atributos/{nome}/valores', [ProdutoAtributoController::class, 'valores']);
     Route::get('atributos', [ProdutoAtributoController::class, 'index']);
 
     // Variações

@@ -142,7 +142,18 @@ class ProdutoService
         ]);
 
         if (!empty($request->nome)) {
-            $query->where('nome', 'like', '%' . $request->nome . '%');
+            $term = trim($request->nome);
+
+            $query->where(function ($q) use ($term) {
+                $like = '%' . $term . '%';
+
+                $q->where('nome', 'like', $like)
+
+                    ->orWhereHas('variacoes', function ($q2) use ($like) {
+                        $q2->where('referencia', 'like', $like)
+                            ->orWhere('codigo_barras', 'like', $like);
+                    });
+            });
         }
 
         if (!empty($request->id_categoria)) {

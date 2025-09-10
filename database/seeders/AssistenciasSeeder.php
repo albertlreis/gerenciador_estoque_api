@@ -5,9 +5,6 @@ namespace Database\Seeders;
 use App\Models\Assistencia;
 use Illuminate\Database\Seeder;
 
-/**
- * Seed de Assistências Autorizadas (catálogo).
- */
 class AssistenciasSeeder extends Seeder
 {
     public function run(): void
@@ -26,7 +23,6 @@ class AssistenciasSeeder extends Seeder
                     'uf' => 'SP',
                     'cep' => '01010-000',
                 ],
-                'prazo_padrao_dias' => 30,
                 'ativo' => true,
                 'observacoes' => 'Atende linha marcenaria e cadeiras.',
             ],
@@ -43,7 +39,6 @@ class AssistenciasSeeder extends Seeder
                     'uf' => 'RJ',
                     'cep' => '22010-001',
                 ],
-                'prazo_padrao_dias' => 20,
                 'ativo' => true,
                 'observacoes' => 'Especializada em estruturas metálicas.',
             ],
@@ -60,7 +55,6 @@ class AssistenciasSeeder extends Seeder
                     'uf' => 'AM',
                     'cep' => '69005-000',
                 ],
-                'prazo_padrao_dias' => 35,
                 'ativo' => true,
                 'observacoes' => null,
             ],

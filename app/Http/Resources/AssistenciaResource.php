@@ -16,7 +16,6 @@ class AssistenciaResource extends JsonResource
             'email' => $this->email,
             'contato' => $this->contato,
             'endereco' => $this->endereco_json,
-            'prazo_padrao_dias' => $this->prazo_padrao_dias,
             'ativo' => (bool) $this->ativo,
             'observacoes' => $this->observacoes,
             'created_at' => optional($this->created_at)->toDateTimeString(),

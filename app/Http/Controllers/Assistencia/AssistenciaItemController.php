@@ -17,6 +17,7 @@ use App\Http\Resources\AssistenciaChamadoItemResource;
 use App\Models\AssistenciaChamado;
 use App\Services\Assistencia\AssistenciaItemService;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 
 class AssistenciaItemController extends Controller
 {
@@ -37,8 +38,29 @@ class AssistenciaItemController extends Controller
         $item = $this->service->adicionarItem($dto, auth()->id());
 
         return (new AssistenciaChamadoItemResource(
-            $item->load(['defeito'])
+            $item->load(['defeito','variacao.produto'])
         ))->response();
+    }
+
+    /**
+     * Coloca o item em 'aguardando_reparo' (fluxo depósito/cliente).
+     *
+     * Body esperado (JSON):
+     * - deposito_entrada_id: int (obrigatório quando local_reparo = 'deposito')
+     */
+    public function iniciarReparo(int $itemId, Request $request): JsonResponse
+    {
+        $depositoEntradaId = $request->has('deposito_entrada_id')
+            ? (int) $request->input('deposito_entrada_id')
+            : null;
+
+        $item = $this->service->iniciarReparo(
+            itemId: $itemId,
+            usuarioId: auth()->id(),
+            depositoEntradaId: $depositoEntradaId
+        );
+
+        return (new AssistenciaChamadoItemResource($item))->response();
     }
 
     public function enviar(int $itemId, EnviarItemAssistenciaRequest $request): JsonResponse
@@ -97,6 +119,68 @@ class AssistenciaItemController extends Controller
         ));
 
         $item = $this->service->registrarRetorno($dto, auth()->id());
+
+        return (new AssistenciaChamadoItemResource($item))->response();
+    }
+
+    /**
+     * Conclui o reparo sem movimentação de estoque (depósito/cliente) e muda para 'reparo_concluido'.
+     */
+    public function concluirReparo(int $itemId, Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'data_conclusao' => ['nullable','date'],
+            'observacao'     => ['nullable','string','max:500'],
+        ]);
+
+        $item = $this->service->concluirReparoLocal($itemId, $data['data_conclusao'] ?? null, $data['observacao'] ?? null, auth()->id());
+        return (new AssistenciaChamadoItemResource($item))->response();
+    }
+
+    public function aguardarResposta(int $itemId): JsonResponse
+    {
+        $item = $this->service->marcarAguardandoRespostaFabrica($itemId, auth()->id());
+        return (new AssistenciaChamadoItemResource($item))->response();
+    }
+
+    public function aguardarPeca(int $itemId): JsonResponse
+    {
+        $item = $this->service->marcarAguardandoPeca($itemId, auth()->id());
+        return (new AssistenciaChamadoItemResource($item))->response();
+    }
+
+    public function saidaFabrica(int $itemId, Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'rastreio_retorno' => ['nullable','string','max:100'],
+            'data_envio_retorno' => ['nullable','date'], // só para log; não persiste em coluna
+        ]);
+
+        $item = $this->service->registrarSaidaDaFabrica(
+            itemId: $itemId,
+            rastreio: $data['rastreio_retorno'] ?? null,
+            dataEnvio: $data['data_envio_retorno'] ?? null,
+            usuarioId: auth()->id()
+        );
+
+        return (new AssistenciaChamadoItemResource($item))->response();
+    }
+
+    public function entregar(int $itemId, Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'deposito_saida_id' => ['required','integer','min:1'],
+            'data_entrega'      => ['nullable','date'],
+            'observacao'        => ['nullable','string','max:500'],
+        ]);
+
+        $item = $this->service->registrarEntregaAoCliente(
+            itemId: $itemId,
+            depositoSaidaId: (int) $data['deposito_saida_id'],
+            dataEntrega: $data['data_entrega'] ?? null,
+            observacao: $data['observacao'] ?? null,
+            usuarioId: auth()->id()
+        );
 
         return (new AssistenciaChamadoItemResource($item))->response();
     }

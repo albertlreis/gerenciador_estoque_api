@@ -2,33 +2,30 @@
 
 namespace App\DTOs\Assistencia;
 
-/**
- * DTO para abertura de chamado de assistência.
- */
 class CriarChamadoDTO
 {
     public function __construct(
-        public string  $origemTipo,            // 'pedido'|'consignacao'|'estoque'
+        public string  $origemTipo,
         public ?int    $origemId,
-        public ?int    $clienteId,
-        public ?int    $fornecedorId,
-        public ?int    $assistenciaId,         // pode ser null na abertura
-        public ?string $prioridade,            // 'baixa'|'media'|'alta'|'critica' (opcional)
-        public ?string $canalAbertura,         // loja|site|telefone|whatsapp
-        public ?string $observacoes
+        public ?int    $pedidoId,
+        public ?int    $assistenciaId,
+        public ?string $prioridade,
+        public ?string $observacoes,
+        public ?string $localReparo,
+        public ?string $custoResponsavel,
     ) {}
 
     public static function fromArray(array $data): self
     {
         return new self(
-            origemTipo: $data['origem_tipo'],
-            origemId: $data['origem_id'] ?? null,
-            clienteId: $data['cliente_id'] ?? null,
-            fornecedorId: $data['fornecedor_id'] ?? null,
-            assistenciaId: $data['assistencia_id'] ?? null,
-            prioridade: $data['prioridade'] ?? null,
-            canalAbertura: $data['canal_abertura'] ?? null,
-            observacoes: $data['observacoes'] ?? null,
+            origemTipo:       $data['origem_tipo'],
+            origemId:         $data['origem_id']   ?? null,
+            pedidoId:         $data['pedido_id']   ?? (($data['origem_tipo'] ?? null) === 'pedido' ? ($data['origem_id'] ?? null) : null),
+            assistenciaId:    $data['assistencia_id'] ?? null,
+            prioridade:       $data['prioridade']  ?? null,
+            observacoes:      $data['observacoes'] ?? null,
+            localReparo:      $data['local_reparo'] ?? null,
+            custoResponsavel: $data['custo_responsavel'] ?? null,
         );
     }
 }

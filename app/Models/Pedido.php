@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasManyThrough;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
@@ -91,4 +92,27 @@ class Pedido extends Model
     {
         return $this->hasMany(Devolucao::class);
     }
+
+    public function pedidosFabricaItens(): HasMany
+    {
+        return $this->hasMany(PedidoFabricaItem::class, 'pedido_venda_id');
+    }
+
+    /**
+     * Pedidos de fábrica relacionados a este pedido de venda.
+     *
+     * @return \Illuminate\Database\Eloquent\Relations\HasManyThrough
+     */
+    public function pedidosFabrica(): HasManyThrough
+    {
+        return $this->hasManyThrough(
+            PedidoFabrica::class,      // Related
+            PedidoFabricaItem::class,  // Through
+            'pedido_venda_id',                     // FK em pedidos_fabrica_itens -> Pedido (este model)
+            'id',                                  // PK em pedidos_fabrica
+            'id',                                  // PK em pedidos (este model)
+            'pedido_fabrica_id'                    // FK em pedidos_fabrica_itens -> pedidos_fabrica
+        );
+    }
+
 }

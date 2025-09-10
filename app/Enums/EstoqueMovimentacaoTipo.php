@@ -12,4 +12,6 @@ enum EstoqueMovimentacaoTipo: string
 
     case ASSISTENCIA_ENVIO = 'assistencia_envio';
     case ASSISTENCIA_RETORNO = 'assistencia_retorno';
+    case ENTRADA_DEPOSITO         = 'entrada_deposito';
+    case SAIDA_ENTREGA_CLIENTE    = 'saida_entrega_cliente';
 }

@@ -4,6 +4,7 @@ use App\Http\Controllers\Assistencia\AssistenciaChamadoController;
 use App\Http\Controllers\Assistencia\AssistenciaDefeitosController;
 use App\Http\Controllers\Assistencia\AssistenciaItemController;
 use App\Http\Controllers\Assistencia\AssistenciasController;
+use App\Http\Controllers\Assistencia\PedidoLookupController;
 use App\Http\Controllers\ConsignacaoRelatorioController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DevolucaoController;
@@ -191,11 +192,22 @@ Route::middleware('auth:sanctum')->prefix('v1')->group(function () {
 
         // Itens do chamado
         Route::post('/chamados/{id}/itens', [AssistenciaItemController::class, 'store']);
+        Route::post('/itens/{itemId}/iniciar-reparo', [AssistenciaItemController::class, 'iniciarReparo']);
         Route::post('/itens/{itemId}/enviar', [AssistenciaItemController::class, 'enviar']);
         Route::post('/itens/{itemId}/orcamento', [AssistenciaItemController::class, 'orcamento']);
         Route::post('/itens/{itemId}/aprovar-orcamento', [AssistenciaItemController::class, 'aprovar']);
         Route::post('/itens/{itemId}/reprovar-orcamento', [AssistenciaItemController::class, 'reprovar']);
         Route::post('/itens/{itemId}/retorno', [AssistenciaItemController::class, 'retorno']);
+        Route::post('/itens/{itemId}/concluir-reparo', [AssistenciaItemController::class, 'concluirReparo']);
+
+        Route::post('/itens/{itemId}/aguardar-resposta', [AssistenciaItemController::class, 'aguardarResposta']);
+        Route::post('/itens/{itemId}/aguardar-peca', [AssistenciaItemController::class, 'aguardarPeca']);
+        Route::post('/itens/{itemId}/saida-fabrica', [AssistenciaItemController::class, 'saidaFabrica']);
+        Route::post('/itens/{itemId}/entregar', [AssistenciaItemController::class, 'entregar']);
+
+        Route::get('/pedidos/busca', [PedidoLookupController::class, 'buscar']);
+        Route::get('/pedidos/{pedido}/produtos', [PedidoLookupController::class, 'produtos']);
+
     });
 
 });

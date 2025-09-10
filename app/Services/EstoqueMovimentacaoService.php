@@ -129,7 +129,7 @@ class EstoqueMovimentacaoService
             'id_deposito_destino' => $depositoAssistenciaId,
             'tipo'                => EstoqueMovimentacaoTipo::ASSISTENCIA_ENVIO->value, // 'assistencia_envio'
             'quantidade'          => $quantidade,
-            'usuario_id'          => $usuarioId,
+            'id_usuario'          => $usuarioId,
             'observacao'          => $observacao,
         ]);
     }
@@ -151,7 +151,7 @@ class EstoqueMovimentacaoService
             'id_deposito_destino' => $depositoRetornoId,
             'tipo'                => EstoqueMovimentacaoTipo::ASSISTENCIA_RETORNO->value, // 'assistencia_retorno'
             'quantidade'          => $quantidade,
-            'usuario_id'          => $usuarioId,
+            'id_usuario'          => $usuarioId,
             'observacao'          => $observacao,
         ]);
     }
@@ -160,7 +160,7 @@ class EstoqueMovimentacaoService
      * Movimenta estoque: valida e persiste a movimentação.
      * OBS: Ajuste aqui se você atualiza saldos em outra tabela.
      *
-     * @param  array{id_variacao:int,id_deposito_origem:int|null,id_deposito_destino:int|null,tipo:string,quantidade:int,usuario_id:int|null,observacao:string|null}  $dados
+     * @param  array{id_variacao:int,id_deposito_origem:int|null,id_deposito_destino:int|null,tipo:string,quantidade:int,id_usuario:int|null,observacao:string|null}  $dados
      */
     private function movimentar(array $dados): EstoqueMovimentacao
     {
@@ -190,15 +190,79 @@ class EstoqueMovimentacaoService
                 'id_deposito_destino' => $dados['id_deposito_destino'] ?? null,
                 'tipo'                => (string) $dados['tipo'],
                 'quantidade'          => (int) $dados['quantidade'],
-                'usuario_id'          => $dados['usuario_id'] ?? null,
+                'id_usuario'          => $dados['usuario_id'] ?? null,
                 'observacao'          => $dados['observacao'] ?? null,
                 'data_movimentacao'   => Carbon::now(),
             ]);
 
-            // Se sua regra exigir atualização de saldos, faça aqui:
-            // $this->atualizarSaldos($mov);
-
             return $mov->fresh(['variacao.produto', 'usuario', 'depositoOrigem', 'depositoDestino']);
         });
     }
+
+    /**
+     * Registra ENTRADA em um depósito (ex.: início de reparo local).
+     * Origem: externo/cliente (null) → Destino: depósitoEntradaId
+     */
+    public function registrarEntradaDeposito(
+        int $variacaoId,
+        int $depositoEntradaId,
+        int $quantidade,
+        ?int $usuarioId,
+        ?string $observacao = null
+    ): EstoqueMovimentacao {
+        return $this->movimentar([
+            'id_variacao'         => $variacaoId,
+            'id_deposito_origem'  => null,
+            'id_deposito_destino' => $depositoEntradaId,
+            'tipo'                => EstoqueMovimentacaoTipo::ENTRADA_DEPOSITO->value,
+            'quantidade'          => $quantidade,
+            'id_usuario'          => $usuarioId,
+            'observacao'          => $observacao,
+        ]);
+    }
+
+    /**
+     * Registra SAÍDA para o cliente (ex.: entrega após reparo).
+     * Origem: depósitoSaidaId → Destino: cliente (null)
+     */
+    public function registrarSaidaEntregaCliente(
+        int $variacaoId,
+        int $depositoSaidaId,
+        int $quantidade,
+        ?int $usuarioId,
+        ?string $observacao = null
+    ): EstoqueMovimentacao {
+        return $this->movimentar([
+            'id_variacao'         => $variacaoId,
+            'id_deposito_origem'  => $depositoSaidaId,
+            'id_deposito_destino' => null,
+            'tipo'                => EstoqueMovimentacaoTipo::SAIDA_ENTREGA_CLIENTE->value,
+            'quantidade'          => $quantidade,
+            'id_usuario'          => $usuarioId,
+            'observacao'          => $observacao,
+        ]);
+    }
+
+    /**
+     * (Opcional) Transfere entre depósitos internos.
+     */
+    public function registrarTransferencia(
+        int $variacaoId,
+        int $depositoOrigemId,
+        int $depositoDestinoId,
+        int $quantidade,
+        ?int $usuarioId,
+        ?string $observacao = null
+    ): EstoqueMovimentacao {
+        return $this->movimentar([
+            'id_variacao'         => $variacaoId,
+            'id_deposito_origem'  => $depositoOrigemId,
+            'id_deposito_destino' => $depositoDestinoId,
+            'tipo'                => EstoqueMovimentacaoTipo::TRANSFERENCIA->value,
+            'quantidade'          => $quantidade,
+            'id_usuario'          => $usuarioId,
+            'observacao'          => $observacao,
+        ]);
+    }
+
 }

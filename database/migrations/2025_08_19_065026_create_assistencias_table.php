@@ -21,7 +21,6 @@ return new class extends Migration
             $table->string('email', 150)->nullable();
             $table->string('contato', 150)->nullable();
             $table->json('endereco_json')->nullable();
-            $table->unsignedInteger('prazo_padrao_dias')->default(30);
             $table->boolean('ativo')->default(true);
             $table->text('observacoes')->nullable();
             $table->timestamps();

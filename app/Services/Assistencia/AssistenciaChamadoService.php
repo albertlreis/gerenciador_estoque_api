@@ -37,40 +37,36 @@ class AssistenciaChamadoService
         return DB::transaction(function () use ($dto, $usuarioId) {
             $numero = $this->numeroGenerator->gerar();
 
-            // SLA pelo prazo padrão da assistência (se informada)
-            $sla = null;
-            if ($dto->assistenciaId) {
-                $assist = Assistencia::query()->find($dto->assistenciaId);
-                if ($assist && $assist->prazo_padrao_dias) {
-                    $sla = now()->addDays($assist->prazo_padrao_dias)->toDateString();
-                }
+            $pedidoId = $dto->pedidoId;
+            if (($dto->origemTipo === 'pedido') && !$pedidoId && $dto->origemId) {
+                $pedidoId = (int) $dto->origemId;
             }
 
             $chamado = AssistenciaChamado::query()->create([
-                'numero'         => $numero,
-                'origem_tipo'    => $dto->origemTipo,
-                'origem_id'      => $dto->origemId,
-                'cliente_id'     => $dto->clienteId,
-                'fornecedor_id'  => $dto->fornecedorId,
-                'assistencia_id' => $dto->assistenciaId,
-                'status'         => AssistenciaStatus::ABERTO,
-                'prioridade'     => $dto->prioridade ?: PrioridadeChamado::MEDIA->value,
-                'sla_data_limite'=> $sla,
-                'canal_abertura' => $dto->canalAbertura,
-                'observacoes'    => $dto->observacoes,
-                'created_by'     => $usuarioId,
-                'updated_by'     => $usuarioId,
+                'numero'            => $numero,
+                'origem_tipo'       => $dto->origemTipo,
+                'origem_id'         => $dto->origemId,
+                'pedido_id'         => $pedidoId,
+                'assistencia_id'    => $dto->assistenciaId,
+                'status'            => AssistenciaStatus::ABERTO,
+                'prioridade'        => $dto->prioridade ?: PrioridadeChamado::MEDIA->value,
+                'sla_data_limite'   => null,
+                'observacoes'       => $dto->observacoes,
+                'created_by'        => $usuarioId,
+                'updated_by'        => $usuarioId,
+                'local_reparo'      => $dto->localReparo,
+                'custo_responsavel' => $dto->custoResponsavel,
             ]);
 
             $this->log(
-                chamadoId: $chamado->id,
-                statusDe: null,
-                statusPara: AssistenciaStatus::ABERTO->value,
-                mensagem: 'Chamado aberto',
-                meta: ['usuario_id' => $usuarioId]
+                $chamado->id,
+                null,
+                AssistenciaStatus::ABERTO->value,
+                'Chamado aberto',
+                ['usuario_id' => $usuarioId]
             );
 
-            return $chamado->fresh(['assistencia']);
+            return $chamado->fresh(['assistencia','pedido']);
         });
     }
 
@@ -85,22 +81,35 @@ class AssistenciaChamadoService
      */
     public function atualizarChamado(AssistenciaChamado $chamado, AtualizarChamadoDTO $dto, ?int $usuarioId): AssistenciaChamado
     {
+        if ($chamado->status === AssistenciaStatus::ENTREGUE) {
+            throw new InvalidArgumentException('Chamados entregues não podem ser alterados.');
+        }
+
         return DB::transaction(function () use ($chamado, $dto, $usuarioId) {
             $antesAssistenciaId = $chamado->assistencia_id;
 
             $payload = $dto->toUpdateArray();
+
+            if (
+                ($payload['origem_tipo'] ?? null) === 'pedido' &&
+                !isset($payload['pedido_id']) &&
+                isset($payload['origem_id']) &&
+                $payload['origem_id']
+            ) {
+                $payload['pedido_id'] = (int) $payload['origem_id'];
+            }
+
             if (!empty($payload)) {
                 $chamado->fill($payload);
                 $chamado->updated_by = $usuarioId;
                 $chamado->save();
             }
 
-            // Se mudou assistência, recalcula SLA
             if (array_key_exists('assistencia_id', $payload) && $chamado->assistencia_id !== $antesAssistenciaId) {
                 $this->recalcularSLA($chamado);
             }
 
-            return $chamado->fresh(['assistencia']);
+            return $chamado->fresh(['assistencia','pedido']);
         });
     }
 
@@ -133,7 +142,7 @@ class AssistenciaChamadoService
      * @param int|null $usuarioId
      * @return AssistenciaChamado
      */
-    public function atualizarStatus(AssistenciaChamado $chamado, AssistenciaStatus $novoStatus, ?int $usuarioId): AssistenciaChamado
+    public function atualizarStatus(AssistenciaChamado $chamado, AssistenciaStatus $novoStatus, ?int $usuarioId, bool $registrarLog = true): AssistenciaChamado
     {
         $antigo = $chamado->status;
         if ($antigo === $novoStatus) {
@@ -144,13 +153,15 @@ class AssistenciaChamadoService
         $chamado->updated_by = $usuarioId;
         $chamado->save();
 
-        $this->log(
-            chamadoId: $chamado->id,
-            statusDe: $antigo?->value,
-            statusPara: $novoStatus->value,
-            mensagem: 'Status do chamado atualizado',
-            meta: ['usuario_id' => $usuarioId]
-        );
+        if ($registrarLog) {
+            $this->log(
+                $chamado->id,
+                $antigo?->value,
+                $novoStatus->value,
+                'Status do chamado atualizado',
+                ['usuario_id' => $usuarioId]
+            );
+        }
 
         return $chamado->fresh();
     }

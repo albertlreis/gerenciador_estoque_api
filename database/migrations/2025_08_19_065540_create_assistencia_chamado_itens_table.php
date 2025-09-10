@@ -18,57 +18,48 @@ return new class extends Migration
 
             $table->unsignedInteger('chamado_id');
 
-            $table->unsignedInteger('produto_id')->nullable();
-            $table->unsignedInteger('variacao_id')->nullable();
+            // Vínculos de produto
+            $table->unsignedInteger('variacao_id')->nullable();     // sempre que possível
+            $table->unsignedInteger('pedido_item_id')->nullable();  // quando origem = pedido
 
-            $table->string('numero_serie', 120)->nullable()->index();
-            $table->string('lote', 120)->nullable();
-
+            // Catálogo de defeitos
             $table->unsignedInteger('defeito_id')->nullable();
-            $table->string('descricao_defeito_livre', 255)->nullable();
 
+            // Status do item
             $table->string('status_item', 50)->index();
 
-            // vínculos operacionais (ajuste nomes se necessário)
-            $table->unsignedInteger('pedido_id')->nullable();
-            $table->unsignedInteger('pedido_item_id')->nullable();
-            $table->unsignedBigInteger('consignacao_id')->nullable();
+            // Prazos/nota
+            $table->date('prazo_finalizacao')->nullable();
+            $table->string('nota_numero', 60)->nullable();
 
-            // logística
+            // Operacional/logística
+            $table->unsignedBigInteger('consignacao_id')->nullable();
             $table->unsignedInteger('deposito_origem_id')->nullable();
-            $table->unsignedInteger('assistencia_id')->nullable(); // por item
             $table->unsignedInteger('deposito_assistencia_id')->nullable();
             $table->string('rastreio_envio', 150)->nullable();
             $table->string('rastreio_retorno', 150)->nullable();
             $table->date('data_envio')->nullable();
             $table->date('data_retorno')->nullable();
 
-            // orçamento
+            // Orçamento
             $table->decimal('valor_orcado', 12)->nullable();
-            $table->string('aprovacao', 20)->default('pendente'); // pendente|aprovado|reprovado
+            $table->string('aprovacao', 20)->default('pendente');
             $table->date('data_aprovacao')->nullable();
 
             $table->text('observacoes')->nullable();
 
             $table->timestamps();
 
+            // FKs
             $table->foreign('chamado_id')->references('id')->on('assistencia_chamados')->onDelete('cascade');
-
-            $table->foreign('produto_id')->references('id')->on('produtos')->onDelete('set null');
             $table->foreign('variacao_id')->references('id')->on('produto_variacoes')->onDelete('set null');
-
             $table->foreign('defeito_id')->references('id')->on('assistencia_defeitos')->onDelete('set null');
 
-            // ajuste nomes de tabelas abaixo conforme seu schema:
-            $table->foreign('pedido_id')->references('id')->on('pedidos')->onDelete('set null');
             $table->foreign('pedido_item_id')->references('id')->on('pedido_itens')->onDelete('set null');
-
             $table->foreign('consignacao_id')->references('id')->on('consignacoes')->onDelete('set null');
 
             $table->foreign('deposito_origem_id')->references('id')->on('depositos')->onDelete('set null');
             $table->foreign('deposito_assistencia_id')->references('id')->on('depositos')->onDelete('set null');
-
-            $table->foreign('assistencia_id')->references('id')->on('assistencias')->onDelete('set null');
 
             $table->index(['aprovacao', 'data_aprovacao']);
         });

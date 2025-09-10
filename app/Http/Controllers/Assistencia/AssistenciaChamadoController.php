@@ -28,7 +28,7 @@ class AssistenciaChamadoController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        $q = AssistenciaChamado::query()->with(['assistencia']);
+        $q = AssistenciaChamado::query()->with(['assistencia','pedido', 'itens:id,chamado_id,prazo_finalizacao']);
 
         if ($s = $request->input('busca')) {
             $q->where(function ($w) use ($s) {
@@ -46,8 +46,8 @@ class AssistenciaChamadoController extends Controller
         if ($prioridade = $request->input('prioridade')) {
             $q->where('prioridade', $prioridade);
         }
-        if ($request->filled('cliente_id')) {
-            $q->where('cliente_id', $request->integer('cliente_id'));
+        if ($request->filled('pedido_id')) {
+            $q->where('pedido_id', $request->integer('pedido_id'));
         }
         if ($request->filled('periodo')) {
             $periodo = $request->input('periodo');
@@ -83,16 +83,22 @@ class AssistenciaChamadoController extends Controller
     /**
      * Exibe um chamado com relacionamentos necessários ao front.
      *
-     * @param int $id
+     * @param  int  $id
      * @return JsonResponse
      */
     public function show(int $id): JsonResponse
     {
-        $chamado = AssistenciaChamado::with([
-            'assistencia',
-            'itens.defeito',
-            'logs'
-        ])->findOrFail($id);
+        $chamado = AssistenciaChamado::query()
+            ->with([
+                'assistencia',
+                'pedido.cliente',
+                'pedido.parceiro',
+                'pedido.pedidosFabrica',
+                'itens.defeito',
+                'itens.variacao.produto',
+                'logs',
+            ])
+            ->findOrFail($id);
 
         return (new AssistenciaChamadoResource($chamado))->response();
     }
@@ -100,8 +106,8 @@ class AssistenciaChamadoController extends Controller
     /**
      * Atualiza campos básicos do chamado (sem alterar status).
      *
-     * @param int $id
-     * @param AtualizarChamadoRequest $request
+     * @param  int  $id
+     * @param  AtualizarChamadoRequest  $request
      * @return JsonResponse
      */
     public function update(int $id, AtualizarChamadoRequest $request): JsonResponse
@@ -111,9 +117,14 @@ class AssistenciaChamadoController extends Controller
 
         $atualizado = $this->service->atualizarChamado($chamado, $dto, auth()->id());
 
-        return (new AssistenciaChamadoResource(
-            $atualizado->load(['assistencia'])
-        ))->response();
+        $atualizado->load([
+            'assistencia',
+            'pedido.cliente',
+            'pedido.parceiro',
+            'pedido.pedidosFabrica',
+        ]);
+
+        return (new AssistenciaChamadoResource($atualizado))->response();
     }
 
     /**
@@ -128,11 +139,12 @@ class AssistenciaChamadoController extends Controller
 
         $temBloqueio = $chamado->itens()
             ->whereIn('status_item', [
-                AssistenciaStatus::ENVIADO_ASSISTENCIA->value,
-                AssistenciaStatus::EM_ORCAMENTO->value,
-                AssistenciaStatus::EM_REPARO->value,
-                AssistenciaStatus::RETORNADO->value,
-                AssistenciaStatus::FINALIZADO->value,
+                AssistenciaStatus::ENVIADO_FABRICA->value,
+                AssistenciaStatus::AGUARDANDO_RESPOSTA_FABRICA->value,
+                AssistenciaStatus::AGUARDANDO_PECA->value,
+                AssistenciaStatus::AGUARDANDO_REPARO->value,
+                AssistenciaStatus::REPARO_CONCLUIDO->value,
+                AssistenciaStatus::ENTREGUE->value,
             ])
             ->exists();
 

@@ -16,7 +16,8 @@ class EstoqueMovimentacao extends Model
         'tipo',
         'quantidade',
         'observacao',
-        'data_movimentacao'
+        'data_movimentacao',
+        'id_usuario'
     ];
 
     protected $casts = [

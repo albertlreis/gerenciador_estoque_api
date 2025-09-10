@@ -55,7 +55,6 @@ class AssistenciasController extends Controller
     public function show(int $id): JsonResponse
     {
         $assist = Assistencia::findOrFail($id);
-
         return (new AssistenciaResource($assist))->response();
     }
 
@@ -79,19 +78,17 @@ class AssistenciasController extends Controller
     public function store(Request $request): JsonResponse
     {
         $data = $request->validate([
-            'nome' => ['required', 'string', 'max:255'],
-            'cnpj' => ['nullable', 'string', 'max:20'],
-            'telefone' => ['nullable', 'string', 'max:50'],
-            'email' => ['nullable', 'email', 'max:150'],
-            'contato' => ['nullable', 'string', 'max:150'],
+            'nome'          => ['required', 'string', 'max:255'],
+            'cnpj'          => ['nullable', 'string', 'max:20'],
+            'telefone'      => ['nullable', 'string', 'max:50'],
+            'email'         => ['nullable', 'email', 'max:150'],
+            'contato'       => ['nullable', 'string', 'max:150'],
             'endereco_json' => ['nullable', 'array'],
-            'prazo_padrao_dias' => ['nullable', 'integer', 'min:1', 'max:365'],
-            'ativo' => ['nullable', 'boolean'],
-            'observacoes' => ['nullable', 'string'],
+            'ativo'         => ['nullable', 'boolean'],
+            'observacoes'   => ['nullable', 'string'],
         ]);
 
         $assist = Assistencia::create($data);
-
         return (new AssistenciaResource($assist))->response();
     }
 
@@ -107,19 +104,17 @@ class AssistenciasController extends Controller
         $assist = Assistencia::findOrFail($id);
 
         $data = $request->validate([
-            'nome' => ['sometimes', 'string', 'max:255'],
-            'cnpj' => ['sometimes', 'nullable', 'string', 'max:20'],
-            'telefone' => ['sometimes', 'nullable', 'string', 'max:50'],
-            'email' => ['sometimes', 'nullable', 'email', 'max:150'],
-            'contato' => ['sometimes', 'nullable', 'string', 'max:150'],
+            'nome'          => ['sometimes', 'string', 'max:255'],
+            'cnpj'          => ['sometimes', 'nullable', 'string', 'max:20'],
+            'telefone'      => ['sometimes', 'nullable', 'string', 'max:50'],
+            'email'         => ['sometimes', 'nullable', 'email', 'max:150'],
+            'contato'       => ['sometimes', 'nullable', 'string', 'max:150'],
             'endereco_json' => ['sometimes', 'nullable', 'array'],
-            'prazo_padrao_dias' => ['sometimes', 'integer', 'min:1', 'max:365'],
-            'ativo' => ['sometimes', 'boolean'],
-            'observacoes' => ['sometimes', 'nullable', 'string'],
+            'ativo'         => ['sometimes', 'boolean'],
+            'observacoes'   => ['sometimes', 'nullable', 'string'],
         ]);
 
         $assist->update($data);
-
         return (new AssistenciaResource($assist))->response();
     }
 

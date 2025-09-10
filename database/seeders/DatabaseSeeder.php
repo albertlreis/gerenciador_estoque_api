@@ -3,6 +3,7 @@
 namespace Database\Seeders;
 
 use Illuminate\Database\Seeder;
+use Illuminate\Support\Facades\Storage;
 
 class DatabaseSeeder extends Seeder
 {
@@ -13,6 +14,11 @@ class DatabaseSeeder extends Seeder
      */
     public function run(): void
     {
+        if (!app()->environment('production')) {
+            Storage::disk('public')->deleteDirectory('produtos');
+            Storage::disk('public')->makeDirectory('produtos');
+        }
+
         $this->call([
             ConfiguracoesSeeder::class,
             FeriadosSeeder::class,

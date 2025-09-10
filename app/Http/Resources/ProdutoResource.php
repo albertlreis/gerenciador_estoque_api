@@ -33,7 +33,7 @@ class ProdutoResource extends JsonResource
             ),
             'estoque_total' => $this->getEstoqueTotalAttributeSafely(),
             'estoque_outlet_total' => $this->getEstoqueOutletTotalAttributeSafely(),
-            'imagem_principal' => $this->imagemPrincipal?->url,
+            'imagem_principal' => $this->imagemPrincipal?->url_completa,
             'data_ultima_saida' => $this->data_ultima_saida,
             'manual_conservacao' => $this->manual_conservacao
                 ? Storage::url($this->manual_conservacao)
@@ -46,6 +46,7 @@ class ProdutoResource extends JsonResource
                 return [
                     'id' => $imagem->id,
                     'url' => $imagem->url,
+                    'url_completa' => $imagem->url_completa,
                     'principal' => $imagem->principal,
                 ];
             }),

@@ -6,123 +6,151 @@ use App\Models\Produto;
 use App\Models\ProdutoImagem;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 use Throwable;
 
 class ProdutoImagemController extends Controller
 {
-    public function index(Produto $produto)
+    /**
+     * Lista as imagens de um produto.
+     *
+     * @param  Produto  $produto
+     * @return JsonResponse
+     */
+    public function index(Produto $produto): JsonResponse
     {
         return response()->json($produto->imagens);
     }
 
-    public function store(Request $request, Produto $produto)
+    /**
+     * Faz upload e cria o registro da imagem do produto.
+     * - Salva no disco "public" em storage/app/public/produtos
+     * - Persiste no banco apenas o NOME do arquivo (sem pasta)
+     *
+     * @param  Request  $request
+     * @param  Produto  $produto
+     * @return JsonResponse
+     */
+    public function store(Request $request, Produto $produto): JsonResponse
     {
         try {
-            $request->validate([
-                'image' => 'required|image|max:2048',
-            ]);
-
+            /** @var UploadedFile $file */
             $file = $request->file('image');
             $extension = $file->getClientOriginalExtension();
 
-            $hash = md5(uniqid(rand(), true));
-            $filename = $hash . '.' . $extension;
+            // Nome único e curto, somente o nome com extensão (sem pastas)
+            $filename = sprintf('%s.%s', bin2hex(random_bytes(16)), strtolower($extension));
 
-            $folder = public_path('uploads/produtos');
-
-            if (!is_dir($folder)) {
-                mkdir($folder, 0755, true);
-            }
-
-            $file->move($folder, $filename);
+            // Salva no storage/app/public/produtos/<filename>
+            Storage::disk(ProdutoImagem::DISK)
+                ->putFileAs(ProdutoImagem::FOLDER, $file, $filename, 'public');
 
             $imagem = ProdutoImagem::create([
                 'id_produto' => $produto->id,
-                'url'        => $filename,
+                'url'        => $filename, // <- somente nome do arquivo
                 'principal'  => $request->boolean('principal'),
             ]);
 
             $imagem->append('url_completa');
 
             return response()->json($imagem, 201);
-
         } catch (Throwable $e) {
-            // Captura informações do arquivo se houver
             $fileName = $request->hasFile('image') ? $request->file('image')->getClientOriginalName() : 'Arquivo não enviado';
-            $fileSize = $request->hasFile('image') ? $request->file('image')->getSize() : 0;
+            $fileSize = $request->hasFile('image') ? (int) $request->file('image')->getSize() : 0;
 
             Log::error('Erro ao enviar imagem', [
-                'fileName'   => $fileName,
-                'fileSize'   => $fileSize,
-                'message'    => $e->getMessage(),
-                'trace'      => $e->getTraceAsString()
+                'fileName' => $fileName,
+                'fileSize' => $fileSize,
+                'message'  => $e->getMessage(),
+                'trace'    => $e->getTraceAsString(),
             ]);
 
             return response()->json([
-                'error' => "Erro interno ao salvar imagem. Detalhes: {$e->getMessage()}"
+                'error' => "Erro interno ao salvar imagem. Detalhes: {$e->getMessage()}",
             ], 500);
         }
     }
 
-
-    public function show(Produto $produto, ProdutoImagem $imagem)
+    /**
+     * Exibe uma imagem específica do produto.
+     *
+     * @param  Produto        $produto
+     * @param  ProdutoImagem  $imagem
+     * @return JsonResponse
+     */
+    public function show(Produto $produto, ProdutoImagem $imagem): JsonResponse
     {
         if ($imagem->id_produto !== $produto->id) {
             return response()->json(['error' => 'Imagem não pertence a este produto'], 404);
         }
+
         return response()->json($imagem);
     }
 
-    public function update(Request $request, Produto $produto, ProdutoImagem $imagem)
+    /**
+     * Atualiza dados de uma imagem (apenas metadados: principal).
+     * **Não** atualiza o arquivo físico.
+     *
+     * @param  Request        $request
+     * @param  Produto        $produto
+     * @param  ProdutoImagem  $imagem
+     * @return JsonResponse
+     */
+    public function update(Request $request, Produto $produto, ProdutoImagem $imagem): JsonResponse
     {
         if ($imagem->id_produto !== $produto->id) {
             return response()->json(['error' => 'Imagem não pertence a este produto'], 404);
         }
 
         $validated = $request->validate([
-            'url'       => 'sometimes|required|string',
-            'principal' => 'boolean',
+            // 'url' não deve ser atualizada manualmente; filename é controlado no upload
+            'principal' => 'sometimes|boolean',
         ]);
 
         $imagem->update($validated);
+
         return response()->json($imagem);
     }
 
-    public function destroy(Produto $produto, ProdutoImagem $imagem)
+    /**
+     * Remove a imagem do storage e o registro do banco.
+     *
+     * @param  Produto        $produto
+     * @param  ProdutoImagem  $imagem
+     * @return JsonResponse
+     */
+    public function destroy(Produto $produto, ProdutoImagem $imagem): JsonResponse
     {
-        // Obtém o valor da chave primária usando getKey()
-        $imagemId = $imagem->getKey();
-
-        // Busca a imagem pelo relacionamento do produto.
+        $imagemId   = $imagem->getKey();
         $imagemFound = $produto->imagens()->find($imagemId);
 
         if (!$imagemFound) {
             return response()->json(['error' => "Imagem não pertence a este produto: {$imagemId}"], 404);
         }
 
-        // Define o diretório das imagens
-        $folder = public_path('uploads/produtos');
-        // Constrói o caminho completo do arquivo
-        $filePath = $folder . DIRECTORY_SEPARATOR . $imagemFound->url;
-
-        // Verifica se o arquivo existe e tenta removê-lo
-        if (file_exists($filePath)) {
-            if (!unlink($filePath)) {
-                Log::error("Falha ao excluir o arquivo: {$filePath}");
-                return response()->json(['error' => 'Não foi possível remover o arquivo do diretório'], 500);
-            }
-        } else {
-            Log::warning("Arquivo não encontrado para remoção: {$filePath}");
+        // Exclui o arquivo físico, se existir
+        $path = ProdutoImagem::FOLDER . '/' . $imagemFound->url;
+        try {
+            Storage::disk(ProdutoImagem::DISK)->delete($path);
+        } catch (Throwable $e) {
+            Log::error("Falha ao excluir o arquivo: {$path}", ['message' => $e->getMessage()]);
+            return response()->json(['error' => 'Não foi possível remover o arquivo do diretório'], 500);
         }
 
-        // Remove o registro do banco de dados
+        // Remove o registro do banco
         $imagemFound->delete();
+
         return response()->json(null, 204);
     }
 
     /**
      * Define uma imagem como principal de um produto.
+     *
+     * @param  int $produto ID do produto
+     * @param  int $imagem  ID da imagem
+     * @return JsonResponse
      */
     public function definirPrincipal(int $produto, int $imagem): JsonResponse
     {
@@ -142,7 +170,7 @@ class ProdutoImagemController extends Controller
 
         return response()->json([
             'message' => 'Imagem principal definida com sucesso.',
-            'imagem' => $imagemSelecionada
+            'imagem'  => $imagemSelecionada,
         ]);
     }
 }

@@ -15,7 +15,7 @@ return new class extends Migration
     {
         Schema::create('assistencia_defeitos', function (Blueprint $table) {
             $table->increments('id');
-            $table->string('codigo', 50)->unique();
+            $table->string('codigo', 50)->nullable()->unique();
             $table->string('descricao', 255);
             $table->boolean('critico')->default(false);
             $table->boolean('ativo')->default(true);

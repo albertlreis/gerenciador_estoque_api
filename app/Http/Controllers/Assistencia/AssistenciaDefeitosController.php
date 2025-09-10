@@ -34,7 +34,7 @@ class AssistenciaDefeitosController extends Controller
     public function store(Request $request): JsonResponse
     {
         $data = $request->validate([
-            'codigo' => ['required', 'string', 'max:50', 'unique:assistencia_defeitos,codigo'],
+            'codigo' => ['nullable', 'string', 'max:50', 'unique:assistencia_defeitos,codigo'],
             'descricao' => ['required', 'string', 'max:255'],
             'critico' => ['nullable', 'boolean'],
             'ativo' => ['nullable', 'boolean'],

@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Assistencia\AssistenciaArquivoController;
 use App\Http\Controllers\Assistencia\AssistenciaChamadoController;
 use App\Http\Controllers\Assistencia\AssistenciaDefeitosController;
 use App\Http\Controllers\Assistencia\AssistenciaItemController;
@@ -207,6 +208,19 @@ Route::middleware('auth:sanctum')->prefix('v1')->group(function () {
 
         Route::get('/pedidos/busca', [PedidoLookupController::class, 'buscar']);
         Route::get('/pedidos/{pedido}/produtos', [PedidoLookupController::class, 'produtos']);
+
+        Route::get('/chamados/{id}/arquivos', [AssistenciaArquivoController::class, 'listByChamado']);
+        Route::post('/chamados/{id}/arquivos', [AssistenciaArquivoController::class, 'uploadToChamado']);
+
+        // Item do chamado: listar e enviar fotos
+        Route::get('/itens/{itemId}/arquivos', [AssistenciaArquivoController::class, 'listByItem']);
+        Route::post('/itens/{itemId}/arquivos', [AssistenciaArquivoController::class, 'uploadToItem']);
+
+        // Operações diretas no arquivo
+        Route::get('/arquivos/{arquivo}', [AssistenciaArquivoController::class, 'show'])
+            ->whereNumber('arquivo');
+        Route::delete('/arquivos/{arquivo}', [AssistenciaArquivoController::class, 'destroy'])
+            ->whereNumber('arquivo');
 
     });
 

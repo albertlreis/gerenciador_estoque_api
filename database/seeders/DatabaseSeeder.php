@@ -37,6 +37,7 @@ class DatabaseSeeder extends Seeder
             CarrinhosSeeder::class,
             PedidosSeeder::class,
             ConsignacoesSeeder::class,
+            AreasEstoqueSeeder::class,
             LocalizacaoEstoqueSeeder::class,
             PedidosFabricaSeeder::class,
             AssistenciasSeeder::class,

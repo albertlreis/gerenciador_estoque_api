@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\AreaEstoqueController;
 use App\Http\Controllers\Assistencia\AssistenciaArquivoController;
 use App\Http\Controllers\Assistencia\AssistenciaChamadoController;
 use App\Http\Controllers\Assistencia\AssistenciaDefeitosController;
@@ -12,6 +13,7 @@ use App\Http\Controllers\DevolucaoController;
 use App\Http\Controllers\EstoqueRelatorioController;
 use App\Http\Controllers\FeriadoController;
 use App\Http\Controllers\FornecedorController;
+use App\Http\Controllers\LocalizacaoDimensaoController;
 use App\Http\Controllers\LocalizacaoEstoqueController;
 use App\Http\Controllers\OutletCatalogoController;
 use App\Http\Controllers\PedidoFabricaController;
@@ -96,6 +98,16 @@ Route::middleware('auth:sanctum')->prefix('v1')->group(function () {
     });
 
     Route::apiResource('localizacoes-estoque', LocalizacaoEstoqueController::class);
+
+    Route::get('/estoque/areas', [AreaEstoqueController::class, 'index']);
+    Route::post('/estoque/areas', [AreaEstoqueController::class, 'store']);
+    Route::put('/estoque/areas/{id}', [AreaEstoqueController::class, 'update']);
+    Route::delete('/estoque/areas/{id}', [AreaEstoqueController::class, 'destroy']);
+
+    Route::get('/estoque/dimensoes', [LocalizacaoDimensaoController::class, 'index']);
+    Route::post('/estoque/dimensoes', [LocalizacaoDimensaoController::class, 'store']);
+    Route::put('/estoque/dimensoes/{id}', [LocalizacaoDimensaoController::class, 'update']);
+    Route::delete('/estoque/dimensoes/{id}', [LocalizacaoDimensaoController::class, 'destroy']);
 
     // Estoque por depósito
     Route::apiResource('depositos.estoque', EstoqueController::class)->shallow();

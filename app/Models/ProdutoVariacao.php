@@ -85,10 +85,20 @@ class ProdutoVariacao extends Model
         return $this->outlets->sum('quantidade_restante') ?? 0;
     }
 
+    /**
+     * Estoques da variação com relações necessárias para a tela:
+     * - deposito
+     * - localizacao.area
+     * - localizacao.valores.dimensao
+     */
     public function estoquesComLocalizacao(): HasMany
     {
         return $this->hasMany(Estoque::class, 'id_variacao')
-            ->with(['localizacao', 'deposito']);
+            ->with([
+                'deposito',
+                'localizacao.area',
+                'localizacao.valores.dimensao',
+            ]);
     }
 
 }

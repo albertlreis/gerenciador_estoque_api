@@ -11,78 +11,57 @@ use Illuminate\Http\JsonResponse;
 /**
  * @group Localizações de Estoque
  *
- * Gerencia a localização física de itens no depósito, como corredor, prateleira, etc.
+ * Gerencia a localização física de itens no depósito.
  */
 class LocalizacaoEstoqueController extends Controller
 {
-    /**
-     * @var LocalizacaoEstoqueService
-     */
-    protected LocalizacaoEstoqueService $service;
-
-    /**
-     * Construtor com injeção de dependência do service.
-     *
-     * @param LocalizacaoEstoqueService $service
-     */
-    public function __construct(LocalizacaoEstoqueService $service)
-    {
-        $this->service = $service;
-    }
+    public function __construct(protected LocalizacaoEstoqueService $service) {}
 
     /**
      * Lista paginada das localizações de estoque.
-     *
-     * @return JsonResponse
      */
     public function index(): JsonResponse
     {
         $localizacoes = $this->service->listar();
-        return response()->json(LocalizacaoEstoqueResource::collection($localizacoes));
+        return response()->json(LocalizacaoEstoqueResource::collection($localizacoes)->additional([
+            'meta' => [
+                'current_page' => $localizacoes->currentPage(),
+                'per_page'     => $localizacoes->perPage(),
+                'total'        => $localizacoes->total(),
+                'last_page'    => $localizacoes->lastPage(),
+            ],
+        ]));
     }
 
     /**
-     * Cria uma localização para um ‘item’ de estoque.
-     *
-     * @param StoreLocalizacaoEstoqueRequest $request
-     * @return JsonResponse
+     * Cria uma localização para um item de estoque.
      */
     public function store(StoreLocalizacaoEstoqueRequest $request): JsonResponse
     {
         $localizacao = $this->service->criar($request->validated());
-        return response()->json(new LocalizacaoEstoqueResource($localizacao), 201);
+        return response()->json(new LocalizacaoEstoqueResource($localizacao->load(['area', 'valores.dimensao'])), 201);
     }
 
     /**
-     * Retorna os detalhes de uma localização de estoque específica.
-     *
-     * @param int $id
-     * @return JsonResponse
+     * Detalhes de uma localização específica.
      */
     public function show(int $id): JsonResponse
     {
         $localizacao = $this->service->visualizar($id);
-        return response()->json(new LocalizacaoEstoqueResource($localizacao));
+        return response()->json(new LocalizacaoEstoqueResource($localizacao->load(['area', 'valores.dimensao'])));
     }
 
     /**
-     * Atualiza uma localização de estoque existente.
-     *
-     * @param UpdateLocalizacaoEstoqueRequest $request
-     * @param int $id
-     * @return JsonResponse
+     * Atualiza uma localização de estoque.
      */
     public function update(UpdateLocalizacaoEstoqueRequest $request, int $id): JsonResponse
     {
         $localizacao = $this->service->atualizar($id, $request->validated());
-        return response()->json(new LocalizacaoEstoqueResource($localizacao));
+        return response()->json(new LocalizacaoEstoqueResource($localizacao->load(['area', 'valores.dimensao'])));
     }
 
     /**
-     * Remove uma localização de estoque.
-     *
-     * @param int $id
-     * @return JsonResponse
+     * Remove uma localização.
      */
     public function destroy(int $id): JsonResponse
     {

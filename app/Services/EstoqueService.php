@@ -23,11 +23,15 @@ class EstoqueService
         $query = ProdutoVariacao::with([
             'produto',
             'atributos',
+            // Garante que o eager load traga depósito e localização completa:
             'estoquesComLocalizacao' => function ($q) use ($filtros) {
                 if ($filtros->deposito) {
                     $q->where('id_deposito', $filtros->deposito);
                 }
-            }
+            },
+            'estoquesComLocalizacao.deposito',
+            'estoquesComLocalizacao.localizacao.area',
+            'estoquesComLocalizacao.localizacao.valores.dimensao',
         ])
             ->withSum(['estoque as quantidade_estoque' => function ($q) use ($filtros) {
                 if ($filtros->deposito) {
@@ -80,11 +84,6 @@ class EstoqueService
 
     /**
      * Gera um resumo do estoque com totais de produtos, peças e depósitos.
-     *
-     * @param string|null $produto Nome ou referência do produto
-     * @param int|null $deposito ID do depósito
-     * @param array<int, string>|null $periodo Período de atualização do estoque
-     * @return array<string, int> Totais agregados
      */
     public function gerarResumoEstoque(
         ?string $produto = null,

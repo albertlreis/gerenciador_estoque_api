@@ -5,33 +5,36 @@ namespace App\Http\Resources;
 use Illuminate\Http\Resources\Json\JsonResource;
 
 /**
- * @property int $id
- * @property int $estoque_id
- * @property string|null $corredor
- * @property string|null $prateleira
- * @property string|null $coluna
- * @property string|null $nivel
- * @property string|null $observacoes
- * @property \App\Models\Estoque|null $estoque
+ * Resource da localização de estoque (essencial + dimensões).
  */
 class LocalizacaoEstoqueResource extends JsonResource
 {
     /**
-     * Transforma o recurso em um array para resposta JSON.
-     *
      * @param  \Illuminate\Http\Request  $request
      * @return array<string, mixed>
      */
     public function toArray($request): array
     {
         return [
-            'id' => $this->id,
-            'estoque_id' => $this->estoque_id,
-            'corredor' => $this->corredor,
-            'prateleira' => $this->prateleira,
-            'coluna' => $this->coluna,
-            'nivel' => $this->nivel,
-            'observacoes' => $this->observacoes,
+            'id'             => $this->id,
+            'estoque_id'     => $this->estoque_id,
+            'setor'          => $this->setor,
+            'coluna'         => $this->coluna,
+            'nivel'          => $this->nivel,
+            'area_id'        => $this->area_id,
+            'codigo_composto'=> $this->codigo_composto,
+            'observacoes'    => $this->observacoes,
+            'area'           => $this->whenLoaded('area', fn () => [
+                'id' => $this->area?->id,
+                'nome' => $this->area?->nome,
+            ]),
+            'dimensoes'      => $this->whenLoaded('valores', function () {
+                return $this->valores->map(fn($v) => [
+                    'dimensao_id' => $v->dimensao_id,
+                    'nome'        => $v->dimensao?->nome,
+                    'valor'       => $v->valor,
+                ]);
+            })
         ];
     }
 }

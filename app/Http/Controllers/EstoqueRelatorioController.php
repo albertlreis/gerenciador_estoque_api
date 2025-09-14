@@ -5,13 +5,18 @@ namespace App\Http\Controllers;
 use App\Exports\Relatorios\EstoqueAtualExport;
 use App\Services\Relatorios\EstoqueRelatorioService;
 use Barryvdh\DomPDF\Facade\Pdf;
-use Dompdf\Options;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Maatwebsite\Excel\Facades\Excel;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
+use App\Models\ProdutoImagem; // <- usaremos a pasta FOLDER
 
+/**
+ * @group Relatórios: Estoque
+ *
+ * Endpoints relacionados aos relatórios de estoque
+ */
 class EstoqueRelatorioController extends Controller
 {
     protected EstoqueRelatorioService $service;
@@ -22,38 +27,25 @@ class EstoqueRelatorioController extends Controller
     }
 
     /**
-     * Relatório de Estoque Atual (JSON | PDF | Excel).
+     * Relatório de Estoque Atual
      *
-     * @param  Request  $request
-     * @return Response|JsonResponse|BinaryFileResponse
+     * @queryParam formato string Opcional. 'pdf' | 'excel'. Padrão: JSON.
      */
-    // app/Http/Controllers/EstoqueRelatorioController.php
-
-// ...
     public function estoqueAtual(Request $request): Response|JsonResponse|BinaryFileResponse
     {
-        $dados   = $this->service->obterEstoqueAtual($request->all());
-        $formato = $request->query('formato');
+        $dados = $this->service->obterEstoqueAtual($request->all());
+        $formato = strtolower((string) $request->query('formato'));
 
         if ($formato === 'pdf') {
-            $folder = env('PRODUCT_IMAGES_FOLDER', 'produtos');
-
-             $baseFsDir = storage_path('app/public/' . $folder);
-
-            $options = [
-                'isRemoteEnabled' => false,
-                'chroot'          => $baseFsDir,
-            ];
+            // caminho físico DENTRO de /public, respeitando o chroot do DomPDF
+            $baseFsDir = public_path('storage/' . ProdutoImagem::FOLDER);
+            // habilita recursos remotos caso opte por usar URLs absolutas
+            Pdf::setOptions(['isRemoteEnabled' => true]);
 
             $pdf = Pdf::loadView('exports.estoque-atual', [
-                'dados'     => $dados,
-                'baseFsDir' => $baseFsDir,
+                'dados'      => $dados,
+                'baseFsDir'  => $baseFsDir, // <- passamos para o Blade
             ]);
-
-            $pdf->setOptions($options);
-
-            @ini_set('max_execution_time', '120');
-            @ini_set('memory_limit', '512M');
 
             return $pdf->download('relatorio-estoque.pdf');
         }
@@ -67,5 +59,4 @@ class EstoqueRelatorioController extends Controller
 
         return response()->json(['data' => $dados]);
     }
-
 }

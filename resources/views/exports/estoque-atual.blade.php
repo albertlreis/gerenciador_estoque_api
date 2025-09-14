@@ -8,7 +8,9 @@
         $somenteOutlet = request()->boolean('somente_outlet');
 
         // Recebido do controller; se vier vazio, podemos inferir um padrão.
-        $baseFsDir = $baseFsDir ?? public_path(env('PRODUCT_IMAGES_FOLDER', 'produtos'));
+        $baseFsDir = isset($baseFsDir) && is_dir($baseFsDir)
+            ? $baseFsDir
+            : public_path('storage/produtos');
 
         $totaisDeposito = [];
         $totalGeralQuantidade = 0;
@@ -54,9 +56,8 @@
                             $imgAbs = $imgRel !== '' ? $baseFsDir . DIRECTORY_SEPARATOR . $imgRel : '';
                         @endphp
 
-                        @if($imgAbs !== '' && file_exists($imgAbs))
-                            <img src="{{ 'file:///' . str_replace('\\', '/', $imgAbs) }}"
-                                 alt="Imagem do produto" style="max-height:64px;">
+                        @if($imgAbs)
+                            <img src="{{ $imgAbs }}" alt="Imagem do produto" style="max-height:64px;">
                         @endif
                     </td>
                 @endif

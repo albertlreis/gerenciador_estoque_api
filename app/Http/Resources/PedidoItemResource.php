@@ -16,7 +16,7 @@ class PedidoItemResource extends JsonResource
             'quantidade' => $this->quantidade,
             'preco_unitario' => $this->preco_unitario,
             'subtotal' => $this->subtotal,
-            'imagem' => $this->variacao->produto->imagens->first()->url ?? null,
+            'imagem' => $this->variacao->produto->imagens->first()->url_completa ?? null,
             'atributos' => AtributoResource::collection($this->variacao->atributos),
         ];
     }

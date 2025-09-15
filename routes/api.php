@@ -7,6 +7,7 @@ use App\Http\Controllers\Assistencia\AssistenciaDefeitosController;
 use App\Http\Controllers\Assistencia\AssistenciaItemController;
 use App\Http\Controllers\Assistencia\AssistenciasController;
 use App\Http\Controllers\Assistencia\PedidoLookupController;
+use App\Http\Controllers\CaixaEstoqueController;
 use App\Http\Controllers\ConsignacaoRelatorioController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DevolucaoController;
@@ -236,5 +237,13 @@ Route::middleware('auth:sanctum')->prefix('v1')->group(function () {
             ->whereNumber('arquivo');
 
     });
+
+    Route::prefix('estoque/caixa')->group(function () {
+        Route::get('/scan/{codigo}', [CaixaEstoqueController::class, 'scan'])->where('codigo', '.*');
+        Route::post('/finalizar', [CaixaEstoqueController::class, 'finalizar']);
+        Route::post('/transferir', [CaixaEstoqueController::class, 'transferir']);
+    });
+
+
 
 });

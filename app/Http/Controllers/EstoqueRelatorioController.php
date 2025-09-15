@@ -37,14 +37,16 @@ class EstoqueRelatorioController extends Controller
         $formato = strtolower((string) $request->query('formato'));
 
         if ($formato === 'pdf') {
-            // caminho físico DENTRO de /public, respeitando o chroot do DomPDF
-            $baseFsDir = public_path('storage/' . ProdutoImagem::FOLDER);
-            // habilita recursos remotos caso opte por usar URLs absolutas
+            $baseFsDir = public_path('storage' . DIRECTORY_SEPARATOR . ProdutoImagem::FOLDER);
+
             Pdf::setOptions(['isRemoteEnabled' => true]);
 
+            $geradoEm = now('America/Belem')->format('d/m/Y H:i');
+
             $pdf = Pdf::loadView('exports.estoque-atual', [
-                'dados'      => $dados,
-                'baseFsDir'  => $baseFsDir, // <- passamos para o Blade
+                'dados'     => $dados,
+                'baseFsDir' => $baseFsDir,
+                'geradoEm'  => $geradoEm,
             ]);
 
             return $pdf->download('relatorio-estoque.pdf');

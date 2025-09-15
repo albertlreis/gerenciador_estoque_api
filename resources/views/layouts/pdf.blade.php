@@ -4,37 +4,40 @@
     <meta charset="utf-8">
     <title>@yield('titulo')</title>
     <style>
-        /* Margens da página (papel) no DomPDF */
+        /* Papel DomPDF (A4 paisagem). Mantemos margem inferior pequena. */
         @page {
-            /* top/bottom = 15mm, left/right = 8mm */
-            margin: 15mm 8mm;
             size: A4 landscape;
+            margin-top: 12mm;
+            margin-right: 8mm;
+            margin-bottom: 14mm; /* pequeno para caber o footer */
+            margin-left: 8mm;
         }
 
-        /* Espaço interno do conteúdo. Deixe pequeno para não adicionar "margem extra" */
         body {
             font-family: sans-serif;
             font-size: 12px;
             margin: 0;
-            padding: 8px; /* estava 20px */
+            padding: 8px;
         }
 
         header {
             display: flex;
             align-items: center;
-            margin-bottom: 12px; /* levemente menor que antes */
+            margin-bottom: 8px;
         }
         header img { height: 40px; margin-right: 12px; }
         header h1 { font-size: 18px; margin: 0; }
 
         footer {
             position: fixed;
-            bottom: 8mm;   /* respeita a margem inferior da @page */
-            left: 8mm;     /* respeita a margem esquerda da @page */
-            right: 8mm;    /* respeita a margem direita da @page */
+            bottom: 2mm;   /* cola no fim da página (respeita @page) */
+            left: 8mm;
+            right: 8mm;
             font-size: 10px;
             color: #888;
-            text-align: right;
+            display: flex;
+            align-items: center;
+            justify-content: space-between; /* data à esquerda, numeração à direita */
         }
 
         table { width: 100%; border-collapse: collapse; margin-top: 8px; }
@@ -51,23 +54,30 @@
 @yield('conteudo')
 
 <footer>
-    Gerado em {{ now()->format('d/m/Y H:i:s') }}
+    <span>Gerado em {{ now()->format('d/m/Y H:i:s') }}</span>
+    <!-- espaço para equilibrar o flex; a numeração real é desenhada via page_text -->
+    <span style="opacity:0">Página</span>
 </footer>
 
 <script type="text/php">
     if (isset($pdf)) {
-        $pdf->page_script('
-            if ($PAGE_COUNT > 1) {
-                $font = $fontMetrics->get_font("sans-serif", "normal");
-                $size = 9;
-                $pageText = "Página " . $PAGE_NUM . " de " . $PAGE_COUNT;
+        /* Numeração: "Página X de Y" ancorada no canto inferior direito */
+        $w = $pdf->get_width();
+        $h = $pdf->get_height();
 
-                // Ajuste fino da posição se necessário após mudar as margens:
-                $x = 520; // deslocamento horizontal
-                $y = 810; // deslocamento vertical
-                $pdf->text($x, $y, $pageText, $font, $size);
-            }
-        ');
+        $text = "Página {PAGE_NUM} de {PAGE_COUNT}";
+
+        /* Fonte compatível em todas as instalações do DomPDF */
+        $font = $fontMetrics->getFont("Helvetica", "normal");
+        if (!$font) { $font = $fontMetrics->getFont("DejaVu Sans", "normal"); }
+
+        $size = 9;
+
+        /* Posição: ~20px acima da base e ~110px da borda direita (ajuste fino) */
+        $x = $w - 110;
+        $y = $h - 20;
+
+        $pdf->page_text($x, $y, $text, $font, $size, array(0.53, 0.53, 0.53));
     }
 </script>
 

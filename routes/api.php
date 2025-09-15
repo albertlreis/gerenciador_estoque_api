@@ -14,6 +14,7 @@ use App\Http\Controllers\DevolucaoController;
 use App\Http\Controllers\EstoqueRelatorioController;
 use App\Http\Controllers\FeriadoController;
 use App\Http\Controllers\FornecedorController;
+use App\Http\Controllers\ImportEstoqueController;
 use App\Http\Controllers\LocalizacaoDimensaoController;
 use App\Http\Controllers\LocalizacaoEstoqueController;
 use App\Http\Controllers\OutletCatalogoController;
@@ -244,6 +245,10 @@ Route::middleware('auth:sanctum')->prefix('v1')->group(function () {
         Route::post('/transferir', [CaixaEstoqueController::class, 'transferir']);
     });
 
-
+    Route::prefix('imports/estoque')->group(function () {
+        Route::post('/', [ImportEstoqueController::class, 'store']); // upload + staging
+        Route::post('{id}/processar', [ImportEstoqueController::class, 'processar']); // dry-run opcional
+        Route::get('{id}', [ImportEstoqueController::class, 'show']);
+    });
 
 });

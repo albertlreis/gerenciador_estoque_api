@@ -17,10 +17,10 @@ return new class extends Migration
         Schema::create('produto_variacoes', function (Blueprint $table) {
             $table->increments('id'); // Identificador da variação
             $table->unsignedInteger('produto_id'); // Produto ao qual pertence essa variação
-            $table->string('referencia', 100)->unique(); // Referência única da variação
+            $table->string('referencia', 100); // Referência única da variação
             $table->string('nome', 255)->nullable(); // Nome descritivo da variação (ex: "Preta - Inox")
-            $table->decimal('preco', 10); // Preço de venda
-            $table->decimal('custo', 10); // Custo de aquisição/fabricação
+            $table->decimal('preco', 10)->nullable(); // Preço de venda
+            $table->decimal('custo', 10)->nullable(); // Custo de aquisição/fabricação
             $table->string('codigo_barras', 100)->nullable(); // Código de barras (EAN, GTIN, etc)
             $table->timestamps();
 

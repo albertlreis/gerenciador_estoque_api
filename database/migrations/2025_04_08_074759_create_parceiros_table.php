@@ -11,17 +11,23 @@ return new class extends Migration
      *
      * @return void
      */
-    public function up()
+    public function up(): void
     {
         Schema::create('parceiros', function (Blueprint $table) {
             $table->increments('id');
             $table->string('nome', 255);
             $table->string('tipo', 50);
             $table->string('documento', 50);
-            $table->string('email', 100);
-            $table->string('telefone', 50);
+            $table->string('email', 100)->nullable();
+            $table->string('telefone', 50)->nullable();
             $table->text('endereco')->nullable();
+            $table->tinyInteger('status')->default(1);
+            $table->text('observacoes')->nullable();
             $table->timestamps();
+            $table->softDeletes();
+            $table->index(['status']);
+            $table->index(['documento']);
+            $table->index(['nome']);
         });
     }
 
@@ -30,7 +36,7 @@ return new class extends Migration
      *
      * @return void
      */
-    public function down()
+    public function down(): void
     {
         Schema::dropIfExists('parceiros');
     }

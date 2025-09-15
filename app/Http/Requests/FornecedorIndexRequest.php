@@ -28,7 +28,7 @@ class FornecedorIndexRequest extends FormRequest
             'order_by'     => ['nullable','in:nome,created_at,updated_at'],
             'order_dir'    => ['nullable','in:asc,desc'],
             'per_page'     => ['nullable','integer','min:1','max:200'],
-            'with_trashed' => ['nullable','boolean'], // agora vai passar
+            'with_trashed' => ['nullable','boolean'],
         ];
     }
 }

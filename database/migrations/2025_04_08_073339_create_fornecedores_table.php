@@ -20,7 +20,14 @@ return new class extends Migration
             $table->string('email', 150)->nullable();
             $table->string('telefone', 30)->nullable();
             $table->string('endereco')->nullable();
+            $table->tinyInteger('status')->default(1)->comment('1=ativo,0=inativo');
+            $table->text('observacoes')->nullable();
             $table->timestamps();
+
+            $table->softDeletes();
+
+            $table->index('nome');
+            $table->unique('cnpj');
         });
     }
 

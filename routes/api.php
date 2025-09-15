@@ -84,7 +84,17 @@ Route::middleware('auth:sanctum')->prefix('v1')->group(function () {
     // Depósitos e Estoque
     Route::apiResource('depositos', DepositoController::class);
 
-    Route::get('/fornecedores', [FornecedorController::class, 'index']);
+    Route::prefix('fornecedores')->group(function () {
+        Route::get('/',            [FornecedorController::class, 'index']);   // filtros + paginação
+        Route::post('/',           [FornecedorController::class, 'store']);
+        Route::get('/{id}',        [FornecedorController::class, 'show'])->whereNumber('id');
+        Route::put('/{id}',        [FornecedorController::class, 'update'])->whereNumber('id');
+        Route::delete('/{id}',     [FornecedorController::class, 'destroy'])->whereNumber('id');
+
+        // extras
+        Route::post('/{id}/restore', [FornecedorController::class, 'restore'])->whereNumber('id'); // desfaz soft delete
+        Route::get('/{id}/produtos', [FornecedorController::class, 'produtos'])->whereNumber('id'); // listar produtos do fornecedor
+    });
 
     // Rotas de estoque e movimentações
     Route::prefix('estoque')->group(function () {
@@ -117,7 +127,16 @@ Route::middleware('auth:sanctum')->prefix('v1')->group(function () {
     // Clientes e Parceiros
     Route::apiResource('clientes', ClienteController::class);
     Route::get('clientes/verifica-documento/{documento}/{id?}', [ClienteController::class, 'verificaDocumento']);
-    Route::apiResource('parceiros', ParceiroController::class);
+
+    Route::prefix('parceiros')->group(function () {
+        Route::get('/',        [ParceiroController::class, 'index']);
+        Route::post('/',       [ParceiroController::class, 'store']);
+        Route::get('/{id}',    [ParceiroController::class, 'show'])->whereNumber('id');
+        Route::put('/{id}',    [ParceiroController::class, 'update'])->whereNumber('id');
+        Route::delete('/{id}', [ParceiroController::class, 'destroy'])->whereNumber('id');
+        Route::post('/{id}/restore', [ParceiroController::class, 'restore'])->whereNumber('id');
+    });
+
 
     Route::get('pedidos/exportar', [PedidoController::class, 'exportar']);
     Route::get('pedidos/estatisticas', [PedidoController::class, 'estatisticas']);

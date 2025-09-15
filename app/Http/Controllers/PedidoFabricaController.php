@@ -2,87 +2,96 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Requests\PedidoFabricaEntregaParcialRequest;
+use App\Http\Requests\PedidoFabricaIndexRequest;
+use App\Http\Requests\PedidoFabricaStoreRequest;
+use App\Http\Requests\PedidoFabricaUpdateRequest;
+use App\Http\Requests\PedidoFabricaUpdateStatusRequest;
+use App\Http\Resources\PedidoFabricaResource;
 use App\Models\PedidoFabrica;
-use Illuminate\Http\Request;
+use App\Services\PedidoFabricaService;
 use Illuminate\Http\JsonResponse;
 
+/**
+ * Controller de Pedidos de Fábrica.
+ */
 class PedidoFabricaController extends Controller
 {
+    public function __construct(private readonly PedidoFabricaService $service) {}
+
     /**
-     * Lista todos os pedidos para fábrica com itens e filtros opcionais.
+     * Lista com filtro opcional por status.
      */
-    public function index(Request $request): JsonResponse
+    public function index(PedidoFabricaIndexRequest $request): JsonResponse
     {
-        $query = PedidoFabrica::with('itens.variacao.produto', 'itens.deposito');
+        $query = PedidoFabrica::with(['itens.variacao.produto'])
+            ->when($request->validated('status'), fn($q, $status) => $q->where('status', $status))
+            ->orderByDesc('created_at');
 
-        if ($request->has('status')) {
-            $query->where('status', $request->status);
-        }
-
-        return response()->json($query->orderByDesc('created_at')->get());
+        return PedidoFabricaResource::collection($query->get())->response();
     }
 
     /**
-     * Cria um novo pedido para fábrica com seus itens.
+     * Cria pedido + itens.
      */
-    public function store(Request $request): JsonResponse
+    public function store(PedidoFabricaStoreRequest $request): JsonResponse
     {
-        $data = $request->validate([
-            'data_previsao_entrega' => 'nullable|date',
-            'observacoes' => 'nullable|string',
-            'itens' => 'required|array|min:1',
-            'itens.*.produto_variacao_id' => 'required|exists:produto_variacoes,id',
-            'itens.*.quantidade' => 'required|integer|min:1',
-            'itens.*.pedido_venda_id' => 'nullable|exists:pedidos,id',
-            'itens.*.observacoes' => 'nullable|string',
-        ]);
+        $pedido = $this->service->criar($request);
 
-        $pedido = PedidoFabrica::create([
-            'data_previsao_entrega' => $data['data_previsao_entrega'] ?? null,
-            'observacoes' => $data['observacoes'] ?? null,
-            'status' => 'pendente',
-        ]);
-
-        foreach ($data['itens'] as $item) {
-            $pedido->itens()->create([
-                'produto_variacao_id' => $item['produto_variacao_id'],
-                'quantidade' => $item['quantidade'],
-                'pedido_venda_id' => $item['pedido_venda_id'] ?? null,
-                'deposito_id' => $item['deposito_id'] ?? null,
-                'observacoes' => $item['observacoes'] ?? null,
-            ]);
-        }
-
-        return response()->json($pedido->load('itens.variacao.produto'), 201);
+        return (new PedidoFabricaResource($pedido->load(['itens.variacao.produto', 'historicos'])))
+            ->response()
+            ->setStatusCode(201);
     }
 
     /**
-     * Atualiza o status do pedido para fábrica.
-     */
-    public function updateStatus(Request $request, int $id): JsonResponse
-    {
-        $request->validate([
-            'status' => 'required|in:pendente,produzindo,entregue,cancelado',
-        ]);
-
-        $pedido = PedidoFabrica::findOrFail($id);
-        $pedido->status = $request->status;
-        $pedido->save();
-
-        return response()->json(['message' => 'Status atualizado com sucesso.']);
-    }
-
-    /**
-     * Retorna os dados completos de um pedido para fábrica.
+     * Exibe um pedido completo.
      */
     public function show(int $id): JsonResponse
     {
-        $pedido = PedidoFabrica::with(['itens.variacao.produto', 'itens.variacao.atributos'])->findOrFail($id);
-        return response()->json($pedido);
+        $pedido = PedidoFabrica::with([
+            'itens.variacao.produto',
+            'itens.variacao.atributos',
+            'itens.pedidoVenda.cliente',
+            'historicos',
+            'entregas.deposito',
+        ])->findOrFail($id);
+
+        return (new PedidoFabricaResource($pedido))->response();
+    }
+
+
+    /**
+     * Atualiza dados e itens do pedido (substitui os itens).
+     */
+    public function update(PedidoFabricaUpdateRequest $request, int $id): JsonResponse
+    {
+        $pedido = $this->service->atualizar($request, $id);
+
+        return (new PedidoFabricaResource($pedido))->response();
     }
 
     /**
-     * Remove um pedido para fábrica (se ainda estiver pendente).
+     * Atualiza o status manualmente e registra histórico + responsável.
+     */
+    public function updateStatus(PedidoFabricaUpdateStatusRequest $request, int $id): JsonResponse
+    {
+        $pedido = $this->service->atualizarStatus($request, $id);
+
+        return (new PedidoFabricaResource($pedido))->response();
+    }
+
+    /**
+     * Registra entrega (parcial ou total) para um item.
+     */
+    public function registrarEntrega(PedidoFabricaEntregaParcialRequest $request, int $itemId): JsonResponse
+    {
+        $pedido = $this->service->registrarEntregaParcial($request, $itemId);
+
+        return (new PedidoFabricaResource($pedido))->response();
+    }
+
+    /**
+     * Remove pedido (apenas pendente).
      */
     public function destroy(int $id): JsonResponse
     {
@@ -95,40 +104,5 @@ class PedidoFabricaController extends Controller
         $pedido->delete();
 
         return response()->json(['message' => 'Pedido removido com sucesso.']);
-    }
-
-    public function update(Request $request, int $id): JsonResponse
-    {
-        $pedido = PedidoFabrica::findOrFail($id);
-
-        $data = $request->validate([
-            'data_previsao_entrega' => 'nullable|date',
-            'observacoes' => 'nullable|string',
-            'itens' => 'required|array|min:1',
-            'itens.*.produto_variacao_id' => 'required|exists:produto_variacoes,id',
-            'itens.*.quantidade' => 'required|integer|min:1',
-            'itens.*.pedido_venda_id' => 'nullable|exists:pedidos,id',
-            'itens.*.deposito_id' => 'nullable|exists:depositos,id',
-            'itens.*.observacoes' => 'nullable|string',
-        ]);
-
-        $pedido->update([
-            'data_previsao_entrega' => $data['data_previsao_entrega'] ?? null,
-            'observacoes' => $data['observacoes'] ?? null,
-        ]);
-
-        $pedido->itens()->delete();
-
-        foreach ($data['itens'] as $item) {
-            $pedido->itens()->create([
-                'produto_variacao_id' => $item['produto_variacao_id'],
-                'quantidade' => $item['quantidade'],
-                'pedido_venda_id' => $item['pedido_venda_id'] ?? null,
-                'deposito_id' => $item['deposito_id'] ?? null,
-                'observacoes' => $item['observacoes'] ?? null,
-            ]);
-        }
-
-        return response()->json($pedido->load('itens.variacao.produto'));
     }
 }

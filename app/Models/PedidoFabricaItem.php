@@ -5,14 +5,26 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
+/**
+ * @property int $id
+ * @property int $pedido_fabrica_id
+ * @property int $produto_variacao_id
+ * @property int $quantidade
+ * @property int $quantidade_entregue
+ * @property int|null $deposito_id
+ * @property int|null $pedido_venda_id
+ * @property string|null $observacoes
+ */
 class PedidoFabricaItem extends Model
 {
     protected $table = 'pedidos_fabrica_itens';
 
+    /** @var array<int, string> */
     protected $fillable = [
         'pedido_fabrica_id',
         'produto_variacao_id',
         'quantidade',
+        'quantidade_entregue',
         'deposito_id',
         'pedido_venda_id',
         'observacoes',

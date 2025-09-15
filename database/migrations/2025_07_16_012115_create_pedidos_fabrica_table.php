@@ -15,7 +15,7 @@ return new class extends Migration
     {
         Schema::create('pedidos_fabrica', function (Blueprint $table) {
             $table->id();
-            $table->enum('status', ['pendente', 'produzindo', 'entregue', 'cancelado'])->default('pendente');
+            $table->enum('status', ['pendente', 'enviado', 'parcial', 'entregue', 'cancelado'])->default('pendente');
             $table->date('data_previsao_entrega')->nullable();
             $table->text('observacoes')->nullable();
             $table->timestamps();

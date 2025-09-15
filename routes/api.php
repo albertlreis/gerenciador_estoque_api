@@ -166,6 +166,7 @@ Route::middleware('auth:sanctum')->prefix('v1')->group(function () {
         Route::put('{id}', [PedidoFabricaController::class, 'update']);
         Route::patch('{id}/status', [PedidoFabricaController::class, 'updateStatus']);
         Route::delete('{id}', [PedidoFabricaController::class, 'destroy']);
+        Route::patch('itens/{itemId}/entrega', [PedidoFabricaController::class, 'registrarEntrega']);
     });
 
     Route::prefix('relatorios')->group(function () {

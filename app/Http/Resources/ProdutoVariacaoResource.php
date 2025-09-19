@@ -29,6 +29,13 @@ class ProdutoVariacaoResource extends JsonResource
         $precoPromocional = $this->preco_promocional;
         $temDesconto = $precoPromocional !== null && $precoPromocional < $preco;
 
+        // Ordena atributos no resource também (cautela extra)
+        $atributosOrdenados = $this->whenLoaded('atributos', function () {
+            return $this->atributos->sortBy(function ($a) {
+                return mb_strtolower(($a->atributo ?? '') . ' ' . ($a->valor ?? ''));
+            });
+        });
+
         return [
             'id' => $this->id,
             'produto_id' => $this->produto_id,
@@ -47,7 +54,7 @@ class ProdutoVariacaoResource extends JsonResource
             ]),
             'outlet' => new ProdutoVariacaoOutletResource($this->whenLoaded('outlet')),
             'outlets' => ProdutoVariacaoOutletResource::collection($this->whenLoaded('outlets')),
-            'atributos' => ProdutoVariacaoAtributoResource::collection($this->whenLoaded('atributos')),
+            'atributos' => ProdutoVariacaoAtributoResource::collection($atributosOrdenados ?? $this->whenLoaded('atributos')),
             'produto' => $this->whenLoaded('produto', fn () => [
                 'id'     => $this->produto->id,
                 'nome'   => $this->produto->nome,

@@ -141,17 +141,22 @@ class ProdutoService
             'imagemPrincipal'
         ]);
 
+        // ===== Busca textual: produto, categoria, variação (ref/código) e atributos (nome/valor)
         if (!empty($request->nome)) {
             $term = trim($request->nome);
+            $like = '%' . $term . '%';
 
-            $query->where(function ($q) use ($term) {
-                $like = '%' . $term . '%';
-
+            $query->where(function ($q) use ($like) {
                 $q->where('nome', 'like', $like)
-
-                    ->orWhereHas('variacoes', function ($q2) use ($like) {
-                        $q2->where('referencia', 'like', $like)
-                            ->orWhere('codigo_barras', 'like', $like);
+                    ->orWhere('descricao', 'like', $like)
+                    ->orWhereHas('categoria', fn($qc) => $qc->where('nome', 'like', $like))
+                    ->orWhereHas('variacoes', function ($qv) use ($like) {
+                        $qv->where('referencia', 'like', $like)
+                            ->orWhere('codigo_barras', 'like', $like)
+                            ->orWhereHas('atributos', function ($qa) use ($like) {
+                                $qa->where('atributo', 'like', $like)
+                                    ->orWhere('valor', 'like', $like);
+                            });
                     });
             });
         }
@@ -194,12 +199,14 @@ class ProdutoService
             }
         }
 
+        // Filtros por atributos (AND por atributo; OR entre valores do mesmo atributo)
         if (!empty($request->atributos) && is_array($request->atributos)) {
             foreach ($request->atributos as $atributo => $valores) {
                 if (!empty($valores)) {
-                    $query->whereHas('variacoes.atributos', function ($q) use ($atributo, $valores) {
+                    $vals = is_array($valores) ? $valores : [$valores];
+                    $query->whereHas('variacoes.atributos', function ($q) use ($atributo, $vals) {
                         $q->where('atributo', $atributo)
-                            ->whereIn('valor', is_array($valores) ? $valores : [$valores]);
+                            ->whereIn('valor', $vals);
                     });
                 }
             }
@@ -209,15 +216,18 @@ class ProdutoService
 
         $resultado = $query->paginate($request->get('per_page', 15));
 
+        // Ordena atributos das variações alfabeticamente (para a UI)
         $resultado->getCollection()->each(function ($produto) {
             $produto->variacoes->each(function ($variacao) {
-                $variacao->loadMissing([
-                    'outlets.formasPagamento',
-                ]);
+                if ($variacao->relationLoaded('atributos')) {
+                    $variacao->setRelation(
+                        'atributos',
+                        $variacao->atributos->sortBy(fn($a) => mb_strtolower(($a->atributo ?? '') . ' ' . ($a->valor ?? '')))
+                    );
+                }
             });
         });
 
         return $resultado;
-
     }
 }

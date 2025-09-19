@@ -22,11 +22,12 @@ class DatabaseSeeder extends Seeder
         $this->call([
             ConfiguracoesSeeder::class,
             FeriadosSeeder::class,
+            OutletTabelasBasicasSeeder::class,
+
 //            CategoriasSeeder::class,
 //            FornecedoresSeeder::class,
 //            ProdutosSeeder::class,
 //            ProdutoVariacoesSeeder::class,
-            OutletTabelasBasicasSeeder::class,
 //            ProdutoVariacaoOutletSeeder::class,
 //            ProdutoImagensSeeder::class,
 //            DepositosSeeder::class,

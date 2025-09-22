@@ -29,11 +29,11 @@ class ClienteController extends Controller
     {
         $data = $request->validated();
 
-        if ($this->service->documentoDuplicado($data['documento'])) {
+        if ($data['documento'] && $this->service->documentoDuplicado($data['documento'])) {
             throw ValidationException::withMessages(['documento' => 'Documento já cadastrado.']);
         }
 
-        if (!$this->service->validarDocumento($data['documento'], $data['tipo'])) {
+        if ($data['documento'] && !$this->service->validarDocumento($data['documento'], $data['tipo'])) {
             throw ValidationException::withMessages(['documento' => 'Documento inválido.']);
         }
 

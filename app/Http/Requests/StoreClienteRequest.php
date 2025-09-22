@@ -16,9 +16,9 @@ class StoreClienteRequest extends FormRequest
         return [
             'nome' => 'required|string|max:255',
             'nome_fantasia' => 'nullable|string|max:255',
-            'documento' => 'required|string|max:50',
+            'documento' => 'nullable|string|max:50',
             'inscricao_estadual' => 'nullable|string|max:50',
-            'email' => 'required|email|max:100',
+            'email' => 'nullable|email|max:100',
             'telefone' => 'nullable|string|max:50',
             'whatsapp' => 'nullable|string|max:20',
             'cep' => 'nullable|string|max:20',

@@ -23,7 +23,6 @@ class DatabaseSeeder extends Seeder
             ConfiguracoesSeeder::class,
             FeriadosSeeder::class,
             OutletTabelasBasicasSeeder::class,
-
 //            CategoriasSeeder::class,
 //            FornecedoresSeeder::class,
 //            ProdutosSeeder::class,

@@ -157,8 +157,7 @@ class EstoqueMovimentacaoService
     }
 
     /**
-     * Movimenta estoque: valida e persiste a movimentação.
-     * OBS: Ajuste aqui se você atualiza saldos em outra tabela.
+     * Movimenta estoque: valida, ajusta saldos e persiste a movimentação.
      *
      * @param  array{id_variacao:int,id_deposito_origem:int|null,id_deposito_destino:int|null,tipo:string,quantidade:int,id_usuario:int|null,observacao:string|null}  $dados
      */
@@ -180,23 +179,111 @@ class EstoqueMovimentacaoService
         if ($origem && $destino && (int)$origem === (int)$destino) {
             throw new InvalidArgumentException('Depósito de origem e destino não podem ser o mesmo.');
         }
+        if (!$origem && !$destino) {
+            throw new InvalidArgumentException('Movimentação inválida: origem e destino ausentes.');
+        }
 
-        // Persistência e (se aplicável) ajuste de saldos em transação
-        return DB::transaction(function () use ($dados) {
+        return DB::transaction(function () use ($dados, $variacaoId, $origem, $destino, $tipo, $qtd) {
+            // 1) Ajuste de saldos na tabela `estoque`
+            if ($origem) {
+                // debita origem (valida disponível >= qtd)
+                $this->debitarEstoque($variacaoId, (int)$origem, $qtd);
+            }
+            if ($destino) {
+                // credita destino (cria linha se não existir)
+                $this->creditarEstoque($variacaoId, (int)$destino, $qtd);
+            }
+
+            // 2) Persiste a movimentação (se algo falhar acima, tudo é revertido)
             /** @var EstoqueMovimentacao $mov */
             $mov = EstoqueMovimentacao::create([
-                'id_variacao'         => (int) $dados['id_variacao'],
-                'id_deposito_origem'  => $dados['id_deposito_origem'] ?? null,
-                'id_deposito_destino' => $dados['id_deposito_destino'] ?? null,
-                'tipo'                => (string) $dados['tipo'],
-                'quantidade'          => (int) $dados['quantidade'],
-                'id_usuario'          => $dados['usuario_id'] ?? null,
+                'id_variacao'         => $variacaoId,
+                'id_deposito_origem'  => $origem ?? null,
+                'id_deposito_destino' => $destino ?? null,
+                'tipo'                => $tipo,
+                'quantidade'          => $qtd,
+                // 🔧 correção de chave: aqui a entrada é 'id_usuario'
+                'id_usuario'          => $dados['id_usuario'] ?? null,
                 'observacao'          => $dados['observacao'] ?? null,
                 'data_movimentacao'   => Carbon::now(),
             ]);
 
             return $mov->fresh(['variacao.produto', 'usuario', 'depositoOrigem', 'depositoDestino']);
         });
+    }
+
+    /**
+     * Debita (–) saldo do depósito. Valida disponível (quantidade - reservas).
+     */
+    private function debitarEstoque(int $variacaoId, int $depositoId, int $qtd): void
+    {
+        // trava a linha de estoque (se existir) para evitar corrida
+        $row = DB::table('estoque') // <- ajuste o nome da tabela se necessário
+        ->where('id_variacao', $variacaoId)
+            ->where('id_deposito', $depositoId)
+            ->lockForUpdate()
+            ->first();
+
+        if (!$row) {
+            throw new InvalidArgumentException('Saldo inexistente no depósito de origem.');
+        }
+
+        $quantidadeAtual = (int) $row->quantidade;
+
+        // Considera reservas em aberto no depósito
+        $reservas = app(\App\Services\ReservaEstoqueService::class)
+            ->reservasEmAbertoPorDeposito($variacaoId, $depositoId);
+
+        $disponivel = $quantidadeAtual - (int) $reservas;
+        if ($disponivel < $qtd) {
+            throw new InvalidArgumentException("Saldo insuficiente. Disponível: {$disponivel}.");
+        }
+
+        $novaQtd = $quantidadeAtual - $qtd;
+
+        DB::table('estoque')
+            ->where('id_variacao', $variacaoId)
+            ->where('id_deposito', $depositoId)
+            ->update([
+                'quantidade' => $novaQtd,
+                'updated_at' => Carbon::now(),
+            ]);
+    }
+
+    /**
+     * Credita (+) saldo no depósito. Faz upsert se a linha não existir.
+     */
+    private function creditarEstoque(int $variacaoId, int $depositoId, int $qtd): void
+    {
+        // tenta travar a linha se existir
+        $row = DB::table('estoque') // <- ajuste o nome da tabela se necessário
+        ->where('id_variacao', $variacaoId)
+            ->where('id_deposito', $depositoId)
+            ->lockForUpdate()
+            ->first();
+
+        if ($row) {
+            $novaQtd = (int) $row->quantidade + $qtd;
+
+            DB::table('estoque')
+                ->where('id_variacao', $variacaoId)
+                ->where('id_deposito', $depositoId)
+                ->update([
+                    'quantidade' => $novaQtd,
+                    'updated_at' => Carbon::now(),
+                ]);
+
+            return;
+        }
+
+        // não existe: cria
+        DB::table('estoque')->insert([
+            'id_variacao' => $variacaoId,
+            'id_deposito' => $depositoId,
+            'quantidade'  => $qtd,
+            'created_at'  => Carbon::now(),
+            'updated_at'  => Carbon::now(),
+        ]);
     }
 
     /**

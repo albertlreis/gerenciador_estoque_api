@@ -11,6 +11,7 @@ use App\Models\Consignacao;
 use App\Models\Estoque;
 use App\Models\EstoqueMovimentacao;
 use App\Models\Pedido;
+use App\Models\ProdutoImagem;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -276,15 +277,22 @@ class ConsignacaoController extends Controller
         return response()->json(['mensagem' => 'Devolução registrada com sucesso.']);
     }
 
+    /**
+     * Gera o PDF do roteiro de consignação.
+     *
+     * Inclui: parceiro, imagem do produto, e localização de estoque.
+     */
     public function gerarPdf(int $id): Response
     {
         $pedido = Pedido::with([
             'cliente',
             'usuario',
+            'parceiro', // <-- exibir parceiro
             'consignacoes.deposito',
             'consignacoes.produtoVariacao.produto.imagemPrincipal',
             'consignacoes.produtoVariacao.produto',
             'consignacoes.produtoVariacao.atributos',
+            'consignacoes.produtoVariacao.estoquesComLocalizacao', // <-- localização
         ])->findOrFail($id);
 
         $grupos = $pedido->consignacoes->groupBy(fn($item) => $item->deposito->nome ?? 'Sem depósito');
@@ -294,12 +302,20 @@ class ConsignacaoController extends Controller
             'pedido_id' => $id,
         ]);
 
+        // Mesmo padrão do relatório de estoque para caminho de imagens:
+        $baseFsDir = public_path('storage' . DIRECTORY_SEPARATOR . ProdutoImagem::FOLDER);
+
+        // Permitir imagens locais/externas
+        Pdf::setOptions(['isRemoteEnabled' => true]);
+
         $pdf = Pdf::loadView('exports.roteiro-consignacao', [
-            'pedido' => $pedido,
-            'grupos' => $grupos,
+            'pedido'     => $pedido,
+            'grupos'     => $grupos,
+            'baseFsDir'  => $baseFsDir,  // <-- usado na blade para montar caminho absoluto
+            'geradoEm'   => now('America/Belem')->format('d/m/Y H:i'),
         ])->setPaper('a4');
 
-        return $pdf->download("roteiro_consignacao_$id.pdf");
+        return $pdf->download("roteiro_consignacao_{$id}.pdf");
     }
 
 

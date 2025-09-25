@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 /**
  * @property int $id
@@ -56,10 +57,13 @@ class Produto extends Model
             ->orderBy('id');
     }
 
-    public function imagemPrincipal()
+    public function imagemPrincipal(): HasOne
     {
-        return $this->hasOne(ProdutoImagem::class, 'id_produto')->where('principal', true);
+        return $this->hasOne(ProdutoImagem::class, 'id_produto')
+            ->orderByDesc('principal')
+            ->orderBy('id');
     }
+
 
     public function getEstoqueTotalAttribute(): int
     {

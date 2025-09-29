@@ -34,6 +34,7 @@ class ConsignacaoResource extends JsonResource
             'numero_externo' => optional($this->pedido)->numero_externo,
             'cliente_nome' => optional($this->pedido->cliente)->nome,
             'vendedor_nome' => optional($this->pedido->usuario)->nome,
+            'parceiro_nome' => optional($this->pedido->parceiro)->nome,
             'data_envio' => optional($this->data_envio)->format('d/m/Y'),
             'prazo_resposta' => optional($this->prazo_resposta)->format('d/m/Y'),
             'status' => $this->status,

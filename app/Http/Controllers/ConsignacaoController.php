@@ -32,6 +32,7 @@ class ConsignacaoController extends Controller
         $query = Consignacao::with([
             'pedido.cliente:id,nome',
             'pedido.usuario:id,nome',
+            'pedido.parceiro:id,nome',
             'pedido.statusAtual',
             'produtoVariacao.produto',
         ]);

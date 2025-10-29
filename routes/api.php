@@ -9,6 +9,7 @@ use App\Http\Controllers\Assistencia\AssistenciasController;
 use App\Http\Controllers\Assistencia\PedidoLookupController;
 use App\Http\Controllers\CaixaEstoqueController;
 use App\Http\Controllers\ConsignacaoRelatorioController;
+use App\Http\Controllers\ContaPagarController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DevolucaoController;
 use App\Http\Controllers\EstoqueRelatorioController;
@@ -269,5 +270,10 @@ Route::middleware('auth:sanctum')->prefix('v1')->group(function () {
         Route::post('{id}/processar', [ImportEstoqueController::class, 'processar']); // dry-run opcional
         Route::get('{id}', [ImportEstoqueController::class, 'show']);
     });
+
+    Route::apiResource('contas-pagar', ContaPagarController::class);
+
+    Route::post('contas-pagar/{conta_pagar}/pagar', [ContaPagarController::class, 'pagar']);
+    Route::delete('contas-pagar/{conta_pagar}/estornar/{pagamentoId}', [ContaPagarController::class, 'estornar']);
 
 });

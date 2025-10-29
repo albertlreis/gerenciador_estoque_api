@@ -7,13 +7,18 @@ use Illuminate\Http\Request;
 
 class CategoriaController extends Controller
 {
-    public function index()
+    public function index(Request $request)
     {
-        return response()->json(
-            Categoria::with('subcategorias')
-                ->orderBy('nome')
-                ->get()
-        );
+        $search = $request->query('search');
+
+        $query = Categoria::with('subcategorias.subcategorias')
+            ->orderBy('nome');
+
+        if ($search) {
+            $query->where('nome', 'like', "%{$search}%");
+        }
+
+        return response()->json($query->get(['id', 'nome', 'categoria_pai_id']));
     }
 
     public function store(Request $request)
@@ -25,7 +30,13 @@ class CategoriaController extends Controller
         ]);
 
         $categoria = Categoria::create($validated);
-        return response()->json($categoria, 201);
+
+        return response()->json([
+            'id' => $categoria->id,
+            'nome' => $categoria->nome,
+            'label' => $categoria->nome,
+            'value' => $categoria->id,
+        ], 201);
     }
 
     public function show(Categoria $categoria)

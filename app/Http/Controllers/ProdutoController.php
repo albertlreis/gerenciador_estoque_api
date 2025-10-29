@@ -2,37 +2,42 @@
 
 namespace App\Http\Controllers;
 
+use App\Domain\Importacao\DTO\AtributoDTO;
+use App\Domain\Importacao\DTO\NotaDTO;
+use App\Domain\Importacao\DTO\ProdutoImportadoDTO;
+use App\Domain\Importacao\Services\ImportacaoProdutosService;
 use App\Services\LogService;
 use App\Services\ProdutoSugestoesOutletService;
-use Exception;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Throwable;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use App\Http\Requests\{
+use App\Http\Requests\{ConfirmarImportacaoRequest,
     FiltrarProdutosRequest,
+    ImportarXmlRequest,
     StoreProdutoRequest,
-    UpdateProdutoRequest
-};
+    UpdateProdutoRequest};
 use App\Http\Resources\ProdutoResource;
 use App\Models\{
-    Produto,
-    ProdutoVariacaoVinculo,
-    EstoqueMovimentacao
+    Produto
 };
 use App\Services\ProdutoService;
 
 class ProdutoController extends Controller
 {
     private ProdutoService $produtoService;
+    private readonly ImportacaoProdutosService $service;
 
     /**
      * Construtor com injeção de dependência do ProdutoService.
      */
-    public function __construct(ProdutoService $produtoService)
+    public function __construct(ProdutoService $produtoService, ImportacaoProdutosService $service)
     {
         $this->produtoService = $produtoService;
+        $this->service = $service;
     }
 
     /**
@@ -152,151 +157,116 @@ class ProdutoController extends Controller
         }
     }
 
-    /**
-     * Processa o upload do XML da NF-e e extrai os produtos e dados da nota.
-     *
-     * @param Request $request
-     * @return JsonResponse
-     */
-    public function importarXML(Request $request): JsonResponse
+
+    /** Upload e parsing do XML */
+    public function importarXML(ImportarXmlRequest $request): JsonResponse
     {
-        $request->validate(['arquivo' => 'required|file|mimes:xml']);
+        [$notaDto, $produtosDto, $xmlString] = $this->service->parsearXml($request->file('arquivo'));
 
-        $xmlString = file_get_contents($request->file('arquivo')->getRealPath());
-        $xml = simplexml_load_string($xmlString);
-        $ns = $xml->getNamespaces(true);
-        $nfe = $xml->children($ns[''])->NFe->infNFe;
+        // 🔹 Gera identificador único e salva XML temporário
+        $tokenXml = 'xml-' . Str::uuid() . '.xml';
+        $path = "importacoes/tmp/{$tokenXml}";
+        Storage::disk('local')->put($path, $xmlString);
 
-        // Informações da nota
         $nota = [
-            'numero' => (string) $nfe->ide->nNF,
-            'data_emissao' => (string) $nfe->ide->dhEmi,
-            'fornecedor_cnpj' => (string) $nfe->emit->CNPJ,
-            'fornecedor_nome' => (string) $nfe->emit->xNome,
+            'numero'           => $notaDto->numero,
+            'data_emissao'     => $notaDto->dataEmissao,
+            'fornecedor_cnpj'  => $notaDto->fornecedorCnpj,
+            'fornecedor_nome'  => $notaDto->fornecedorNome,
         ];
 
-        // Produtos extraídos
-        $produtos = [];
-        foreach ($nfe->det as $det) {
-            $produto = $det->prod;
-            $descricaoXml = (string) $produto->xProd;
-
-            $vinculo = ProdutoVariacaoVinculo::where('descricao_xml', $descricaoXml)->first();
-            $variacao = $vinculo?->variacao;
-
-            $produtos[] = [
-                'descricao_xml' => $descricaoXml,
-                'ncm' => (string) $produto->NCM,
-                'unidade' => (string) $produto->uCom,
-                'quantidade' => (float) $produto->qCom,
-                'preco_unitario' => (float) $produto->vUnCom,
-                'valor_total' => (float) $produto->vProd,
-                'observacao' => (string) ($det->infAdProd ?? ''),
-                'variacao_id' => $variacao?->id,
-                'variacao_nome' => $variacao?->descricao,
+        $produtos = $produtosDto->map(function(ProdutoImportadoDTO $p) {
+            return [
+                'descricao_xml'       => $p->descricaoXml,
+                'referencia'          => $p->referencia,
+                'unidade'             => $p->unidade,
+                'quantidade'          => $p->quantidade,
+                'custo_unitario'      => $p->custoUnitXml,
+                'valor_total'         => $p->valorTotalXml,
+                'observacao'          => $p->observacao,
+                'id_categoria'        => $p->idCategoria,
+                'variacao_id_manual'  => $p->variacaoIdManual,
+                'variacao_id'         => $p->variacaoIdEncontrada,
+                'preco'               => $p->precoCadastrado,
+                'custo_cadastrado'    => $p->custoCadastrado,
+                'descricao_final'     => $p->descricaoFinal,
+                'atributos'           => collect($p->atributos)
+                    ->map(fn($a) => ['atributo' => $a->atributo, 'valor' => $a->valor])
+                    ->values()
+                    ->toArray(),
+                'pedido_id'           => $p->pedidoId,
             ];
-        }
+        });
 
         return response()->json([
-            'nota' => $nota,
-            'produtos' => $produtos,
+            'nota'        => $nota,
+            'produtos'    => $produtos,
+            'token_xml'   => $tokenXml,
         ]);
     }
 
-    /**
-     * Confirma a importação da nota fiscal XML, criando produtos ou movimentações.
-     *
-     * @param Request $request
-     * @return JsonResponse
-     */
-    public function confirmarImportacao(Request $request): JsonResponse
+    /** Confirma a importação */
+    public function confirmarImportacao(ConfirmarImportacaoRequest $request): JsonResponse
     {
-        $request->validate([
-            'nota' => 'required|array',
-            'produtos' => 'required|array',
-            'deposito_id' => 'required|integer|exists:depositos,id',
-        ]);
+        $notaArr    = $request->input('nota');
+        $depositoId = (int)$request->input('deposito_id');
+        $produtos   = collect($request->input('produtos'));
+        $tokenXml   = $request->input('token_xml');
 
-        $nota = $request->input('nota');
-        $produtos = $request->input('produtos');
-        $depositoId = $request->input('deposito_id');
-
-        DB::beginTransaction();
-
-        try {
-            foreach ($produtos as $item) {
-                $variacaoId = $item['variacao_id'] ?? null;
-
-                // Caso o usuário tenha selecionado manualmente
-                if (!$variacaoId && !empty($item['variacao_id_manual'])) {
-                    ProdutoVariacaoVinculo::firstOrCreate(
-                        ['descricao_xml' => $item['descricao_xml']],
-                        ['produto_variacao_id' => $item['variacao_id_manual']]
-                    );
-                    $variacaoId = $item['variacao_id_manual'];
-                }
-
-                // Produto novo (sem vínculo nem variação existente)
-                if (!$variacaoId && !empty($item['descricao_xml'])) {
-                    if (empty($item['id_categoria'])) {
-                        throw new Exception("Categoria não informada para o produto: {$item['descricao_xml']}");
-                    }
-
-                    $produto = Produto::create([
-                        'nome' => $item['descricao_xml'],
-                        'descricao' => $item['observacao'] ?? null,
-                        'id_categoria' => $item['id_categoria'],
-                        'id_fornecedor' => null,
-                        'ativo' => true,
-                    ]);
-
-                    $variacao = $produto->variacoes()->create([
-                        'referencia' => $item['referencia'],
-                        'nome' => $item['descricao_xml'],
-                        'preco' => $item['preco_unitario'],
-                        'custo' => $item['preco_unitario'],
-                        'codigo_barras' => null,
-                    ]);
-
-                    ProdutoVariacaoVinculo::create([
-                        'descricao_xml' => $item['descricao_xml'],
-                        'produto_variacao_id' => $variacao->id,
-                    ]);
-
-                    $variacaoId = $variacao->id;
-                }
-
-                if (!$variacaoId) {
-                    throw new Exception("Produto não identificado e sem variação vinculada: {$item['descricao_xml']}");
-                }
-
-                EstoqueMovimentacao::create([
-                    'id_variacao' => $variacaoId,
-                    'id_deposito_origem' => null,
-                    'id_deposito_destino' => $depositoId,
-                    'tipo' => 'entrada',
-                    'quantidade' => $item['quantidade'],
-                    'observacao' => 'Importação NF-e nº ' . $nota['numero'],
-                    'data_movimentacao' => $nota['data_emissao'],
-                ]);
-
-            }
-
-            DB::commit();
-
-            return response()->json([
-                'success' => true,
-                'message' => 'Importação confirmada com sucesso.',
-            ]);
-        } catch (Throwable $e) {
-            DB::rollBack();
-
+        if (!$tokenXml) {
             return response()->json([
                 'success' => false,
-                'message' => 'Erro ao confirmar importação.',
-                'error' => app()->environment('local') ? $e->getMessage() : null,
-            ], 500);
+                'message' => 'Token do XML não informado. Reimporte o arquivo.',
+            ], 422);
         }
+
+        $path = "importacoes/tmp/{$tokenXml}";
+        if (!Storage::disk('local')->exists($path)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Arquivo XML temporário não encontrado. Reimporte o XML.',
+            ], 422);
+        }
+
+        $xmlString = Storage::disk('local')->get($path);
+
+        $notaDto = new NotaDTO(
+            numero: (string)$notaArr['numero'],
+            dataEmissao: $notaArr['data_emissao'] ?? null,
+            fornecedorCnpj: $notaArr['fornecedor_cnpj'] ?? null,
+            fornecedorNome: $notaArr['fornecedor_nome'] ?? null,
+        );
+
+        $itens = $produtos->map(function(array $i) {
+            return new ProdutoImportadoDTO(
+                descricaoXml: $i['descricao_xml'],
+                referencia: $i['referencia'] ?? null,
+                unidade: $i['unidade'] ?? null,
+                quantidade: (float)$i['quantidade'],
+                custoUnitXml: (float)$i['custo_unitario'],
+                valorTotalXml: (float)($i['valor_total'] ?? ($i['quantidade'] * $i['custo_unitario'])),
+                observacao: $i['observacao'] ?? null,
+                idCategoria: $i['id_categoria'] ?? null,
+                variacaoIdManual: $i['variacao_id_manual'] ?? null,
+                variacaoIdEncontrada: $i['variacao_id'] ?? null,
+                precoCadastrado: $i['preco'] ?? null,
+                custoCadastrado: $i['custo_cadastrado'] ?? null,
+                descricaoFinal: $i['descricao_final'] ?? ($i['descricao_xml'] ?? null),
+                atributos: collect($i['atributos'] ?? [])
+                    ->map(fn($a) => new AtributoDTO($a['atributo'], $a['valor']))->all(),
+                pedidoId: $i['pedido_id'] ?? null,
+            );
+        });
+
+        $this->service->confirmar($notaDto, $itens, $depositoId, $xmlString);
+
+        // Remove arquivo temporário após uso
+        Storage::disk('local')->delete($path);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Importação confirmada com sucesso.',
+        ]);
     }
 
     public function estoqueBaixo(Request $request): JsonResponse

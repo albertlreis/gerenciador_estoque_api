@@ -40,6 +40,38 @@ class PedidoService
      */
     public function listarPedidos(Request $request): JsonResponse
     {
+        /**
+         * 🔍 Busca rápida (auto-complete)
+         * Quando vier parâmetro "q", retorna resultados leves para seleção de pedidos.
+         */
+        if ($request->filled('q')) {
+            $termo = trim($request->get('q'));
+
+            $resultados = Pedido::query()
+                ->with(['cliente:id,nome'])
+                ->select(['id', 'numero_externo', 'id_cliente'])
+                ->when($termo !== '', function ($q) use ($termo) {
+                    $q->where('numero_externo', 'like', "%{$termo}%")
+                        ->orWhereHas('cliente', fn($sub) =>
+                        $sub->where('nome', 'like', "%{$termo}%")
+                        );
+                })
+                ->orderByDesc('data_pedido')
+                ->limit(20)
+                ->get()
+                ->map(fn($p) => [
+                    'id' => $p->id,
+                    'numero' => $p->numero_externo,
+                    'cliente' => $p->cliente?->nome ?? '-',
+                    'label' => "#$p->numero_externo - {$p->cliente?->nome}",
+                ]);
+
+            return response()->json($resultados);
+        }
+
+        /**
+         * 🔁 Listagem padrão com paginação e filtros
+         */
         $query = $this->pedidoRepository->comFiltros($request);
 
         $ordenarPor = $request->get('ordenarPor', 'data_pedido');

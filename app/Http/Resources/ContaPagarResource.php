@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources;
 
+use BackedEnum;
 use Illuminate\Http\Resources\Json\JsonResource;
 
 /** @mixin \App\Models\ContaPagar */
@@ -22,7 +23,9 @@ class ContaPagarResource extends JsonResource
             'valor_liquido' => (float) ($this->valor_bruto - $this->desconto + $this->juros + $this->multa),
             'valor_pago' => (float) $this->valor_pago,
             'saldo_aberto' => (float) $this->saldo_aberto,
-            'status' => $this->status->value,
+            'status' => $this->status instanceof BackedEnum
+                ? $this->status->value
+                : ($this->status ?? 'INDEFINIDO'),
             'forma_pagamento' => $this->forma_pagamento,
             'centro_custo' => $this->centro_custo,
             'categoria' => $this->categoria,

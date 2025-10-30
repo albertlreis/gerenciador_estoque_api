@@ -7,7 +7,7 @@ use App\Models\ContaPagar;
 use App\Repositories\Contracts\ContaPagarRepository;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 
-class EloquentContaPagarRepository implements ContaPagarRepository
+class ContaPagarRepositoryEloquent implements ContaPagarRepository
 {
     public function listar(FiltroContaPagarDTO $filtro, int $page = 1, int $perPage = 15): LengthAwarePaginator
     {
@@ -50,7 +50,7 @@ class EloquentContaPagarRepository implements ContaPagarRepository
         $conta->fill($dados)->save();
         return $conta;
     }
-    
+
     public function deletar(ContaPagar $conta): void
     {
         $conta->delete();

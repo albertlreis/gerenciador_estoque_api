@@ -2,6 +2,8 @@
 
 namespace App\Providers;
 
+use App\Repositories\Contracts\ContaPagarRepository;
+use App\Repositories\Eloquent\ContaPagarRepositoryEloquent;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -13,7 +15,7 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register()
     {
-        //
+        $this->app->bind(ContaPagarRepository::class, ContaPagarRepositoryEloquent::class);
     }
 
     /**

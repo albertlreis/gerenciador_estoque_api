@@ -271,9 +271,20 @@ Route::middleware('auth:sanctum')->prefix('v1')->group(function () {
         Route::get('{id}', [ImportEstoqueController::class, 'show']);
     });
 
-    Route::apiResource('contas-pagar', ContaPagarController::class);
 
-    Route::post('contas-pagar/{conta_pagar}/pagar', [ContaPagarController::class, 'pagar']);
-    Route::delete('contas-pagar/{conta_pagar}/estornar/{pagamentoId}', [ContaPagarController::class, 'estornar']);
+    Route::prefix('contas-pagar')->group(function () {
+        Route::get('export/excel', [ContaPagarController::class, 'exportExcel'])->name('contas-pagar.export.excel');
+        Route::get('export/pdf',   [ContaPagarController::class, 'exportPdf'])->name('contas-pagar.export.pdf');
+        Route::get('kpis',         [ContaPagarController::class, 'kpis'])->name('contas-pagar.kpis');
+
+        Route::post('{conta_pagar}/pagar', [ContaPagarController::class, 'pagar'])->name('contas-pagar.pagar');
+        Route::delete('{conta_pagar}/estornar/{pagamento}', [ContaPagarController::class, 'estornar'])
+            ->whereNumber(['conta_pagar', 'pagamento'])
+            ->name('contas-pagar.estornar');
+    });
+
+    Route::apiResource('contas-pagar', ContaPagarController::class)
+        ->names('contas-pagar')
+        ->except(['create', 'edit']);
 
 });

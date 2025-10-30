@@ -11,11 +11,11 @@ return new class extends Migration
      *
      * @return void
      */
-    public function up()
+    public function up(): void
     {
         Schema::create('contas_pagar', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('fornecedor_id')->nullable()->constrained('fornecedores');
+            $table->unsignedInteger('fornecedor_id')->nullable();
             $table->string('descricao', 180);
             $table->string('numero_documento', 80)->nullable();
             $table->date('data_emissao')->nullable();
@@ -32,6 +32,8 @@ return new class extends Migration
             $table->text('observacoes')->nullable();
             $table->softDeletes();
             $table->timestamps();
+
+            $table->foreign('fornecedor_id')->references('id')->on('fornecedores')->onDelete('set null');
         });
     }
 
@@ -40,7 +42,7 @@ return new class extends Migration
      *
      * @return void
      */
-    public function down()
+    public function down(): void
     {
         Schema::dropIfExists('contas_pagar');
     }

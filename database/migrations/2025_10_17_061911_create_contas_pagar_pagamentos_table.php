@@ -21,8 +21,10 @@ return new class extends Migration
             $table->string('forma_pagamento', 30)->nullable();
             $table->string('comprovante_path')->nullable();
             $table->text('observacoes')->nullable();
-            $table->foreignId('usuario_id')->nullable()->constrained('users');
+            $table->unsignedInteger('usuario_id')->nullable();
             $table->timestamps();
+
+            $table->foreign('usuario_id')->references('id')->on('acesso_usuarios')->onDelete('set null');
         });
     }
 

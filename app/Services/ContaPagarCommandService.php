@@ -73,7 +73,6 @@ class ContaPagarCommandService
 
             $this->sincronizarStatus($conta->fresh());
 
-
             return new ContaPagarResource($conta->fresh(['fornecedor','pagamentos']));
         });
     }

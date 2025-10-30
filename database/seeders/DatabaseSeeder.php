@@ -26,6 +26,8 @@ class DatabaseSeeder extends Seeder
             AreasEstoqueSeeder::class,
             LocalizacaoEstoqueSeeder::class,
             AssistenciaDefeitosSeeder::class,
+            ContaPagarSeeder::class,
+            ContaPagarPagamentoSeeder::class,
 //            CategoriasSeeder::class,
 //            FornecedoresSeeder::class,
 //            ProdutosSeeder::class,

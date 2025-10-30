@@ -126,9 +126,9 @@ final class ImportacaoProdutosService
     }
 
     /** Confirma importação: upsert produtos, movimenta estoque e salva arquivo */
-    public function confirmar(NotaDTO $nota, Collection $itens, int $depositoId, string $xmlString): void
+    public function confirmar(NotaDTO $nota, Collection $itens, int $depositoId, string $xmlString, string $dataEntrada): void
     {
-        DB::transaction(function () use ($nota, $itens, $depositoId, $xmlString) {
+        DB::transaction(function () use ($nota, $itens, $depositoId, $xmlString, $dataEntrada) {
             $path = 'importacoes/xml/' . now()->format('Ymd-His') . "-NF{$nota->numero}.xml";
             Storage::disk('local')->put($path, $xmlString);
 
@@ -206,7 +206,7 @@ final class ImportacaoProdutosService
                     'tipo'                 => 'entrada',
                     'quantidade'           => $dto->quantidade,
                     'observacao'           => 'Importação NF-e nº ' . $nota->numero,
-                    'data_movimentacao'    => $nota->dataEmissao ?: now(),
+                    'data_movimentacao'    => $dataEntrada ?: now(),
                     'id_usuario'           => Auth::id(),
                 ]);
             }

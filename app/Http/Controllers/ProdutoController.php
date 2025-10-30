@@ -212,6 +212,7 @@ class ProdutoController extends Controller
         $depositoId = (int)$request->input('deposito_id');
         $produtos   = collect($request->input('produtos'));
         $tokenXml   = $request->input('token_xml');
+        $dataEntrada = $request->input('data_entrada');
 
         if (!$tokenXml) {
             return response()->json([
@@ -258,7 +259,7 @@ class ProdutoController extends Controller
             );
         });
 
-        $this->service->confirmar($notaDto, $itens, $depositoId, $xmlString);
+        $this->service->confirmar($notaDto, $itens, $depositoId, $xmlString, $dataEntrada);
 
         // Remove arquivo temporário após uso
         Storage::disk('local')->delete($path);

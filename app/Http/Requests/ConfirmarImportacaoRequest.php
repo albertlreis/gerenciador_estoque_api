@@ -28,6 +28,7 @@ class ConfirmarImportacaoRequest extends FormRequest
             'produtos.*.atributos.*.atributo' => ['required_with:produtos.*.atributos','string','max:80'],
             'produtos.*.atributos.*.valor' => ['required_with:produtos.*.atributos','string','max:120'],
             'produtos.*.pedido_id' => ['nullable','integer','exists:pedidos,id'],
+            'data_entrada' => ['nullable', 'date'],
         ];
     }
 }

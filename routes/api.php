@@ -12,6 +12,7 @@ use App\Http\Controllers\ConsignacaoRelatorioController;
 use App\Http\Controllers\ContaPagarController;
 use App\Http\Controllers\ContaReceberController;
 use App\Http\Controllers\ContaReceberExportController;
+use App\Http\Controllers\ContaReceberRelatorioController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DevolucaoController;
 use App\Http\Controllers\EstoqueRelatorioController;
@@ -197,6 +198,10 @@ Route::middleware('auth:sanctum')->prefix('v1')->group(function () {
         Route::get('estoque/atual', [EstoqueRelatorioController::class, 'estoqueAtual']);
         Route::get('pedidos', [PedidosRelatorioController::class, 'pedidosPorPeriodo']);
         Route::get('consignacoes/ativas', [ConsignacaoRelatorioController::class, 'consignacoesAtivas']);
+
+        Route::get('/devedores', [ContaReceberRelatorioController::class, 'devedores']);
+        Route::get('/devedores/exportar/excel', [ContaReceberRelatorioController::class, 'exportarExcel']);
+        Route::get('/devedores/exportar/pdf', [ContaReceberRelatorioController::class, 'exportarPdf']);
     });
 
     Route::post('devolucoes', [DevolucaoController::class, 'store']);

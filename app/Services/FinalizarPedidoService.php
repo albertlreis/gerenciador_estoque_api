@@ -12,6 +12,8 @@ use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use RuntimeException;
+use Throwable;
 
 /**
  * Caso de uso de finalização de pedido.
@@ -43,6 +45,7 @@ final class FinalizarPedidoService
         private readonly DepositoResolver $resolver,
         private readonly MovimentarEstoqueStrategy $movimentarStrategy,
         private readonly ReservarEstoqueStrategy $reservarStrategy,
+        private readonly ContaReceberService $contaReceberService,
     ) {}
 
     /**
@@ -137,6 +140,16 @@ final class FinalizarPedidoService
 
             // Data limite
             $this->prazoService->definirDataLimite($pedido);
+
+            // Cria conta a receber (apenas se não for consignado)
+            if (!$emConsignacao) {
+                try {
+                    $this->contaReceberService->gerarPorPedido($pedido);
+                } catch (Throwable $e) {
+                    report($e);
+                    throw new RuntimeException("Falha ao gerar conta a receber: {$e->getMessage()}");
+                }
+            }
 
             // Finaliza carrinho
             $carrinho->itens()->delete();

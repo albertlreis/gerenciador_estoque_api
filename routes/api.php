@@ -10,6 +10,8 @@ use App\Http\Controllers\Assistencia\PedidoLookupController;
 use App\Http\Controllers\CaixaEstoqueController;
 use App\Http\Controllers\ConsignacaoRelatorioController;
 use App\Http\Controllers\ContaPagarController;
+use App\Http\Controllers\ContaReceberController;
+use App\Http\Controllers\ContaReceberExportController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DevolucaoController;
 use App\Http\Controllers\EstoqueRelatorioController;
@@ -286,5 +288,19 @@ Route::middleware('auth:sanctum')->prefix('v1')->group(function () {
     Route::apiResource('contas-pagar', ContaPagarController::class)
         ->names('contas-pagar')
         ->except(['create', 'edit']);
+
+    Route::prefix('contas-receber')->group(function () {
+        Route::get('/exportar/excel', [ContaReceberExportController::class, 'exportarExcel']);
+        Route::get('/exportar/pdf', [ContaReceberExportController::class, 'exportarPdf']);
+        Route::get('/kpis', [ContaReceberExportController::class, 'kpis']);
+        Route::get('/', [ContaReceberController::class, 'index']);
+        Route::get('/{id}', [ContaReceberController::class, 'show']);
+        Route::post('/', [ContaReceberController::class, 'store']);
+        Route::put('/{id}', [ContaReceberController::class, 'update']);
+        Route::delete('/{id}', [ContaReceberController::class, 'destroy']);
+
+        // baixa de pagamentos
+        Route::post('/{id}/baixa', [ContaReceberController::class, 'baixa']);
+    });
 
 });

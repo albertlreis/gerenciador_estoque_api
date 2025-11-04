@@ -21,8 +21,9 @@ class PedidoCreator
      * Cria um pedido a partir do carrinho informado na request,
      * incluindo lógica de consignação, movimentação e/ou reserva.
      *
-     * @param  StorePedidoRequest $request
+     * @param StorePedidoRequest $request
      * @return JsonResponse
+     * @throws \Illuminate\Validation\ValidationException
      */
     public function criar(StorePedidoRequest $request): JsonResponse
     {

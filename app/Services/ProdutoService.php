@@ -5,6 +5,9 @@ namespace App\Services;
 use App\Models\Produto;
 use Exception;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Log;
@@ -124,110 +127,130 @@ class ProdutoService
     }
 
     /**
-     * Lista os produtos com filtros avançados e paginação.
+     * Lista ou busca produtos com filtros dinâmicos e controle contextual.
      *
-     * @param \Illuminate\Http\Request $request
+     * @param Request $request
      * @return LengthAwarePaginator
      */
     public function listarProdutosFiltrados(Request $request): LengthAwarePaginator
     {
-        $query = Produto::with([
-            'categoria',
-            'fornecedor',
-            'variacoes.atributos',
-            'variacoes.estoque',
-            'variacoes.outlet',
-            'variacoes.outlets',
-            'imagemPrincipal'
-        ]);
+        $view             = $request->get('view', 'completa');
+        $depositoId       = $request->input('deposito_id');
+        $comEstoque       = $request->boolean('com_estoque');
+        $incluirEstoque   = $request->boolean('incluir_estoque', in_array($view, ['completa', 'simplificada']));
 
-        // ===== Busca textual: produto, categoria, variação (ref/código) e atributos (nome/valor)
-        if (!empty($request->nome)) {
-            $term = trim($request->nome);
-            $like = '%' . $term . '%';
+        $with = ['categoria', 'variacoes.atributos'];
+        if ($incluirEstoque) {
+            $with[] = 'variacoes.estoque';
+        }
 
-            $query->where(function ($q) use ($like) {
-                $q->where('nome', 'like', $like)
-                    ->orWhere('descricao', 'like', $like)
-                    ->orWhereHas('categoria', fn($qc) => $qc->where('nome', 'like', $like))
-                    ->orWhereHas('variacoes', function ($qv) use ($like) {
-                        $qv->where('referencia', 'like', $like)
-                            ->orWhere('codigo_barras', 'like', $like)
-                            ->orWhereHas('atributos', function ($qa) use ($like) {
-                                $qa->where('atributo', 'like', $like)
-                                    ->orWhere('valor', 'like', $like);
+        $query = Produto::with($with);
+
+        // ========== BUSCA TEXTUAL FLEXÍVEL ==========
+        $term = $request->input('q') ?? $request->input('nome');
+        if ($term) {
+            $normalized = strtolower(iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $term));
+            $words = preg_split('/\s+/', $normalized);
+
+            $query->where(function ($q) use ($words) {
+                foreach ($words as $w) {
+                    $like = "%{$w}%";
+                    $q->where(function ($qq) use ($like) {
+                        $qq->whereRaw('LOWER(nome) LIKE ?', [$like])
+                            ->orWhereRaw('LOWER(descricao) LIKE ?', [$like])
+                            ->orWhereHas('categoria', fn($qc) => $qc->whereRaw('LOWER(nome) LIKE ?', [$like]))
+                            ->orWhereHas('variacoes', function ($qv) use ($like) {
+                                $qv->whereRaw('LOWER(referencia) LIKE ?', [$like])
+                                    ->orWhereRaw('LOWER(codigo_barras) LIKE ?', [$like])
+                                    ->orWhereHas('atributos', function ($qa) use ($like) {
+                                        $qa->whereRaw('LOWER(atributo) LIKE ?', [$like])
+                                            ->orWhereRaw('LOWER(valor) LIKE ?', [$like]);
+                                    });
                             });
                     });
+                }
             });
         }
 
-        if (!empty($request->id_categoria)) {
-            $ids = is_array($request->id_categoria)
-                ? array_filter($request->id_categoria)
-                : [$request->id_categoria];
+        // ========== FILTROS DE ESTOQUE E DEPÓSITO ==========
+        if ($depositoId) {
+            $query->whereHas('variacoes.estoque', fn($qe) => $qe->where('deposito_id', $depositoId));
+        }
 
+        if ($comEstoque) {
+            $query->whereHas('variacoes.estoque', fn($qe) => $qe->where('quantidade', '>', 0));
+        }
+
+        if ($status = $request->input('estoque_status')) {
+            if ($status === 'com_estoque') {
+                $query->whereHas('variacoes.estoque', fn($q) => $q->where('quantidade', '>', 0));
+            } elseif ($status === 'sem_estoque') {
+                $query->whereDoesntHave('variacoes.estoque')
+                    ->orWhereHas('variacoes.estoque', fn($q) => $q->where('quantidade', '<=', 0));
+            }
+        }
+
+        // ========== OUTROS FILTROS ==========
+        if ($ids = $request->input('id_categoria')) {
             $query->whereIn('id_categoria', $ids);
         }
 
-        if (!empty($request->fornecedor_id)) {
-            $ids = is_array($request->fornecedor_id)
-                ? array_filter($request->fornecedor_id)
-                : [$request->fornecedor_id];
-
-            $query->whereIn('id_fornecedor', $ids);
+        if ($forn = $request->input('fornecedor_id')) {
+            $query->whereIn('id_fornecedor', $forn);
         }
 
-        if ($request->filled('ativo')) {
-            $query->where('ativo', (bool) $request->ativo);
+        if (!is_null($request->input('ativo'))) {
+            $query->where('ativo', (bool) $request->input('ativo'));
         }
 
-        if (!is_null($request->is_outlet)) {
-            if ($request->is_outlet) {
-                $query->whereHas('variacoes.outlet', fn($q) => $q->where('quantidade_restante', '>', 0))
-                    ->whereHas('variacoes.estoque', fn($q) => $q->where('quantidade', '>', 0));
+        if (!is_null($request->input('is_outlet'))) {
+            if ($request->boolean('is_outlet')) {
+                $query->whereHas('variacoes.outlet', fn($q) => $q->where('quantidade_restante', '>', 0));
             } else {
                 $query->whereDoesntHave('variacoes.outlet', fn($q) => $q->where('quantidade_restante', '>', 0));
-            }
-        } elseif (!empty($request->estoque_status)) {
-            if ($request->estoque_status === 'com_estoque') {
-                $query->whereHas('variacoes.estoque', fn($q) => $q->where('quantidade', '>', 0));
-            } elseif ($request->estoque_status === 'sem_estoque') {
-                $query->where(function ($q) {
-                    $q->whereDoesntHave('variacoes.estoque')
-                        ->orWhereHas('variacoes.estoque', fn($q2) => $q2->where('quantidade', '<=', 0));
-                });
-            }
-        }
-
-        // Filtros por atributos (AND por atributo; OR entre valores do mesmo atributo)
-        if (!empty($request->atributos) && is_array($request->atributos)) {
-            foreach ($request->atributos as $atributo => $valores) {
-                if (!empty($valores)) {
-                    $vals = is_array($valores) ? $valores : [$valores];
-                    $query->whereHas('variacoes.atributos', function ($q) use ($atributo, $vals) {
-                        $q->where('atributo', $atributo)
-                            ->whereIn('valor', $vals);
-                    });
-                }
             }
         }
 
         $query->orderByDesc('created_at');
 
-        $resultado = $query->paginate($request->get('per_page', 15));
+        // ========== PAGINAÇÃO ==========
+        $produtos = $query->paginate($request->integer('per_page', 15));
 
-        // Ordena atributos das variações alfabeticamente (para a UI)
-        $resultado->getCollection()->each(function ($produto) {
-            $produto->variacoes->each(function ($variacao) {
-                if ($variacao->relationLoaded('atributos')) {
-                    $variacao->setRelation(
-                        'atributos',
-                        $variacao->atributos->sortBy(fn($a) => mb_strtolower(($a->atributo ?? '') . ' ' . ($a->valor ?? '')))
-                    );
-                }
-            });
-        });
+        // ========== FORMATAÇÃO OPCIONAL ==========
+        if (in_array($view, ['minima', 'simplificada'])) {
+            $produtos->getCollection()->transform(fn($p) => [
+                'id'          => $p->id,
+                'nome'        => $p->nome,
+                'categoria'   => $p->categoria->nome ?? null,
+                'variacoes'   => $p->variacoes->map(fn($v) => [
+                    'id'            => $v->id,
+                    'referencia'    => $v->referencia,
+                    'codigo_barras' => $v->codigo_barras,
+                    'estoque'       => $incluirEstoque
+                        ? $v->estoque?->only(['quantidade', 'id_deposito'])
+                        : null,
+                ]),
+            ]);
+        }
 
-        return $resultado;
+        return $produtos;
     }
+
+    /**
+     * Retorna um produto completo com todas as relações necessárias para edição ou exibição detalhada.
+     */
+    public function obterProdutoCompleto(int $id): Builder|array|Collection|Model
+    {
+        return Produto::with([
+            'variacoes.atributos',
+            'variacoes.estoque',
+            'variacoes.outlets',
+            'variacoes.outlets.motivo',
+            'variacoes.outlets.formasPagamento.formaPagamento',
+            'fornecedor',
+            'categoria',
+            'imagens',
+        ])->findOrFail($id);
+    }
+
 }

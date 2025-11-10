@@ -2,17 +2,27 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Resources\ProdutoMiniResource;
+use App\Http\Resources\ProdutoSimplificadoResource;
 use App\Http\Resources\ProdutoVariacaoResource;
 use App\Models\Produto;
 use App\Models\ProdutoVariacao;
 use App\Services\ProdutoVariacaoService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Throwable;
 
 class ProdutoVariacaoController extends Controller
 {
-    public function index(Produto $produto)
+    protected ProdutoVariacaoService $service;
+
+    public function __construct(ProdutoVariacaoService $service)
+    {
+        $this->service = $service;
+    }
+
+    public function index(Produto $produto): AnonymousResourceCollection
     {
         $variacoes = $produto->variacoes()
             ->with(['atributos', 'produto'])
@@ -21,7 +31,7 @@ class ProdutoVariacaoController extends Controller
         return ProdutoVariacaoResource::collection($variacoes);
     }
 
-    public function store(Request $request, Produto $produto)
+    public function store(Request $request, Produto $produto): JsonResponse
     {
         $validated = $request->validate([
             'referencia' => 'required|string|max:100|unique:produto_variacoes,referencia',
@@ -36,13 +46,20 @@ class ProdutoVariacaoController extends Controller
         return response()->json($variacao, 201);
     }
 
-    public function show(Produto $produto, ProdutoVariacao $variacao)
+    /**
+     * Exibe os dados completos de uma variação específica.
+     * Aceita view=completa|simplificada|minima
+     */
+    public function show(Produto $produto, ProdutoVariacao $variacao): JsonResponse
     {
-        if ($variacao->produto_id !== $produto->id) {
-            return response()->json(['error' => 'Variação não pertence a este produto'], 404);
-        }
+        $view = request('view', 'completa');
+        $variacaoCompleta = $this->service->obterVariacaoCompleta($produto->id, $variacao->id);
 
-        return response()->json($variacao);
+        return match ($view) {
+            'minima' => ProdutoMiniResource::make($variacaoCompleta->produto)->response(),
+            'simplificada' => ProdutoSimplificadoResource::make($variacaoCompleta->produto)->response(),
+            default => ProdutoVariacaoResource::make($variacaoCompleta)->response(),
+        };
     }
 
     public function update(Request $request, int $produtoId, ProdutoVariacaoService $service): JsonResponse

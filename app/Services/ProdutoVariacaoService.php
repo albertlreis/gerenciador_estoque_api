@@ -4,11 +4,35 @@ namespace App\Services;
 
 use App\Models\Produto;
 use App\Models\ProdutoVariacao;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
 
 class ProdutoVariacaoService
 {
+    /**
+     * Retorna uma variação completa, com relações necessárias para exibição detalhada.
+     */
+    public function obterVariacaoCompleta(int $produtoId, int $variacaoId): Builder|array|Collection|Model
+    {
+        $variacao = ProdutoVariacao::with([
+            'produto',
+            'atributos',
+            'estoque',
+            'outlets',
+            'outlets.motivo',
+            'outlets.formasPagamento.formaPagamento',
+        ])->findOrFail($variacaoId);
+
+        if ($variacao->produto_id !== $produtoId) {
+            abort(404, 'Variação não pertence a este produto.');
+        }
+
+        return $variacao;
+    }
+
     /**
      * Atualiza ou cria em lote as variações de um produto,
      * sincronizando os atributos sem apagá-los indiscriminadamente.

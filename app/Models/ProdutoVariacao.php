@@ -48,19 +48,32 @@ class ProdutoVariacao extends Model
 
     public function getNomeCompletoAttribute(): string
     {
-        // Evita lazy loading caso não esteja carregado
-        $produto = $this->relationLoaded('produto') ? $this->produto : null;
-        $produtoNome = $produto?->nome ?? '';
+        // Evita lazy loading
+        $produto = $this->relationLoaded('produto') ? $this->produto : $this->getRelationValue('produto');
+        $produtoNome = trim($produto?->nome ?? '');
 
-        // Evita lazy loading também para atributos
+        // Garante atributos carregados
         $atributos = $this->relationLoaded('atributos') ? $this->atributos : collect();
 
-        $atributosTexto = $atributos->map(fn($attr) => "$attr->atributo: $attr->valor")
-            ->implode(' - ');
+        if ($atributos->isNotEmpty()) {
+            // Agrupa atributos por nome
+            $agrupados = $atributos->groupBy('atributo')->map(function ($itens, $atributo) {
+                $valores = $itens->pluck('valor')->filter()->unique()->join(', ');
+                return ucfirst($atributo) . ': ' . $valores;
+            });
 
-        $complemento = trim($atributosTexto ?: '');
+            // Junta tudo num único texto, separado por " | "
+            $atributosTexto = $agrupados->join(' | ');
 
-        return trim("$produtoNome - $complemento") ?: '-';
+            return trim("{$produtoNome} ({$atributosTexto})");
+        }
+
+        // Se não tiver atributos, retorna o nome base da variação ou do produto
+        if (!empty($this->nome)) {
+            return trim("{$produtoNome} - {$this->nome}");
+        }
+
+        return $produtoNome ?: '-';
     }
 
     public function outlets(): HasMany

@@ -12,6 +12,7 @@ use App\Models\EstoqueImportRow;
 use App\Models\EstoqueMovimentacao;
 use App\Models\PedidoFabrica;
 use App\Models\PedidoFabricaItem;
+use Carbon\Carbon;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
@@ -133,7 +134,7 @@ final class EstoqueImportService
         $movCriadas = 0;
 
         // Depósito-alvo padrão quando coluna "Depósito" vier "Consignação"
-        $depositoPadrao = Deposito::firstOrCreate(['nome' => 'Depósito']);
+//        $depositoPadrao = Deposito::firstOrCreate(['nome' => 'Depósito']);
 
         // Agrupar por chave (Cod + atributos + depósito efetivo), somando Qtd
         $grupos = $import->rows()
@@ -141,7 +142,7 @@ final class EstoqueImportService
             ->get()
             ->groupBy(function(EstoqueImportRow $r) {
                 $depRaw = (string)$r->deposito;
-                $depEfetivo = (Str::lower($depRaw) === 'consignação') ? 'Depósito' : ($depRaw ?: 'Depósito');
+                $depEfetivo = (Str::lower($depRaw) === 'consignação') ? 'Depósito JB' : ($depRaw ?: 'Depósito JB');
 
                 $attrs = [
                     'madeira' => $r->madeira,
@@ -209,7 +210,7 @@ final class EstoqueImportService
 
                 // Depósito efetivo (ignorar "Consignação")
                 $depRaw = (string)$primeira->deposito;
-                $depositoNome = (Str::lower($depRaw) === 'consignação') ? 'Depósito' : ($depRaw ?: 'Depósito');
+                $depositoNome = (Str::lower($depRaw) === 'consignação') ? 'Depósito JB' : ($depRaw ?: 'Depósito JB');
                 $deposito = Deposito::firstOrCreate(['nome' => $depositoNome]);
 
                 // Localização (somente coluna Localização)
@@ -265,27 +266,27 @@ final class EstoqueImportService
 
                 // Pedido de Fábrica (Data NF => criar PF + Item)
                 // Regras: se houver alguma 'data_nf' no grupo, criar PF pendente com essa data e item com qtdTotal
-                $dataNF = $linhas->pluck('data_nf')->filter()->first();
-                if ($dataNF) {
-                    if (!$dryRun) {
-                        $pf = PedidoFabrica::create([
-                            'status' => 'pendente',
-                            'data_previsao_entrega' => $dataNF instanceof \Carbon\Carbon ? $dataNF : CarbonImmutable::parse($dataNF),
-                            'observacoes' => "Criado na importação #{$import->id}",
-                        ]);
-                        PedidoFabricaItem::create([
-                            'pedido_fabrica_id' => $pf->id,
-                            'produto_variacao_id' => $variacao->id,
-                            'quantidade' => $qtdTotal,
-                            'quantidade_entregue' => 0,
-                            'deposito_id' => $deposito->id,
-                            'pedido_venda_id' => null,
-                            'observacoes' => null,
-                        ]);
-                        $pfCriados++;
-                        $pfItens++;
-                    }
-                }
+//                $dataNF = $linhas->pluck('data_nf')->filter()->first();
+//                if ($dataNF) {
+//                    if (!$dryRun) {
+//                        $pf = PedidoFabrica::create([
+//                            'status' => 'pendente',
+//                            'data_previsao_entrega' => $dataNF instanceof Carbon ? $dataNF : CarbonImmutable::parse($dataNF),
+//                            'observacoes' => "Criado na importação #$import->id",
+//                        ]);
+//                        PedidoFabricaItem::create([
+//                            'pedido_fabrica_id' => $pf->id,
+//                            'produto_variacao_id' => $variacao->id,
+//                            'quantidade' => $qtdTotal,
+//                            'quantidade_entregue' => 0,
+//                            'deposito_id' => $deposito->id,
+//                            'pedido_venda_id' => null,
+//                            'observacoes' => null,
+//                        ]);
+//                        $pfCriados++;
+//                        $pfItens++;
+//                    }
+//                }
 
                 $atualizados++; // por simplicidade contar como atualizados/novos
             }
@@ -360,12 +361,12 @@ final class EstoqueImportService
         return null;
     }
 
-    private function toDate(mixed $v): ?\Carbon\Carbon
+    private function toDate(mixed $v): ?Carbon
     {
         if (!$v) return null;
         try {
-            if ($v instanceof \DateTimeInterface) return \Carbon\Carbon::instance(\DateTime::createFromInterface($v));
-            return \Carbon\Carbon::parse((string)$v);
+            if ($v instanceof \DateTimeInterface) return Carbon::instance(\DateTime::createFromInterface($v));
+            return Carbon::parse((string)$v);
         } catch (\Throwable) {
             return null;
         }

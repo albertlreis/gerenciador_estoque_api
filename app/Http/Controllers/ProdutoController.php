@@ -53,8 +53,6 @@ class ProdutoController extends Controller
     public function index(FiltrarProdutosRequest $request): JsonResponse
     {
         $view = $request->get('view', 'completa');
-
-        // Define se deve carregar estoque conforme o tipo de visualização
         $incluirEstoque = in_array($view, ['completa', 'simplificada']);
         $request->merge(['incluir_estoque' => $incluirEstoque]);
 
@@ -97,7 +95,8 @@ class ProdutoController extends Controller
     public function show(int $id): JsonResponse
     {
         $view = request('view', 'completa');
-        $produto = $this->produtoService->obterProdutoCompleto($id);
+        $depositoId = request('deposito_id'); // ✅ novo parâmetro
+        $produto = $this->produtoService->obterProdutoCompleto($id, $depositoId);
 
         return match ($view) {
             'minima' => ProdutoMiniResource::make($produto)->response(),

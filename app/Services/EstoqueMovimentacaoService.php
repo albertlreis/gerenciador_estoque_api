@@ -405,9 +405,4 @@ class EstoqueMovimentacaoService
         ];
     }
 
-    public function registrarUnica(array $dados): EstoqueMovimentacao
-    {
-        return $this->movimentar($dados);
-    }
-
 }

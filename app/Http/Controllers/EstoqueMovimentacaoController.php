@@ -11,6 +11,7 @@ use App\Models\EstoqueMovimentacao;
 use App\Services\EstoqueMovimentacaoService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 
 /**
  * Controlador responsável por gerenciar movimentações de estoque.

@@ -34,7 +34,7 @@ class ImportEstoqueController extends Controller
     public function processar(Request $request, int $id): JsonResponse
     {
         $import = EstoqueImport::findOrFail($id);
-        $dry = (bool) $request->boolean('dry_run', false);
+        $dry = $request->boolean('dry_run', false);
 
         $res = $this->service->processar($import, $dry);
 

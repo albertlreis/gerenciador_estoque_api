@@ -111,4 +111,26 @@ class EstoqueMovimentacaoController extends Controller
         $movimentacao->delete();
         return response()->json(null, 204);
     }
+
+    /**
+     * POST /v1/estoque/movimentacoes/lote
+     * Registra lote de movimentações (entrada, saída ou transferência)
+     */
+    public function lote(Request $request): JsonResponse
+    {
+        $dados = $request->validate([
+            'tipo' => ['required', Rule::in(['entrada', 'saida', 'transferencia'])],
+            'deposito_origem_id' => ['nullable', 'integer', 'exists:depositos,id'],
+            'deposito_destino_id' => ['nullable', 'integer', 'exists:depositos,id'],
+            'observacao' => ['nullable', 'string', 'max:1000'],
+            'itens' => ['required', 'array', 'min:1'],
+            'itens.*.variacao_id' => ['required', 'integer', 'exists:produto_variacoes,id'],
+            'itens.*.quantidade' => ['required', 'integer', 'min:1'],
+        ]);
+
+        $usuarioId = auth()->id();
+
+        $result = $this->service->registrarMovimentacaoLote($dados, $usuarioId);
+        return response()->json($result);
+    }
 }

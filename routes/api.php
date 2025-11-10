@@ -82,9 +82,6 @@ Route::middleware('auth:sanctum')->prefix('v1')->group(function () {
 
     Route::apiResource('produtos', ProdutoController::class);
 
-    // Depósitos e Estoque
-    Route::apiResource('depositos', DepositoController::class);
-
     Route::prefix('fornecedores')->group(function () {
         Route::get('/',            [FornecedorController::class, 'index']);   // filtros + paginação
         Route::post('/',           [FornecedorController::class, 'store']);
@@ -99,31 +96,46 @@ Route::middleware('auth:sanctum')->prefix('v1')->group(function () {
 
     // Rotas de estoque e movimentações
     Route::prefix('estoque')->group(function () {
+        // 🔹 Relatórios e consultas
         Route::get('atual', [EstoqueController::class, 'listarEstoqueAtual']);
         Route::get('resumo', [EstoqueController::class, 'resumoEstoque']);
         Route::get('/por-variacao/{id_variacao}', [EstoqueController::class, 'porVariacao']);
-        // Movimentações
-        Route::get('movimentacoes', [EstoqueMovimentacaoController::class, 'index']);
-        Route::post('produtos/{produto}/movimentacoes', [EstoqueMovimentacaoController::class, 'store']);
-        Route::get('produtos/{produto}/movimentacoes/{movimentacao}', [EstoqueMovimentacaoController::class, 'show']);
-        Route::put('produtos/{produto}/movimentacoes/{movimentacao}', [EstoqueMovimentacaoController::class, 'update']);
-        Route::delete('produtos/{produto}/movimentacoes/{movimentacao}', [EstoqueMovimentacaoController::class, 'destroy']);
+
+        // 🔹 Movimentações unificadas
+        Route::prefix('movimentacoes')->group(function () {
+            Route::get('/', [EstoqueMovimentacaoController::class, 'index']);
+            Route::post('/', [EstoqueMovimentacaoController::class, 'store']);
+            Route::get('/{movimentacao}', [EstoqueMovimentacaoController::class, 'show']);
+            Route::put('/{movimentacao}', [EstoqueMovimentacaoController::class, 'update']);
+            Route::delete('/{movimentacao}', [EstoqueMovimentacaoController::class, 'destroy']);
+            Route::post('/lote', [EstoqueMovimentacaoController::class, 'lote']);
+        });
+
+        // 🔹 Dimensões, áreas e localizações
+        Route::get('/areas', [AreaEstoqueController::class, 'index']);
+        Route::post('/areas', [AreaEstoqueController::class, 'store']);
+        Route::put('/areas/{id}', [AreaEstoqueController::class, 'update']);
+        Route::delete('/areas/{id}', [AreaEstoqueController::class, 'destroy']);
+
+        Route::get('/dimensoes', [LocalizacaoDimensaoController::class, 'index']);
+        Route::post('/dimensoes', [LocalizacaoDimensaoController::class, 'store']);
+        Route::put('/dimensoes/{id}', [LocalizacaoDimensaoController::class, 'update']);
+        Route::delete('/dimensoes/{id}', [LocalizacaoDimensaoController::class, 'destroy']);
     });
 
+    // 🔹 Depósitos
+    Route::apiResource('depositos', DepositoController::class);
+    Route::apiResource('depositos.estoque', EstoqueController::class)->shallow();
+
+    // 🔹 Localizações
     Route::apiResource('localizacoes-estoque', LocalizacaoEstoqueController::class);
 
-    Route::get('/estoque/areas', [AreaEstoqueController::class, 'index']);
-    Route::post('/estoque/areas', [AreaEstoqueController::class, 'store']);
-    Route::put('/estoque/areas/{id}', [AreaEstoqueController::class, 'update']);
-    Route::delete('/estoque/areas/{id}', [AreaEstoqueController::class, 'destroy']);
-
-    Route::get('/estoque/dimensoes', [LocalizacaoDimensaoController::class, 'index']);
-    Route::post('/estoque/dimensoes', [LocalizacaoDimensaoController::class, 'store']);
-    Route::put('/estoque/dimensoes/{id}', [LocalizacaoDimensaoController::class, 'update']);
-    Route::delete('/estoque/dimensoes/{id}', [LocalizacaoDimensaoController::class, 'destroy']);
-
-    // Estoque por depósito
-    Route::apiResource('depositos.estoque', EstoqueController::class)->shallow();
+    // 🔹 Importações
+    Route::prefix('imports/estoque')->group(function () {
+        Route::post('/', [ImportEstoqueController::class, 'store']);
+        Route::post('{id}/processar', [ImportEstoqueController::class, 'processar']);
+        Route::get('{id}', [ImportEstoqueController::class, 'show']);
+    });
 
     // Clientes e Parceiros
     Route::apiResource('clientes', ClienteController::class);
@@ -137,7 +149,6 @@ Route::middleware('auth:sanctum')->prefix('v1')->group(function () {
         Route::delete('/{id}', [ParceiroController::class, 'destroy'])->whereNumber('id');
         Route::post('/{id}/restore', [ParceiroController::class, 'restore'])->whereNumber('id');
     });
-
 
     Route::get('pedidos/exportar', [PedidoController::class, 'exportar']);
     Route::get('pedidos/estatisticas', [PedidoController::class, 'estatisticas']);
@@ -258,19 +269,6 @@ Route::middleware('auth:sanctum')->prefix('v1')->group(function () {
             ->whereNumber('arquivo');
 
     });
-
-    Route::prefix('estoque/caixa')->group(function () {
-        Route::get('/scan/{codigo}', [CaixaEstoqueController::class, 'scan'])->where('codigo', '.*');
-        Route::post('/finalizar', [CaixaEstoqueController::class, 'finalizar']);
-        Route::post('/transferir', [CaixaEstoqueController::class, 'transferir']);
-    });
-
-    Route::prefix('imports/estoque')->group(function () {
-        Route::post('/', [ImportEstoqueController::class, 'store']); // upload + staging
-        Route::post('{id}/processar', [ImportEstoqueController::class, 'processar']); // dry-run opcional
-        Route::get('{id}', [ImportEstoqueController::class, 'show']);
-    });
-
 
     Route::prefix('contas-pagar')->group(function () {
         Route::get('export/excel', [ContaPagarController::class, 'exportExcel'])->name('contas-pagar.export.excel');

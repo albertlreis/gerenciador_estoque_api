@@ -68,13 +68,13 @@ class ImportacaoPedidoService
             'cliente.nome' => 'required|string|max:255',
             'cliente.documento' => 'required|string|max:20',
             'pedido.numero_externo' => 'nullable|string|max:50|unique:pedidos,numero_externo',
-            'pedido.vendedor' => 'nullable|string|max:255',
             'pedido.total' => 'nullable|numeric',
             'pedido.observacoes' => 'nullable|string',
             'itens' => 'required|array|min:1',
-            'itens.*.descricao' => 'required|string',
+            'itens.*.nome' => 'required|string',
             'itens.*.quantidade' => 'required|numeric|min:0.01',
             'itens.*.valor' => 'required|numeric|min:0',
+            'itens.*.id_categoria' => 'required|integer',
         ]);
 
         if ($validator->fails()) {
@@ -82,11 +82,16 @@ class ImportacaoPedidoService
         }
 
         return DB::transaction(function () use ($request) {
+
             $usuario = Auth::user();
             $dadosCliente = $request->cliente;
+            $dadosPedido  = $request->pedido;
+            $itens        = $request->itens;
+
+            // ---------------------------------------------------------------------
+            // 🧍 CLIENTE
+            // ---------------------------------------------------------------------
             $dadosCliente['documento'] = preg_replace('/\D/', '', $dadosCliente['documento']);
-            $dadosPedido = $request->pedido;
-            $itens = $request->itens;
 
             $cliente = Cliente::firstOrCreate(
                 ['documento' => $dadosCliente['documento']],
@@ -98,106 +103,164 @@ class ImportacaoPedidoService
                 ]
             );
 
+            // ---------------------------------------------------------------------
+            // 🧾 PEDIDO
+            // ---------------------------------------------------------------------
             $pedido = Pedido::create([
-                'id_cliente' => $cliente->id,
-                'id_usuario' => $usuario->id,
-                'data_pedido' => now(),
+                'id_cliente'     => $cliente->id,
+                'id_usuario'     => $usuario->id,
                 'numero_externo' => $dadosPedido['numero_externo'] ?? null,
-                'valor_total' => $dadosPedido['total'] ?? array_sum(array_map(fn($item) => $item['quantidade'] * $item['valor'], $itens)),
-                'observacoes' => $dadosPedido['observacoes'] ?? null,
+                'data_pedido'    => now(),
+                'valor_total'    => $dadosPedido['total']
+                    ?? collect($itens)->sum(fn($i) => $i['quantidade'] * $i['valor']),
+                'observacoes'    => $dadosPedido['observacoes'] ?? null,
             ]);
 
             PedidoStatusHistorico::create([
-                'pedido_id' => $pedido->id,
-                'status' => PedidoStatus::PEDIDO_CRIADO,
+                'pedido_id'  => $pedido->id,
+                'status'      => PedidoStatus::PEDIDO_CRIADO,
                 'data_status' => now(),
-                'usuario_id' => $usuario->id
+                'usuario_id'  => $usuario->id,
             ]);
 
+            // ---------------------------------------------------------------------
+            // 🧩 ITENS
+            // ---------------------------------------------------------------------
             foreach ($itens as $item) {
-                $variacao = ProdutoVariacao::query()
-                    ->where('referencia', $item['ref'] ?? '')
-                    ->when(!empty($item['nome']), fn($q) => $q->whereHas('produto', fn($q2) => $q2->where('nome', 'like', '%' . $item['nome'] . '%')))
-                    ->first();
 
-                if (!$variacao && !empty($item['ref']) && !empty($item['nome'])) {
-                    if (empty($item['id_categoria'])) {
-                        throw new Exception("Item '{$item['descricao']}' está sem categoria definida.");
-                    }
+                // 🟢 1) Tentar reaproveitar variação existente
+                $variacao = null;
 
+                if (!empty($item['id_variacao'])) {
+                    $variacao = ProdutoVariacao::with('atributos')->find($item['id_variacao']);
+                }
+
+                // 🟡 2) Buscar por referência se id_variacao não veio
+                if (!$variacao && !empty($item['ref'])) {
+                    $variacao = ProdutoVariacao::with('atributos')
+                        ->where('referencia', $item['ref'])
+                        ->first();
+                }
+
+                // 🔴 3) Criar nova variação se não existir
+                if (!$variacao) {
+
+                    // criar produto base
                     $produto = Produto::firstOrCreate([
                         'nome' => $item['nome'],
                         'id_categoria' => $item['id_categoria'],
                     ]);
 
-                    $produto->update([
-                        'largura' => $item['fixos']['largura'] ?? null,
-                        'profundidade' => $item['fixos']['profundidade'] ?? null,
-                        'altura' => $item['fixos']['altura'] ?? null,
-                    ]);
-
+                    // criar variação
                     $variacao = ProdutoVariacao::create([
                         'produto_id' => $produto->id,
                         'referencia' => $item['ref'],
-                        'nome' => $item['descricao'],
-                        'preco' => $item['valor'],
-                        'custo' => $item['valor'],
+                        'nome'       => $item['nome'],
+                        'preco'      => $item['valor'],
+                        'custo'      => $item['valor'],
                     ]);
 
-                    foreach ($item['atributos'] as $grupo => $atributosGrupo) {
-                        foreach ($atributosGrupo as $atributo => $valor) {
-                            if (trim($valor) === '') continue;
+                    // salvar atributos enviados
+                    foreach ($item['atributos'] as $atrib => $valor) {
 
-                            ProdutoVariacaoAtributo::updateOrCreate(
-                                [
-                                    'id_variacao' => $variacao->id,
-                                    'atributo' => StringHelper::normalizarAtributo("$atributo"),
-                                ],
-                                ['valor' => $valor]
-                            );
+                        // Ignora arrays e valores vazios
+                        if (is_array($valor)) {
+                            continue;
                         }
+
+                        // Converter numéricos para string
+                        if (is_numeric($valor)) {
+                            $valor = (string) $valor;
+                        }
+
+                        // Ignorar null ou strings vazias
+                        if ($valor === null || trim((string)$valor) === '') {
+                            continue;
+                        }
+
+                        ProdutoVariacaoAtributo::updateOrCreate(
+                            [
+                                'id_variacao' => $variacao->id,
+                                'atributo' => StringHelper::normalizarAtributo($atrib),
+                            ],
+                            ['valor' => trim((string)$valor)]
+                        );
                     }
                 }
 
+                // ---------------------------------------------------------------------
+                // 📝 Criar item do pedido
+                // ---------------------------------------------------------------------
                 PedidoItem::create([
-                    'id_pedido' => $pedido->id,
-                    'id_variacao' => $variacao?->id,
-                    'descricao_manual' => $item['descricao'],
-                    'quantidade' => $item['quantidade'],
-                    'preco_unitario' => $item['valor'],
-                    'subtotal' => $item['quantidade'] * $item['valor'],
-                    'observacoes' => collect([
-                        ...($item['atributos']['observacoes'] ?? []),
-                        'observacao_extra' => $item['atributos']['observacoes_observacao_extra'] ?? null
-                    ])->filter()->implode("\n"),
+                    'id_pedido'       => $pedido->id,
+                    'id_variacao'     => $variacao->id,
+                    'quantidade'      => $item['quantidade'],
+                    'preco_unitario'  => $item['valor'],
+                    'subtotal'        => $item['quantidade'] * $item['valor'],
+                    'id_deposito'     => $item['id_deposito'] ?? null,
+                    'observacoes'     => $item['atributos']['observacao'] ?? null,
                 ]);
             }
 
-            logAuditoria('pedido', "Pedido importado via PDF para cliente '$cliente->nome'.", [
-                'acao' => 'importacao',
-                'nivel' => 'info',
-                'cliente' => $cliente->nome,
-                'numero_pdf' => $request->input('pedido.numero'),
-                'valor_total' => $pedido->valor_total,
-                'itens' => $itens,
-            ], $pedido);
-
-            // Após salvar o pedido:
-            $itensConfirmados = $pedido->itens()->with('variacao.produto', 'variacao.atributos')->get();
+            // ---------------------------------------------------------------------
+            // 🔁 Retorno completo ao front
+            // ---------------------------------------------------------------------
+            $itensConfirmados = $pedido->itens()
+                ->with('variacao.produto', 'variacao.atributos')
+                ->get();
 
             return response()->json([
                 'message' => 'Pedido importado e salvo com sucesso.',
-                'id' => $pedido->id,
-                'itens' => $itensConfirmados->map(function ($item) {
+                'id'      => $pedido->id,
+                'itens'   => $itensConfirmados->map(function ($item) {
                     return [
-                        'id_variacao' => $item->variacao?->id,
-                        'referencia' => $item->variacao?->referencia,
+                        'id_variacao'  => $item->variacao?->id,
+                        'referencia'   => $item->variacao?->referencia,
                         'nome_produto' => $item->variacao?->produto?->nome,
-                        'nome_completo' => $item->variacao?->nomeCompleto ?? $item->variacao?->nome ?? null,
+                        'nome_completo'=> $item->variacao?->nomeCompleto,
+                        'categoria_id' => $item->variacao?->produto?->id_categoria,
                     ];
                 }),
             ]);
-
         });
+    }
+
+    /**
+     * Mescla itens extraídos do PDF com itens já cadastrados.
+     *
+     * @param array $itens
+     * @return array
+     */
+    public function mesclarItensComVariacoes(array $itens): array
+    {
+        return collect($itens)->map(function ($item) {
+
+            $ref = $item['codigo'] ?? $item['ref'] ?? null;
+            if (!$ref) return $item;
+
+            $variacao = ProdutoVariacao::with('produto')
+                ->where('referencia', $ref)
+                ->first();
+
+            if ($variacao) {
+                return array_merge($item, [
+                    "ref"            => $ref,
+                    "nome"           => $variacao->produto->nome,
+                    "produto_id"     => $variacao->produto_id,
+                    "id_variacao"    => $variacao->id,
+                    "variacao_nome"  => $variacao->descricao,
+                    "id_categoria"   => $variacao->produto->id_categoria,
+                ]);
+            }
+
+            // Produto não encontrado → usar dados do PDF
+            return array_merge($item, [
+                "ref"            => $ref,
+                "produto_id"     => null,
+                "id_variacao"    => null,
+                "variacao_nome"  => null,
+                "id_categoria"   => null,
+            ]);
+        })->toArray();
     }
 }

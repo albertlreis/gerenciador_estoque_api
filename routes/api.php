@@ -152,6 +152,7 @@ Route::middleware('auth:sanctum')->prefix('v1')->group(function () {
 
     Route::get('pedidos/exportar', [PedidoController::class, 'exportar']);
     Route::get('pedidos/estatisticas', [PedidoController::class, 'estatisticas']);
+    Route::post('pedidos/importar', [PedidoController::class, 'importar']);
     Route::post('pedidos/importar-pdf', [PedidoController::class, 'importarPDF']);
     Route::post('pedidos/importar-pdf/confirmar', [PedidoController::class, 'confirmarImportacaoPDF']);
 

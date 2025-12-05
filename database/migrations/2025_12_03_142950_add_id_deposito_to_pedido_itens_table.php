@@ -23,14 +23,6 @@ return new class extends Migration
                     ->references('id')
                     ->on('depositos')
                     ->nullOnDelete();
-
-                // FK opcional (caso sua tabela depositos exista)
-                if (Schema::hasTable('depositos')) {
-                    $table->foreign('id_deposito')
-                        ->references('id')
-                        ->on('depositos')
-                        ->nullOnDelete();
-                }
             }
         });
     }

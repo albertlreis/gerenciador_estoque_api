@@ -172,7 +172,7 @@ class PedidoController extends Controller
                 ]
             ]);
 
-        } catch (\Exception $e) {
+        } catch (Exception $e) {
             return response()->json([
                 "sucesso" => false,
                 "mensagem" => "Erro ao processar PDF.",

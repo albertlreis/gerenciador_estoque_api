@@ -65,16 +65,15 @@ class ImportacaoPedidoService
     public function confirmarImportacaoPDF(Request $request): JsonResponse
     {
         $validator = Validator::make($request->all(), [
-            'cliente.nome' => 'required|string|max:255',
-            'cliente.documento' => 'required|string|max:20',
+            'cliente.id'            => 'required|numeric|min:1',
             'pedido.numero_externo' => 'nullable|string|max:50|unique:pedidos,numero_externo',
-            'pedido.total' => 'nullable|numeric',
-            'pedido.observacoes' => 'nullable|string',
-            'itens' => 'required|array|min:1',
-            'itens.*.nome' => 'required|string',
-            'itens.*.quantidade' => 'required|numeric|min:0.01',
-            'itens.*.valor' => 'required|numeric|min:0',
-            'itens.*.id_categoria' => 'required|integer',
+            'pedido.total'          => 'nullable|numeric',
+            'pedido.observacoes'    => 'nullable|string',
+            'itens'                 => 'required|array|min:1',
+            'itens.*.nome'          => 'required|string',
+            'itens.*.quantidade'    => 'required|numeric|min:0.01',
+            'itens.*.valor'         => 'required|numeric|min:0',
+            'itens.*.id_categoria'  => 'required|integer',
         ]);
 
         if ($validator->fails()) {
@@ -83,7 +82,7 @@ class ImportacaoPedidoService
 
         return DB::transaction(function () use ($request) {
 
-            $usuario = Auth::user();
+            $usuario     = Auth::user();
             $dadosCliente = $request->cliente;
             $dadosPedido  = $request->pedido;
             $itens        = $request->itens;
@@ -96,8 +95,8 @@ class ImportacaoPedidoService
             $cliente = Cliente::firstOrCreate(
                 ['documento' => $dadosCliente['documento']],
                 [
-                    'nome' => $dadosCliente['nome'],
-                    'email' => $dadosCliente['email'] ?? null,
+                    'nome'     => $dadosCliente['nome'],
+                    'email'    => $dadosCliente['email'] ?? null,
                     'telefone' => $dadosCliente['telefone'] ?? null,
                     'endereco' => $dadosCliente['endereco'] ?? null,
                 ]
@@ -117,7 +116,7 @@ class ImportacaoPedidoService
             ]);
 
             PedidoStatusHistorico::create([
-                'pedido_id'  => $pedido->id,
+                'pedido_id'   => $pedido->id,
                 'status'      => PedidoStatus::PEDIDO_CRIADO,
                 'data_status' => now(),
                 'usuario_id'  => $usuario->id,
@@ -147,8 +146,8 @@ class ImportacaoPedidoService
 
                     // criar produto base
                     $produto = Produto::firstOrCreate([
-                        'nome' => $item['nome'],
-                        'id_categoria' => $item['id_categoria'],
+                        'nome'        => $item['nome'],
+                        'id_categoria'=> $item['id_categoria'],
                     ]);
 
                     // criar variação
@@ -161,7 +160,7 @@ class ImportacaoPedidoService
                     ]);
 
                     // salvar atributos enviados
-                    foreach ($item['atributos'] as $atrib => $valor) {
+                    foreach ($item['atributos'] ?? [] as $atrib => $valor) {
 
                         // Ignora arrays e valores vazios
                         if (is_array($valor)) {
@@ -181,7 +180,7 @@ class ImportacaoPedidoService
                         ProdutoVariacaoAtributo::updateOrCreate(
                             [
                                 'id_variacao' => $variacao->id,
-                                'atributo' => StringHelper::normalizarAtributo($atrib),
+                                'atributo'    => StringHelper::normalizarAtributo($atrib),
                             ],
                             ['valor' => trim((string)$valor)]
                         );
@@ -214,11 +213,11 @@ class ImportacaoPedidoService
                 'id'      => $pedido->id,
                 'itens'   => $itensConfirmados->map(function ($item) {
                     return [
-                        'id_variacao'  => $item->variacao?->id,
-                        'referencia'   => $item->variacao?->referencia,
-                        'nome_produto' => $item->variacao?->produto?->nome,
-                        'nome_completo'=> $item->variacao?->nomeCompleto,
-                        'categoria_id' => $item->variacao?->produto?->id_categoria,
+                        'id_variacao'   => $item->variacao?->id,
+                        'referencia'    => $item->variacao?->referencia,
+                        'nome_produto'  => $item->variacao?->produto?->nome,
+                        'nome_completo' => $item->variacao?->nomeCompleto,
+                        'categoria_id'  => $item->variacao?->produto?->id_categoria,
                     ];
                 }),
             ]);
@@ -228,6 +227,10 @@ class ImportacaoPedidoService
     /**
      * Mescla itens extraídos do PDF com itens já cadastrados.
      *
+     * - Enriquece com nome_completo
+     * - Envia atributos da variação
+     * - Envia dimensões do produto (largura, profundidade, altura) em "fixos"
+     *
      * @param array $itens
      * @return array
      */
@@ -236,31 +239,69 @@ class ImportacaoPedidoService
         return collect($itens)->map(function ($item) {
 
             $ref = $item['codigo'] ?? $item['ref'] ?? null;
-            if (!$ref) return $item;
+            if (!$ref) {
+                return $item;
+            }
 
-            $variacao = ProdutoVariacao::with('produto')
+            /** @var ProdutoVariacao|null $variacao */
+            $variacao = ProdutoVariacao::with(['produto.categoria', 'atributos'])
                 ->where('referencia', $ref)
                 ->first();
 
             if ($variacao) {
+
+                $produto = $variacao->produto;
+
+                // Mapeia atributos da variação para array simples chave => valor
+                $atributosVariacao = $variacao->atributos
+                    ->mapWithKeys(fn($attr) => [$attr->atributo => $attr->valor])
+                    ->toArray();
+
+                // Atributos vindos do PDF (se houver) – db sobrescreve o que vier errado
+                $atributosPdf = $item['atributos'] ?? [];
+
+                $atributosFinal = array_merge($atributosPdf, $atributosVariacao);
+
+                // Dimensões vindas do produto
+                $fixosDb = [
+                    'largura'      => $produto?->largura,
+                    'profundidade' => $produto?->profundidade,
+                    'altura'       => $produto?->altura,
+                ];
+
+                $fixosPdf = $item['fixos'] ?? [];
+
+                $fixosFinal = array_merge(
+                    $fixosPdf,
+                    array_filter($fixosDb, fn($v) => !is_null($v))
+                );
+
                 return array_merge($item, [
-                    "ref"            => $ref,
-                    "nome"           => $variacao->produto->nome,
-                    "produto_id"     => $variacao->produto_id,
-                    "id_variacao"    => $variacao->id,
-                    "variacao_nome"  => $variacao->descricao,
-                    "id_categoria"   => $variacao->produto->id_categoria,
+                    "ref"           => $ref,
+                    "nome"          => $produto?->nome ?? $variacao->nome,
+                    "produto_id"    => $variacao->produto_id,
+                    "id_variacao"   => $variacao->id,
+                    "variacao_nome" => $variacao->nome,
+                    "nome_completo" => $variacao->nome_completo,
+                    "id_categoria"  => $produto?->id_categoria,
+                    "categoria"     => $produto?->categoria?->nome,
+                    "atributos"     => $atributosFinal,
+                    "fixos"         => $fixosFinal,
                 ]);
             }
 
             // Produto não encontrado → usar dados do PDF
             return array_merge($item, [
-                "ref"            => $ref,
-                "produto_id"     => null,
-                "id_variacao"    => null,
-                "variacao_nome"  => null,
-                "id_categoria"   => null,
+                "ref"           => $ref,
+                "produto_id"    => null,
+                "id_variacao"   => null,
+                "variacao_nome" => null,
+                "id_categoria"  => $item['id_categoria'] ?? null,
+                "categoria"  => $item['categoria'] ?? null,
+                "atributos"     => $item['atributos'] ?? [],
+                "fixos"         => $item['fixos'] ?? [],
             ]);
         })->toArray();
     }
 }
+

@@ -33,6 +33,8 @@ class ImportEstoqueController extends Controller
     /** POST /imports/estoque/{id}/processar?dry_run=1 */
     public function processar(Request $request, int $id): JsonResponse
     {
+        set_time_limit(600);
+
         $import = EstoqueImport::findOrFail($id);
         $dry = $request->boolean('dry_run', false);
 

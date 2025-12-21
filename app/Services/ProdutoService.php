@@ -144,11 +144,15 @@ class ProdutoService
             'categoria',
             'variacoes' => function ($q) use ($depositoId, $incluirEstoque) {
                 $q->with(['atributos']);
+
                 if ($incluirEstoque) {
-                    $q->with(['estoque' => function ($e) use ($depositoId) {
+                    $q->with(['estoques' => function ($e) use ($depositoId) {
                         if ($depositoId) {
                             $e->where('id_deposito', $depositoId);
                         }
+
+                        // traz as relações necessárias para a tela
+                        $e->with(['deposito', 'localizacao']);
                     }]);
                 }
             },
@@ -161,7 +165,7 @@ class ProdutoService
         }
 
         if ($depositoId) {
-            $query->whereHas('variacoes.estoque', fn($q) => $q->where('id_deposito', $depositoId));
+            $query->whereHas('variacoes.estoques', fn($q) => $q->where('id_deposito', $depositoId));
         }
 
         // ========== BUSCA TEXTUAL FLEXÍVEL (acentos e cedilhas ignorados) ==========
@@ -200,19 +204,21 @@ class ProdutoService
 
         // ========== FILTROS DE ESTOQUE E DEPÓSITO ==========
         if ($depositoId) {
-            $query->whereHas('variacoes.estoque', fn($qe) => $qe->where('id_deposito', $depositoId));
+            $query->whereHas('variacoes.estoques', fn($qe) => $qe->where('id_deposito', $depositoId));
         }
 
         if ($comEstoque) {
-            $query->whereHas('variacoes.estoque', fn($qe) => $qe->where('quantidade', '>', 0));
+            $query->whereHas('variacoes.estoques', fn($qe) => $qe->where('quantidade', '>', 0));
         }
 
         if ($status = $request->input('estoque_status')) {
             if ($status === 'com_estoque') {
-                $query->whereHas('variacoes.estoque', fn($q) => $q->where('quantidade', '>', 0));
+                $query->whereHas('variacoes.estoques', fn($q) => $q->where('quantidade', '>', 0));
             } elseif ($status === 'sem_estoque') {
-                $query->whereDoesntHave('variacoes.estoque')
-                    ->orWhereHas('variacoes.estoque', fn($q) => $q->where('quantidade', '<=', 0));
+                $query->where(function ($qq) {
+                    $qq->whereDoesntHave('variacoes.estoques')
+                        ->orWhereHas('variacoes.estoques', fn($q) => $q->where('quantidade', '<=', 0));
+                });
             }
         }
 
@@ -254,10 +260,12 @@ class ProdutoService
                     'outlets',
                     'outlets.motivo',
                     'outlets.formasPagamento.formaPagamento',
-                    'estoque' => function ($e) use ($depositoId) {
+                    'estoques' => function ($e) use ($depositoId) {
                         if ($depositoId) {
                             $e->where('id_deposito', $depositoId);
                         }
+
+                        $e->with(['deposito', 'localizacao']);
                     },
                 ]);
             },

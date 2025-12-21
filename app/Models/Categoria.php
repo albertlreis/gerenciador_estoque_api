@@ -3,44 +3,67 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
+/**
+ * @property int $id
+ * @property string $nome
+ * @property string|null $descricao
+ * @property int|null $categoria_pai_id
+ */
 class Categoria extends Model
 {
+    protected $table = 'categorias';
+
     protected $fillable = [
         'nome',
-        'descricao'
+        'descricao',
+        'categoria_pai_id',
     ];
 
+    /** @return HasMany<Produto> */
     public function produtos(): HasMany
     {
         return $this->hasMany(Produto::class, 'id_categoria');
     }
 
-    public function subcategorias()
+    /** @return HasMany<Categoria> */
+    public function subcategorias(): HasMany
     {
         return $this->hasMany(Categoria::class, 'categoria_pai_id');
     }
 
-    public function pai()
+    /** @return BelongsTo<Categoria, Categoria> */
+    public function pai(): BelongsTo
     {
         return $this->belongsTo(Categoria::class, 'categoria_pai_id');
     }
 
-    public function subcategoriasRecursive()
+    /** @return HasMany<Categoria> */
+    public function subcategoriasRecursive(): HasMany
     {
-        return $this->hasMany(Categoria::class, 'categoria_pai_id')->with('subcategoriasRecursive');
+        return $this->hasMany(Categoria::class, 'categoria_pai_id')
+            ->with('subcategoriasRecursive');
     }
 
-    public function allChildrenIds(&$ids = [])
+    /**
+     * @param array<int> $ids
+     * @return array<int>
+     */
+    public function allChildrenIds(array &$ids = []): array
     {
         foreach ($this->subcategoriasRecursive as $sub) {
-            $ids[] = $sub->id;
+            $ids[] = (int)$sub->id;
             $sub->allChildrenIds($ids);
         }
         return $ids;
     }
 
+    /**
+     * @param array<int> $ids
+     * @return array<int>
+     */
     public static function expandirIdsComFilhos(array $ids): array
     {
         $categorias = self::with('subcategoriasRecursive')
@@ -50,10 +73,10 @@ class Categoria extends Model
         $todosIds = [];
 
         foreach ($categorias as $cat) {
-            $todosIds[] = $cat->id;
+            $todosIds[] = (int)$cat->id;
             $cat->allChildrenIds($todosIds);
         }
 
-        return array_unique($todosIds);
+        return array_values(array_unique($todosIds));
     }
 }

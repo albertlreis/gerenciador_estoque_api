@@ -7,6 +7,7 @@ use App\Http\Controllers\Assistencia\AssistenciaDefeitosController;
 use App\Http\Controllers\Assistencia\AssistenciaItemController;
 use App\Http\Controllers\Assistencia\AssistenciasController;
 use App\Http\Controllers\Assistencia\PedidoLookupController;
+use App\Http\Controllers\AssistenciaRelatorioController;
 use App\Http\Controllers\CaixaEstoqueController;
 use App\Http\Controllers\ConsignacaoRelatorioController;
 use App\Http\Controllers\ContaPagarController;
@@ -207,6 +208,7 @@ Route::middleware('auth:sanctum')->prefix('v1')->group(function () {
         Route::get('estoque/atual', [EstoqueRelatorioController::class, 'estoqueAtual']);
         Route::get('pedidos', [PedidosRelatorioController::class, 'pedidosPorPeriodo']);
         Route::get('consignacoes/ativas', [ConsignacaoRelatorioController::class, 'consignacoesAtivas']);
+        Route::get('assistencias', [AssistenciaRelatorioController::class, 'assistencias']);
     });
 
     Route::post('devolucoes', [DevolucaoController::class, 'store']);

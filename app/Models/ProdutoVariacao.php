@@ -36,14 +36,35 @@ class ProdutoVariacao extends Model
         return $this->hasMany(ProdutoVariacaoAtributo::class, 'id_variacao');
     }
 
-    public function estoque(): HasOne
+    /**
+     * Estoques da variação (normalmente 1 por depósito).
+     */
+    public function estoques(): HasMany
     {
-        return $this->hasOne(Estoque::class, 'id_variacao');
+        return $this->hasMany(Estoque::class, 'id_variacao');
     }
 
+    /**
+     * Estoque total (somatório).
+     *
+     * Preferências:
+     * - Se a query já trouxe `quantidade_estoque` via withSum, usa ela (mais barato).
+     * - Senão, se relação `estoques` estiver carregada, soma em memória.
+     * - Por fim, fallback: 0.
+     */
     public function getEstoqueTotalAttribute(): int
     {
-        return $this->estoque->quantidade ?? 0;
+        // 1) veio do withSum?
+        if (array_key_exists('quantidade_estoque', $this->attributes)) {
+            return (int) ($this->attributes['quantidade_estoque'] ?? 0);
+        }
+
+        // 2) relação carregada?
+        if ($this->relationLoaded('estoques')) {
+            return (int) $this->estoques->sum('quantidade');
+        }
+
+        return 0;
     }
 
     public function getNomeCompletoAttribute(): string
@@ -99,19 +120,15 @@ class ProdutoVariacao extends Model
     }
 
     /**
-     * Estoques da variação com relações necessárias para a tela:
-     * - deposito
-     * - localizacao.area
-     * - localizacao.valores.dimensao
+     * Estoques da variação com relações necessárias para a tela.
+     *
+     * IMPORTANTE:
+     * Evite colocar `with()` aqui para não forçar eager loading em qualquer lugar que use a relação.
+     * Deixe o eager loading no Repository/Service.
      */
     public function estoquesComLocalizacao(): HasMany
     {
-        return $this->hasMany(Estoque::class, 'id_variacao')
-            ->with([
-                'deposito',
-                'localizacao.area',
-                'localizacao.valores.dimensao',
-            ]);
+        return $this->hasMany(Estoque::class, 'id_variacao');
     }
 
 }

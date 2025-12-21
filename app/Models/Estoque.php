@@ -23,22 +23,19 @@ class Estoque extends Model
         'quantidade' => 'integer'
     ];
 
-    /**
-     * Relacionamento com a variação de produto
-     */
+    /** @return BelongsTo<ProdutoVariacao,Estoque> */
     public function variacao(): BelongsTo
     {
         return $this->belongsTo(ProdutoVariacao::class, 'id_variacao')->withDefault();
     }
 
-    /**
-     * Relacionamento com o depósito
-     */
+    /** @return BelongsTo<Deposito,Estoque> */
     public function deposito(): BelongsTo
     {
         return $this->belongsTo(Deposito::class, 'id_deposito')->withDefault();
     }
 
+    /** @return HasOne<LocalizacaoEstoque> */
     public function localizacao(): HasOne
     {
         return $this->hasOne(LocalizacaoEstoque::class, 'estoque_id');

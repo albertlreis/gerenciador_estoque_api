@@ -3,27 +3,36 @@
 namespace App\Http\Controllers;
 
 use App\DTOs\FiltroEstoqueDTO;
+use App\Http\Requests\FiltroEstoqueRequest;
 use App\Http\Resources\ProdutoEstoqueResource;
 use App\Http\Resources\ResumoEstoqueResource;
 use App\Models\Estoque;
 use App\Services\EstoqueService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Symfony\Component\HttpFoundation\Response;
 
 class EstoqueController extends Controller
 {
     /**
      * Lista o estoque atual agrupado por produto e depósito com filtros e ordenação.
      *
-     * @param Request $request Instância da requisição HTTP com os parâmetros de filtro
+     * @param \App\Http\Requests\FiltroEstoqueRequest $request Instância da requisição HTTP com os parâmetros de filtro
      * @param EstoqueService $service Serviço responsável pela lógica de estoque
-     * @return JsonResponse Lista paginada de produtos com estoque
+     * @return \Illuminate\Http\JsonResponse|\Symfony\Component\HttpFoundation\Response
      */
-    public function listarEstoqueAtual(Request $request, EstoqueService $service): JsonResponse
+    public function listarEstoqueAtual(FiltroEstoqueRequest $request, EstoqueService $service): JsonResponse|Response
     {
-        $dto = new FiltroEstoqueDTO($request->all());
+        ini_set('memory_limit', '512M');
+        set_time_limit(300);
 
-        $result = $service->obterEstoqueAgrupadoPorProdutoEDeposito($dto);
+        $dto = new FiltroEstoqueDTO($request->validated());
+
+        if ($request->get('export') === 'pdf') {
+            return $service->exportarPdf($dto);
+        }
+
+        $result = $service->listar($dto);
 
         return ProdutoEstoqueResource::collection($result)->response();
     }
@@ -37,7 +46,7 @@ class EstoqueController extends Controller
      */
     public function resumoEstoque(Request $request, EstoqueService $service): JsonResponse
     {
-        $resumo = $service->gerarResumoEstoque(
+        $resumo = $service->gerarResumo(
             produto: $request->input('produto'),
             deposito: $request->input('deposito'),
             periodo: $request->input('periodo')

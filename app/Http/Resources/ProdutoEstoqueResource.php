@@ -23,9 +23,11 @@ class ProdutoEstoqueResource extends JsonResource
     public function toArray($request): array
     {
         // estoquesComLocalizacao é uma Collection de Estoque; pegamos o primeiro da linha agrupada
-        $estoque = $this->estoquesComLocalizacao instanceof Collection
-            ? $this->estoquesComLocalizacao->first()
-            : null;
+        $estoques = $this->estoquesComLocalizacao instanceof Collection
+            ? $this->estoquesComLocalizacao
+            : collect();
+
+        $estoque = $estoques->firstWhere('quantidade', '>', 0) ?? $estoques->first();
 
         $deposito = $estoque?->deposito;
         $localizacao = $estoque?->localizacao;
@@ -47,6 +49,7 @@ class ProdutoEstoqueResource extends JsonResource
             'estoque_id'    => $estoque?->id,
             'variacao_id'   => $this->id,
             'produto_nome'  => $this->nome_completo,
+            'produto_referencia' => $this->referencia,
             'deposito_nome' => $deposito?->nome ?? '—',
             'deposito_id'   => $deposito?->id ?? '—',
             'quantidade'    => (int) ($this->quantidade_estoque ?? 0),

@@ -35,7 +35,7 @@ return new class extends Migration {
              */
             $table->unsignedBigInteger('area_id')->nullable();
 
-            $table->string('codigo_composto', 24)->nullable()->index(); // ex.: "6-B1"
+            $table->string('codigo_composto', 100)->nullable()->index(); // ex.: "6-B1"
             $table->text('observacoes')->nullable();
 
             $table->timestamps();

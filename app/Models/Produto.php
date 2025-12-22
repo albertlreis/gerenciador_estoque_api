@@ -69,7 +69,10 @@ class Produto extends Model
     {
         $variacoes = $this->relationLoaded('variacoes') ? $this->variacoes : collect();
 
-        return $variacoes->sum(fn($v) => $v->relationLoaded('estoque') ? ($v->estoque->quantidade ?? 0) : 0);
+        return $variacoes->sum(function ($v) {
+            if (!$v->relationLoaded('estoques')) return 0;
+            return (int) $v->estoques->sum('quantidade');
+        });
     }
 
     public function getEstoqueOutletTotalAttribute(): int

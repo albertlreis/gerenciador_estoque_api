@@ -3,116 +3,128 @@
 namespace App\Services;
 
 use App\DTOs\FiltroEstoqueDTO;
-use App\Models\ProdutoVariacao;
+use App\Models\Produto;
+use App\Repositories\EstoqueRepository;
+use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
-use Illuminate\Support\Facades\DB;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Http\Response;
 
 /**
- * Serviço responsável pela lógica de consulta e resumo de estoque.
+ * Serviço de orquestração do módulo de estoque:
+ * - Lista paginada com filtros/ordenação
+ * - Exportação em PDF
+ * - Resumo do estoque (métricas)
  */
 class EstoqueService
 {
+    public function __construct(
+        private readonly EstoqueRepository $estoqueRepository,
+        private readonly EstoqueResumoService $estoqueResumoService
+    ) {}
+
     /**
-     * Consulta o estoque agrupado por produto e depósito, com filtros e ordenação.
+     * Lista o estoque conforme filtros informados.
      *
-     * @param FiltroEstoqueDTO $filtros DTO contendo os filtros da consulta
-     * @return LengthAwarePaginator Lista paginada de produtos com estoque
+     * @param FiltroEstoqueDTO $filtros
+     * @return LengthAwarePaginator
      */
-    public function obterEstoqueAgrupadoPorProdutoEDeposito(FiltroEstoqueDTO $filtros): LengthAwarePaginator
+    public function listar(FiltroEstoqueDTO $filtros): LengthAwarePaginator
     {
-        $query = ProdutoVariacao::with([
-            'produto',
-            'atributos',
-            // Garante que o eager load traga depósito e localização completa:
-            'estoquesComLocalizacao' => function ($q) use ($filtros) {
-                if ($filtros->deposito) {
-                    $q->where('id_deposito', $filtros->deposito);
-                }
-            },
-            'estoquesComLocalizacao.deposito',
-            'estoquesComLocalizacao.localizacao.area',
-            'estoquesComLocalizacao.localizacao.valores.dimensao',
-        ])
-            ->withSum(['estoque as quantidade_estoque' => function ($q) use ($filtros) {
-                if ($filtros->deposito) {
-                    $q->where('id_deposito', $filtros->deposito);
-                }
-                if ($filtros->periodo && count($filtros->periodo) === 2) {
-                    $q->whereBetween('updated_at', $filtros->periodo);
-                }
-            }], 'quantidade');
+        $query = $this->estoqueRepository
+            ->aplicarRelacoesDeEstoque(
+                $this->estoqueRepository->queryBase($filtros),
+                $filtros
+            );
 
-        if ($filtros->produto) {
-            $query->where(function ($q) use ($filtros) {
-                $q->whereHas('produto', function ($sub) use ($filtros) {
-                    $sub->where('nome', 'like', "%{$filtros->produto}%");
-                })->orWhere('referencia', 'like', "%{$filtros->produto}%");
-            });
-        }
-
-        if ($filtros->deposito) {
-            $query->whereHas('estoquesComLocalizacao', function ($q) use ($filtros) {
-                $q->where('id_deposito', $filtros->deposito);
-            });
-        }
-
-        if ($filtros->zerados) {
-            $query->havingRaw('quantidade_estoque = 0 OR quantidade_estoque IS NULL');
-        }
-
-        $sortableMap = [
-            'produto_nome' => DB::raw('(select nome from produtos where produtos.id = produto_variacoes.produto_id)'),
-            'referencia' => 'referencia',
-            'quantidade' => 'quantidade_estoque',
-            'deposito_nome' => DB::raw('(select nome from depositos
-                where depositos.id = (
-                    select estoque.id_deposito
-                    from estoque
-                    where estoque.id_variacao = produto_variacoes.id
-                    order by estoque.id asc
-                    limit 1
-                )
-            )'),
-        ];
-
-        if ($filtros->sortField && isset($sortableMap[$filtros->sortField])) {
-            $query->orderBy($sortableMap[$filtros->sortField], $filtros->sortOrder ?? 'asc');
-        }
+        $this->aplicarOrdenacao($query, $filtros);
 
         return $query->paginate($filtros->perPage);
     }
 
     /**
-     * Gera um resumo do estoque com totais de produtos, peças e depósitos.
+     * Exporta o estoque filtrado em PDF.
+     *
+     * Regras:
+     * - Quando NÃO estiver filtrando "zerados", protege contra exportações gigantes.
+     *
+     * Observação:
+     * - Contagem é feita usando query base (toBase) para evitar custo extra de Eloquent.
+     *
+     * @param FiltroEstoqueDTO $filtros
+     * @return Response
      */
-    public function gerarResumoEstoque(
+    public function exportarPdf(FiltroEstoqueDTO $filtros): Response
+    {
+        $query = $this->estoqueRepository
+            ->aplicarRelacoesDeEstoque(
+                $this->estoqueRepository->queryBase($filtros),
+                $filtros
+            );
+
+        $this->aplicarOrdenacao($query, $filtros);
+
+        if (!$filtros->zerados) {
+            $countQuery = clone $query;
+            $total = $countQuery->toBase()->getCountForPagination();
+
+            if ($total > 3000) {
+                abort(422, 'Quantidade de registros muito grande para exportação em PDF.');
+            }
+        }
+
+        $estoque = $query->get();
+
+        return Pdf::loadView('pdf.estoque-atual', [
+            'estoque' => $estoque,
+            'filtros' => $filtros,
+        ])
+            ->setPaper('a4', 'landscape')
+            ->download('estoque-atual.pdf');
+    }
+
+    /**
+     * Aplica ordenação segura na query.
+     *
+     * Importante:
+     * - Evita JOIN para ordenar por produto.nome, para não quebrar paginação/duplicar linhas.
+     * - Mantém shape da query em ProdutoVariacao.
+     *
+     * @param Builder $query
+     * @param FiltroEstoqueDTO $filtros
+     * @return void
+     */
+    private function aplicarOrdenacao(Builder $query, FiltroEstoqueDTO $filtros): void
+    {
+        $direction = $filtros->sortOrder === 'desc' ? 'desc' : 'asc';
+
+        match ($filtros->sortField) {
+            'produto_nome' => $query->orderBy(
+                Produto::select('nome')->whereColumn('produtos.id', 'produto_variacoes.produto_id'),
+                $direction
+            ),
+
+            'referencia' => $query->orderBy('produto_variacoes.referencia', $direction),
+
+            'quantidade_estoque' => $query->orderBy('quantidade_estoque', $direction),
+
+            default => null,
+        };
+    }
+
+    /**
+     * Gera resumo simples do estoque.
+     *
+     * @param string|null $produto
+     * @param int|null $deposito
+     * @param array|null $periodo Intervalo [inicio, fim]
+     * @return array{totalProdutos:int,totalPecas:int,totalDepositos:int}
+     */
+    public function gerarResumo(
         ?string $produto = null,
         ?int $deposito = null,
         ?array $periodo = null
     ): array {
-        $estoqueQuery = DB::table('estoque')
-            ->join('produto_variacoes', 'estoque.id_variacao', '=', 'produto_variacoes.id')
-            ->join('produtos', 'produto_variacoes.produto_id', '=', 'produtos.id');
-
-        if ($produto) {
-            $estoqueQuery->where(function ($q) use ($produto) {
-                $q->where('produtos.nome', 'like', "%$produto%")
-                    ->orWhere('produto_variacoes.referencia', 'like', "%$produto%");
-            });
-        }
-
-        if ($deposito) {
-            $estoqueQuery->where('estoque.id_deposito', $deposito);
-        }
-
-        if ($periodo && count($periodo) === 2) {
-            $estoqueQuery->whereBetween('estoque.updated_at', [$periodo[0], $periodo[1]]);
-        }
-
-        return [
-            'totalProdutos' => DB::table('produtos')->count(),
-            'totalPecas' => $estoqueQuery->sum('estoque.quantidade'),
-            'totalDepositos' => DB::table('depositos')->count(),
-        ];
+        return $this->estoqueResumoService->gerarResumoEstoque($produto, $deposito, $periodo);
     }
 }

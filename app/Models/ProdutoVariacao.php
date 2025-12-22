@@ -36,31 +36,65 @@ class ProdutoVariacao extends Model
         return $this->hasMany(ProdutoVariacaoAtributo::class, 'id_variacao');
     }
 
-    public function estoque(): HasOne
+    /**
+     * Estoques da variação (normalmente 1 por depósito).
+     */
+    public function estoques(): HasMany
     {
-        return $this->hasOne(Estoque::class, 'id_variacao');
+        return $this->hasMany(Estoque::class, 'id_variacao');
     }
 
+    /**
+     * Estoque total (somatório).
+     *
+     * Preferências:
+     * - Se a query já trouxe `quantidade_estoque` via withSum, usa ela (mais barato).
+     * - Senão, se relação `estoques` estiver carregada, soma em memória.
+     * - Por fim, fallback: 0.
+     */
     public function getEstoqueTotalAttribute(): int
     {
-        return $this->estoque->quantidade ?? 0;
+        // 1) veio do withSum?
+        if (array_key_exists('quantidade_estoque', $this->attributes)) {
+            return (int) ($this->attributes['quantidade_estoque'] ?? 0);
+        }
+
+        // 2) relação carregada?
+        if ($this->relationLoaded('estoques')) {
+            return (int) $this->estoques->sum('quantidade');
+        }
+
+        return 0;
     }
 
     public function getNomeCompletoAttribute(): string
     {
-        // Evita lazy loading caso não esteja carregado
-        $produto = $this->relationLoaded('produto') ? $this->produto : null;
-        $produtoNome = $produto?->nome ?? '';
+        // Evita lazy loading
+        $produto = $this->relationLoaded('produto') ? $this->produto : $this->getRelationValue('produto');
+        $produtoNome = trim($produto?->nome ?? '');
 
-        // Evita lazy loading também para atributos
+        // Garante atributos carregados
         $atributos = $this->relationLoaded('atributos') ? $this->atributos : collect();
 
-        $atributosTexto = $atributos->map(fn($attr) => "$attr->atributo: $attr->valor")
-            ->implode(' - ');
+        if ($atributos->isNotEmpty()) {
+            // Agrupa atributos por nome
+            $agrupados = $atributos->groupBy('atributo')->map(function ($itens, $atributo) {
+                $valores = $itens->pluck('valor')->filter()->unique()->join(', ');
+                return ucfirst($atributo) . ': ' . $valores;
+            });
 
-        $complemento = trim($atributosTexto ?: '');
+            // Junta tudo num único texto, separado por " | "
+            $atributosTexto = $agrupados->join(' | ');
 
-        return trim("$produtoNome - $complemento") ?: '-';
+            return trim("{$produtoNome} ({$atributosTexto})");
+        }
+
+        // Se não tiver atributos, retorna o nome base da variação ou do produto
+        if (!empty($this->nome)) {
+            return trim("{$produtoNome} - {$this->nome}");
+        }
+
+        return $produtoNome ?: '-';
     }
 
     public function outlets(): HasMany
@@ -86,19 +120,15 @@ class ProdutoVariacao extends Model
     }
 
     /**
-     * Estoques da variação com relações necessárias para a tela:
-     * - deposito
-     * - localizacao.area
-     * - localizacao.valores.dimensao
+     * Estoques da variação com relações necessárias para a tela.
+     *
+     * IMPORTANTE:
+     * Evite colocar `with()` aqui para não forçar eager loading em qualquer lugar que use a relação.
+     * Deixe o eager loading no Repository/Service.
      */
     public function estoquesComLocalizacao(): HasMany
     {
-        return $this->hasMany(Estoque::class, 'id_variacao')
-            ->with([
-                'deposito',
-                'localizacao.area',
-                'localizacao.valores.dimensao',
-            ]);
+        return $this->hasMany(Estoque::class, 'id_variacao');
     }
 
 }

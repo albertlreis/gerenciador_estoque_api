@@ -5,6 +5,9 @@ namespace App\Services;
 use App\Models\Produto;
 use Exception;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Log;
@@ -124,110 +127,151 @@ class ProdutoService
     }
 
     /**
-     * Lista os produtos com filtros avançados e paginação.
+     * Lista ou busca produtos com filtros dinâmicos e controle contextual.
      *
-     * @param \Illuminate\Http\Request $request
+     * @param Request $request
      * @return LengthAwarePaginator
      */
     public function listarProdutosFiltrados(Request $request): LengthAwarePaginator
     {
-        $query = Produto::with([
+        $view           = $request->get('view', 'completa');
+        $depositoId     = $request->input('deposito_id');
+        $variacaoId     = $request->input('variacao_id');
+        $comEstoque     = $request->boolean('com_estoque');
+        $incluirEstoque = $request->boolean('incluir_estoque', in_array($view, ['completa', 'simplificada']));
+
+        $with = [
             'categoria',
-            'fornecedor',
-            'variacoes.atributos',
-            'variacoes.estoque',
-            'variacoes.outlet',
-            'variacoes.outlets',
-            'imagemPrincipal'
-        ]);
+            'variacoes' => function ($q) use ($depositoId, $incluirEstoque) {
+                $q->with(['atributos']);
 
-        // ===== Busca textual: produto, categoria, variação (ref/código) e atributos (nome/valor)
-        if (!empty($request->nome)) {
-            $term = trim($request->nome);
-            $like = '%' . $term . '%';
+                if ($incluirEstoque) {
+                    $q->with(['estoques' => function ($e) use ($depositoId) {
+                        if ($depositoId) {
+                            $e->where('id_deposito', $depositoId);
+                        }
 
-            $query->where(function ($q) use ($like) {
-                $q->where('nome', 'like', $like)
-                    ->orWhere('descricao', 'like', $like)
-                    ->orWhereHas('categoria', fn($qc) => $qc->where('nome', 'like', $like))
-                    ->orWhereHas('variacoes', function ($qv) use ($like) {
-                        $qv->where('referencia', 'like', $like)
-                            ->orWhere('codigo_barras', 'like', $like)
-                            ->orWhereHas('atributos', function ($qa) use ($like) {
-                                $qa->where('atributo', 'like', $like)
-                                    ->orWhere('valor', 'like', $like);
+                        // traz as relações necessárias para a tela
+                        $e->with(['deposito', 'localizacao']);
+                    }]);
+                }
+            },
+        ];
+
+        $query = Produto::with($with);
+
+        if ($variacaoId) {
+            $query->whereHas('variacoes', fn($q) => $q->where('id', $variacaoId));
+        }
+
+        if ($depositoId) {
+            $query->whereHas('variacoes.estoques', fn($q) => $q->where('id_deposito', $depositoId));
+        }
+
+        // ========== BUSCA TEXTUAL FLEXÍVEL (acentos e cedilhas ignorados) ==========
+        $term = $request->input('q') ?? $request->input('nome');
+        if ($term) {
+            // Normaliza e remove acentos/cedilhas localmente
+            $normalized = iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $term);
+            $normalized = preg_replace('/[^A-Za-z0-9\s]/', '', $normalized);
+            $normalized = trim(strtolower($normalized));
+
+            $words = preg_split('/\s+/', $normalized);
+
+            $query->where(function ($q) use ($words) {
+                foreach ($words as $w) {
+                    $like = "%{$w}%";
+
+                    $q->where(function ($qq) use ($like) {
+                        // 🔤 Usa COLLATE utf8mb4_0900_ai_ci para ignorar acentos, cedilha e case
+                        $qq->whereRaw('LOWER(nome) COLLATE utf8mb4_0900_ai_ci LIKE ?', [$like])
+                            ->orWhereRaw('LOWER(descricao) COLLATE utf8mb4_0900_ai_ci LIKE ?', [$like])
+                            ->orWhereHas('categoria', fn($qc) =>
+                            $qc->whereRaw('LOWER(nome) COLLATE utf8mb4_0900_ai_ci LIKE ?', [$like])
+                            )
+                            ->orWhereHas('variacoes', function ($qv) use ($like) {
+                                $qv->whereRaw('LOWER(referencia) COLLATE utf8mb4_0900_ai_ci LIKE ?', [$like])
+                                    ->orWhereRaw('LOWER(codigo_barras) COLLATE utf8mb4_0900_ai_ci LIKE ?', [$like])
+                                    ->orWhereHas('atributos', function ($qa) use ($like) {
+                                        $qa->whereRaw('LOWER(atributo) COLLATE utf8mb4_0900_ai_ci LIKE ?', [$like])
+                                            ->orWhereRaw('LOWER(valor) COLLATE utf8mb4_0900_ai_ci LIKE ?', [$like]);
+                                    });
                             });
                     });
+                }
             });
         }
 
-        if (!empty($request->id_categoria)) {
-            $ids = is_array($request->id_categoria)
-                ? array_filter($request->id_categoria)
-                : [$request->id_categoria];
-
-            $query->whereIn('id_categoria', $ids);
+        // ========== FILTROS DE ESTOQUE E DEPÓSITO ==========
+        if ($depositoId) {
+            $query->whereHas('variacoes.estoques', fn($qe) => $qe->where('id_deposito', $depositoId));
         }
 
-        if (!empty($request->fornecedor_id)) {
-            $ids = is_array($request->fornecedor_id)
-                ? array_filter($request->fornecedor_id)
-                : [$request->fornecedor_id];
-
-            $query->whereIn('id_fornecedor', $ids);
+        if ($comEstoque) {
+            $query->whereHas('variacoes.estoques', fn($qe) => $qe->where('quantidade', '>', 0));
         }
 
-        if ($request->filled('ativo')) {
-            $query->where('ativo', (bool) $request->ativo);
-        }
-
-        if (!is_null($request->is_outlet)) {
-            if ($request->is_outlet) {
-                $query->whereHas('variacoes.outlet', fn($q) => $q->where('quantidade_restante', '>', 0))
-                    ->whereHas('variacoes.estoque', fn($q) => $q->where('quantidade', '>', 0));
-            } else {
-                $query->whereDoesntHave('variacoes.outlet', fn($q) => $q->where('quantidade_restante', '>', 0));
-            }
-        } elseif (!empty($request->estoque_status)) {
-            if ($request->estoque_status === 'com_estoque') {
-                $query->whereHas('variacoes.estoque', fn($q) => $q->where('quantidade', '>', 0));
-            } elseif ($request->estoque_status === 'sem_estoque') {
-                $query->where(function ($q) {
-                    $q->whereDoesntHave('variacoes.estoque')
-                        ->orWhereHas('variacoes.estoque', fn($q2) => $q2->where('quantidade', '<=', 0));
+        if ($status = $request->input('estoque_status')) {
+            if ($status === 'com_estoque') {
+                $query->whereHas('variacoes.estoques', fn($q) => $q->where('quantidade', '>', 0));
+            } elseif ($status === 'sem_estoque') {
+                $query->where(function ($qq) {
+                    $qq->whereDoesntHave('variacoes.estoques')
+                        ->orWhereHas('variacoes.estoques', fn($q) => $q->where('quantidade', '<=', 0));
                 });
             }
         }
 
-        // Filtros por atributos (AND por atributo; OR entre valores do mesmo atributo)
-        if (!empty($request->atributos) && is_array($request->atributos)) {
-            foreach ($request->atributos as $atributo => $valores) {
-                if (!empty($valores)) {
-                    $vals = is_array($valores) ? $valores : [$valores];
-                    $query->whereHas('variacoes.atributos', function ($q) use ($atributo, $vals) {
-                        $q->where('atributo', $atributo)
-                            ->whereIn('valor', $vals);
-                    });
-                }
+        // ========== OUTROS FILTROS ==========
+        if ($ids = $request->input('id_categoria')) {
+            $query->whereIn('id_categoria', $ids);
+        }
+
+        if ($forn = $request->input('fornecedor_id')) {
+            $query->whereIn('id_fornecedor', $forn);
+        }
+
+        if (!is_null($request->input('ativo'))) {
+            $query->where('ativo', (bool) $request->input('ativo'));
+        }
+
+        if (!is_null($request->input('is_outlet'))) {
+            if ($request->boolean('is_outlet')) {
+                $query->whereHas('variacoes.outlet', fn($q) => $q->where('quantidade_restante', '>', 0));
+            } else {
+                $query->whereDoesntHave('variacoes.outlet', fn($q) => $q->where('quantidade_restante', '>', 0));
             }
         }
 
         $query->orderByDesc('created_at');
 
-        $resultado = $query->paginate($request->get('per_page', 15));
+        return $query->paginate($request->integer('per_page', 15));
+    }
 
-        // Ordena atributos das variações alfabeticamente (para a UI)
-        $resultado->getCollection()->each(function ($produto) {
-            $produto->variacoes->each(function ($variacao) {
-                if ($variacao->relationLoaded('atributos')) {
-                    $variacao->setRelation(
-                        'atributos',
-                        $variacao->atributos->sortBy(fn($a) => mb_strtolower(($a->atributo ?? '') . ' ' . ($a->valor ?? '')))
-                    );
-                }
-            });
-        });
+    /**
+     * Retorna um produto completo com todas as relações necessárias para edição ou exibição detalhada.
+     */
+    public function obterProdutoCompleto(int $id, ?int $depositoId = null): Model|Collection|Builder|array|null
+    {
+        return Produto::with([
+            'variacoes' => function ($q) use ($depositoId) {
+                $q->with([
+                    'atributos',
+                    'outlets',
+                    'outlets.motivo',
+                    'outlets.formasPagamento.formaPagamento',
+                    'estoques' => function ($e) use ($depositoId) {
+                        if ($depositoId) {
+                            $e->where('id_deposito', $depositoId);
+                        }
 
-        return $resultado;
+                        $e->with(['deposito', 'localizacao']);
+                    },
+                ]);
+            },
+            'fornecedor',
+            'categoria',
+            'imagens',
+        ])->findOrFail($id);
     }
 }

@@ -2,63 +2,62 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Requests\CategoriaIndexRequest;
+use App\Http\Requests\CategoriaStoreRequest;
+use App\Http\Requests\CategoriaUpdateRequest;
 use App\Models\Categoria;
-use Illuminate\Http\Request;
+use App\Services\CategoriaService;
+use Illuminate\Http\JsonResponse;
 
 class CategoriaController extends Controller
 {
-    public function index(Request $request)
+    public function __construct(
+        private readonly CategoriaService $service
+    ) {}
+
+    public function index(CategoriaIndexRequest $request): JsonResponse
     {
-        $search = $request->query('search');
+        $search = $request->validated()['search'] ?? null;
 
-        $query = Categoria::with('subcategorias.subcategorias')
-            ->orderBy('nome');
+        $items = $this->service->listar($search);
 
-        if ($search) {
-            $query->where('nome', 'like', "%{$search}%");
-        }
-
-        return response()->json($query->get(['id', 'nome', 'categoria_pai_id']));
+        return response()->json($items);
     }
 
-    public function store(Request $request)
+    public function store(CategoriaStoreRequest $request): JsonResponse
     {
-        $validated = $request->validate([
-            'nome' => 'required|string|max:255',
-            'descricao' => 'nullable|string',
-            'categoria_pai_id' => 'nullable|exists:categorias,id',
-        ]);
+        /** @var array{nome:string,descricao?:string|null,categoria_pai_id?:int|null} $data */
+        $data = $request->validated();
 
-        $categoria = Categoria::create($validated);
+        $categoria = $this->service->criar($data);
 
         return response()->json([
-            'id' => $categoria->id,
-            'nome' => $categoria->nome,
+            'id'    => $categoria->id,
+            'nome'  => $categoria->nome,
             'label' => $categoria->nome,
             'value' => $categoria->id,
         ], 201);
     }
 
-    public function show(Categoria $categoria)
+    public function show(Categoria $categoria): JsonResponse
     {
         return response()->json($categoria);
     }
 
-    public function update(Request $request, Categoria $categoria)
+    public function update(CategoriaUpdateRequest $request, Categoria $categoria): JsonResponse
     {
-        $validated = $request->validate([
-            'nome' => 'sometimes|required|string|max:255',
-            'descricao' => 'nullable|string',
-            'categoria_pai_id' => 'nullable|exists:categorias,id',
-        ]);
+        /** @var array{nome?:string,descricao?:string|null,categoria_pai_id?:int|null} $data */
+        $data = $request->validated();
 
-        $categoria->update($validated);
+        $categoria = $this->service->atualizar($categoria, $data);
+
         return response()->json($categoria);
     }
 
-    public function destroy(Categoria $categoria)
+    public function destroy(Categoria $categoria): JsonResponse
     {
-        $categoria->delete();
+        $this->service->remover($categoria);
+
         return response()->json(null, 204);
     }
 }

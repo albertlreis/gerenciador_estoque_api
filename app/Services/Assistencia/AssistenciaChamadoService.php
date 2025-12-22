@@ -140,6 +140,7 @@ class AssistenciaChamadoService
      * @param AssistenciaChamado $chamado
      * @param AssistenciaStatus $novoStatus
      * @param int|null $usuarioId
+     * @param bool $registrarLog
      * @return AssistenciaChamado
      */
     public function atualizarStatus(AssistenciaChamado $chamado, AssistenciaStatus $novoStatus, ?int $usuarioId, bool $registrarLog = true): AssistenciaChamado

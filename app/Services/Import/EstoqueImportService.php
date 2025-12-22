@@ -10,13 +10,13 @@ use App\Models\Estoque;
 use App\Models\EstoqueImport;
 use App\Models\EstoqueImportRow;
 use App\Models\EstoqueMovimentacao;
-use App\Models\PedidoFabrica;
-use App\Models\PedidoFabricaItem;
-use Carbon\CarbonImmutable;
+use Carbon\Carbon;
+use DateTimeInterface;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use PhpOffice\PhpSpreadsheet\IOFactory;
+use Throwable;
 
 final class EstoqueImportService
 {
@@ -52,9 +52,9 @@ final class EstoqueImportService
         foreach ($rows as $r) {
             $row = $this->rowToAssoc($r, $headerMap);
 
-            // Higiene básica
+            // Higiene básica: trim em todas as strings
             $cod  = trim((string)($row['Cod'] ?? ''));
-            $nome = trim((string)($row['Nome'] ?? ''));
+            $nomeOriginal = trim((string)($row['Nome'] ?? ''));
             $categoria = trim((string)($row['Categoria'] ?? ''));
             $madeira = trim((string)($row['Madeira'] ?? ''));
             $tec1 = trim((string)($row['Tec. 1'] ?? ''));
@@ -62,30 +62,33 @@ final class EstoqueImportService
             $metalVidro = trim((string)($row['Metal / Vidro'] ?? ''));
             $localizacao = trim((string)($row['Localização'] ?? ''));
             $depositoRaw = trim((string)($row['Depósito'] ?? ''));
+            // Ignorados: Cliente, Valor, Data NF, Data, FL
             $cliente = trim((string)($row['Cliente'] ?? ''));
             $valor = $this->toDecimal($row['Valor'] ?? null);
             $qtd = $this->toInt($row['Qtd'] ?? null);
             $dataNF = $this->toDate($row['Data NF'] ?? null);
             $data = $this->toDate($row['Data'] ?? null);
 
-            $dim = $this->dimParser->extrair($nome);
-            $nomeLimpo = $dim['clean'] ?? $nome;
+            // Extrai dimensões — o parser retorna 'clean' e 'raw'
+            $dim = $this->dimParser->extrair($nomeOriginal);
 
+            // Localização parseada
             $loc = $this->locParser->parse($localizacao);
 
             $erros = [];
-            if ($cod === '') $erros[] = 'Cod vazio';
+//            if ($cod === '') $erros[] = 'Cod vazio';
             if ($qtd === null || $qtd < 0) $erros[] = 'Qtd inválida';
-            // Valor pode ser nulo; se vier lixo, zera e vira warning no processamento
 
-            $hashLinha = hash('sha256', json_encode([$import->arquivo_hash, $linhaNum, $cod, $nome], JSON_UNESCAPED_UNICODE));
+            $hashLinha = hash('sha256', json_encode([$import->arquivo_hash, $linhaNum, $cod, $nomeOriginal], JSON_UNESCAPED_UNICODE));
 
             EstoqueImportRow::create([
                 'import_id' => $import->id,
                 'linha_planilha' => $linhaNum,
                 'hash_linha' => $hashLinha,
                 'cod' => $cod,
-                'nome' => $nome,
+                // Mantemos 'nome' como o nome original (para audit/troubleshooting).
+                // parsed_dimensoes contém 'clean' (nome antes das medidas) e 'raw' (texto das medidas).
+                'nome' => $nomeOriginal,
                 'categoria' => $categoria,
                 'madeira' => $madeira !== '' ? $madeira : null,
                 'tecido_1' => $tec1 !== '' ? $tec1 : null,
@@ -94,9 +97,9 @@ final class EstoqueImportService
                 'localizacao' => $localizacao !== '' ? $localizacao : null,
                 'deposito' => $depositoRaw !== '' ? $depositoRaw : null,
                 'cliente' => $cliente !== '' ? $cliente : null,
-                'data_nf' => $dataNF,
-                'data' => $data,
-                'valor' => $valor,
+                'data_nf' => null, // ignoramos Data NF no staging/processing conforme regra
+                'data' => null,
+                'valor' => null,
                 'qtd' => $qtd,
                 'parsed_dimensoes' => $dim,
                 'parsed_localizacao' => $loc,
@@ -120,9 +123,11 @@ final class EstoqueImportService
 
     /**
      * Processa a importação (com ou sem dry-run).
-     * - Ignora "Consignação" (não usa para localização; e não considera depósito consignação)
-     * - Usa APENAS a coluna Localização (limpa por você) para LocalizacaoEstoque
-     * - Cria Pedido de Fábrica e Itens quando houver Data NF
+     * Regras importantes aplicadas:
+     *  - Ignora colunas Valor, Data NF, FL, Data e Cliente para efeitos de movimentação/pedidos
+     *  - Depósitos oficiais somente "Depósito JB" e "Loja" (case-insensitive, sem acento)
+     *  - Produtos com qtd == 0: cadastro de produto/variação/atributos, sem movimentação (estoque criado com 0 apenas se depósito oficial)
+     *  - Depósitos não oficiais: cadastra produto/variação/atributos, NÃO cria estoque nem movimentação
      */
     public function processar(EstoqueImport $import, bool $dryRun = false): array
     {
@@ -132,16 +137,28 @@ final class EstoqueImportService
         $pfCriados = $pfItens = 0;
         $movCriadas = 0;
 
-        // Depósito-alvo padrão quando coluna "Depósito" vier "Consignação"
-        $depositoPadrao = Deposito::firstOrCreate(['nome' => 'Depósito']);
-
         // Agrupar por chave (Cod + atributos + depósito efetivo), somando Qtd
         $grupos = $import->rows()
             ->where('valido', true)
             ->get()
             ->groupBy(function(EstoqueImportRow $r) {
                 $depRaw = (string)$r->deposito;
-                $depEfetivo = (Str::lower($depRaw) === 'consignação') ? 'Depósito' : ($depRaw ?: 'Depósito');
+                $depNorm = Str::of($depRaw)->trim()->lower()->ascii()->__toString();
+
+                // Consideramos depósito oficial somente quando contém 'jb' (Depósito JB) ou é 'loja'
+                $depositoOficial = false;
+                $depositoEfetivoNome = null;
+                if ($depNorm !== '') {
+                    if (Str::contains($depNorm, 'jb') || $depNorm === 'loja') {
+                        $depositoOficial = true;
+                        // Normalizar nomes oficiais
+                        if ($depNorm === 'loja' || $depNorm === 'loja') {
+                            $depositoEfetivoNome = 'Loja';
+                        } else {
+                            $depositoEfetivoNome = 'Depósito JB';
+                        }
+                    }
+                }
 
                 $attrs = [
                     'madeira' => $r->madeira,
@@ -151,10 +168,13 @@ final class EstoqueImportService
                 ];
                 $attrsKey = md5(json_encode($attrs, JSON_UNESCAPED_UNICODE));
 
+                // Se depósito não é oficial, usar valor nulo na chave para evitar que depósito "xpto" crie estoque/movimentação
+                $depKey = $depositoOficial ? $depositoEfetivoNome : 'NULL_DEP';
+
                 return implode('|', [
                     (string)$r->cod,
                     $attrsKey,
-                    $depEfetivo,
+                    $depKey,
                     (string)$r->localizacao,
                     (string)$r->categoria,
                 ]);
@@ -166,10 +186,11 @@ final class EstoqueImportService
                 $primeira = $linhas->first();
                 $cod = $primeira->cod;
 
-                // Nome mais longo
+                // Nome mais longo (usamos o nome original salvo na staging)
                 $nomeEscolhido = $linhas->pluck('nome')->sortByDesc(fn($n)=>mb_strlen((string)$n))->first();
                 $dim = $this->dimParser->extrair((string)$nomeEscolhido);
-                $nomeLimpo = $dim['clean'] ?? $nomeEscolhido;
+                // Nome limpo conforme parser: texto ANTES das medidas, sem Ø, sem sufixo CM, sem espaços extras
+                $nomeLimpo = trim($dim['clean'] ?? (string)$nomeEscolhido);
 
                 // Categoria (upsert simples por nome)
                 $categoriaId = null;
@@ -178,12 +199,8 @@ final class EstoqueImportService
                     $categoriaId = $cat->id;
                 }
 
-                // Somar quantidade e escolher valor (média ou primeiro válido)
+                // Somar quantidade e escolher valor (ignoramos valor conforme regra)
                 $qtdTotal = (int) $linhas->sum(fn($l)=> (int)($l->qtd ?? 0));
-                $valor = null;
-                foreach ($linhas as $l) {
-                    if ($l->valor !== null) { $valor = $l->valor; break; }
-                }
 
                 // Upsert Produto + Variação + Atributos
                 $attrs = [
@@ -200,57 +217,73 @@ final class EstoqueImportService
                     'w_cm' => $dim['w_cm'] ?? null,
                     'p_cm' => $dim['p_cm'] ?? null,
                     'a_cm' => $dim['a_cm'] ?? null,
-                    'valor' => $valor,
+                    'valor' => null, // valor ignorado na regra
                     'cod'   => $cod,
                     'atributos' => $attrs,
                 ]);
 
                 $variacao = $up['variacao'];
 
-                // Depósito efetivo (ignorar "Consignação")
+                // Determinar depósito efetivo (reaplicar lógica de oficialidade)
                 $depRaw = (string)$primeira->deposito;
-                $depositoNome = (Str::lower($depRaw) === 'consignação') ? 'Depósito' : ($depRaw ?: 'Depósito');
-                $deposito = Deposito::firstOrCreate(['nome' => $depositoNome]);
+                $depNorm = Str::of($depRaw)->trim()->lower()->ascii()->__toString();
 
-                // Localização (somente coluna Localização)
+                $depositoOficial = false;
+                $depositoNomeNormalizado = null;
+                if ($depNorm !== '') {
+                    if (Str::contains($depNorm, 'jb') || $depNorm === 'loja') {
+                        $depositoOficial = true;
+                        $depositoNomeNormalizado = Str::contains($depNorm, 'jb') ? 'Depósito JB' : 'Loja';
+                    }
+                }
+
+                // Localização parseada (somente coluna Localização)
                 $locParsed = $this->locParser->parse($primeira->localizacao);
 
                 // Criar/Atualizar ESTOQUE + LOCALIZAÇÃO + MOVIMENTAÇÃO ENTRADA_DEPOSITO
-                // Estoque: seu projeto tem model Estoque com 'id_variacao', 'id_deposito', 'quantidade'?
-                // Assumindo estrutura padrão:
-                $estoque = Estoque::firstOrCreate(
-                    ['id_variacao' => $variacao->id, 'id_deposito' => $deposito->id],
-                    ['quantidade' => 0]
-                );
+                $estoque = null;
+                $depositoModel = null;
 
-                // Localização (por estoque)
-                if ($locParsed['tipo'] === 'posicao' || $locParsed['tipo'] === 'area') {
-                    // Area opcional
-                    $areaId = null;
-                    if ($locParsed['tipo'] === 'area' && $locParsed['area']) {
-                        $area = AreaEstoque::firstOrCreate(['nome' => mb_convert_case($locParsed['area'], MB_CASE_TITLE, 'UTF-8')]);
-                        $areaId = $area->id;
-                    }
+                if ($depositoOficial) {
+                    // cria/recupera deposito oficial
+                    $depositoModel = Deposito::firstOrCreate(['nome' => $depositoNomeNormalizado]);
 
-                    $estoque->localizacao()->updateOrCreate(
-                        ['estoque_id' => $estoque->id],
-                        [
-                            'setor' => $locParsed['setor'],
-                            'coluna' => $locParsed['coluna'],
-                            'nivel' => $locParsed['nivel'],
-                            'area_id' => $areaId,
-                            'codigo_composto' => $locParsed['codigo'],
-                        ]
+                    // Estoque: criar registro com quantidade atual (firstOrCreate com quantidade 0)
+                    $estoque = Estoque::firstOrCreate(
+                        ['id_variacao' => $variacao->id, 'id_deposito' => $depositoModel->id],
+                        ['quantidade' => 0]
                     );
+
+                    // Localização (por estoque)
+                    if ($locParsed['tipo'] === 'posicao' || $locParsed['tipo'] === 'area') {
+                        // Area opcional
+                        $areaId = null;
+                        if ($locParsed['tipo'] === 'area' && $locParsed['area']) {
+                            $area = AreaEstoque::firstOrCreate(['nome' => mb_convert_case($locParsed['area'], MB_CASE_TITLE, 'UTF-8')]);
+                            $areaId = $area->id;
+                        }
+
+                        $estoque->localizacao()->updateOrCreate(
+                            ['estoque_id' => $estoque->id],
+                            [
+                                'setor' => $locParsed['setor'],
+                                'coluna' => $locParsed['coluna'],
+                                'nivel' => $locParsed['nivel'],
+                                'area_id' => $areaId,
+                                'codigo_composto' => $locParsed['codigo'],
+                            ]
+                        );
+                    }
                 }
 
                 // Movimentação de entrada para fixar estoque inicial
-                if ($qtdTotal > 0) {
+                // Regra: só criar movimentação se qtdTotal > 0 e depósito for oficial
+                if ($qtdTotal > 0 && $depositoOficial) {
                     if (!$dryRun) {
                         EstoqueMovimentacao::create([
                             'id_variacao' => $variacao->id,
                             'id_deposito_origem' => null,
-                            'id_deposito_destino' => $deposito->id,
+                            'id_deposito_destino' => $depositoModel->id,
                             'tipo' => EstoqueMovimentacaoTipo::ENTRADA_DEPOSITO->value,
                             'quantidade' => $qtdTotal,
                             'observacao' => "Importação inicial #{$import->id}",
@@ -263,31 +296,8 @@ final class EstoqueImportService
                     }
                 }
 
-                // Pedido de Fábrica (Data NF => criar PF + Item)
-                // Regras: se houver alguma 'data_nf' no grupo, criar PF pendente com essa data e item com qtdTotal
-                $dataNF = $linhas->pluck('data_nf')->filter()->first();
-                if ($dataNF) {
-                    if (!$dryRun) {
-                        $pf = PedidoFabrica::create([
-                            'status' => 'pendente',
-                            'data_previsao_entrega' => $dataNF instanceof \Carbon\Carbon ? $dataNF : CarbonImmutable::parse($dataNF),
-                            'observacoes' => "Criado na importação #{$import->id}",
-                        ]);
-                        PedidoFabricaItem::create([
-                            'pedido_fabrica_id' => $pf->id,
-                            'produto_variacao_id' => $variacao->id,
-                            'quantidade' => $qtdTotal,
-                            'quantidade_entregue' => 0,
-                            'deposito_id' => $deposito->id,
-                            'pedido_venda_id' => null,
-                            'observacoes' => null,
-                        ]);
-                        $pfCriados++;
-                        $pfItens++;
-                    }
-                }
-
-                $atualizados++; // por simplicidade contar como atualizados/novos
+                // contadores simples (poderíamos incrementar novos/atualizados com base em retorno do produtoUpsert)
+                $novos++; // aproximação; ajustar conforme desejado
             }
 
             if ($dryRun) {
@@ -315,7 +325,7 @@ final class EstoqueImportService
                 'pf_itens' => $pfItens,
                 'grupos_processados' => $grupos->count(),
             ];
-        } catch (\Throwable $e) {
+        } catch (Throwable $e) {
             DB::rollBack();
             $import->update([
                 'status' => 'com_erro',
@@ -360,13 +370,13 @@ final class EstoqueImportService
         return null;
     }
 
-    private function toDate(mixed $v): ?\Carbon\Carbon
+    private function toDate(mixed $v): ?Carbon
     {
         if (!$v) return null;
         try {
-            if ($v instanceof \DateTimeInterface) return \Carbon\Carbon::instance(\DateTime::createFromInterface($v));
-            return \Carbon\Carbon::parse((string)$v);
-        } catch (\Throwable) {
+            if ($v instanceof DateTimeInterface) return Carbon::instance(\DateTime::createFromInterface($v));
+            return Carbon::parse((string)$v);
+        } catch (Throwable) {
             return null;
         }
     }

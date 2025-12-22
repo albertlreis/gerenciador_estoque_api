@@ -6,46 +6,125 @@ final class DimensoesParser
 {
     /**
      * Extrai dimensões de um nome e retorna:
-     * - w_cm, p_cm, a_cm (cm), diam_cm (opcional), clean (nome sem dimensões)
-     * Suporta: "170x55x77cm", "220x100cm", "Ø 200cm", "300x400x10mm"
+     * - w_cm, p_cm, a_cm (cm), diam_cm (opcional),
+     * - clean (nome sem dimensões e sem texto depois das medidas),
+     * - raw (texto que casou com as medidas),
+     * - full (nome original)
+     *
+     * Suporta: "170x55x77cm", "220x100cm", "Ø 200cm", "300x400x10mm",
+     *         "70X36CM", "Ø 70X36CM" (Ø combinado com medidas LxP).
      */
     public function extrair(string $nome): array
     {
-        $src = $nome;
+        $src = trim($nome);
+        $result = [
+            'full' => $src,
+            'raw' => null,
+            'clean' => null,
+            'w_cm' => null,
+            'p_cm' => null,
+            'a_cm' => null,
+            'diam_cm' => null,
+        ];
 
-        // Triplo em cm (LxPxA)
-        if (preg_match('/(\d+(?:[.,]\d+)?)\s*[xX×]\s*(\d+(?:[.,]\d+)?)\s*[xX×]\s*(\d+(?:[.,]\d+)?)(?:\s*cm)?/u', $src, $m)) {
-            [$w,$p,$a] = array_map([$this,'toFloat'], [$m[1],$m[2],$m[3]]);
-            $clean = trim(str_replace($m[0], '', $src));
-            return ['w_cm'=>$w,'p_cm'=>$p,'a_cm'=>$a,'diam_cm'=>null,'clean'=>$clean];
+        if ($src === '') {
+            $result['clean'] = '';
+            return $result;
         }
 
-        // Triplo em mm
-        if (preg_match('/(\d+(?:[.,]\d+)?)\s*[xX×]\s*(\d+(?:[.,]\d+)?)\s*[xX×]\s*(\d+(?:[.,]\d+)?)(?:\s*mm)/ui', $src, $m)) {
-            [$w,$p,$a] = array_map([$this,'toFloat'], [$m[1],$m[2],$m[3]]);
-            $clean = trim(str_replace($m[0], '', $src));
-            return ['w_cm'=>$w/10,'p_cm'=>$p/10,'a_cm'=>$a/10,'diam_cm'=>null,'clean'=>$clean];
+        // Normalize spaces
+        $s = preg_replace('/\s+/', ' ', $src);
+
+        // Padrões: tentar achar o primeiro match que represente medidas
+        // 1) Triplo com unidade opcional (cm/mm) e com x, X, ×
+        if (preg_match('/(\d+(?:[.,]\d+)?)\s*[xX×]\s*(\d+(?:[.,]\d+)?)\s*[xX×]\s*(\d+(?:[.,]\d+)?)(?:\s*(cm|mm))?/u', $s, $m, PREG_OFFSET_CAPTURE)) {
+            $raw = $m[0][0];
+            $pos = $m[0][1];
+            $unit = isset($m[4][0]) ? strtolower($m[4][0]) : 'cm';
+            [$w,$p,$a] = array_map([$this,'toFloat'], [$m[1][0],$m[2][0],$m[3][0]]);
+
+            if ($unit === 'mm') {
+                $w = $w / 10; $p = $p / 10; $a = $a / 10;
+            }
+
+            $result['raw'] = $raw;
+            $result['w_cm'] = $w;
+            $result['p_cm'] = $p;
+            $result['a_cm'] = $a;
+            $result['diam_cm'] = null;
+            $result['clean'] = $this->cleanBeforeMatch($s, $pos);
+            return $result;
         }
 
-        // LxP
-        if (preg_match('/(\d+(?:[.,]\d+)?)\s*[xX×]\s*(\d+(?:[.,]\d+)?)(?:\s*cm)?/ui', $src, $m)) {
-            [$w,$p] = array_map([$this,'toFloat'], [$m[1],$m[2]]);
-            $clean = trim(str_replace($m[0], '', $src));
-            return ['w_cm'=>$w,'p_cm'=>$p,'a_cm'=>null,'diam_cm'=>null,'clean'=>$clean];
+        // 2) Duplo LxP com unidade opcional (cm/mm) — note que pode existir Ø antes (ex: "Ø 70X36CM")
+        if (preg_match('/(?:[ØØoØ]\s*)?(\d+(?:[.,]\d+)?)\s*[xX×]\s*(\d+(?:[.,]\d+)?)(?:\s*(cm|mm))?/ui', $s, $m, PREG_OFFSET_CAPTURE)) {
+            // Se veio com Ø e duas medidas juntas (ex: "Ø 70X36CM"), tratar como LxP
+            $raw = $m[0][0];
+            $pos = $m[0][1];
+            $unit = isset($m[3][0]) ? strtolower($m[3][0]) : 'cm';
+            [$w,$p] = array_map([$this,'toFloat'], [$m[1][0],$m[2][0]]);
+
+            if ($unit === 'mm') {
+                $w = $w / 10; $p = $p / 10;
+            }
+
+            $result['raw'] = $raw;
+            $result['w_cm'] = $w;
+            $result['p_cm'] = $p;
+            $result['a_cm'] = null;
+            $result['diam_cm'] = null;
+            $result['clean'] = $this->cleanBeforeMatch($s, $pos);
+            return $result;
         }
 
-        // Ø diâmetro cm
-        if (preg_match('/[Øøo]\s*(\d+(?:[.,]\d+)?)(?:\s*cm)/ui', $src, $m)) {
-            $d = $this->toFloat($m[1]);
-            $clean = trim(str_replace($m[0], '', $src));
-            return ['w_cm'=>null,'p_cm'=>null,'a_cm'=>null,'diam_cm'=>$d,'clean'=>$clean];
+        // 3) Ø diâmetro sozinho (ex: "Ø 200cm" ou "Ø200CM")
+        if (preg_match('/[Øøo]\s*(\d+(?:[.,]\d+)?)(?:\s*(cm|mm))?/ui', $s, $m, PREG_OFFSET_CAPTURE)) {
+            $raw = $m[0][0];
+            $pos = $m[0][1];
+            $unit = isset($m[2][0]) ? strtolower($m[2][0]) : 'cm';
+            $d = $this->toFloat($m[1][0]);
+            if ($unit === 'mm') $d = $d / 10;
+
+            $result['raw'] = $raw;
+            $result['diam_cm'] = $d;
+            $result['w_cm'] = null;
+            $result['p_cm'] = null;
+            $result['a_cm'] = null;
+            $result['clean'] = $this->cleanBeforeMatch($s, $pos);
+            return $result;
         }
 
-        return ['w_cm'=>null,'p_cm'=>null,'a_cm'=>null,'diam_cm'=>null,'clean'=>trim($src)];
+        // Nenhuma medida detectada
+        $result['clean'] = $this->sanitizeName($s);
+        return $result;
     }
 
     private function toFloat(string $v): float
     {
         return (float) str_replace(',', '.', $v);
+    }
+
+    /**
+     * Retorna o texto antes do match, removendo Ø e sufixos de unidade do final
+     * e limpando espaços duplicados.
+     */
+    private function cleanBeforeMatch(string $src, int $pos): string
+    {
+        $prefix = mb_substr($src, 0, $pos);
+        return $this->sanitizeName($prefix);
+    }
+
+    /**
+     * Remove Ø (e variantes), remove "CM"/"MM" remanescentes, e squish spaces.
+     */
+    private function sanitizeName(string $s): string
+    {
+        // Remove caracteres Ø e variantes
+        $s = str_replace(['Ø','ø','º'], ' ', $s);
+        // Remove sufixos 'cm' or 'mm' se sobrar por engano
+        $s = preg_replace('/\b(cm|mm)\b/ui', ' ', $s);
+        // Squish spaces
+        $s = preg_replace('/\s+/', ' ', $s);
+        return trim($s);
     }
 }

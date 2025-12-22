@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\DTOs\FiltroMovimentacaoEstoqueDTO;
 use App\Enums\EstoqueMovimentacaoTipo;
+use App\Http\Resources\MovimentacaoResource;
 use App\Models\EstoqueMovimentacao;
 use Carbon\Carbon;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
@@ -350,6 +351,58 @@ class EstoqueMovimentacaoService
             'id_usuario'          => $usuarioId,
             'observacao'          => $observacao,
         ]);
+    }
+
+    public function registrarMovimentacaoLote(array $dados, int $usuarioId): array
+    {
+        $tipo = $dados['tipo'];
+        $origem = $dados['deposito_origem_id'] ?? null;
+        $destino = $dados['deposito_destino_id'] ?? null;
+        $observacao = $dados['observacao'] ?? null;
+
+        $consolidados = collect($dados['itens'])
+            ->groupBy('variacao_id')
+            ->map(fn($g) => $g->sum('quantidade'));
+
+        $movs = [];
+
+        DB::transaction(function () use (&$movs, $tipo, $origem, $destino, $observacao, $usuarioId, $consolidados) {
+            foreach ($consolidados as $variacaoId => $qtd) {
+                $dadosMov = [
+                    'id_variacao' => $variacaoId,
+                    'quantidade'  => $qtd,
+                    'id_usuario'  => $usuarioId,
+                    'observacao'  => $observacao,
+                ];
+
+                switch ($tipo) {
+                    case 'entrada':
+                        $dadosMov['id_deposito_destino'] = $destino;
+                        $dadosMov['tipo'] = 'entrada';
+                        break;
+
+                    case 'saida':
+                        $dadosMov['id_deposito_origem'] = $origem;
+                        $dadosMov['tipo'] = 'saida';
+                        break;
+
+                    case 'transferencia':
+                        $dadosMov['id_deposito_origem']  = $origem;
+                        $dadosMov['id_deposito_destino'] = $destino;
+                        $dadosMov['tipo'] = 'transferencia';
+                        break;
+                }
+
+                $movs[] = $this->movimentar($dadosMov);
+            }
+        });
+
+        return [
+            'sucesso' => true,
+            'mensagem' => 'Movimentação concluída com sucesso.',
+            'total_itens' => $consolidados->sum(),
+            'movimentacoes' => MovimentacaoResource::collection(collect($movs)),
+        ];
     }
 
 }

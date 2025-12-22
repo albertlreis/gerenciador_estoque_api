@@ -6,6 +6,8 @@ use App\Domain\Importacao\DTO\AtributoDTO;
 use App\Domain\Importacao\DTO\NotaDTO;
 use App\Domain\Importacao\DTO\ProdutoImportadoDTO;
 use App\Domain\Importacao\Services\ImportacaoProdutosService;
+use App\Http\Resources\ProdutoMiniResource;
+use App\Http\Resources\ProdutoSimplificadoResource;
 use App\Services\LogService;
 use App\Services\ProdutoSugestoesOutletService;
 use Illuminate\Support\Facades\Cache;
@@ -41,15 +43,26 @@ class ProdutoController extends Controller
     }
 
     /**
-     * Lista produtos com filtros e paginação.
+     * Endpoint unificado de listagem e busca de produtos.
+     * Aceita filtros e modos contextuais (com/sem estoque, depósito, outlet, etc).
+     * Aceita ?view=completa|simplificada|minima
      *
-     * @param FiltrarProdutosRequest $request
-     * @return JsonResponse
+     * Exemplo:
+     *  GET /produtos?q=mesa&deposito_id=2&incluir_estoque=true
      */
     public function index(FiltrarProdutosRequest $request): JsonResponse
     {
+        $view = $request->get('view', 'completa');
+        $incluirEstoque = in_array($view, ['completa', 'simplificada']);
+        $request->merge(['incluir_estoque' => $incluirEstoque]);
+
         $produtos = $this->produtoService->listarProdutosFiltrados($request);
-        return ProdutoResource::collection($produtos)->response();
+
+        return match ($view) {
+            'minima' => ProdutoMiniResource::collection($produtos)->response(),
+            'simplificada' => ProdutoSimplificadoResource::collection($produtos)->response(),
+            default => ProdutoResource::collection($produtos)->response(),
+        };
     }
 
     /**
@@ -74,21 +87,22 @@ class ProdutoController extends Controller
     /**
      * Exibe os dados de um produto específico.
      *
-     * @param int $id
-     * @return ProdutoResource
+     * Permite escolher o formato de resposta:
+     *  - default (completo)
+     *  - ?view=simplificada
+     *  - ?view=minima
      */
-    public function show(int $id): ProdutoResource
+    public function show(int $id): JsonResponse
     {
-        $produto = Produto::with([
-            'variacoes.atributos',
-            'variacoes.estoque',
-            'variacoes.outlets',
-            'variacoes.outlets.motivo',
-            'variacoes.outlets.formasPagamento.formaPagamento',
-            'fornecedor',
-            'imagens'
-        ])->findOrFail($id);
-        return new ProdutoResource($produto);
+        $view = request('view', 'completa');
+        $depositoId = request('deposito_id'); // ✅ novo parâmetro
+        $produto = $this->produtoService->obterProdutoCompleto($id, $depositoId);
+
+        return match ($view) {
+            'minima' => ProdutoMiniResource::make($produto)->response(),
+            'simplificada' => ProdutoSimplificadoResource::make($produto)->response(),
+            default => ProdutoResource::make($produto)->response(),
+        };
     }
 
     /**

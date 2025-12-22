@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Deposito extends Model
 {
@@ -11,20 +12,20 @@ class Deposito extends Model
         'endereco'
     ];
 
-    // Um depósito possui muitos registros de estoque
-    public function estoque()
+    /** @return HasMany<Estoque> */
+    public function estoque(): HasMany
     {
         return $this->hasMany(Estoque::class, 'id_deposito');
     }
 
-    // Movimentações onde o depósito é a origem
-    public function movimentacoesOrigem()
+    /** @return HasMany<EstoqueMovimentacao> */
+    public function movimentacoesOrigem(): HasMany
     {
         return $this->hasMany(EstoqueMovimentacao::class, 'id_deposito_origem');
     }
 
-    // Movimentações onde o depósito é o destino
-    public function movimentacoesDestino()
+    /** @return HasMany<EstoqueMovimentacao> */
+    public function movimentacoesDestino(): HasMany
     {
         return $this->hasMany(EstoqueMovimentacao::class, 'id_deposito_destino');
     }

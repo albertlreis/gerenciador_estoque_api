@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Cliente;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use App\Services\ClienteService;
 use App\Http\Requests\StoreClienteRequest;
 use Illuminate\Validation\ValidationException;
@@ -17,9 +18,19 @@ class ClienteController extends Controller
         $this->service = $service;
     }
 
-    public function index(): JsonResponse
+    /**
+     * GET /clientes?nome=&documento=...
+     */
+    public function index(Request $request): JsonResponse
     {
-        return response()->json(Cliente::all());
+        $filtros = [
+            'nome' => $request->string('nome')->toString(),
+            'documento' => $request->string('documento')->toString(),
+        ];
+
+        return response()->json(
+            $this->service->listarClientes($filtros)
+        );
     }
 
     /**
@@ -29,17 +40,16 @@ class ClienteController extends Controller
     {
         $data = $request->validated();
 
-        if ($data['documento'] && $this->service->documentoDuplicado($data['documento'])) {
+        if (!empty($data['documento']) && $this->service->documentoDuplicado($data['documento'])) {
             throw ValidationException::withMessages(['documento' => 'Documento já cadastrado.']);
         }
 
-        if ($data['documento'] && !$this->service->validarDocumento($data['documento'], $data['tipo'])) {
+        if (!empty($data['documento']) && !$this->service->validarDocumento($data['documento'], $data['tipo'])) {
             throw ValidationException::withMessages(['documento' => 'Documento inválido.']);
         }
 
-        $data = $this->service->preencherEnderecoViaCep($data);
+        $cliente = $this->service->criarClienteComEnderecos($data);
 
-        $cliente = Cliente::create($data);
         return response()->json($cliente, 201);
     }
 
@@ -54,20 +64,21 @@ class ClienteController extends Controller
             if ($this->service->documentoDuplicado($data['documento'], $cliente->id)) {
                 throw ValidationException::withMessages(['documento' => 'Documento já cadastrado.']);
             }
+
             $tipo = $data['tipo'] ?? $cliente->tipo;
             if (!$this->service->validarDocumento($data['documento'], $tipo)) {
                 throw ValidationException::withMessages(['documento' => 'Documento inválido.']);
             }
         }
 
-        $data = $this->service->preencherEnderecoViaCep($data);
-        $cliente->update($data);
+        $cliente = $this->service->atualizarClienteComEnderecos($cliente, $data);
+
         return response()->json($cliente);
     }
 
     public function show(Cliente $cliente): JsonResponse
     {
-        return response()->json($cliente);
+        return response()->json($cliente->load(['enderecos']));
     }
 
     public function destroy(Cliente $cliente): JsonResponse
@@ -76,18 +87,13 @@ class ClienteController extends Controller
         return response()->json(null, 204);
     }
 
-    public function verificaDocumento($documento, $id = null): JsonResponse
+    /**
+     * GET /clientes/verifica-documento/{documento}/{id?}
+     */
+    public function verificaDocumento(string $documento, ?int $id = null): JsonResponse
     {
-        $documentoLimpo = preg_replace('/\D/', '', $documento);
-
-        $query = Cliente::where('documento', $documentoLimpo);
-        if ($id) {
-            $query->where('id', '!=', $id);
-        }
-
-        $existe = $query->exists();
-
-        return response()->json(['existe' => $existe]);
+        return response()->json([
+            'existe' => $this->service->documentoDuplicado($documento, $id),
+        ]);
     }
-
 }

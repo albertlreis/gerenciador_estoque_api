@@ -3,6 +3,8 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class Cliente extends Model
 {
@@ -13,15 +15,21 @@ class Cliente extends Model
         'inscricao_estadual',
         'email',
         'telefone',
-        'endereco',
         'tipo',
         'whatsapp',
-        'cep',
-        'complemento'
     ];
 
+    public function enderecos(): HasMany
+    {
+        return $this->hasMany(ClienteEndereco::class, 'cliente_id');
+    }
 
-    public function pedidos()
+    public function enderecoPrincipal(): HasOne
+    {
+        return $this->hasOne(ClienteEndereco::class, 'cliente_id')->where('principal', true);
+    }
+
+    public function pedidos(): HasMany
     {
         return $this->hasMany(Pedido::class, 'id_cliente');
     }

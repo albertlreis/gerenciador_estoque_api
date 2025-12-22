@@ -31,4 +31,10 @@ return [
         'region' => env('AWS_DEFAULT_REGION', 'us-east-1'),
     ],
 
+    'comms' => [
+        'base_url' => env('COMMS_BASE_URL'),
+        'api_key' => env('COMMS_API_KEY'),
+        'api_secret' => env('COMMS_API_SECRET'),
+    ],
+
 ];

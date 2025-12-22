@@ -9,6 +9,7 @@ use App\Http\Controllers\Assistencia\AssistenciasController;
 use App\Http\Controllers\Assistencia\PedidoLookupController;
 use App\Http\Controllers\AssistenciaRelatorioController;
 use App\Http\Controllers\CaixaEstoqueController;
+use App\Http\Controllers\CommsProxyController;
 use App\Http\Controllers\ConsignacaoRelatorioController;
 use App\Http\Controllers\ContaPagarController;
 use App\Http\Controllers\DashboardController;
@@ -287,5 +288,24 @@ Route::middleware('auth:sanctum')->prefix('v1')->group(function () {
     Route::apiResource('contas-pagar', ContaPagarController::class)
         ->names('contas-pagar')
         ->except(['create', 'edit']);
+
+    Route::prefix('comms')->group(function () {
+        // templates
+        Route::get('/templates', [CommsProxyController::class, 'templatesIndex']);
+        Route::get('/templates/{id}', [CommsProxyController::class, 'templatesShow']);
+        Route::post('/templates', [CommsProxyController::class, 'templatesStore']);
+        Route::put('/templates/{id}', [CommsProxyController::class, 'templatesUpdate']);
+        Route::post('/templates/{id}/preview', [CommsProxyController::class, 'templatesPreview']);
+
+        // requests
+        Route::get('/requests', [CommsProxyController::class, 'requestsIndex']);
+        Route::get('/requests/{id}', [CommsProxyController::class, 'requestsShow']);
+        Route::post('/requests/{id}/cancel', [CommsProxyController::class, 'requestsCancel']);
+
+        // messages
+        Route::get('/messages', [CommsProxyController::class, 'messagesIndex']);
+        Route::get('/messages/{id}', [CommsProxyController::class, 'messagesShow']);
+        Route::post('/messages/{id}/retry', [CommsProxyController::class, 'messagesRetry']);
+    });
 
 });

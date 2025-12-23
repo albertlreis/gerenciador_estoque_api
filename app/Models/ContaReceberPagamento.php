@@ -6,6 +6,8 @@ use Illuminate\Database\Eloquent\Model;
 
 class ContaReceberPagamento extends Model
 {
+    protected $table = 'contas_receber_pagamentos';
+
     protected $fillable = [
         'conta_receber_id', 'data_pagamento', 'valor_pago', 'forma_pagamento', 'comprovante'
     ];

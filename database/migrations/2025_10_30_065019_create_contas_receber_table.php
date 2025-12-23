@@ -15,7 +15,10 @@ return new class extends Migration
     {
         Schema::create('contas_receber', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('pedido_id')->nullable()->constrained('pedidos')->onDelete('set null');
+            $table->unsignedInteger('pedido_id')->nullable();
+            $table->foreign('pedido_id')
+                ->references('id')->on('pedidos')
+                ->nullOnDelete();
             $table->string('descricao')->nullable();
             $table->string('numero_documento')->nullable();
             $table->date('data_emissao')->nullable();
@@ -27,7 +30,7 @@ return new class extends Migration
             $table->decimal('valor_liquido', 15, 2)->default(0);
             $table->decimal('valor_recebido', 15, 2)->default(0);
             $table->decimal('saldo_aberto', 15, 2)->default(0);
-            $table->enum('status', ['ABERTO', 'PARCIAL', 'PAGO', 'CANCELADO'])->default('ABERTO');
+            $table->enum('status', ['ABERTO', 'PARCIAL', 'RECEBIDO', 'VENCIDO', 'CANCELADO', 'ESTORNADO'])->default('ABERTO');
             $table->string('forma_recebimento')->nullable();
             $table->string('centro_custo')->nullable();
             $table->string('categoria')->nullable();

@@ -9,6 +9,8 @@ class ContaReceber extends Model
 {
     use SoftDeletes;
 
+    protected $table = 'contas_receber';
+
     protected $fillable = [
         'pedido_id', 'descricao', 'numero_documento', 'data_emissao', 'data_vencimento',
         'valor_bruto', 'desconto', 'juros', 'multa', 'valor_liquido', 'valor_recebido',

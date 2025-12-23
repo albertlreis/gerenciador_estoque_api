@@ -305,9 +305,8 @@ Route::middleware('auth:sanctum')->prefix('v1')->group(function () {
         Route::post('/', [ContaReceberController::class, 'store']);
         Route::put('/{id}', [ContaReceberController::class, 'update']);
         Route::delete('/{id}', [ContaReceberController::class, 'destroy']);
-
-        // baixa de pagamentos
         Route::post('/{id}/baixa', [ContaReceberController::class, 'baixa']);
+        Route::post('/{id}/estornar', [ContaReceberController::class, 'estornar']);
     });
 
     Route::prefix('comms')->group(function () {

@@ -49,6 +49,9 @@ class DatabaseSeeder extends Seeder
             ContaPagarSeeder::class,
             ContaPagarPagamentoSeeder::class,
             ContasReceberSeeder::class,
+            CategoriasFinanceirasSeeder::class,
+            ContasFinanceirasSeeder::class,
+            LancamentosFinanceirosSeeder::class,
         ]);
     }
 }

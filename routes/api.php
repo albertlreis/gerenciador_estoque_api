@@ -9,8 +9,10 @@ use App\Http\Controllers\Assistencia\AssistenciasController;
 use App\Http\Controllers\Assistencia\PedidoLookupController;
 use App\Http\Controllers\AssistenciaRelatorioController;
 use App\Http\Controllers\CaixaEstoqueController;
+use App\Http\Controllers\CategoriaFinanceiraController;
 use App\Http\Controllers\CommsProxyController;
 use App\Http\Controllers\ConsignacaoRelatorioController;
+use App\Http\Controllers\ContaFinanceiraController;
 use App\Http\Controllers\ContaPagarController;
 use App\Http\Controllers\ContaReceberController;
 use App\Http\Controllers\ContaReceberExportController;
@@ -19,8 +21,10 @@ use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DevolucaoController;
 use App\Http\Controllers\EstoqueRelatorioController;
 use App\Http\Controllers\FeriadoController;
+use App\Http\Controllers\FinanceiroDashboardController;
 use App\Http\Controllers\FornecedorController;
 use App\Http\Controllers\ImportEstoqueController;
+use App\Http\Controllers\LancamentoFinanceiroController;
 use App\Http\Controllers\LocalizacaoDimensaoController;
 use App\Http\Controllers\LocalizacaoEstoqueController;
 use App\Http\Controllers\OutletCatalogoController;
@@ -307,6 +311,17 @@ Route::middleware('auth:sanctum')->prefix('v1')->group(function () {
         Route::delete('/{id}', [ContaReceberController::class, 'destroy']);
         Route::post('/{id}/baixa', [ContaReceberController::class, 'baixa']);
         Route::post('/{id}/estornar', [ContaReceberController::class, 'estornar']);
+    });
+
+    Route::prefix('financeiro')->group(function () {
+        Route::get('lancamentos/totais', [LancamentoFinanceiroController::class, 'totais']);
+        Route::apiResource('lancamentos', LancamentoFinanceiroController::class);
+        Route::get('dashboard', [FinanceiroDashboardController::class, 'show']);
+
+        Route::prefix('catalogo')->group(function () {
+            Route::get('categorias-financeiras', [CategoriaFinanceiraController::class, 'index']);
+            Route::get('contas-financeiras', [ContaFinanceiraController::class, 'index']);
+        });
     });
 
     Route::prefix('comms')->group(function () {

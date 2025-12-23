@@ -2,10 +2,10 @@
 
 namespace App\Http\Controllers;
 
-use App\Http\Requests\BaixaContaReceberRequest;
-use App\Http\Requests\EstornarContaReceberRequest;
-use App\Http\Requests\StoreContaReceberRequest;
-use App\Http\Requests\UpdateContaReceberRequest;
+use App\Http\Requests\Financeiro\BaixaContaReceberRequest;
+use App\Http\Requests\Financeiro\EstornarContaReceberRequest;
+use App\Http\Requests\Financeiro\StoreContaReceberRequest;
+use App\Http\Requests\Financeiro\UpdateContaReceberRequest;
 use App\Http\Resources\ContaReceberResource;
 use App\Models\ContaReceber;
 use App\Services\ContaReceberService;

@@ -4,8 +4,8 @@ namespace App\Http\Controllers;
 
 use App\DTOs\FiltroContaPagarDTO;
 use App\Exports\ContasPagarExport;
-use App\Http\Requests\ContaPagarPagamentoRequest;
-use App\Http\Requests\ContaPagarRequest;
+use App\Http\Requests\Financeiro\ContaPagarPagamentoRequest;
+use App\Http\Requests\Financeiro\ContaPagarRequest;
 use App\Http\Resources\ContaPagarResource;
 use App\Models\ContaPagar;
 use App\Services\ContaPagarCommandService;

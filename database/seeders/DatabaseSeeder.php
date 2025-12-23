@@ -52,6 +52,7 @@ class DatabaseSeeder extends Seeder
             CategoriasFinanceirasSeeder::class,
             ContasFinanceirasSeeder::class,
             LancamentosFinanceirosSeeder::class,
+            DespesasRecorrentesSeeder::class,
         ]);
     }
 }

@@ -18,6 +18,7 @@ use App\Http\Controllers\ContaReceberController;
 use App\Http\Controllers\ContaReceberExportController;
 use App\Http\Controllers\ContaReceberRelatorioController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\DespesaRecorrenteController;
 use App\Http\Controllers\DevolucaoController;
 use App\Http\Controllers\EstoqueRelatorioController;
 use App\Http\Controllers\FeriadoController;
@@ -322,6 +323,17 @@ Route::middleware('auth:sanctum')->prefix('v1')->group(function () {
             Route::get('categorias-financeiras', [CategoriaFinanceiraController::class, 'index']);
             Route::get('contas-financeiras', [ContaFinanceiraController::class, 'index']);
         });
+
+        Route::get('/despesas-recorrentes', [DespesaRecorrenteController::class, 'index']);
+        Route::get('/despesas-recorrentes/{id}', [DespesaRecorrenteController::class, 'show']);
+        Route::post('/despesas-recorrentes', [DespesaRecorrenteController::class, 'store']);
+        Route::put('/despesas-recorrentes/{id}', [DespesaRecorrenteController::class, 'update']);
+
+        Route::patch('/despesas-recorrentes/{id}/pausar', [DespesaRecorrenteController::class, 'pause']);
+        Route::patch('/despesas-recorrentes/{id}/ativar', [DespesaRecorrenteController::class, 'activate']);
+        Route::patch('/despesas-recorrentes/{id}/cancelar', [DespesaRecorrenteController::class, 'cancel']);
+
+        Route::post('/despesas-recorrentes/{id}/executar', [DespesaRecorrenteController::class, 'executar']);
     });
 
     Route::prefix('comms')->group(function () {
@@ -344,3 +356,4 @@ Route::middleware('auth:sanctum')->prefix('v1')->group(function () {
     });
 
 });
+

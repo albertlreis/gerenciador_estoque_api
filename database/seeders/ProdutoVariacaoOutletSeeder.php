@@ -37,7 +37,7 @@ class ProdutoVariacaoOutletSeeder extends Seeder
             ->keyBy('slug');
 
         // 5 variações aleatórias
-        $variacoes = ProdutoVariacao::with(['estoque','outlets'])->inRandomOrder()->take(5)->get();
+        $variacoes = ProdutoVariacao::with(['estoques','outlets'])->inRandomOrder()->take(5)->get();
 
         foreach ($variacoes as $variacao) {
             $qtdOutletsParaCriar = rand(1, 2);

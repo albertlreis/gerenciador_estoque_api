@@ -12,6 +12,9 @@ use App\Http\Controllers\CaixaEstoqueController;
 use App\Http\Controllers\CommsProxyController;
 use App\Http\Controllers\ConsignacaoRelatorioController;
 use App\Http\Controllers\ContaPagarController;
+use App\Http\Controllers\ContaReceberController;
+use App\Http\Controllers\ContaReceberExportController;
+use App\Http\Controllers\ContaReceberRelatorioController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DevolucaoController;
 use App\Http\Controllers\EstoqueRelatorioController;
@@ -210,6 +213,10 @@ Route::middleware('auth:sanctum')->prefix('v1')->group(function () {
         Route::get('pedidos', [PedidosRelatorioController::class, 'pedidosPorPeriodo']);
         Route::get('consignacoes/ativas', [ConsignacaoRelatorioController::class, 'consignacoesAtivas']);
         Route::get('assistencias', [AssistenciaRelatorioController::class, 'assistencias']);
+
+        Route::get('/devedores', [ContaReceberRelatorioController::class, 'devedores']);
+        Route::get('/devedores/exportar/excel', [ContaReceberRelatorioController::class, 'exportarExcel']);
+        Route::get('/devedores/exportar/pdf', [ContaReceberRelatorioController::class, 'exportarPdf']);
     });
 
     Route::post('devolucoes', [DevolucaoController::class, 'store']);
@@ -288,6 +295,19 @@ Route::middleware('auth:sanctum')->prefix('v1')->group(function () {
     Route::apiResource('contas-pagar', ContaPagarController::class)
         ->names('contas-pagar')
         ->except(['create', 'edit']);
+
+    Route::prefix('contas-receber')->group(function () {
+        Route::get('/exportar/excel', [ContaReceberExportController::class, 'exportarExcel']);
+        Route::get('/exportar/pdf', [ContaReceberExportController::class, 'exportarPdf']);
+        Route::get('/kpis', [ContaReceberExportController::class, 'kpis']);
+        Route::get('/', [ContaReceberController::class, 'index']);
+        Route::get('/{id}', [ContaReceberController::class, 'show']);
+        Route::post('/', [ContaReceberController::class, 'store']);
+        Route::put('/{id}', [ContaReceberController::class, 'update']);
+        Route::delete('/{id}', [ContaReceberController::class, 'destroy']);
+        Route::post('/{id}/baixa', [ContaReceberController::class, 'baixa']);
+        Route::post('/{id}/estornar', [ContaReceberController::class, 'estornar']);
+    });
 
     Route::prefix('comms')->group(function () {
         // templates

@@ -20,8 +20,7 @@ class ContaPagarRequest extends FormRequest
             'desconto' => ['nullable','numeric','min:0'],
             'juros' => ['nullable','numeric','min:0'],
             'multa' => ['nullable','numeric','min:0'],
-            'status' => ['required','in:ABERTA,PARCIAL,PAGA,CANCELADA'],
-            'forma_pagamento' => ['nullable','in:PIX,BOLETO,TED,DINHEIRO,CARTAO'],
+            'status' => ['nullable','in:ABERTA,PARCIAL,PAGA,CANCELADA'], // será sincronizado depois
             'centro_custo' => ['nullable','string','max:60'],
             'categoria' => ['nullable','string','max:60'],
             'observacoes' => ['nullable','string'],

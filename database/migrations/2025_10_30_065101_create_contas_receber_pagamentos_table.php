@@ -17,9 +17,14 @@ return new class extends Migration
             $table->id();
             $table->foreignId('conta_receber_id')->constrained('contas_receber')->onDelete('cascade');
             $table->date('data_pagamento');
-            $table->decimal('valor_pago', 15, 2);
+            $table->decimal('valor', 15);
             $table->string('forma_pagamento')->nullable();
-            $table->string('comprovante')->nullable();
+            $table->string('comprovante_path')->nullable();
+            $table->string('observacoes')->nullable();
+            $table->unsignedInteger('usuario_id')->nullable();
+            $table->foreign('usuario_id')->references('id')->on('acesso_usuarios')->nullOnDelete();
+            $table->unsignedInteger('usuario_id')->nullable();
+            $table->foreign('usuario_id')->references('id')->on('acesso_usuarios')->nullOnDelete();
             $table->timestamps();
         });
     }

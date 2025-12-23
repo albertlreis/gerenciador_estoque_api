@@ -14,15 +14,17 @@ class UpdateContaReceberRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'descricao' => ['sometimes', 'string', 'max:255'],
-            'numero_documento' => ['sometimes', 'string', 'max:255'],
-            'data_vencimento' => ['sometimes', 'date'],
-            'valor_bruto' => ['sometimes', 'numeric', 'min:0'],
-            'valor_liquido' => ['sometimes', 'numeric', 'min:0'],
-            'forma_recebimento' => ['sometimes', 'string', 'max:100'],
-            'centro_custo' => ['sometimes', 'string', 'max:100'],
-            'categoria' => ['sometimes', 'string', 'max:100'],
-            'observacoes' => ['nullable', 'string'],
+            'descricao' => ['sometimes','string','max:255'],
+            'numero_documento' => ['sometimes','string','max:255'],
+            'data_vencimento' => ['sometimes','date'],
+            'valor_bruto' => ['sometimes','numeric','min:0'],
+            'desconto' => ['sometimes','numeric','min:0'],
+            'juros' => ['sometimes','numeric','min:0'],
+            'multa' => ['sometimes','numeric','min:0'],
+            'centro_custo' => ['sometimes','string','max:100'],
+            'categoria' => ['sometimes','string','max:100'],
+            'observacoes' => ['nullable','string'],
+            'status' => ['nullable','in:ABERTA,PARCIAL,PAGA,CANCELADA'],
         ];
     }
 }

@@ -14,10 +14,12 @@ class BaixaContaReceberRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'data_pagamento' => ['required', 'date'],
-            'valor_pago' => ['required', 'numeric', 'min:0.01'],
-            'forma_pagamento' => ['required', 'string', 'max:100'],
-            'comprovante' => ['nullable', 'string', 'max:255'],
+            'data_pagamento' => ['required','date'],
+            'valor' => ['required','numeric','gt:0'],
+            'forma_pagamento' => ['required','in:PIX,BOLETO,TED,DINHEIRO,CARTAO'],
+            'observacoes' => ['nullable','string'],
+            'comprovante' => ['nullable','file','mimes:pdf,jpg,jpeg,png','max:4096'],
+            'conta_financeira_id' => ['nullable','integer','exists:contas_financeiras,id'],
         ];
     }
 }

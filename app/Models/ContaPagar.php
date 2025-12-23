@@ -2,7 +2,7 @@
 
 namespace App\Models;
 
-use App\Enums\ContaPagarStatus;
+use App\Enums\ContaStatus;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -17,7 +17,7 @@ class ContaPagar extends Model
 
     protected $fillable = [
         'fornecedor_id','descricao','numero_documento','data_emissao','data_vencimento',
-        'valor_bruto','desconto','juros','multa','status','forma_pagamento',
+        'valor_bruto','desconto','juros','multa','status',
         'centro_custo','categoria','observacoes'
     ];
 
@@ -28,19 +28,22 @@ class ContaPagar extends Model
         'desconto' => 'decimal:2',
         'juros' => 'decimal:2',
         'multa' => 'decimal:2',
-        'status' => ContaPagarStatus::class,
+        'status' => ContaStatus::class,
     ];
 
-    /** @return BelongsTo<Fornecedor,ContaPagar> */
     public function fornecedor(): BelongsTo
     {
-        return $this->belongsTo(Fornecedor::class, 'fornecedor_id');
+        return $this->belongsTo(Fornecedor::class, 'fornecedor_id')->withDefault();
     }
 
-    /** @return HasMany<ContaPagarPagamento> */
     public function pagamentos(): HasMany
     {
         return $this->hasMany(ContaPagarPagamento::class, 'conta_pagar_id');
+    }
+
+    public function getValorLiquidoAttribute(): string
+    {
+        return (string) max(0, (float)($this->valor_bruto - $this->desconto + $this->juros + $this->multa));
     }
 
     public function getValorPagoAttribute(): string
@@ -50,7 +53,6 @@ class ContaPagar extends Model
 
     public function getSaldoAbertoAttribute(): string
     {
-        $liquido = $this->valor_bruto - $this->desconto + $this->juros + $this->multa;
-        return (string) max(0, $liquido - (float) $this->valor_pago);
+        return (string) max(0, (float)$this->valor_liquido - (float)$this->valor_pago);
     }
 }

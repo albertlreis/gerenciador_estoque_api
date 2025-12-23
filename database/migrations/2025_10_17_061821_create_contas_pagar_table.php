@@ -26,7 +26,6 @@ return new class extends Migration
             $table->decimal('multa', 15, 2)->default(0);
             $table->decimal('valor_liquido', 15, 2)->virtualAs('(valor_bruto - desconto + juros + multa)');
             $table->string('status', 20)->index(); // ABERTA, PARCIAL, PAGA, CANCELADA
-            $table->string('forma_pagamento', 30)->nullable(); // PIX, BOLETO, TED, DINHEIRO, CARTAO
             $table->string('centro_custo', 60)->nullable();
             $table->string('categoria', 60)->nullable();
             $table->text('observacoes')->nullable();

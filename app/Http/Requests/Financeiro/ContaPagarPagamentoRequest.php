@@ -11,11 +11,12 @@ class ContaPagarPagamentoRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'data_pagamento' => ['required','date'],
+            'data_pagamento' => ['required','date','before_or_equal:today'],
             'valor' => ['required','numeric','gt:0'],
-            'forma_pagamento' => ['nullable','in:PIX,BOLETO,TED,DINHEIRO,CARTAO'],
+            'forma_pagamento' => ['required','in:PIX,BOLETO,TED,DINHEIRO,CARTAO'],
             'observacoes' => ['nullable','string'],
             'comprovante' => ['nullable','file','mimes:pdf,jpg,jpeg,png','max:4096'],
+            'conta_financeira_id' => ['nullable','integer','exists:contas_financeiras,id'],
         ];
     }
 }

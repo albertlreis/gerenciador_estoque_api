@@ -27,7 +27,6 @@ class ContaReceberResource extends JsonResource
             'categoria'         => $this->categoria,
             'observacoes'       => $this->observacoes,
 
-            // 🔗 Integração com pedido e cliente
             'pedido' => $this->whenLoaded('pedido', function () {
                 return [
                     'id' => $this->pedido->id,
@@ -37,16 +36,20 @@ class ContaReceberResource extends JsonResource
                 ];
             }),
 
-            // 💰 Pagamentos realizados
             'pagamentos' => $this->whenLoaded('pagamentos', function () {
                 return $this->pagamentos->map(fn($p) => [
                     'id' => $p->id,
                     'data_pagamento' => optional($p->data_pagamento)->format('Y-m-d'),
-                    'valor_pago' => (float) $p->valor_pago,
+                    'valor' => (float) $p->valor,
                     'forma_pagamento' => $p->forma_pagamento,
-                    'comprovante' => $p->comprovante,
+                    'comprovante_path' => $p->comprovante_path,
+                    'usuario' => $p->relationLoaded('usuario') ? [
+                        'id' => $p->usuario?->id,
+                        'nome' => $p->usuario?->nome,
+                    ] : null,
                 ]);
             }),
+
 
             'created_at' => optional($this->created_at)->format('Y-m-d H:i:s'),
             'updated_at' => optional($this->updated_at)->format('Y-m-d H:i:s'),

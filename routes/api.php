@@ -234,7 +234,6 @@ Route::middleware('auth:sanctum')->prefix('v1')->group(function () {
     });
 
     Route::prefix('assistencias')->group(function () {
-        // Catálogos
         Route::get('/autorizadas', [AssistenciasController::class, 'index']);
         Route::get('/autorizadas/{id}', [AssistenciasController::class, 'show']);
         Route::post('/autorizadas', [AssistenciasController::class, 'store']);
@@ -246,14 +245,12 @@ Route::middleware('auth:sanctum')->prefix('v1')->group(function () {
         Route::put('/defeitos/{id}', [AssistenciaDefeitosController::class, 'update']);
         Route::delete('/defeitos/{id}', [AssistenciaDefeitosController::class, 'destroy']);
 
-        // Chamados
         Route::get('/chamados', [AssistenciaChamadoController::class, 'index']);
         Route::post('/chamados', [AssistenciaChamadoController::class, 'store']);
         Route::get('/chamados/{id}', [AssistenciaChamadoController::class, 'show']);
         Route::put('/chamados/{id}', [AssistenciaChamadoController::class, 'update']);
         Route::post('/chamados/{id}/cancelar', [AssistenciaChamadoController::class, 'cancelar']);
 
-        // Itens do chamado
         Route::post('/chamados/{id}/itens', [AssistenciaItemController::class, 'store']);
         Route::post('/itens/{itemId}/iniciar-reparo', [AssistenciaItemController::class, 'iniciarReparo']);
         Route::post('/itens/{itemId}/enviar', [AssistenciaItemController::class, 'enviar']);
@@ -274,11 +271,9 @@ Route::middleware('auth:sanctum')->prefix('v1')->group(function () {
         Route::get('/chamados/{id}/arquivos', [AssistenciaArquivoController::class, 'listByChamado']);
         Route::post('/chamados/{id}/arquivos', [AssistenciaArquivoController::class, 'uploadToChamado']);
 
-        // Item do chamado: listar e enviar fotos
         Route::get('/itens/{itemId}/arquivos', [AssistenciaArquivoController::class, 'listByItem']);
         Route::post('/itens/{itemId}/arquivos', [AssistenciaArquivoController::class, 'uploadToItem']);
 
-        // Operações diretas no arquivo
         Route::get('/arquivos/{arquivo}', [AssistenciaArquivoController::class, 'show'])
             ->whereNumber('arquivo');
         Route::delete('/arquivos/{arquivo}', [AssistenciaArquivoController::class, 'destroy'])
@@ -291,10 +286,13 @@ Route::middleware('auth:sanctum')->prefix('v1')->group(function () {
         Route::get('export/pdf',   [ContaPagarController::class, 'exportPdf'])->name('contas-pagar.export.pdf');
         Route::get('kpis',         [ContaPagarController::class, 'kpis'])->name('contas-pagar.kpis');
 
-        Route::post('{conta_pagar}/pagar', [ContaPagarController::class, 'pagar'])->name('contas-pagar.pagar');
-        Route::delete('{conta_pagar}/estornar/{pagamento}', [ContaPagarController::class, 'estornar'])
+        Route::post('{conta_pagar}/pagar', [ContaPagarController::class, 'pagar'])
+            ->whereNumber('conta_pagar')
+            ->name('contas-pagar.pagar');
+
+        Route::delete('{conta_pagar}/pagamentos/{pagamento}', [ContaPagarController::class, 'estornar'])
             ->whereNumber(['conta_pagar', 'pagamento'])
-            ->name('contas-pagar.estornar');
+            ->name('contas-pagar.pagamentos.estornar');
     });
 
     Route::apiResource('contas-pagar', ContaPagarController::class)
@@ -302,21 +300,29 @@ Route::middleware('auth:sanctum')->prefix('v1')->group(function () {
         ->except(['create', 'edit']);
 
     Route::prefix('contas-receber')->group(function () {
-        Route::get('/exportar/excel', [ContaReceberExportController::class, 'exportarExcel']);
-        Route::get('/exportar/pdf', [ContaReceberExportController::class, 'exportarPdf']);
-        Route::get('/kpis', [ContaReceberExportController::class, 'kpis']);
-        Route::get('/', [ContaReceberController::class, 'index']);
-        Route::get('/{id}', [ContaReceberController::class, 'show']);
-        Route::post('/', [ContaReceberController::class, 'store']);
-        Route::put('/{id}', [ContaReceberController::class, 'update']);
-        Route::delete('/{id}', [ContaReceberController::class, 'destroy']);
-        Route::post('/{id}/baixa', [ContaReceberController::class, 'baixa']);
-        Route::post('/{id}/estornar', [ContaReceberController::class, 'estornar']);
+        Route::get('exportar/excel', [ContaReceberExportController::class, 'exportarExcel'])->name('contas-receber.export.excel');
+        Route::get('exportar/pdf',   [ContaReceberExportController::class, 'exportarPdf'])->name('contas-receber.export.pdf');
+        Route::get('kpis',           [ContaReceberExportController::class, 'kpis'])->name('contas-receber.kpis');
+
+        Route::get('/',        [ContaReceberController::class, 'index'])->name('contas-receber.index');
+        Route::get('{conta}',  [ContaReceberController::class, 'show'])->whereNumber('conta')->name('contas-receber.show');
+        Route::post('/',       [ContaReceberController::class, 'store'])->name('contas-receber.store');
+        Route::put('{conta}',  [ContaReceberController::class, 'update'])->whereNumber('conta')->name('contas-receber.update');
+        Route::delete('{conta}', [ContaReceberController::class, 'destroy'])->whereNumber('conta')->name('contas-receber.destroy');
+
+        Route::post('{conta}/pagar', [ContaReceberController::class, 'pagar'])
+            ->whereNumber('conta')
+            ->name('contas-receber.pagar');
+
+        Route::delete('{conta}/pagamentos/{pagamento}', [ContaReceberController::class, 'estornarPagamento'])
+            ->whereNumber(['conta', 'pagamento'])
+            ->name('contas-receber.pagamentos.estornar');
     });
 
     Route::prefix('financeiro')->group(function () {
         Route::get('lancamentos/totais', [LancamentoFinanceiroController::class, 'totais']);
         Route::apiResource('lancamentos', LancamentoFinanceiroController::class);
+
         Route::get('dashboard', [FinanceiroDashboardController::class, 'show']);
 
         Route::prefix('catalogo')->group(function () {
@@ -324,32 +330,29 @@ Route::middleware('auth:sanctum')->prefix('v1')->group(function () {
             Route::get('contas-financeiras', [ContaFinanceiraController::class, 'index']);
         });
 
-        Route::get('/despesas-recorrentes', [DespesaRecorrenteController::class, 'index']);
-        Route::get('/despesas-recorrentes/{id}', [DespesaRecorrenteController::class, 'show']);
-        Route::post('/despesas-recorrentes', [DespesaRecorrenteController::class, 'store']);
-        Route::put('/despesas-recorrentes/{id}', [DespesaRecorrenteController::class, 'update']);
+        Route::get('despesas-recorrentes', [DespesaRecorrenteController::class, 'index']);
+        Route::get('despesas-recorrentes/{id}', [DespesaRecorrenteController::class, 'show']);
+        Route::post('despesas-recorrentes', [DespesaRecorrenteController::class, 'store']);
+        Route::put('despesas-recorrentes/{id}', [DespesaRecorrenteController::class, 'update']);
 
-        Route::patch('/despesas-recorrentes/{id}/pausar', [DespesaRecorrenteController::class, 'pause']);
-        Route::patch('/despesas-recorrentes/{id}/ativar', [DespesaRecorrenteController::class, 'activate']);
-        Route::patch('/despesas-recorrentes/{id}/cancelar', [DespesaRecorrenteController::class, 'cancel']);
+        Route::patch('despesas-recorrentes/{id}/pausar', [DespesaRecorrenteController::class, 'pause']);
+        Route::patch('despesas-recorrentes/{id}/ativar', [DespesaRecorrenteController::class, 'activate']);
+        Route::patch('despesas-recorrentes/{id}/cancelar', [DespesaRecorrenteController::class, 'cancel']);
 
-        Route::post('/despesas-recorrentes/{id}/executar', [DespesaRecorrenteController::class, 'executar']);
+        Route::post('despesas-recorrentes/{id}/executar', [DespesaRecorrenteController::class, 'executar']);
     });
 
     Route::prefix('comms')->group(function () {
-        // templates
         Route::get('/templates', [CommsProxyController::class, 'templatesIndex']);
         Route::get('/templates/{id}', [CommsProxyController::class, 'templatesShow']);
         Route::post('/templates', [CommsProxyController::class, 'templatesStore']);
         Route::put('/templates/{id}', [CommsProxyController::class, 'templatesUpdate']);
         Route::post('/templates/{id}/preview', [CommsProxyController::class, 'templatesPreview']);
 
-        // requests
         Route::get('/requests', [CommsProxyController::class, 'requestsIndex']);
         Route::get('/requests/{id}', [CommsProxyController::class, 'requestsShow']);
         Route::post('/requests/{id}/cancel', [CommsProxyController::class, 'requestsCancel']);
 
-        // messages
         Route::get('/messages', [CommsProxyController::class, 'messagesIndex']);
         Route::get('/messages/{id}', [CommsProxyController::class, 'messagesShow']);
         Route::post('/messages/{id}/retry', [CommsProxyController::class, 'messagesRetry']);

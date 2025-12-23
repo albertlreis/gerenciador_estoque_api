@@ -26,7 +26,6 @@ class ContaPagarResource extends JsonResource
             'status' => $this->status instanceof BackedEnum
                 ? $this->status->value
                 : ($this->status ?? 'INDEFINIDO'),
-            'forma_pagamento' => $this->forma_pagamento,
             'centro_custo' => $this->centro_custo,
             'categoria' => $this->categoria,
             'observacoes' => $this->observacoes,

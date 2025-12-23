@@ -2,176 +2,192 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\ContaStatus;
 use App\Http\Requests\Financeiro\BaixaContaReceberRequest;
-use App\Http\Requests\Financeiro\EstornarContaReceberRequest;
 use App\Http\Requests\Financeiro\StoreContaReceberRequest;
 use App\Http\Requests\Financeiro\UpdateContaReceberRequest;
 use App\Http\Resources\ContaReceberResource;
 use App\Models\ContaReceber;
-use App\Services\ContaReceberService;
+use App\Services\ContaReceberCommandService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
 
 class ContaReceberController extends Controller
 {
-    protected ContaReceberService $service;
-
-    public function __construct(ContaReceberService $service)
-    {
-        $this->service = $service;
-    }
+    public function __construct(
+        private readonly ContaReceberCommandService $cmd,
+    ) {}
 
     /**
      * Lista contas a receber com filtros e paginação.
      *
      * Filtros suportados:
-     * - status
-     * - forma_recebimento
-     * - cliente (nome do cliente do pedido)
-     * - numero_pedido (campo "numero" do pedido, se existir)
-     * - data_inicio, data_fim (intervalo por data_vencimento)
-     * - valor_min, valor_max (intervalo por valor_liquido)
+     * - busca (descricao/numero_documento)
+     * - status (ABERTA, PARCIAL, PAGA, CANCELADA)
+     * - cliente (nome do cliente no pedido)
+     * - numero_pedido (numero_externo do pedido)
+     * - data_ini, data_fim (intervalo por data_vencimento)
+     * - vencidas (bool) => vencimento passado e status != PAGA
      *
      * @param Request $request
      * @return JsonResponse
      */
     public function index(Request $request): JsonResponse
     {
-        $perPage = (int)$request->input('per_page', 20);
-
-        $query = ContaReceber::with(['pedido.cliente', 'pagamentos']);
-
-        $query->when($request->filled('status'), fn($q) =>
-        $q->where('status', $request->status)
-        );
-
-        $query->when($request->filled('forma_recebimento'), fn($q) =>
-        $q->where('forma_recebimento', $request->forma_recebimento)
-        );
-
-        $query->when($request->filled('cliente'), fn($q) =>
-        $q->whereHas('pedido.cliente', fn($c) =>
-        $c->where('nome', 'like', "%{$request->cliente}%")
-        )
-        );
-
-        // OBS: seu model Pedido exibido não tem 'numero'. Mantive como estava,
-        // mas se o correto for 'numero_externo', troque aqui.
-        $query->when($request->filled('numero_pedido'), fn($q) =>
-        $q->whereHas('pedido', fn($p) =>
-        $p->where('numero_externo', 'like', "%{$request->numero_pedido}%")
-        )
-        );
-
-        if ($request->filled('data_inicio') && $request->filled('data_fim')) {
-            $query->whereBetween('data_vencimento', [$request->data_inicio, $request->data_fim]);
+        if ($request->has('vencidas')) {
+            $request->merge([
+                'vencidas' => filter_var($request->input('vencidas'), FILTER_VALIDATE_BOOLEAN),
+            ]);
         }
 
-        if ($request->filled('valor_min') && $request->filled('valor_max')) {
-            $query->whereBetween('valor_liquido', [$request->valor_min, $request->valor_max]);
+        $request->validate([
+            'page'      => 'nullable|integer|min:1',
+            'per_page'  => 'nullable|integer|min:1|max:200',
+            'busca'     => 'nullable|string|max:255',
+            'status'    => 'nullable|in:ABERTA,PARCIAL,PAGA,CANCELADA',
+            'cliente'   => 'nullable|string|max:255',
+            'numero_pedido' => 'nullable|string|max:80',
+            'data_ini'  => 'nullable|date',
+            'data_fim'  => 'nullable|date',
+            'vencidas'  => 'nullable|boolean',
+        ]);
+
+        $page = $request->integer('page', 1);
+        $perPage = $request->integer('per_page', 20);
+
+        $q = ContaReceber::query()
+            ->with(['pedido.cliente', 'pagamentos.usuario']);
+
+        if ($request->filled('busca')) {
+            $busca = '%' . $request->string('busca')->toString() . '%';
+            $q->where(fn ($w) => $w
+                ->where('descricao', 'like', $busca)
+                ->orWhere('numero_documento', 'like', $busca)
+            );
         }
 
-        $contas = $query->orderByDesc('data_vencimento')->paginate($perPage);
+        if ($request->filled('status')) {
+            $q->where('status', $request->string('status')->toString());
+        }
 
-        return ContaReceberResource::collection($contas)
-            ->additional(['meta' => ['filtros_aplicados' => $request->all()]])
-            ->response();
+        if ($request->filled('cliente')) {
+            $cliente = '%' . $request->string('cliente')->toString() . '%';
+            $q->whereHas('pedido.cliente', fn ($c) =>
+            $c->where('nome', 'like', $cliente)
+            );
+        }
+
+        if ($request->filled('numero_pedido')) {
+            $np = '%' . $request->string('numero_pedido')->toString() . '%';
+            $q->whereHas('pedido', fn ($p) =>
+            $p->where('numero_externo', 'like', $np)
+            );
+        }
+
+        if ($request->filled('data_ini')) {
+            $q->whereDate('data_vencimento', '>=', $request->string('data_ini')->toString());
+        }
+
+        if ($request->filled('data_fim')) {
+            $q->whereDate('data_vencimento', '<=', $request->string('data_fim')->toString());
+        }
+
+        if ($request->boolean('vencidas', false)) {
+            $q->whereDate('data_vencimento', '<', now()->toDateString())
+                ->where('status', '!=', ContaStatus::PAGA->value);
+        }
+
+        $q->orderBy('data_vencimento')->orderBy('id');
+
+        $paginator = $q->paginate($perPage, ['*'], 'page', $page);
+
+        return ContaReceberResource::collection($paginator)
+            ->response()
+            ->setStatusCode(Response::HTTP_OK);
     }
 
     /**
-     * Exibe o detalhe de uma conta a receber.
-     *
-     * @param int $id
-     * @return JsonResponse
+     * Exibe uma conta a receber com relacionamentos.
      */
-    public function show(int $id): JsonResponse
+    public function show(ContaReceber $conta): JsonResponse
     {
-        $conta = ContaReceber::with(['pedido.cliente', 'pagamentos'])->findOrFail($id);
-        return response()->json(new ContaReceberResource($conta), Response::HTTP_OK);
-    }
-
-    /**
-     * Cria uma conta a receber.
-     *
-     * @param StoreContaReceberRequest $request
-     * @return JsonResponse
-     */
-    public function store(StoreContaReceberRequest $request): JsonResponse
-    {
-        $conta = $this->service->criar($request->validated());
-        return response()->json(new ContaReceberResource($conta), Response::HTTP_CREATED);
-    }
-
-    /**
-     * Atualiza uma conta a receber.
-     * Recalcula automaticamente: valor_liquido (quando aplicável), valor_recebido, saldo_aberto e status.
-     *
-     * @param UpdateContaReceberRequest $request
-     * @param int $id
-     * @return JsonResponse
-     */
-    public function update(UpdateContaReceberRequest $request, int $id): JsonResponse
-    {
-        $conta = ContaReceber::with('pagamentos')->findOrFail($id);
-
-        $conta = $this->service->atualizar($conta, $request->validated());
-
-        return response()->json(new ContaReceberResource($conta), Response::HTTP_OK);
-    }
-
-    /**
-     * Remove (soft delete) uma conta a receber.
-     * Se houver pagamentos registrados, realiza estorno automático (pagamento negativo) antes do soft delete.
-     *
-     * @param int $id
-     * @return JsonResponse
-     */
-    public function destroy(int $id): JsonResponse
-    {
-        $conta = ContaReceber::with('pagamentos')->findOrFail($id);
-
-        $this->service->remover($conta, 'Remoção via endpoint');
+        $conta->load(['pedido.cliente', 'pagamentos.usuario']);
 
         return response()->json([
-            'message' => 'Conta removida com sucesso (soft delete) com estorno automático, se aplicável.',
+            'data' => new ContaReceberResource($conta),
         ], Response::HTTP_OK);
     }
 
     /**
-     * Registra baixa (pagamento) em uma conta a receber.
-     *
-     * @param BaixaContaReceberRequest $request
-     * @param int $id
-     * @return JsonResponse
+     * Cria uma conta a receber.
      */
-    public function baixa(BaixaContaReceberRequest $request, int $id): JsonResponse
+    public function store(StoreContaReceberRequest $request): JsonResponse
     {
-        $conta = ContaReceber::findOrFail($id);
+        $conta = $this->cmd->criar($request->validated());
+        $conta->load(['pedido.cliente']);
 
-        $this->service->registrarBaixa($conta, $request->validated());
-
-        $conta->load('pagamentos', 'pedido.cliente');
-
-        return response()->json(new ContaReceberResource($conta), Response::HTTP_OK);
+        return response()->json([
+            'data' => new ContaReceberResource($conta),
+        ], Response::HTTP_CREATED);
     }
 
     /**
-     * Estorna uma conta a receber (não remove).
-     * Cria um pagamento negativo para anular o valor recebido e marca status como ESTORNADO.
-     *
-     * @param EstornarContaReceberRequest $request
-     * @param int $id
-     * @return JsonResponse
+     * Atualiza uma conta a receber.
      */
-    public function estornar(EstornarContaReceberRequest $request, int $id): JsonResponse
+    public function update(UpdateContaReceberRequest $request, ContaReceber $conta): JsonResponse
     {
-        $conta = ContaReceber::with('pagamentos')->findOrFail($id);
+        $conta = $this->cmd->atualizar($conta, $request->validated());
+        $conta->load(['pedido.cliente', 'pagamentos.usuario']);
 
-        $this->service->estornar($conta, $request->validated()['motivo'] ?? null);
+        return response()->json([
+            'data' => new ContaReceberResource($conta),
+        ], Response::HTTP_OK);
+    }
 
-        $conta->load('pagamentos', 'pedido.cliente');
+    /**
+     * Exclui (soft delete) uma conta a receber.
+     */
+    public function destroy(ContaReceber $conta): JsonResponse
+    {
+        $this->cmd->deletar($conta);
 
-        return response()->json(new ContaReceberResource($conta), Response::HTTP_OK);
+        return response()->json([
+            'message' => 'Excluída com sucesso',
+        ], Response::HTTP_OK);
+    }
+
+    /**
+     * Registra um pagamento (baixa) em uma conta a receber.
+     */
+    public function pagar(BaixaContaReceberRequest $request, ContaReceber $conta): JsonResponse
+    {
+        $dados = $request->validated();
+
+        if ($request->hasFile('comprovante')) {
+            $dados['comprovante'] = $request->file('comprovante');
+        }
+
+        $pagamento = $this->cmd->registrarPagamento($conta, $dados);
+
+        // retorna a conta atualizada (padrão similar ao contas a pagar)
+        $conta->refresh()->load(['pedido.cliente', 'pagamentos.usuario']);
+
+        return response()->json([
+            'data' => new ContaReceberResource($conta),
+        ], Response::HTTP_OK);
+    }
+
+    /**
+     * Estorna (remove) um pagamento específico da conta a receber.
+     * DELETE /contas-receber/{conta}/pagamentos/{pagamento}
+     */
+    public function estornarPagamento(ContaReceber $conta, int $pagamento): JsonResponse
+    {
+        $contaAtualizada = $this->cmd->estornarPagamento($conta, $pagamento);
+
+        return response()->json([
+            'data' => new ContaReceberResource($contaAtualizada),
+        ], Response::HTTP_OK);
     }
 }

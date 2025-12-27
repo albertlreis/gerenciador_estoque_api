@@ -14,7 +14,9 @@ use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+use Illuminate\Http\Response;
 use Maatwebsite\Excel\Facades\Excel;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 class ContaPagarController extends Controller
 {
@@ -84,11 +86,22 @@ class ContaPagarController extends Controller
      */
     public function show(ContaPagar $conta_pagar): JsonResponse
     {
-        $conta_pagar->load(['fornecedor', 'pagamentos.usuario']);
+        $conta_pagar->load([
+            'fornecedor:id,nome',
+            'categoria:id,nome,tipo',
+            'centroCusto:id,nome',
+            'pagamentos' => function ($q) {
+                $q->orderByDesc('data_pagamento')
+                    ->with([
+                        'usuario:id,nome',
+                        'contaFinanceira:id,nome',
+                    ]);
+            },
+        ]);
 
         return response()->json([
-            'data' => new ContaPagarResource($conta_pagar)
-        ], 200);
+            'data' => new ContaPagarResource($conta_pagar),
+        ]);
     }
 
     /**
@@ -124,7 +137,10 @@ class ContaPagarController extends Controller
         $this->cmd->registrarPagamento($conta_pagar, $dados);
 
         // retorna conta atualizada (status real)
-        $conta_pagar->refresh()->load(['fornecedor', 'pagamentos.usuario']);
+        $conta_pagar->refresh()->load([
+            'fornecedor', 'categoria', 'centroCusto',
+            'pagamentos.usuario', 'pagamentos.contaFinanceira'
+        ]);
 
         return response()->json([
             'data' => new ContaPagarResource($conta_pagar)
@@ -139,17 +155,20 @@ class ContaPagarController extends Controller
         // service já retorna resource, mas aqui padronizamos com a conta atualizada
         $this->cmd->estornarPagamento($conta_pagar, $pagamento);
 
-        $conta_pagar->refresh()->load(['fornecedor', 'pagamentos.usuario']);
+        $conta_pagar->refresh()->load([
+            'fornecedor', 'categoria', 'centroCusto',
+            'pagamentos.usuario', 'pagamentos.contaFinanceira'
+        ]);
 
         return response()->json([
             'data' => new ContaPagarResource($conta_pagar)
-        ], 200);
+        ]);
     }
 
     /**
      * Exporta os dados para Excel
      */
-    public function exportExcel(Request $request)
+    public function exportExcel(Request $request): BinaryFileResponse
     {
         $export = new ContasPagarExport($request->all());
         return Excel::download($export, 'contas_pagar.xlsx');
@@ -158,7 +177,7 @@ class ContaPagarController extends Controller
     /**
      * Exporta os dados para PDF
      */
-    public function exportPdf(Request $request)
+    public function exportPdf(Request $request): Response
     {
         $dados = (new ContasPagarExport($request->all()))->collection();
 

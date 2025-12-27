@@ -90,6 +90,7 @@ class PedidoService
      *
      * @param StorePedidoRequest $request
      * @return JsonResponse
+     * @throws \Illuminate\Validation\ValidationException
      */
     public function criarPedido(StorePedidoRequest $request): JsonResponse
     {

@@ -2,20 +2,12 @@
 
 namespace App\Models;
 
+use App\Enums\LancamentoStatus;
+use App\Enums\LancamentoTipo;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Support\Carbon;
 
-/**
- * @property int $id
- * @property string $descricao
- * @property string $tipo   receita|despesa
- * @property string $status pendente|pago|cancelado
- * @property float|string $valor
- * @property Carbon $data_vencimento
- * @property Carbon|null $data_pagamento
- */
 class LancamentoFinanceiro extends Model
 {
     use SoftDeletes;
@@ -24,36 +16,40 @@ class LancamentoFinanceiro extends Model
 
     protected $fillable = [
         'descricao',
-        'tipo',
-        'status',
+        'tipo',            // receita|despesa
+        'status',          // confirmado|cancelado
+
         'categoria_id',
+        'centro_custo_id',
         'conta_id',
+
         'valor',
-        'data_vencimento',
+
         'data_pagamento',
+        'data_movimento',
         'competencia',
+
         'observacoes',
+
         'referencia_type',
         'referencia_id',
+
+        'pagamento_type',
+        'pagamento_id',
+
         'created_by',
     ];
 
     protected $casts = [
         'valor'          => 'decimal:2',
-        'data_vencimento'=> 'datetime',
         'data_pagamento' => 'datetime',
+        'data_movimento' => 'datetime',
         'competencia'    => 'date',
+
+        'tipo'   => LancamentoTipo::class,
+        'status' => LancamentoStatus::class,
     ];
 
-    /** Atrasado é derivado: pendente + vencimento no passado */
-    public function getAtrasadoAttribute(): bool
-    {
-        if ($this->status !== 'pendente') return false;
-        if (!$this->data_vencimento) return false;
-        return $this->data_vencimento->lt(now());
-    }
-
-    // Ajuste os Models conforme seu projeto
     public function categoria(): BelongsTo
     {
         return $this->belongsTo(CategoriaFinanceira::class, 'categoria_id')->withDefault();
@@ -67,5 +63,10 @@ class LancamentoFinanceiro extends Model
     public function criador(): BelongsTo
     {
         return $this->belongsTo(Usuario::class, 'created_by')->withDefault();
+    }
+
+    public function centroCusto(): BelongsTo
+    {
+        return $this->belongsTo(CentroCusto::class, 'centro_custo_id')->withDefault();
     }
 }

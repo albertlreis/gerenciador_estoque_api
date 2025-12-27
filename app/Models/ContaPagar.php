@@ -18,7 +18,7 @@ class ContaPagar extends Model
     protected $fillable = [
         'fornecedor_id','descricao','numero_documento','data_emissao','data_vencimento',
         'valor_bruto','desconto','juros','multa','status',
-        'centro_custo','categoria','observacoes'
+        'categoria_id','centro_custo_id','observacoes'
     ];
 
     protected $casts = [
@@ -30,6 +30,16 @@ class ContaPagar extends Model
         'multa' => 'decimal:2',
         'status' => ContaStatus::class,
     ];
+
+    public function categoria(): BelongsTo
+    {
+        return $this->belongsTo(CategoriaFinanceira::class, 'categoria_id')->withDefault();
+    }
+
+    public function centroCusto(): BelongsTo
+    {
+        return $this->belongsTo(CentroCusto::class, 'centro_custo_id')->withDefault();
+    }
 
     public function fornecedor(): BelongsTo
     {

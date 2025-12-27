@@ -6,6 +6,9 @@ use App\DTOs\FiltroContaPagarDTO;
 use App\Models\ContaPagar;
 use App\Repositories\Contracts\ContaPagarRepository;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Database\Eloquent\Model;
 
 class ContaPagarRepositoryEloquent implements ContaPagarRepository
 {
@@ -28,13 +31,13 @@ class ContaPagarRepositoryEloquent implements ContaPagarRepository
         if ($filtro->data_fim) $q->whereDate('data_vencimento','<=',$filtro->data_fim);
         if ($filtro->vencidas) $q->whereDate('data_vencimento','<', now()->toDateString())->where('status','!=','PAGA');
 
-        $q->orderBy('data_vencimento')->orderBy('id');
+        $q->orderBy('data_vencimento', 'desc')->orderBy('id');
 
         return $q->paginate($perPage, ['*'], 'page', $page);
     }
 
 
-    public function encontrar(int $id): ?ContaPagar
+    public function encontrar(int $id): Builder|array|Collection|Model
     {
         return ContaPagar::with(['fornecedor','pagamentos.usuario'])->find($id);
     }

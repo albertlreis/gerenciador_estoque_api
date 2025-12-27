@@ -17,8 +17,8 @@ class DespesaRecorrente extends Model
         'fornecedor_id',
         'descricao',
         'numero_documento',
-        'centro_custo',
-        'categoria',
+        'categoria_id',
+        'centro_custo_id',
         'valor_bruto',
         'desconto',
         'juros',
@@ -51,7 +51,15 @@ class DespesaRecorrente extends Model
         'data_fim' => 'date',
     ];
 
-    // Relacionamentos
+    public function categoria(): BelongsTo
+    {
+        return $this->belongsTo(CategoriaFinanceira::class, 'categoria_id')->withDefault();
+    }
+
+    public function centroCusto(): BelongsTo
+    {
+        return $this->belongsTo(CentroCusto::class, 'centro_custo_id')->withDefault();
+    }
 
     public function execucoes(): HasMany
     {

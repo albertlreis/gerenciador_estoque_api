@@ -11,6 +11,8 @@ class CategoriaFinanceiraIndexRequest extends FormRequest
     protected function prepareForValidation(): void
     {
         $this->merge([
+            'q'     => $this->input('q') ? trim((string)$this->input('q')) : null,
+            'tipo'  => $this->input('tipo') ? strtolower((string)$this->input('tipo')) : null,
             'ativo' => $this->toBoolOrNull($this->input('ativo')),
             'tree'  => $this->toBoolOrNull($this->input('tree')),
         ]);
@@ -19,9 +21,7 @@ class CategoriaFinanceiraIndexRequest extends FormRequest
     private function toBoolOrNull(mixed $value): ?bool
     {
         if ($value === null || $value === '') return null;
-
-        // aceita true/false, "true"/"false", 1/0, "1"/"0", "on"/"off", etc
-        return filter_var($value, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE); // bool|null
+        return filter_var($value, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
     }
 
     public function rules(): array

@@ -10,6 +10,7 @@ use App\Http\Controllers\Assistencia\PedidoLookupController;
 use App\Http\Controllers\AssistenciaRelatorioController;
 use App\Http\Controllers\CaixaEstoqueController;
 use App\Http\Controllers\CategoriaFinanceiraController;
+use App\Http\Controllers\CentroCustoController;
 use App\Http\Controllers\CommsProxyController;
 use App\Http\Controllers\ConsignacaoRelatorioController;
 use App\Http\Controllers\ContaFinanceiraController;
@@ -281,6 +282,8 @@ Route::middleware('auth:sanctum')->prefix('v1')->group(function () {
 
     });
 
+    Route::get('centros-custo', [CentroCustoController::class, 'index']);
+
     Route::prefix('contas-pagar')->group(function () {
         Route::get('export/excel', [ContaPagarController::class, 'exportExcel'])->name('contas-pagar.export.excel');
         Route::get('export/pdf',   [ContaPagarController::class, 'exportPdf'])->name('contas-pagar.export.pdf');
@@ -296,6 +299,7 @@ Route::middleware('auth:sanctum')->prefix('v1')->group(function () {
     });
 
     Route::apiResource('contas-pagar', ContaPagarController::class)
+        ->parameters(['contas-pagar' => 'conta_pagar'])
         ->names('contas-pagar')
         ->except(['create', 'edit']);
 

@@ -2,11 +2,13 @@
 
 namespace Database\Seeders;
 
-use App\Enums\ContaReceberStatusEnum;
+use App\Enums\ContaStatus;
+use App\Models\CategoriaFinanceira;
+use App\Models\CentroCusto;
+use App\Models\ContaFinanceira;
 use App\Models\ContaReceber;
-use App\Models\ContaReceberPagamento;
 use App\Models\Pedido;
-use App\Services\ContaReceberService;
+use App\Services\ContaReceberCommandService;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -15,19 +17,29 @@ class ContasReceberSeeder extends Seeder
 {
     public function run(): void
     {
-        /** @var ContaReceberService $service */
-        $service = app(ContaReceberService::class);
+        /** @var ContaReceberCommandService $cmd */
+        $cmd = app(ContaReceberCommandService::class);
 
-        // Ajuste aqui para "muitos registros"
+        $contaFinanceiraId = ContaFinanceira::query()->orderBy('id')->value('id');
+        if (!$contaFinanceiraId) {
+            $this->command?->warn('Nenhuma conta_financeira encontrada. Pulei contas a receber.');
+            return;
+        }
+
+        $catReceita = CategoriaFinanceira::query()->where('tipo', 'receita')->inRandomOrder()->first();
+        $cc = CentroCusto::query()->where('ativo', 1)->inRandomOrder()->first();
+
+        if (!$catReceita || !$cc) {
+            $this->command?->warn('Sem categoria de receita ou centro de custo. Rode seeds/migrations do catálogo antes.');
+            return;
+        }
+
         $maxPedidos = (int) (env('SEED_CONTAS_RECEBER_MAX_PEDIDOS', 1500));
-        $seedParcelasMin = (int) (env('SEED_CONTAS_RECEBER_PARCELAS_MIN', 1));
-        $seedParcelasMax = (int) (env('SEED_CONTAS_RECEBER_PARCELAS_MAX', 3));
+        $parcelasMin = (int) (env('SEED_CONTAS_RECEBER_PARCELAS_MIN', 1));
+        $parcelasMax = (int) (env('SEED_CONTAS_RECEBER_PARCELAS_MAX', 3));
 
-        $formasRecebimento = ['pix', 'boleto', 'cartao', 'transferencia', 'dinheiro'];
-        $centros = ['Vendas', 'Online', 'Projetos', 'Showroom'];
-        $categorias = ['Receitas', 'Venda de Produtos', 'Venda Profissional', 'Serviços'];
+        $formas = ['PIX','BOLETO','CARTAO','TED','DINHEIRO'];
 
-        // Busca pedidos reais
         $pedidos = Pedido::query()
             ->select(['id', 'id_cliente', 'data_pedido', 'valor_total', 'data_limite_entrega', 'numero_externo'])
             ->whereNotNull('valor_total')
@@ -40,128 +52,102 @@ class ContasReceberSeeder extends Seeder
             return;
         }
 
-        DB::transaction(function () use ($pedidos, $service, $seedParcelasMin, $seedParcelasMax, $formasRecebimento, $centros, $categorias) {
-
+        DB::transaction(function () use (
+            $pedidos, $cmd, $parcelasMin, $parcelasMax, $formas, $catReceita, $cc, $contaFinanceiraId
+        ) {
             foreach ($pedidos as $pedido) {
                 $total = (float) $pedido->valor_total;
                 if ($total <= 0) continue;
 
-                $parcelas = random_int($seedParcelasMin, $seedParcelasMax);
+                $parcelas = random_int($parcelasMin, $parcelasMax);
 
-                // Pequena variação para simular descontos/juros/multa
-                $desconto = (random_int(0, 100) <= 12) ? round($total * (random_int(1, 5) / 100), 2) : 0;
-                $juros = 0;
-                $multa = 0;
+                $descontoTotal = (random_int(0, 100) <= 12)
+                    ? round($total * (random_int(1, 5) / 100), 2)
+                    : 0;
 
                 $baseEmissao = $pedido->data_pedido ? Carbon::parse($pedido->data_pedido) : now()->subDays(random_int(1, 120));
                 $primeiroVenc = $pedido->data_limite_entrega ? Carbon::parse($pedido->data_limite_entrega) : $baseEmissao->copy()->addDays(30);
 
-                // Divide valor em parcelas com ajuste na última
-                $valorParcela = round(($total - $desconto) / $parcelas, 2);
+                $valorParcela = round(($total - $descontoTotal) / $parcelas, 2);
 
                 for ($i = 1; $i <= $parcelas; $i++) {
                     $venc = $primeiroVenc->copy()->addDays(30 * ($i - 1));
                     $valor = ($i === $parcelas)
-                        ? round(($total - $desconto) - ($valorParcela * ($parcelas - 1)), 2)
+                        ? round(($total - $descontoTotal) - ($valorParcela * ($parcelas - 1)), 2)
                         : $valorParcela;
 
-                    // Alguns vencidos terão juros/multa
+                    $desconto = ($i === 1 ? $descontoTotal : 0);
+                    $juros = 0;
+                    $multa = 0;
+
                     if ($venc->lt(now()->startOfDay()) && random_int(0, 100) <= 30) {
                         $juros = round($valor * (random_int(1, 3) / 100), 2);
                         $multa = round($valor * (random_int(1, 2) / 100), 2);
-                    } else {
-                        $juros = 0;
-                        $multa = 0;
                     }
 
-                    $valorLiquido = max(0, round($valor - ($i === 1 ? $desconto : 0) + $juros + $multa, 2));
+                    $valorLiquido = max(0, round($valor - $desconto + $juros + $multa, 2));
 
-                    $conta = ContaReceber::create([
-                        'pedido_id'         => $pedido->id,
-                        'descricao'         => "Recebimento Pedido #{$pedido->id} - Parcela {$i}/{$parcelas}",
-                        'numero_documento'  => ($pedido->numero_externo ?: "PED-{$pedido->id}") . "-{$i}",
-                        'data_emissao'      => $baseEmissao->copy()->toDateString(),
-                        'data_vencimento'   => $venc->toDateString(),
-                        'valor_bruto'       => $valor,
-                        'desconto'          => ($i === 1 ? $desconto : 0),
-                        'juros'             => $juros,
-                        'multa'             => $multa,
-                        'valor_liquido'     => $valorLiquido,
-                        'valor_recebido'    => 0,
-                        'saldo_aberto'      => $valorLiquido,
-                        'status'            => ContaReceberStatusEnum::ABERTO->value,
-                        'forma_recebimento' => $formasRecebimento[array_rand($formasRecebimento)],
-                        'centro_custo'      => $centros[array_rand($centros)],
-                        'categoria'         => $categorias[array_rand($categorias)],
-                        'observacoes'       => null,
-                        'created_at'        => now(),
-                        'updated_at'        => now(),
+                    /** @var ContaReceber $conta */
+                    $conta = $cmd->criar([
+                        'pedido_id'        => $pedido->id,
+                        'descricao'        => "Recebimento Pedido #{$pedido->id} - Parcela {$i}/{$parcelas}",
+                        'numero_documento' => ($pedido->numero_externo ?: "PED-{$pedido->id}") . "-{$i}",
+                        'data_emissao'     => $baseEmissao->copy()->toDateString(),
+                        'data_vencimento'  => $venc->toDateString(),
+                        'valor_bruto'      => $valor,
+                        'desconto'         => $desconto,
+                        'juros'            => $juros,
+                        'multa'            => $multa,
+                        'valor_liquido'    => $valorLiquido,
+                        'valor_recebido'   => 0,
+                        'saldo_aberto'     => $valorLiquido,
+                        'status'           => ContaStatus::ABERTA->value,
+                        'forma_recebimento'=> $formas[array_rand($formas)],
+
+                        'categoria_id'     => $catReceita->id,
+                        'centro_custo_id'  => $cc->id,
                     ]);
 
-                    // --- Pagamentos: cria 0, 1 ou 2
+                    // pagamentos: 0, parcial, total
                     $cenario = random_int(1, 100);
 
-                    if ($cenario <= 45) {
-                        // 45%: sem pagamento => ABERTO ou VENCIDO (recalcular resolve)
-                    } elseif ($cenario <= 75) {
-                        // 30%: parcial
+                    if ($cenario > 45 && $cenario <= 75) {
                         $pago = round($valorLiquido * (random_int(20, 80) / 100), 2);
 
-                        ContaReceberPagamento::create([
-                            'conta_receber_id' => $conta->id,
-                            'data_pagamento'   => $venc->copy()->subDays(random_int(0, 10))->toDateString(),
-                            'valor_pago'       => $pago,
-                            'forma_pagamento'  => $conta->forma_recebimento ?: 'Indefinido',
-                            'comprovante'      => null,
-                            'created_at'       => now(),
-                            'updated_at'       => now(),
+                        $cmd->registrarPagamento($conta->fresh(), [
+                            'data_pagamento' => $venc->copy()->subDays(random_int(0, 10))->toDateString(),
+                            'valor' => $pago,
+                            'forma_pagamento' => $formas[array_rand($formas)],
+                            'conta_financeira_id' => $contaFinanceiraId,
                         ]);
-                    } else {
-                        // 25%: recebido total (às vezes com 2 pagamentos)
-                        $doisPag = random_int(0, 100) <= 40;
+                    } elseif ($cenario > 75) {
+                        $dois = random_int(0, 100) <= 40;
 
-                        if ($doisPag) {
+                        if ($dois) {
                             $p1 = round($valorLiquido * 0.5, 2);
                             $p2 = round($valorLiquido - $p1, 2);
 
-                            ContaReceberPagamento::create([
-                                'conta_receber_id' => $conta->id,
-                                'data_pagamento'   => $venc->copy()->subDays(random_int(0, 15))->toDateString(),
-                                'valor_pago'       => $p1,
-                                'forma_pagamento'  => $conta->forma_recebimento ?: 'Indefinido',
-                                'comprovante'      => null,
-                                'created_at'       => now(),
-                                'updated_at'       => now(),
+                            $cmd->registrarPagamento($conta->fresh(), [
+                                'data_pagamento' => $venc->copy()->subDays(random_int(0, 15))->toDateString(),
+                                'valor' => $p1,
+                                'forma_pagamento' => $formas[array_rand($formas)],
+                                'conta_financeira_id' => $contaFinanceiraId,
                             ]);
 
-                            ContaReceberPagamento::create([
-                                'conta_receber_id' => $conta->id,
-                                'data_pagamento'   => $venc->copy()->subDays(random_int(0, 5))->toDateString(),
-                                'valor_pago'       => $p2,
-                                'forma_pagamento'  => $conta->forma_recebimento ?: 'Indefinido',
-                                'comprovante'      => null,
-                                'created_at'       => now(),
-                                'updated_at'       => now(),
+                            $cmd->registrarPagamento($conta->fresh(), [
+                                'data_pagamento' => $venc->copy()->subDays(random_int(0, 5))->toDateString(),
+                                'valor' => $p2,
+                                'forma_pagamento' => $formas[array_rand($formas)],
+                                'conta_financeira_id' => $contaFinanceiraId,
                             ]);
                         } else {
-                            ContaReceberPagamento::create([
-                                'conta_receber_id' => $conta->id,
-                                'data_pagamento'   => $venc->copy()->subDays(random_int(0, 10))->toDateString(),
-                                'valor_pago'       => $valorLiquido,
-                                'forma_pagamento'  => $conta->forma_recebimento ?: 'Indefinido',
-                                'comprovante'      => null,
-                                'created_at'       => now(),
-                                'updated_at'       => now(),
+                            $cmd->registrarPagamento($conta->fresh(), [
+                                'data_pagamento' => $venc->copy()->subDays(random_int(0, 10))->toDateString(),
+                                'valor' => $valorLiquido,
+                                'forma_pagamento' => $formas[array_rand($formas)],
+                                'conta_financeira_id' => $contaFinanceiraId,
                             ]);
                         }
-                    }
-
-                    // Recalcula (status/saldo/recebido) com base nos pagamentos criados
-                    $service->recalcular($conta->fresh(), true);
-
-                    // ~3% das contas: soft delete com estorno automático (pra testar feature)
-                    if (random_int(1, 100) <= 3) {
-                        $service->remover($conta->fresh(), 'Seed: teste de estorno + soft delete');
                     }
                 }
             }

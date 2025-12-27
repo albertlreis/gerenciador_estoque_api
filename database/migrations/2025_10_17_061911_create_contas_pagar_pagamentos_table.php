@@ -6,35 +6,36 @@ use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
-    /**
-     * Run the migrations.
-     *
-     * @return void
-     */
     public function up(): void
     {
         Schema::create('contas_pagar_pagamentos', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('conta_pagar_id')->constrained('contas_pagar')->cascadeOnDelete();
-            $table->date('data_pagamento');
-            $table->decimal('valor', 15);
-            $table->string('forma_pagamento', 30)->nullable();
+
+            $table->foreignId('conta_pagar_id')
+                ->constrained('contas_pagar')
+                ->cascadeOnDelete();
+
+            $table->date('data_pagamento')->index();
+            $table->decimal('valor', 15, 2);
+            $table->string('forma_pagamento', 30);
+
             $table->string('comprovante_path')->nullable();
             $table->text('observacoes')->nullable();
-            $table->unsignedInteger('usuario_id')->nullable();
-            $table->unsignedBigInteger('conta_financeira_id')->nullable()->after('usuario_id');
+
+            $table->unsignedInteger('usuario_id')->nullable()->index();
+            $table->foreign('usuario_id')->references('id')->on('acesso_usuarios')->nullOnDelete();
+
+            $table->foreignId('conta_financeira_id')
+                ->constrained('contas_financeiras')
+                ->restrictOnDelete();
+
             $table->timestamps();
 
-            $table->foreign('usuario_id')->references('id')->on('acesso_usuarios')->onDelete('set null');
-            $table->foreign('conta_financeira_id')->references('id')->on('contas_financeiras')->nullOnDelete();
+            $table->index(['conta_pagar_id', 'data_pagamento'], 'ix_cpp_conta_data');
+            $table->index(['conta_financeira_id', 'data_pagamento'], 'ix_cpp_cf_data');
         });
     }
 
-    /**
-     * Reverse the migrations.
-     *
-     * @return void
-     */
     public function down(): void
     {
         Schema::dropIfExists('contas_pagar_pagamentos');

@@ -6,27 +6,34 @@ use Illuminate\Foundation\Http\FormRequest;
 
 class LancamentoFinanceiroIndexRequest extends FormRequest
 {
-    public function authorize(): bool
+    public function authorize(): bool { return true; }
+
+    protected function prepareForValidation(): void
     {
-        return true; // depois você pluga permissões/policies
+        $this->merge([
+            'q'      => $this->input('q') ? trim((string)$this->input('q')) : null,
+            'tipo'   => $this->input('tipo') ? strtolower((string)$this->input('tipo')) : null,
+            'status' => $this->input('status') ? strtolower((string)$this->input('status')) : null,
+        ]);
     }
 
     public function rules(): array
     {
         return [
+            // período por data_movimento
             'data_inicio' => ['nullable', 'date'],
             'data_fim'    => ['nullable', 'date', 'after_or_equal:data_inicio'],
 
-            'status'      => ['nullable', 'in:pendente,pago,cancelado'],
-            'atrasado'    => ['nullable', 'boolean'],
+            'status'      => ['nullable', 'in:confirmado,cancelado'],
+            'tipo'        => ['nullable', 'in:receita,despesa'],
 
             'categoria_id'=> ['nullable', 'integer', 'min:1'],
             'conta_id'    => ['nullable', 'integer', 'min:1'],
-            'tipo'        => ['nullable', 'in:receita,despesa'],
+            'centro_custo_id' => ['nullable', 'integer', 'min:1'],
 
             'q'           => ['nullable', 'string', 'max:255'],
 
-            'order_by'    => ['nullable', 'in:data_vencimento,data_pagamento,valor,created_at,id'],
+            'order_by'    => ['nullable', 'in:data_movimento,competencia,valor,created_at,id'],
             'order_dir'   => ['nullable', 'in:asc,desc'],
 
             'page'        => ['nullable', 'integer', 'min:1'],

@@ -23,8 +23,15 @@ class ContaReceberResource extends JsonResource
             'saldo_aberto'      => (float) $this->saldo_aberto,
             'status'            => $this->status,
             'forma_recebimento' => $this->forma_recebimento,
-            'centro_custo'      => $this->centro_custo,
-            'categoria'         => $this->categoria,
+            'categoria' => $this->whenLoaded('categoria', fn() => [
+                'id' => $this->categoria?->id,
+                'nome' => $this->categoria?->nome,
+                'tipo' => $this->categoria?->tipo,
+            ]),
+            'centro_custo' => $this->whenLoaded('centroCusto', fn() => [
+                'id' => $this->centroCusto?->id,
+                'nome' => $this->centroCusto?->nome,
+            ]),
             'observacoes'       => $this->observacoes,
 
             'pedido' => $this->whenLoaded('pedido', function () {

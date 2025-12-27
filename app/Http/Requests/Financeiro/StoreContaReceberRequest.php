@@ -23,8 +23,8 @@ class StoreContaReceberRequest extends FormRequest
             'desconto' => ['nullable','numeric','min:0'],
             'juros' => ['nullable','numeric','min:0'],
             'multa' => ['nullable','numeric','min:0'],
-            'centro_custo' => ['nullable','string','max:100'],
-            'categoria' => ['nullable','string','max:100'],
+            'categoria_id' => ['nullable','integer','exists:categorias_financeiras,id'],
+            'centro_custo_id' => ['nullable','integer','exists:centros_custo,id'],
             'observacoes' => ['nullable','string'],
             'status' => ['nullable','in:ABERTA,PARCIAL,PAGA,CANCELADA'],
         ];

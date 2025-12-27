@@ -6,67 +6,49 @@ use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
-    /**
-     * Run the migrations.
-     *
-     * @return void
-     */
     public function up(): void
     {
         Schema::create('lancamentos_financeiros', function (Blueprint $table) {
             $table->id();
 
             $table->string('descricao', 255);
-            // receita | despesa
             $table->string('tipo', 20)->index();
+            $table->string('status', 20)->default('confirmado')->index();
 
-            // pendente | pago | cancelado (atrasado é derivado)
-            $table->string('status', 20)->default('pendente')->index();
+            $table->foreignId('categoria_id')->nullable()
+                ->constrained('categorias_financeiras')->nullOnDelete();
 
-            $table->unsignedBigInteger('categoria_id')->nullable()->index();
-            $table->unsignedBigInteger('conta_id')->nullable()->index();
+            $table->foreignId('centro_custo_id')->nullable()
+                ->constrained('centros_custo')->nullOnDelete();
 
-            $table->decimal('valor', 12, 2);
+            $table->foreignId('conta_id')->nullable()
+                ->constrained('contas_financeiras')->nullOnDelete();
 
-            $table->dateTime('data_vencimento')->index();
+            $table->decimal('valor', 15, 2);
+
             $table->dateTime('data_pagamento')->nullable()->index();
-
-            // Opcional (dashboard por competência depois). Pode ficar nulo por enquanto.
+            $table->dateTime('data_movimento')->nullable()->index();
             $table->date('competencia')->nullable()->index();
 
             $table->text('observacoes')->nullable();
 
-            // Opcional: vínculo com outras entidades (pedido, boleto etc.)
-            $table->string('referencia_type', 120)->nullable()->index();
+            $table->string('referencia_type', 190)->nullable()->index();
             $table->unsignedBigInteger('referencia_id')->nullable()->index();
 
-            // Quem criou
+            $table->string('pagamento_type', 190)->nullable()->index();
+            $table->unsignedBigInteger('pagamento_id')->nullable()->index();
+
             $table->unsignedInteger('created_by')->nullable()->index();
+            $table->foreign('created_by')->references('id')->on('acesso_usuarios')->nullOnDelete();
 
             $table->softDeletes();
             $table->timestamps();
 
-            // FKs (ajuste os nomes das tabelas se no seu projeto forem outros)
-            $table->foreign('categoria_id')
-                ->references('id')->on('categorias_financeiras')
-                ->nullOnDelete();
-
-            $table->foreign('conta_id')
-                ->references('id')->on('contas_financeiras')
-                ->nullOnDelete();
-
-            $table->foreign('created_by')
-                ->references('id')->on('acesso_usuarios')
-                ->nullOnDelete();
-
+            $table->unique(['pagamento_type', 'pagamento_id'], 'ux_lf_pagamento');
+            $table->index(['tipo', 'status', 'data_movimento'], 'ix_lf_tipo_status_data');
         });
     }
 
-    /**
-     * Reverse the migrations.
-     *
-     * @return void
-     */
     public function down(): void
     {
         Schema::dropIfExists('lancamentos_financeiros');

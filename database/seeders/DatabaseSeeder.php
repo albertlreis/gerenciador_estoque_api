@@ -32,7 +32,7 @@ class DatabaseSeeder extends Seeder
             ProdutosSeeder::class,
             ProdutoVariacoesSeeder::class,
             ProdutoVariacaoOutletSeeder::class,
-            ProdutoImagensSeeder::class,
+//            ProdutoImagensSeeder::class,
             DepositosSeeder::class,
             EstoqueSeeder::class,
             EstoqueMovimentacoesSeeder::class,
@@ -46,11 +46,12 @@ class DatabaseSeeder extends Seeder
             AssistenciaDepositoSeeder::class,
             AssistenciaDemoSeeder::class,
 
+            CentrosCustoSeeder::class,
+            CategoriasFinanceirasSeeder::class,
+            ContasFinanceirasSeeder::class,
             ContaPagarSeeder::class,
             ContaPagarPagamentoSeeder::class,
             ContasReceberSeeder::class,
-            CategoriasFinanceirasSeeder::class,
-            ContasFinanceirasSeeder::class,
             LancamentosFinanceirosSeeder::class,
             DespesasRecorrentesSeeder::class,
         ]);

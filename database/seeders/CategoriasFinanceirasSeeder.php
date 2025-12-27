@@ -11,96 +11,52 @@ class CategoriasFinanceirasSeeder extends Seeder
     {
         $now = now();
 
-        // === RECEITAS ===
-        $receitas = CategoriaFinanceira::create([
-            'nome'   => 'Receitas',
-            'slug'   => 'receitas',
-            'tipo'   => 'receita',
-            'ordem'  => 1,
-            'ativo'  => true,
-            'padrao' => true,
-        ]);
+        $receitas = CategoriaFinanceira::updateOrCreate(
+            ['slug' => 'receitas'],
+            ['nome' => 'Receitas','tipo' => 'receita','ordem' => 1,'ativo' => true,'padrao' => true,'categoria_pai_id' => null,'meta_json' => null]
+        );
 
-        CategoriaFinanceira::insert([
-            [
-                'nome' => 'Vendas',
-                'slug' => 'vendas',
-                'tipo' => 'receita',
-                'categoria_pai_id' => $receitas->id,
-                'ordem' => 1,
-                'ativo' => true,
-                'padrao' => false,
-                'created_at' => $now,
-                'updated_at' => $now,
-            ],
-            [
-                'nome' => 'Serviços',
-                'slug' => 'servicos',
-                'tipo' => 'receita',
-                'categoria_pai_id' => $receitas->id,
-                'ordem' => 2,
-                'ativo' => true,
-                'padrao' => false,
-                'created_at' => $now,
-                'updated_at' => $now,
-            ],
-        ]);
+        $despesas = CategoriaFinanceira::updateOrCreate(
+            ['slug' => 'despesas'],
+            ['nome' => 'Despesas','tipo' => 'despesa','ordem' => 2,'ativo' => true,'padrao' => true,'categoria_pai_id' => null,'meta_json' => null]
+        );
 
-        // === DESPESAS ===
-        $despesas = CategoriaFinanceira::create([
-            'nome'   => 'Despesas',
-            'slug'   => 'despesas',
-            'tipo'   => 'despesa',
-            'ordem'  => 2,
-            'ativo'  => true,
-            'padrao' => true,
-        ]);
+        $children = [
+            // RECEITAS
+            ['nome' => 'Vendas',    'slug' => 'vendas',    'tipo' => 'receita', 'pai' => $receitas->id, 'ordem' => 1],
+            ['nome' => 'Serviços',  'slug' => 'servicos',  'tipo' => 'receita', 'pai' => $receitas->id, 'ordem' => 2],
+            ['nome' => 'Juros',     'slug' => 'juros-receita', 'tipo' => 'receita', 'pai' => $receitas->id, 'ordem' => 3],
+            ['nome' => 'Outros',    'slug' => 'outros-receitas','tipo' => 'receita','pai' => $receitas->id,'ordem' => 99,'padrao' => true],
 
-        CategoriaFinanceira::insert([
-            [
-                'nome' => 'Fornecedores',
-                'slug' => 'fornecedores',
-                'tipo' => 'despesa',
-                'categoria_pai_id' => $despesas->id,
-                'ordem' => 1,
-                'ativo' => true,
-                'padrao' => false,
-                'created_at' => $now,
-                'updated_at' => $now,
-            ],
-            [
-                'nome' => 'Impostos',
-                'slug' => 'impostos',
-                'tipo' => 'despesa',
-                'categoria_pai_id' => $despesas->id,
-                'ordem' => 2,
-                'ativo' => true,
-                'padrao' => false,
-                'created_at' => $now,
-                'updated_at' => $now,
-            ],
-            [
-                'nome' => 'Folha de Pagamento',
-                'slug' => 'folha-pagamento',
-                'tipo' => 'despesa',
-                'categoria_pai_id' => $despesas->id,
-                'ordem' => 3,
-                'ativo' => true,
-                'padrao' => false,
-                'created_at' => $now,
-                'updated_at' => $now,
-            ],
-            [
-                'nome' => 'Outros',
-                'slug' => 'outros-despesas',
-                'tipo' => 'despesa',
-                'categoria_pai_id' => $despesas->id,
-                'ordem' => 99,
-                'ativo' => true,
-                'padrao' => true,
-                'created_at' => $now,
-                'updated_at' => $now,
-            ],
-        ]);
+            // DESPESAS (inclui o que suas seeds tentam achar por slug)
+            ['nome' => 'Fornecedores',       'slug' => 'fornecedores',    'tipo' => 'despesa', 'pai' => $despesas->id, 'ordem' => 1],
+            ['nome' => 'Impostos',           'slug' => 'impostos',        'tipo' => 'despesa', 'pai' => $despesas->id, 'ordem' => 2],
+            ['nome' => 'Folha de Pagamento', 'slug' => 'folha-pagamento', 'tipo' => 'despesa', 'pai' => $despesas->id, 'ordem' => 3],
+
+            ['nome' => 'Aluguel',            'slug' => 'aluguel',   'tipo' => 'despesa', 'pai' => $despesas->id, 'ordem' => 10],
+            ['nome' => 'Internet',           'slug' => 'internet',  'tipo' => 'despesa', 'pai' => $despesas->id, 'ordem' => 11],
+            ['nome' => 'Energia',            'slug' => 'energia',   'tipo' => 'despesa', 'pai' => $despesas->id, 'ordem' => 12],
+            ['nome' => 'Software',           'slug' => 'software',  'tipo' => 'despesa', 'pai' => $despesas->id, 'ordem' => 13],
+            ['nome' => 'Seguro',             'slug' => 'seguro',    'tipo' => 'despesa', 'pai' => $despesas->id, 'ordem' => 14],
+
+            ['nome' => 'Outros', 'slug' => 'outros-despesas', 'tipo' => 'despesa', 'pai' => $despesas->id, 'ordem' => 99, 'padrao' => true],
+        ];
+
+        foreach ($children as $c) {
+            CategoriaFinanceira::updateOrCreate(
+                ['slug' => $c['slug']],
+                [
+                    'nome' => $c['nome'],
+                    'tipo' => $c['tipo'],
+                    'categoria_pai_id' => $c['pai'],
+                    'ordem' => $c['ordem'],
+                    'ativo' => true,
+                    'padrao' => $c['padrao'] ?? false,
+                    'meta_json' => null,
+                    'created_at' => $now,
+                    'updated_at' => $now,
+                ]
+            );
+        }
     }
 }

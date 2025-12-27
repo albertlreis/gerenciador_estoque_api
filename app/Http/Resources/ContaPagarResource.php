@@ -12,6 +12,9 @@ class ContaPagarResource extends JsonResource
     {
         return [
             'id' => $this->id,
+            'fornecedor_id'    => $this->fornecedor_id ? (int) $this->fornecedor_id : null,
+            'categoria_id'     => $this->categoria_id ? (int) $this->categoria_id : null,
+            'centro_custo_id'  => $this->centro_custo_id ? (int) $this->centro_custo_id : null,
             'descricao' => $this->descricao,
             'numero_documento' => $this->numero_documento,
             'data_emissao' => optional($this->data_emissao)->format('Y-m-d'),
@@ -26,8 +29,16 @@ class ContaPagarResource extends JsonResource
             'status' => $this->status instanceof BackedEnum
                 ? $this->status->value
                 : ($this->status ?? 'INDEFINIDO'),
-            'centro_custo' => $this->centro_custo,
-            'categoria' => $this->categoria,
+            'categoria' => $this->whenLoaded('categoria', fn() => [
+                'id' => $this->categoria?->id,
+                'nome' => $this->categoria?->nome,
+                'tipo' => $this->categoria?->tipo,
+            ]),
+            'centro_custo' => $this->whenLoaded('centroCusto', fn() => [
+                'id' => $this->centroCusto?->id,
+                'nome' => $this->centroCusto?->nome,
+            ]),
+
             'observacoes' => $this->observacoes,
             'fornecedor' => $this->whenLoaded('fornecedor', fn() => [
                 'id' => $this->fornecedor?->id,

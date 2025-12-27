@@ -11,17 +11,15 @@ class ContaFinanceiraIndexRequest extends FormRequest
     protected function prepareForValidation(): void
     {
         $this->merge([
+            'q'     => $this->input('q') ? trim((string)$this->input('q')) : null,
+            'tipo'  => $this->input('tipo') ? strtolower((string)$this->input('tipo')) : null,
             'ativo' => $this->toBoolOrNull($this->input('ativo')),
         ]);
     }
 
     private function toBoolOrNull(mixed $value): ?bool
     {
-        if ($value === null || $value === '') {
-            return null;
-        }
-
-        // Aceita: true, false, "true", "false", 1, 0, "1", "0", "on", "off"
+        if ($value === null || $value === '') return null;
         return filter_var($value, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
     }
 
@@ -29,7 +27,7 @@ class ContaFinanceiraIndexRequest extends FormRequest
     {
         return [
             'q'     => ['nullable', 'string', 'max:255'],
-            'tipo'  => ['nullable', 'string', 'max:30'],
+            'tipo'  => ['nullable', 'string', 'max:30'], // mantém flexível
             'ativo' => ['nullable', 'boolean'],
         ];
     }

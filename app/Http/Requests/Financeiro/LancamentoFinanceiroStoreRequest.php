@@ -6,9 +6,15 @@ use Illuminate\Foundation\Http\FormRequest;
 
 class LancamentoFinanceiroStoreRequest extends FormRequest
 {
-    public function authorize(): bool
+    public function authorize(): bool { return true; }
+
+    protected function prepareForValidation(): void
     {
-        return true;
+        $this->merge([
+            'descricao' => $this->input('descricao') ? trim((string)$this->input('descricao')) : null,
+            'tipo'      => $this->input('tipo') ? strtolower((string)$this->input('tipo')) : null,
+            'status'    => $this->input('status') ? strtolower((string)$this->input('status')) : null,
+        ]);
     }
 
     public function rules(): array
@@ -16,21 +22,24 @@ class LancamentoFinanceiroStoreRequest extends FormRequest
         return [
             'descricao'      => ['required', 'string', 'max:255'],
             'tipo'           => ['required', 'in:receita,despesa'],
-            'status'         => ['nullable', 'in:pendente,pago,cancelado'],
+            'status'         => ['nullable', 'in:confirmado,cancelado'],
 
             'categoria_id'   => ['nullable', 'integer', 'min:1'],
+            'centro_custo_id'=> ['nullable', 'integer', 'min:1'],
             'conta_id'       => ['nullable', 'integer', 'min:1'],
 
             'valor'          => ['required', 'numeric', 'min:0.01'],
 
-            'data_vencimento'=> ['required', 'date'],
-            'data_pagamento' => ['nullable', 'date'],
+            'data_movimento' => ['required', 'date'],
+            'competencia'    => ['nullable', 'date'], // ou date_format:Y-m-d se quiser travar
 
-            'competencia'    => ['nullable', 'date'],
             'observacoes'    => ['nullable', 'string'],
 
             'referencia_type'=> ['nullable', 'string', 'max:120'],
             'referencia_id'  => ['nullable', 'integer', 'min:1'],
+
+            'pagamento_type' => ['nullable', 'string', 'max:120'],
+            'pagamento_id'   => ['nullable', 'integer', 'min:1'],
         ];
     }
 }

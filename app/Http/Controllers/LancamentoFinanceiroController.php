@@ -20,24 +20,24 @@ class LancamentoFinanceiroController extends Controller
         $dto = new FiltroLancamentoFinanceiroDTO($request->validated());
         $pag = $this->service->listar($dto);
 
-        return response()->json([
-            'data' => LancamentoFinanceiroResource::collection($pag),
-            'meta' => [
-                'page'        => $pag->currentPage(),
-                'per_page'    => $pag->perPage(),
-                'total'       => $pag->total(),
-                'last_page'   => $pag->lastPage(),
-            ],
-        ]);
+        return LancamentoFinanceiroResource::collection($pag)
+            ->additional([
+                'meta' => [
+                    'page'      => $pag->currentPage(),
+                    'per_page'  => $pag->perPage(),
+                    'total'     => $pag->total(),
+                    'last_page' => $pag->lastPage(),
+                ],
+            ])
+            ->response();
     }
 
     public function show(LancamentoFinanceiro $lancamento): JsonResponse
     {
-        // Garante relations carregadas
-        $lancamento->load(['categoria', 'conta', 'criador']);
+        $lancamento->load(['categoria', 'conta', 'criador', 'centroCusto']);
 
         return response()->json([
-            'data' => new LancamentoFinanceiroResource($lancamento)
+            'data' => new LancamentoFinanceiroResource($lancamento),
         ]);
     }
 
@@ -65,9 +65,7 @@ class LancamentoFinanceiroController extends Controller
     {
         $this->service->remover($lancamento);
 
-        return response()->json([
-            'message' => 'Lançamento removido com sucesso.'
-        ]);
+        return response()->json(['message' => 'Lançamento removido com sucesso.']);
     }
 
     public function totais(LancamentoFinanceiroIndexRequest $request): JsonResponse

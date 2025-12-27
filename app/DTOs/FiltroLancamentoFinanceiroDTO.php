@@ -40,8 +40,12 @@ class FiltroLancamentoFinanceiroDTO
 
         $this->q           = isset($data['q']) ? trim((string)$data['q']) : null;
 
-        $this->orderBy     = $data['order_by'] ?? 'data_vencimento';
-        $this->orderDir    = $data['order_dir'] ?? 'desc';
+        $this->orderBy  = $data['order_by'] ?? 'data_movimento';
+        $this->orderDir = strtolower($data['order_dir'] ?? 'desc');
+        if (!in_array($this->orderDir, ['asc','desc'], true)) $this->orderDir = 'desc';
+
+        $allowedOrderBy = ['id','data_movimento','data_pagamento','competencia','valor','created_at'];
+        if (!in_array($this->orderBy, $allowedOrderBy, true)) $this->orderBy = 'data_movimento';
 
         $this->page        = isset($data['page']) ? max(1, (int)$data['page']) : 1;
         $this->perPage     = isset($data['per_page']) ? min(200, max(1, (int)$data['per_page'])) : 25;

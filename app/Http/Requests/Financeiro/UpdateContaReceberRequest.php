@@ -21,8 +21,8 @@ class UpdateContaReceberRequest extends FormRequest
             'desconto' => ['sometimes','numeric','min:0'],
             'juros' => ['sometimes','numeric','min:0'],
             'multa' => ['sometimes','numeric','min:0'],
-            'centro_custo' => ['sometimes','string','max:100'],
-            'categoria' => ['sometimes','string','max:100'],
+            'categoria_id' => ['sometimes','nullable','integer','exists:categorias_financeiras,id'],
+            'centro_custo_id' => ['sometimes','nullable','integer','exists:centros_custo,id'],
             'observacoes' => ['nullable','string'],
             'status' => ['nullable','in:ABERTA,PARCIAL,PAGA,CANCELADA'],
         ];

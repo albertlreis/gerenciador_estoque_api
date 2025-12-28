@@ -6,21 +6,12 @@ use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
-    /**
-     * Run the migrations.
-     *
-     * @return void
-     */
     public function up(): void
     {
         Schema::create('cliente_enderecos', function (Blueprint $table) {
-            $table->increments('id'); // <- int unsigned (compatível)
+            $table->increments('id');
 
-            $table->unsignedInteger('cliente_id'); // <- int unsigned (compatível)
-            $table->foreign('cliente_id')
-                ->references('id')
-                ->on('clientes')
-                ->onDelete('cascade');
+            $table->unsignedInteger('cliente_id');
 
             $table->string('cep', 10)->nullable();
             $table->string('endereco', 255)->nullable();
@@ -35,16 +26,16 @@ return new class extends Migration
 
             $table->timestamps();
 
-            $table->index(['cliente_id', 'principal']);
+            $table->index(['cliente_id', 'principal'], 'idx_cliente_enderecos_principal');
             $table->unique(['cliente_id', 'fingerprint'], 'uq_cliente_endereco_fingerprint');
+
+            $table->foreign('cliente_id', 'cliente_enderecos_cliente_fk')
+                ->references('id')->on('clientes')
+                ->cascadeOnDelete()
+                ->onUpdate('restrict');
         });
     }
 
-    /**
-     * Reverse the migrations.
-     *
-     * @return void
-     */
     public function down(): void
     {
         Schema::dropIfExists('cliente_enderecos');

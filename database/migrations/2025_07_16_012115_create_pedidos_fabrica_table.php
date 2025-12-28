@@ -6,27 +6,32 @@ use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
-    /**
-     * Run the migrations.
-     *
-     * @return void
-     */
     public function up(): void
     {
         Schema::create('pedidos_fabrica', function (Blueprint $table) {
             $table->id();
-            $table->enum('status', ['pendente', 'enviado', 'parcial', 'entregue', 'cancelado'])->default('pendente');
+
+            $table->enum('status', ['pendente', 'enviado', 'parcial', 'entregue', 'cancelado'])
+                ->default('pendente');
+
             $table->date('data_previsao_entrega')->nullable();
             $table->text('observacoes')->nullable();
+
+            // (opcional, mas muito útil) auditoria do usuário que criou/registrou o pedido
+            $table->unsignedInteger('usuario_id')->nullable();
+
             $table->timestamps();
+
+            $table->index('status');
+            $table->index('data_previsao_entrega');
+
+            $table->foreign('usuario_id', 'pedidos_fabrica_usuario_fk')
+                ->references('id')->on('acesso_usuarios')
+                ->nullOnDelete()
+                ->onUpdate('restrict');
         });
     }
 
-    /**
-     * Reverse the migrations.
-     *
-     * @return void
-     */
     public function down(): void
     {
         Schema::dropIfExists('pedidos_fabrica');

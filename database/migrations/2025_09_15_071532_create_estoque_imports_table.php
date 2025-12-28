@@ -6,35 +6,38 @@ use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
-    /**
-     * Run the migrations.
-     *
-     * @return void
-     */
-    public function up()
+    public function up(): void
     {
         Schema::create('estoque_imports', function (Blueprint $table) {
             $table->id();
+
             $table->string('arquivo_nome');
             $table->string('arquivo_hash')->unique();
-            $table->unsignedBigInteger('usuario_id')->nullable();
-            $table->enum('status', ['pendente','processando','concluido','com_erro','cancelado'])->default('pendente');
+
+            $table->unsignedInteger('usuario_id')->nullable();
+
+            $table->enum('status', ['pendente','processando','concluido','com_erro','cancelado'])
+                ->default('pendente');
+
             $table->unsignedInteger('linhas_total')->default(0);
             $table->unsignedInteger('linhas_processadas')->default(0);
             $table->unsignedInteger('linhas_validas')->default(0);
             $table->unsignedInteger('linhas_invalidas')->default(0);
-            $table->json('metricas')->nullable(); // counts e agregados
+
+            $table->json('metricas')->nullable();
             $table->text('mensagem')->nullable();
+
             $table->timestamps();
+
+            $table->index(['status', 'created_at']);
+            $table->foreign('usuario_id', 'estoque_imports_usuario_fk')
+                ->references('id')->on('acesso_usuarios')
+                ->nullOnDelete()
+                ->onUpdate('restrict');
         });
     }
 
-    /**
-     * Reverse the migrations.
-     *
-     * @return void
-     */
-    public function down()
+    public function down(): void
     {
         Schema::dropIfExists('estoque_imports');
     }

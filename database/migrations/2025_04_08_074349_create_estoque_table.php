@@ -6,38 +6,32 @@ use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
-    /**
-     * Run the migrations.
-     *
-     * @return void
-     */
-    public function up()
+    public function up(): void
     {
         Schema::create('estoque', function (Blueprint $table) {
             $table->increments('id');
+
             $table->unsignedInteger('id_variacao');
             $table->unsignedInteger('id_deposito');
-            $table->integer('quantidade');
+
+            $table->integer('quantidade')->default(0);
             $table->timestamps();
 
-            $table->foreign('id_variacao')
-                ->references('id')
-                ->on('produto_variacoes')
-                ->onDelete('cascade');
-            $table->foreign('id_deposito')
-                ->references('id')
-                ->on('depositos')
-                ->onDelete('cascade');
             $table->unique(['id_variacao', 'id_deposito'], 'uq_estoque');
+
+            $table->foreign('id_variacao', 'estoque_variacao_fk')
+                ->references('id')->on('produto_variacoes')
+                ->cascadeOnDelete()
+                ->onUpdate('restrict');
+
+            $table->foreign('id_deposito', 'estoque_deposito_fk')
+                ->references('id')->on('depositos')
+                ->cascadeOnDelete()
+                ->onUpdate('restrict');
         });
     }
 
-    /**
-     * Reverse the migrations.
-     *
-     * @return void
-     */
-    public function down()
+    public function down(): void
     {
         Schema::dropIfExists('estoque');
     }

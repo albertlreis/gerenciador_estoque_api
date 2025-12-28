@@ -6,32 +6,29 @@ use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
-    /**
-     * Run the migrations.
-     *
-     * @return void
-     */
-    public function up()
+    public function up(): void
     {
         Schema::create('estoque_logs', function (Blueprint $table) {
             $table->id();
-            $table->unsignedBigInteger('id_usuario')->nullable();
+
+            $table->unsignedInteger('id_usuario')->nullable();
             $table->string('acao', 50); // 'entrada','saida','transferencia','scan'
             $table->json('payload')->nullable();
             $table->string('ip', 45)->nullable();
             $table->string('user_agent', 255)->nullable();
+
             $table->timestamps();
 
             $table->index(['acao', 'created_at']);
+
+            $table->foreign('id_usuario', 'estoque_logs_usuario_fk')
+                ->references('id')->on('acesso_usuarios')
+                ->nullOnDelete()
+                ->onUpdate('restrict');
         });
     }
 
-    /**
-     * Reverse the migrations.
-     *
-     * @return void
-     */
-    public function down()
+    public function down(): void
     {
         Schema::dropIfExists('estoque_logs');
     }

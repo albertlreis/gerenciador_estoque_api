@@ -6,33 +6,28 @@ use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
-    /**
-     * Run the migrations.
-     *
-     * @return void
-     */
-    public function up()
+    public function up(): void
     {
         Schema::create('produto_imagens', function (Blueprint $table) {
             $table->increments('id');
             $table->unsignedInteger('id_produto');
+
+            // URL/path (texto longo)
             $table->text('url');
+
             $table->boolean('principal')->default(false);
             $table->timestamps();
 
-            $table->foreign('id_produto')
-                ->references('id')
-                ->on('produtos')
-                ->onDelete('cascade');
+            $table->index(['id_produto', 'principal'], 'idx_pi_produto_principal');
+
+            $table->foreign('id_produto', 'produto_imagens_produto_fk')
+                ->references('id')->on('produtos')
+                ->cascadeOnDelete()
+                ->onUpdate('restrict');
         });
     }
 
-    /**
-     * Reverse the migrations.
-     *
-     * @return void
-     */
-    public function down()
+    public function down(): void
     {
         Schema::dropIfExists('produto_imagens');
     }

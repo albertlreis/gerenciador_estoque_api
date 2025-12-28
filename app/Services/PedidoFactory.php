@@ -33,6 +33,7 @@ final class PedidoFactory
         foreach ($itensCarrinho as $item) {
             PedidoItem::create([
                 'id_pedido'      => $pedido->id,
+                'id_carrinho_item' => $item->id,
                 'id_variacao'    => $item->id_variacao,
                 'quantidade'     => $item->quantidade,
                 'preco_unitario' => $item->preco_unitario,

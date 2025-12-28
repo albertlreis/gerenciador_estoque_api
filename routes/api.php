@@ -30,6 +30,7 @@ use App\Http\Controllers\LancamentoFinanceiroController;
 use App\Http\Controllers\LocalizacaoDimensaoController;
 use App\Http\Controllers\LocalizacaoEstoqueController;
 use App\Http\Controllers\OutletCatalogoController;
+use App\Http\Controllers\PedidoEstoqueController;
 use App\Http\Controllers\PedidoFabricaController;
 use App\Http\Controllers\PedidosRelatorioController;
 use App\Http\Controllers\ProdutoVariacaoOutletController;
@@ -164,7 +165,6 @@ Route::middleware('auth:sanctum')->prefix('v1')->group(function () {
     Route::get('pedidos/exportar', [PedidoController::class, 'exportar']);
     Route::get('pedidos/estatisticas', [PedidoController::class, 'estatisticas']);
     Route::post('pedidos/importar', [PedidoController::class, 'importar']);
-    Route::post('pedidos/importar-pdf', [PedidoController::class, 'importarPDF']);
     Route::post('pedidos/importar-pdf/confirmar', [PedidoController::class, 'confirmarImportacaoPDF']);
 
     Route::prefix('pedidos/{pedido}')->group(function () {
@@ -173,6 +173,9 @@ Route::middleware('auth:sanctum')->prefix('v1')->group(function () {
         Route::get('previsoes', [PedidoStatusHistoricoController::class, 'previsoes']);
         Route::get('fluxo-status', [PedidoStatusHistoricoController::class, 'fluxoStatus']);
         Route::get('completo', [PedidoController::class, 'completo']);
+        Route::post('reservar-estoque', [PedidoEstoqueController::class, 'reservar']);
+        Route::post('expedir', [PedidoEstoqueController::class, 'expedir']);
+        Route::post('cancelar-reservas', [PedidoEstoqueController::class, 'cancelarReservas']);
     });
 
     Route::delete('pedidos/status/{statusHistorico}', [PedidoStatusHistoricoController::class, 'cancelarStatus']);

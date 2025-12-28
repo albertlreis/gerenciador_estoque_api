@@ -11,15 +11,10 @@ use App\Models\ProdutoVariacao;
 use App\Models\ProdutoVariacaoAtributo;
 use App\Enums\PedidoStatus;
 use App\Helpers\StringHelper;
-use App\Traits\ExtracaoClienteTrait;
-use App\Traits\ExtracaoProdutoTrait;
-use App\Services\Parsers\PedidoPDFParser;
-use Exception;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
 
@@ -28,33 +23,6 @@ use Illuminate\Validation\ValidationException;
  */
 class ImportacaoPedidoService
 {
-    use ExtracaoClienteTrait, ExtracaoProdutoTrait;
-
-    /**
-     * Lê o PDF, extrai dados brutos e retorna os campos estruturados.
-     *
-     * @param Request $request
-     * @return \Illuminate\Http\JsonResponse
-     * @throws ValidationException
-     */
-    public function importarPDF(Request $request): JsonResponse
-    {
-        $validator = Validator::make($request->all(), [
-            'arquivo' => 'required|file|mimes:pdf',
-        ]);
-
-        if ($validator->fails()) {
-            throw new ValidationException($validator);
-        }
-
-        $parser = new PedidoPDFParser();
-        $data = $parser->parse($request->file('arquivo'));
-
-        Log::info('[ImportacaoPDF] Arquivo lido com sucesso.', ['nome' => $request->file('arquivo')->getClientOriginalName()]);
-
-        return response()->json($data);
-    }
-
     /**
      * Confirma os dados da importação de um pedido, salvando no banco.
      *
@@ -65,54 +33,81 @@ class ImportacaoPedidoService
     public function confirmarImportacaoPDF(Request $request): JsonResponse
     {
         $validator = Validator::make($request->all(), [
-            'cliente.id'            => 'required|numeric|min:1',
-            'pedido.numero_externo' => 'nullable|string|max:50|unique:pedidos,numero_externo',
-            'pedido.total'          => 'nullable|numeric',
-            'pedido.observacoes'    => 'nullable|string',
-            'itens'                 => 'required|array|min:1',
-            'itens.*.nome'          => 'required|string',
-            'itens.*.quantidade'    => 'required|numeric|min:0.01',
-            'itens.*.valor'         => 'required|numeric|min:0',
-            'itens.*.id_categoria'  => 'required|integer',
+            'pedido.tipo'          => 'required|in:venda,reposicao',
+
+            'cliente.id'           => 'nullable|numeric|min:1',
+
+            'pedido.numero_externo'=> 'nullable|string|max:50|unique:pedidos,numero_externo',
+            'pedido.total'         => 'nullable|numeric',
+            'pedido.observacoes'   => 'nullable|string',
+
+            'itens'                => 'required|array|min:1',
+            'itens.*.nome'         => 'required|string',
+            'itens.*.quantidade'   => 'required|numeric|min:0.01',
+            'itens.*.valor'        => 'required|numeric|min:0',
+            'itens.*.id_categoria' => 'required|integer',
         ]);
+
+        // Condicional: se for venda, cliente.id é obrigatório
+        $validator->sometimes('cliente.id', 'required|numeric|min:1', function ($input) {
+            return data_get($input, 'pedido.tipo') === Pedido::TIPO_VENDA;
+        });
 
         if ($validator->fails()) {
             throw new ValidationException($validator);
         }
 
         return DB::transaction(function () use ($request) {
-
             $usuario     = Auth::user();
-            $dadosCliente = $request->cliente;
-            $dadosPedido  = $request->pedido;
-            $itens        = $request->itens;
+            $dadosCliente = (array) $request->cliente;
+            $dadosPedido  = (array) $request->pedido;
+            $itens        = (array) $request->itens;
 
-            // ---------------------------------------------------------------------
-            // 🧍 CLIENTE
-            // ---------------------------------------------------------------------
-            $dadosCliente['documento'] = preg_replace('/\D/', '', $dadosCliente['documento']);
+            $tipo = $dadosPedido['tipo'] ?? Pedido::TIPO_VENDA;
 
-            $cliente = Cliente::firstOrCreate(
-                ['documento' => $dadosCliente['documento']],
-                [
-                    'nome'     => $dadosCliente['nome'],
-                    'email'    => $dadosCliente['email'] ?? null,
-                    'telefone' => $dadosCliente['telefone'] ?? null,
-                    'endereco' => $dadosCliente['endereco'] ?? null,
-                ]
-            );
+            // -------------------------------------------------------------
+            // 🧍 CLIENTE (somente para venda)
+            // -------------------------------------------------------------
+            $clienteId = null;
 
-            // ---------------------------------------------------------------------
+            if ($tipo === Pedido::TIPO_VENDA) {
+                // Se você realmente quer sempre usar o cliente selecionado, pode buscar direto pelo ID.
+                // Mantive sua lógica de normalização + firstOrCreate, mas note: documento vem vazio no front hoje.
+                $dadosCliente['documento'] = preg_replace('/\D/', '', $dadosCliente['documento'] ?? '');
+
+                // Preferência: se veio id, usa direto
+                if (!empty($dadosCliente['id'])) {
+                    $cliente = Cliente::findOrFail((int) data_get($request->cliente, 'id'));
+                } else {
+                    $cliente = Cliente::firstOrCreate(
+                        ['documento' => $dadosCliente['documento']],
+                        [
+                            'nome'     => $dadosCliente['nome'] ?? 'Cliente',
+                            'email'    => $dadosCliente['email'] ?? null,
+                            'telefone' => $dadosCliente['telefone'] ?? null,
+                            'endereco' => $dadosCliente['endereco'] ?? null,
+                        ]
+                    );
+                }
+
+                $clienteId = $cliente->id;
+            }
+
+            // -------------------------------------------------------------
             // 🧾 PEDIDO
-            // ---------------------------------------------------------------------
+            // -------------------------------------------------------------
+            $valorTotal = $dadosPedido['total']
+                ?? collect($itens)->sum(fn($i) => (float)$i['quantidade'] * (float)$i['valor']);
+
             $pedido = Pedido::create([
-                'id_cliente'     => $cliente->id,
-                'id_usuario'     => $usuario->id,
-                'numero_externo' => $dadosPedido['numero_externo'] ?? null,
-                'data_pedido'    => now(),
-                'valor_total'    => $dadosPedido['total']
-                    ?? collect($itens)->sum(fn($i) => $i['quantidade'] * $i['valor']),
-                'observacoes'    => $dadosPedido['observacoes'] ?? null,
+                'tipo'          => $tipo,
+                'id_cliente'    => $clienteId, // null na reposição
+                'id_usuario'    => $usuario->id,
+                'id_parceiro'   => $dadosPedido['id_parceiro'] ?? null,
+                'numero_externo'=> $dadosPedido['numero_externo'] ?? null,
+                'data_pedido'   => now(),
+                'valor_total'   => $valorTotal,
+                'observacoes'   => $dadosPedido['observacoes'] ?? null,
             ]);
 
             PedidoStatusHistorico::create([
@@ -122,60 +117,40 @@ class ImportacaoPedidoService
                 'usuario_id'  => $usuario->id,
             ]);
 
-            // ---------------------------------------------------------------------
-            // 🧩 ITENS
-            // ---------------------------------------------------------------------
+            // -------------------------------------------------------------
+            // 🧩 ITENS (igual ao seu fluxo atual)
+            // -------------------------------------------------------------
             foreach ($itens as $item) {
-
-                // 🟢 1) Tentar reaproveitar variação existente
                 $variacao = null;
 
                 if (!empty($item['id_variacao'])) {
                     $variacao = ProdutoVariacao::with('atributos')->find($item['id_variacao']);
                 }
 
-                // 🟡 2) Buscar por referência se id_variacao não veio
                 if (!$variacao && !empty($item['ref'])) {
                     $variacao = ProdutoVariacao::with('atributos')
                         ->where('referencia', $item['ref'])
                         ->first();
                 }
 
-                // 🔴 3) Criar nova variação se não existir
                 if (!$variacao) {
-
-                    // criar produto base
                     $produto = Produto::firstOrCreate([
-                        'nome'        => $item['nome'],
-                        'id_categoria'=> $item['id_categoria'],
+                        'nome'         => $item['nome'],
+                        'id_categoria' => $item['id_categoria'],
                     ]);
 
-                    // criar variação
                     $variacao = ProdutoVariacao::create([
                         'produto_id' => $produto->id,
-                        'referencia' => $item['ref'],
+                        'referencia' => $item['ref'] ?? null,
                         'nome'       => $item['nome'],
                         'preco'      => $item['valor'],
                         'custo'      => $item['valor'],
                     ]);
 
-                    // salvar atributos enviados
                     foreach ($item['atributos'] ?? [] as $atrib => $valor) {
-
-                        // Ignora arrays e valores vazios
-                        if (is_array($valor)) {
-                            continue;
-                        }
-
-                        // Converter numéricos para string
-                        if (is_numeric($valor)) {
-                            $valor = (string) $valor;
-                        }
-
-                        // Ignorar null ou strings vazias
-                        if ($valor === null || trim((string)$valor) === '') {
-                            continue;
-                        }
+                        if (is_array($valor)) continue;
+                        if (is_numeric($valor)) $valor = (string) $valor;
+                        if ($valor === null || trim((string)$valor) === '') continue;
 
                         ProdutoVariacaoAtributo::updateOrCreate(
                             [
@@ -187,23 +162,17 @@ class ImportacaoPedidoService
                     }
                 }
 
-                // ---------------------------------------------------------------------
-                // 📝 Criar item do pedido
-                // ---------------------------------------------------------------------
                 PedidoItem::create([
-                    'id_pedido'       => $pedido->id,
-                    'id_variacao'     => $variacao->id,
-                    'quantidade'      => $item['quantidade'],
-                    'preco_unitario'  => $item['valor'],
-                    'subtotal'        => $item['quantidade'] * $item['valor'],
-                    'id_deposito'     => $item['id_deposito'] ?? null,
-                    'observacoes'     => $item['atributos']['observacao'] ?? null,
+                    'id_pedido'      => $pedido->id,
+                    'id_variacao'    => $variacao->id,
+                    'quantidade'     => $item['quantidade'],
+                    'preco_unitario' => $item['valor'],
+                    'subtotal'       => (float)$item['quantidade'] * (float)$item['valor'],
+                    'id_deposito'    => $item['id_deposito'] ?? null,
+                    'observacoes'    => $item['atributos']['observacao'] ?? null,
                 ]);
             }
 
-            // ---------------------------------------------------------------------
-            // 🔁 Retorno completo ao front
-            // ---------------------------------------------------------------------
             $itensConfirmados = $pedido->itens()
                 ->with('variacao.produto', 'variacao.atributos')
                 ->get();
@@ -211,6 +180,7 @@ class ImportacaoPedidoService
             return response()->json([
                 'message' => 'Pedido importado e salvo com sucesso.',
                 'id'      => $pedido->id,
+                'tipo'    => $pedido->tipo,
                 'itens'   => $itensConfirmados->map(function ($item) {
                     return [
                         'id_variacao'   => $item->variacao?->id,

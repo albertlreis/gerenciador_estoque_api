@@ -59,6 +59,7 @@ class PedidoController extends Controller
      *
      * @param StorePedidoRequest $request
      * @return JsonResponse
+     * @throws \Illuminate\Validation\ValidationException
      */
     public function store(StorePedidoRequest $request): JsonResponse
     {
@@ -96,18 +97,6 @@ class PedidoController extends Controller
     public function estatisticas(Request $request): JsonResponse
     {
         return response()->json($this->estatisticaService->obterEstatisticas($request));
-    }
-
-    /**
-     * Lê um PDF de pedido e extrai os dados.
-     *
-     * @param Request $request
-     * @return JsonResponse
-     * @throws \Illuminate\Validation\ValidationException
-     */
-    public function importarPDF(Request $request): JsonResponse
-    {
-        return $this->importacaoService->importarPDF($request);
     }
 
     /**

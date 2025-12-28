@@ -6,6 +6,7 @@ use App\DTOs\FiltroMovimentacaoEstoqueDTO;
 use App\Enums\EstoqueMovimentacaoTipo;
 use App\Http\Resources\MovimentacaoResource;
 use App\Models\EstoqueMovimentacao;
+use App\Models\EstoqueReserva;
 use Carbon\Carbon;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
@@ -203,10 +204,17 @@ class EstoqueMovimentacaoService
                 'id_deposito_destino' => $destino ?? null,
                 'tipo'                => $tipo,
                 'quantidade'          => $qtd,
-                // 🔧 correção de chave: aqui a entrada é 'id_usuario'
                 'id_usuario'          => $dados['id_usuario'] ?? null,
                 'observacao'          => $dados['observacao'] ?? null,
                 'data_movimentacao'   => Carbon::now(),
+
+                // ✅ extras (não obrigatórios)
+                'lote_id'        => $dados['lote_id'] ?? null,
+                'ref_type'       => $dados['ref_type'] ?? null,
+                'ref_id'         => $dados['ref_id'] ?? null,
+                'pedido_id'      => $dados['pedido_id'] ?? null,
+                'pedido_item_id' => $dados['pedido_item_id'] ?? null,
+                'reserva_id'     => $dados['reserva_id'] ?? null,
             ]);
 
             return $mov->fresh(['variacao.produto', 'usuario', 'depositoOrigem', 'depositoDestino']);
@@ -404,5 +412,83 @@ class EstoqueMovimentacaoService
             'movimentacoes' => MovimentacaoResource::collection(collect($movs)),
         ];
     }
+
+    public function registrarSaidaPedido(
+        int $variacaoId,
+        int $depositoSaidaId,
+        int $quantidade,
+        int $usuarioId,
+        string $observacao,
+        ?int $pedidoId = null,
+        ?int $pedidoItemId = null,
+        ?string $loteId = null,
+        ?int $reservaId = null
+    ): void {
+        DB::transaction(function () use (
+            $variacaoId, $depositoSaidaId, $quantidade, $usuarioId, $observacao,
+            $pedidoId, $pedidoItemId, $loteId, $reservaId
+        ) {
+            // 1) Se não veio reservaId, tenta achar reserva ativa vinculada ao pedido/pedido_item
+            if (!$reservaId && $pedidoId) {
+                $query = EstoqueReserva::query()
+                    ->where('pedido_id', $pedidoId)
+                    ->where('status', 'ativa')
+                    ->where('id_variacao', $variacaoId)
+                    ->when($depositoSaidaId, fn($q) => $q->where('id_deposito', $depositoSaidaId))
+                    ->when($pedidoItemId, fn($q) => $q->where('pedido_item_id', $pedidoItemId))
+                    ->where(function ($q) {
+                        $q->whereNull('data_expira')
+                            ->orWhere('data_expira', '>', now());
+                    })
+                    ->orderBy('id', 'asc');
+
+                /** @var EstoqueReserva|null $res */
+                $res = $query->lockForUpdate()->first();
+
+                if ($res) {
+                    $reservaId = (int) $res->id;
+
+                    // 1.1) Consome a reserva (total ou parcial)
+                    $restante = max(0, (int)$res->quantidade - (int)$res->quantidade_consumida);
+                    $consumir = min($restante, $quantidade);
+
+                    if ($consumir > 0) {
+                        $res->quantidade_consumida = (int)$res->quantidade_consumida + $consumir;
+
+                        // Se consumiu tudo, marca como consumida
+                        if ($res->quantidade_consumida >= (int)$res->quantidade) {
+                            $res->status = 'consumida';
+                        }
+
+                        $res->id_usuario = $usuarioId;
+                        $res->save();
+                    }
+                }
+            }
+
+            // 2) Movimenta (origem depósito → destino null) com refs preenchidas
+            $this->movimentar([
+                'id_variacao'         => $variacaoId,
+                'id_deposito_origem'  => $depositoSaidaId,
+                'id_deposito_destino' => null,
+                'tipo'                => EstoqueMovimentacaoTipo::SAIDA_ENTREGA_CLIENTE->value,
+                'quantidade'          => $quantidade,
+                'id_usuario'          => $usuarioId,
+                'observacao'          => $observacao,
+
+                // ✅ rastreio
+                'lote_id'        => $loteId,
+                'pedido_id'      => $pedidoId,
+                'pedido_item_id' => $pedidoItemId,
+                'reserva_id'     => $reservaId,
+
+                // ✅ referência genérica (se quiser padronizar)
+                'ref_type' => $pedidoId ? 'pedido' : null,
+                'ref_id'   => $pedidoId,
+            ]);
+        });
+    }
+
+
 
 }

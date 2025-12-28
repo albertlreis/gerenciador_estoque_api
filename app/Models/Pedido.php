@@ -9,14 +9,15 @@ use Illuminate\Database\Eloquent\Relations\HasManyThrough;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-/**
- * Representa um pedido no sistema.
- */
 class Pedido extends Model
 {
     protected $table = 'pedidos';
 
+    public const TIPO_VENDA     = 'venda';
+    public const TIPO_REPOSICAO = 'reposicao';
+
     protected $fillable = [
+        'tipo',
         'id_cliente',
         'id_usuario',
         'id_parceiro',
@@ -34,8 +35,19 @@ class Pedido extends Model
         'data_limite_entrega' => 'date',
     ];
 
+    public function isVenda(): bool
+    {
+        return ($this->tipo ?? self::TIPO_VENDA) === self::TIPO_VENDA;
+    }
+
+    public function isReposicao(): bool
+    {
+        return ($this->tipo ?? self::TIPO_VENDA) === self::TIPO_REPOSICAO;
+    }
+
     public function cliente(): BelongsTo
     {
+        // cliente opcional para reposição
         return $this->belongsTo(Cliente::class, 'id_cliente');
     }
 
@@ -64,17 +76,11 @@ class Pedido extends Model
         return $this->consignacoes()->exists();
     }
 
-    /**
-     * Retorna o histórico completo de status do pedido.
-     */
     public function historicoStatus(): HasMany
     {
         return $this->hasMany(PedidoStatusHistorico::class);
     }
 
-    /**
-     * Retorna o status mais recente do pedido.
-     */
     public function statusAtual(): HasOne
     {
         return $this->hasOne(PedidoStatusHistorico::class, 'pedido_id')->latestOfMany();
@@ -85,9 +91,6 @@ class Pedido extends Model
         return Attribute::get(fn () => $this->statusAtual?->status);
     }
 
-    /**
-     * @return \Illuminate\Database\Eloquent\Relations\HasMany<\App\Models\Devolucao>
-     */
     public function devolucoes(): HasMany
     {
         return $this->hasMany(Devolucao::class);
@@ -98,21 +101,15 @@ class Pedido extends Model
         return $this->hasMany(PedidoFabricaItem::class, 'pedido_venda_id');
     }
 
-    /**
-     * Pedidos de fábrica relacionados a este pedido de venda.
-     *
-     * @return \Illuminate\Database\Eloquent\Relations\HasManyThrough
-     */
     public function pedidosFabrica(): HasManyThrough
     {
         return $this->hasManyThrough(
-            PedidoFabrica::class,      // Related
-            PedidoFabricaItem::class,  // Through
-            'pedido_venda_id',                     // FK em pedidos_fabrica_itens -> Pedido (este model)
-            'id',                                  // PK em pedidos_fabrica
-            'id',                                  // PK em pedidos (este model)
-            'pedido_fabrica_id'                    // FK em pedidos_fabrica_itens -> pedidos_fabrica
+            PedidoFabrica::class,
+            PedidoFabricaItem::class,
+            'pedido_venda_id',
+            'id',
+            'id',
+            'pedido_fabrica_id'
         );
     }
-
 }

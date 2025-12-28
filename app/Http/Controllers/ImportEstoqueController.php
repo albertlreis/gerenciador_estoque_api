@@ -15,6 +15,8 @@ class ImportEstoqueController extends Controller
     /** POST /imports/estoque (upload + staging) */
     public function store(ImportEstoqueUploadRequest $request): JsonResponse
     {
+        set_time_limit(600);
+
         $import = $this->service->criarStaging($request->file('arquivo'), auth()->id());
 
         return response()->json([

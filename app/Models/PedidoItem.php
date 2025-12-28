@@ -16,6 +16,7 @@ class PedidoItem extends Model
 
     protected $fillable = [
         'id_pedido',
+        'id_carrinho_item',
         'id_variacao',
         'quantidade',
         'preco_unitario',

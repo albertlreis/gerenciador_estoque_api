@@ -3,9 +3,11 @@
 namespace App\Services\Movimentacao;
 
 use App\Models\Pedido;
+use App\Models\PedidoItem;
 use App\Services\DepositoResolver;
 use App\Services\EstoqueMovimentacaoService;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
 /**
@@ -20,20 +22,30 @@ final class MovimentarEstoqueStrategy implements MovimentacaoStrategy
 
     public function processar(Pedido $pedido, Collection $itensCarrinho, array $depositosMap, int $usuarioId): void
     {
-        foreach ($itensCarrinho as $item) {
-            $depId = $this->resolver->resolverParaItem($item, $depositosMap);
+        $loteId = (string) Str::uuid();
+
+        foreach ($itensCarrinho as $cItem) {
+            $depId = $this->resolver->resolverParaItem($cItem, $depositosMap);
             if (!$depId) {
                 throw ValidationException::withMessages([
-                    'depositos_por_item' => ["Selecione o depósito do item {$item->id} para registrar a movimentação."]
+                    'depositos_por_item' => ["Selecione o depósito do item {$cItem->id} para registrar a movimentação."]
                 ]);
             }
 
-            $this->mov->registrarSaidaEntregaCliente(
-                variacaoId: $item->id_variacao,
+            $pItemId = PedidoItem::query()
+                ->where('id_pedido', $pedido->id)
+                ->where('id_carrinho_item', $cItem->id)
+                ->value('id');
+
+            $this->mov->registrarSaidaPedido(
+                variacaoId: (int) $cItem->id_variacao,
                 depositoSaidaId: (int) $depId,
-                quantidade: (int) $item->quantidade,
-                usuarioId: $usuarioId,
-                observacao: "Pedido #{$pedido->id}"
+                quantidade: (int) $cItem->quantidade,
+                usuarioId: (int) $usuarioId,
+                observacao: "Pedido #{$pedido->id}",
+                pedidoId: (int) $pedido->id,
+                pedidoItemId: $pItemId ? (int)$pItemId : null,
+                loteId: $loteId,
             );
         }
     }

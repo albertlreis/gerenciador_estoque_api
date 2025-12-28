@@ -3,6 +3,7 @@
 namespace App\Services\Movimentacao;
 
 use App\Models\Pedido;
+use App\Models\PedidoItem;
 use App\Services\DepositoResolver;
 use App\Services\ReservaEstoqueService;
 use Illuminate\Support\Collection;
@@ -19,18 +20,25 @@ final class ReservarEstoqueStrategy implements MovimentacaoStrategy
 
     public function processar(Pedido $pedido, Collection $itensCarrinho, array $depositosMap, int $usuarioId): void
     {
-        foreach ($itensCarrinho as $item) {
-            $depId = $this->resolver->resolverParaItem($item, $depositosMap);
+        foreach ($itensCarrinho as $cItem) {
+            $depId = $this->resolver->resolverParaItem($cItem, $depositosMap);
+            if (!$depId) continue;
 
-            if ($depId) {
-                $this->reservas->reservar(
-                    variacaoId: $item->id_variacao,
-                    depositoId: (int) $depId,
-                    quantidade: (int) $item->quantidade,
-                    pedidoId: $pedido->id,
-                    motivo: 'pedido_sem_movimentacao'
-                );
-            }
+            $pItemId = PedidoItem::query()
+                ->where('id_pedido', $pedido->id)
+                ->where('id_carrinho_item', $cItem->id)
+                ->value('id');
+
+            $this->reservas->reservar(
+                variacaoId: (int) $cItem->id_variacao,
+                depositoId: $depId,
+                quantidade: (int) $cItem->quantidade,
+                pedidoId: (int) $pedido->id,
+                pedidoItemId: $pItemId ? (int) $pItemId : null,
+                usuarioId: $usuarioId,
+                motivo: 'pedido_sem_movimentacao'
+            );
         }
     }
+
 }

@@ -12,7 +12,7 @@ return new class extends Migration
             $table->id();
 
             $table->unsignedInteger('fornecedor_id')->nullable();
-            $table->foreign('fornecedor_id')->references('id')->on('fornecedores')->nullOnDelete();
+            $table->foreign('fornecedor_id')->references('id')->on('fornecedores')->nullOnDelete()->onUpdate('restrict');
 
             $table->string('descricao', 180);
             $table->string('numero_documento', 80)->nullable();
@@ -44,8 +44,8 @@ return new class extends Migration
 
             $table->text('observacoes')->nullable();
 
-            $table->unsignedInteger('usuario_id')->nullable()->index();
-            $table->foreign('usuario_id')->references('id')->on('acesso_usuarios')->nullOnDelete();
+            $table->foreignId('usuario_id')->nullable()->index();
+            $table->foreign('usuario_id')->references('id')->on('acesso_usuarios')->nullOnDelete()->onUpdate('restrict');
 
             $table->softDeletes();
             $table->timestamps();

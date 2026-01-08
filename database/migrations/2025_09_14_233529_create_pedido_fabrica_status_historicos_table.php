@@ -17,8 +17,7 @@ return new class extends Migration
 
             $table->enum('status', ['pendente', 'enviado', 'parcial', 'entregue', 'cancelado']);
 
-            // padronizado p/ bater com acesso_usuarios.id (normalmente unsignedInteger)
-            $table->unsignedInteger('usuario_id')->nullable();
+            $table->foreignId('usuario_id')->nullable();
 
             $table->text('observacao')->nullable();
             $table->timestamps();

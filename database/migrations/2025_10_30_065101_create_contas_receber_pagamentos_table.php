@@ -22,8 +22,8 @@ return new class extends Migration
             $table->string('comprovante_path')->nullable();
             $table->text('observacoes')->nullable();
 
-            $table->unsignedInteger('usuario_id')->nullable()->index();
-            $table->foreign('usuario_id')->references('id')->on('acesso_usuarios')->nullOnDelete();
+            $table->foreignId('usuario_id')->nullable()->index();
+            $table->foreign('usuario_id')->references('id')->on('acesso_usuarios')->nullOnDelete()->onUpdate('restrict');
 
             $table->foreignId('conta_financeira_id')
                 ->constrained('contas_financeiras')

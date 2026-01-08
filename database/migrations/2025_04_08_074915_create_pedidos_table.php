@@ -4,10 +4,6 @@ use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
-/**
- * Criação da tabela 'pedidos'.
- * Um pedido é realizado por um cliente e pode ser intermediado por um parceiro/vendedor.
- */
 return new class extends Migration
 {
     public function up(): void
@@ -15,16 +11,12 @@ return new class extends Migration
         Schema::create('pedidos', function (Blueprint $table) {
             $table->increments('id');
 
-            // cliente agora é nullable + FK set null
             $table->unsignedInteger('id_cliente')->nullable()->comment('ID do cliente que realizou o pedido');
 
-            $table->unsignedInteger('id_usuario')->comment('ID do usuário (vendedor) que registrou o pedido');
+            $table->foreignId('id_usuario')->comment('ID do usuário (vendedor) que registrou o pedido');
             $table->unsignedInteger('id_parceiro')->nullable()->comment('ID do parceiro vinculado ao pedido');
 
-            $table->enum('tipo', ['venda', 'reposicao'])
-                ->default('venda')
-                ->comment('Tipo do pedido');
-
+            $table->enum('tipo', ['venda', 'reposicao'])->default('venda')->comment('Tipo do pedido');
             $table->string('numero_externo', 50)->nullable()->unique()->comment('Número do pedido em sistema externo');
 
             $table->timestamp('data_pedido')->nullable()->comment('Data em que o pedido foi confirmado');
@@ -46,7 +38,7 @@ return new class extends Migration
 
             $table->foreign('id_usuario')
                 ->references('id')->on('acesso_usuarios')
-                ->onDelete('cascade')
+                ->cascadeOnDelete()
                 ->onUpdate('restrict');
 
             $table->foreign('id_parceiro')

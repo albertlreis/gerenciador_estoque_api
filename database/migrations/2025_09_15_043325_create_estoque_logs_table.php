@@ -11,8 +11,9 @@ return new class extends Migration
         Schema::create('estoque_logs', function (Blueprint $table) {
             $table->id();
 
-            $table->unsignedInteger('id_usuario')->nullable();
-            $table->string('acao', 50); // 'entrada','saida','transferencia','scan'
+            $table->foreignId('id_usuario')->nullable();
+
+            $table->string('acao', 50);
             $table->json('payload')->nullable();
             $table->string('ip', 45)->nullable();
             $table->string('user_agent', 255)->nullable();

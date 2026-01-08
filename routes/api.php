@@ -1,369 +1,486 @@
 <?php
 
-use App\Http\Controllers\AreaEstoqueController;
-use App\Http\Controllers\Assistencia\AssistenciaArquivoController;
-use App\Http\Controllers\Assistencia\AssistenciaChamadoController;
-use App\Http\Controllers\Assistencia\AssistenciaDefeitosController;
-use App\Http\Controllers\Assistencia\AssistenciaItemController;
-use App\Http\Controllers\Assistencia\AssistenciasController;
-use App\Http\Controllers\Assistencia\PedidoLookupController;
-use App\Http\Controllers\AssistenciaRelatorioController;
-use App\Http\Controllers\CaixaEstoqueController;
-use App\Http\Controllers\CategoriaFinanceiraController;
-use App\Http\Controllers\CentroCustoController;
-use App\Http\Controllers\CommsProxyController;
-use App\Http\Controllers\ConsignacaoRelatorioController;
-use App\Http\Controllers\ContaFinanceiraController;
-use App\Http\Controllers\ContaPagarController;
-use App\Http\Controllers\ContaReceberController;
-use App\Http\Controllers\ContaReceberExportController;
-use App\Http\Controllers\ContaReceberRelatorioController;
-use App\Http\Controllers\DashboardController;
-use App\Http\Controllers\DespesaRecorrenteController;
-use App\Http\Controllers\DevolucaoController;
-use App\Http\Controllers\EstoqueRelatorioController;
-use App\Http\Controllers\FeriadoController;
-use App\Http\Controllers\FinanceiroDashboardController;
-use App\Http\Controllers\FornecedorController;
-use App\Http\Controllers\ImportEstoqueController;
-use App\Http\Controllers\LancamentoFinanceiroController;
-use App\Http\Controllers\LocalizacaoDimensaoController;
-use App\Http\Controllers\LocalizacaoEstoqueController;
-use App\Http\Controllers\OutletCatalogoController;
-use App\Http\Controllers\PedidoEstoqueController;
-use App\Http\Controllers\PedidoFabricaController;
-use App\Http\Controllers\PedidosRelatorioController;
-use App\Http\Controllers\ProdutoVariacaoOutletController;
 use Illuminate\Support\Facades\Route;
-use App\Http\Controllers\CarrinhoItemController;
-use App\Http\Controllers\CategoriaController;
-use App\Http\Controllers\ConsignacaoController;
-use App\Http\Controllers\PedidoStatusHistoricoController;
-use App\Http\Controllers\ProdutoController;
-use App\Http\Controllers\ProdutoImagemController;
-use App\Http\Controllers\ProdutoVariacaoController;
-use App\Http\Controllers\ProdutoAtributoController;
-use App\Http\Controllers\DepositoController;
-use App\Http\Controllers\EstoqueController;
-use App\Http\Controllers\EstoqueMovimentacaoController;
-use App\Http\Controllers\ClienteController;
-use App\Http\Controllers\ParceiroController;
-use App\Http\Controllers\PedidoController;
-use App\Http\Controllers\PedidoItemController;
-use App\Http\Controllers\CarrinhoController;
-use App\Http\Controllers\ConfiguracaoController;
 
-Route::middleware('auth:sanctum')->prefix('v1')->group(function () {
-    // Configurações do sistema
-    Route::get('configuracoes', [ConfiguracaoController::class, 'listar']);
-    Route::put('configuracoes/{chave}', [ConfiguracaoController::class, 'atualizar']);
+use App\Http\Controllers\{
+    AreaEstoqueController,
+    CarrinhoController,
+    CarrinhoItemController,
+    CategoriaController,
+    CategoriaFinanceiraController,
+    CentroCustoController,
+    ClienteController,
+    ConfiguracaoController,
+    ConsignacaoController,
+    ConsignacaoRelatorioController,
+    ContaFinanceiraController,
+    ContaPagarController,
+    ContaReceberController,
+    ContaReceberExportController,
+    ContaReceberRelatorioController,
+    DashboardController,
+    DespesaRecorrenteController,
+    DevolucaoController,
+    DepositoController,
+    EstoqueController,
+    EstoqueMovimentacaoController,
+    EstoqueRelatorioController,
+    FeriadoController,
+    FinanceiroDashboardController,
+    FornecedorController,
+    ImportEstoqueController,
+    LancamentoFinanceiroController,
+    LocalizacaoDimensaoController,
+    LocalizacaoEstoqueController,
+    OutletCatalogoController,
+    ParceiroController,
+    PedidoController,
+    PedidoEstoqueController,
+    PedidoFabricaController,
+    PedidoItemController,
+    PedidosRelatorioController,
+    PedidoStatusHistoricoController,
+    ProdutoController,
+    ProdutoImagemController,
+    ProdutoVariacaoController,
+    ProdutoVariacaoOutletController,
+    ProdutoAtributoController,
+    CommsProxyController
+};
 
-    Route::get('/dashboard/resumo', [DashboardController::class, 'resumo']);
+use App\Http\Controllers\Assistencia\{
+    AssistenciaArquivoController,
+    AssistenciaChamadoController,
+    AssistenciaDefeitosController,
+    AssistenciaItemController,
+    AssistenciasController,
+    PedidoLookupController
+};
 
-    // Produtos e Categorias
-    Route::apiResource('categorias', CategoriaController::class);
+use App\Http\Controllers\AssistenciaRelatorioController;
 
-    Route::get('/atributos/sugestoes', [ProdutoAtributoController::class, 'nomes']);
-    Route::get('/atributos/{nome}/valores', [ProdutoAtributoController::class, 'valores']);
-    Route::get('atributos', [ProdutoAtributoController::class, 'index']);
+Route::middleware('auth:sanctum')
+    ->prefix('v1')
+    ->group(function () {
 
-    // Variações
-    Route::get('variacoes', [ProdutoVariacaoController::class, 'buscar']);
+        /* ============================================================
+         * SISTEMA / DASHBOARD
+         * ============================================================ */
+        Route::get('configuracoes', [ConfiguracaoController::class, 'listar']);
+        Route::put('configuracoes/{chave}', [ConfiguracaoController::class, 'atualizar']);
 
-    //Outlet
-    Route::prefix('variacoes/{id}/outlet')->group(function () {
-        Route::get('/', [ProdutoVariacaoOutletController::class, 'buscar']);
-        Route::post('/', [ProdutoVariacaoOutletController::class, 'store']);
-        Route::put('{outletId}', [ProdutoVariacaoOutletController::class, 'update']);
-        Route::delete('{outletId}', [ProdutoVariacaoOutletController::class, 'destroy']);
-    });
+        Route::get('dashboard/resumo', [DashboardController::class, 'resumo']);
 
-    Route::get('/outlet/motivos', [OutletCatalogoController::class,'motivos']);
-    Route::get('/outlet/formas-pagamento', [OutletCatalogoController::class,'formas']);
+        /* ============================================================
+         * CATÁLOGO (CATEGORIAS / ATRIBUTOS / PRODUTOS / VARIAÇÕES / OUTLET)
+         * ============================================================ */
+        Route::apiResource('categorias', CategoriaController::class)->except(['create', 'edit']);
 
-    Route::prefix('produtos')->group(function () {
-        Route::get('estoque-baixo', [ProdutoController::class, 'estoqueBaixo']);
-        Route::post('importar-xml', [ProdutoController::class, 'importarXML']);
-        Route::post('importar-xml/confirmar', [ProdutoController::class, 'confirmarImportacao']);
-        Route::get('/sugestoes-outlet', [ProdutoController::class, 'sugestoesOutlet']);
-        Route::post('/{produto}/imagens/{imagem}/definir-principal', [ProdutoImagemController::class, 'definirPrincipal']);
-        Route::apiResource('{produto}/imagens', ProdutoImagemController::class)->parameters(['imagens' => 'imagem']);
-        Route::put('/{produto}/variacoes', [ProdutoVariacaoController::class, 'update']);
-        Route::apiResource('{produto}/variacoes', ProdutoVariacaoController::class)->parameters(['variacoes' => 'variacao']);
-    });
+        // Atributos (mantém sem virar resource)
+        Route::get('atributos', [ProdutoAtributoController::class, 'index']);
+        Route::get('atributos/sugestoes', [ProdutoAtributoController::class, 'nomes']);
+        Route::get('atributos/{nome}/valores', [ProdutoAtributoController::class, 'valores']);
 
-    Route::apiResource('produtos', ProdutoController::class);
+        // Variações (busca/listagem global)
+        Route::get('variacoes', [ProdutoVariacaoController::class, 'buscar']);
 
-    Route::prefix('fornecedores')->group(function () {
-        Route::get('/',            [FornecedorController::class, 'index']);   // filtros + paginação
-        Route::post('/',           [FornecedorController::class, 'store']);
-        Route::get('/{id}',        [FornecedorController::class, 'show'])->whereNumber('id');
-        Route::put('/{id}',        [FornecedorController::class, 'update'])->whereNumber('id');
-        Route::delete('/{id}',     [FornecedorController::class, 'destroy'])->whereNumber('id');
-
-        // extras
-        Route::post('/{id}/restore', [FornecedorController::class, 'restore'])->whereNumber('id'); // desfaz soft delete
-        Route::get('/{id}/produtos', [FornecedorController::class, 'produtos'])->whereNumber('id'); // listar produtos do fornecedor
-    });
-
-    // Rotas de estoque e movimentações
-    Route::prefix('estoque')->group(function () {
-        // 🔹 Relatórios e consultas
-        Route::get('atual', [EstoqueController::class, 'listarEstoqueAtual']);
-        Route::get('resumo', [EstoqueController::class, 'resumoEstoque']);
-        Route::get('/por-variacao/{id_variacao}', [EstoqueController::class, 'porVariacao']);
-
-        // 🔹 Movimentações unificadas
-        Route::prefix('movimentacoes')->group(function () {
-            Route::get('/', [EstoqueMovimentacaoController::class, 'index']);
-            Route::post('/', [EstoqueMovimentacaoController::class, 'store']);
-            Route::get('/{movimentacao}', [EstoqueMovimentacaoController::class, 'show']);
-            Route::put('/{movimentacao}', [EstoqueMovimentacaoController::class, 'update']);
-            Route::delete('/{movimentacao}', [EstoqueMovimentacaoController::class, 'destroy']);
-            Route::post('/lote', [EstoqueMovimentacaoController::class, 'lote']);
+        // Catálogo Outlet
+        Route::prefix('outlet')->group(function () {
+            Route::get('motivos', [OutletCatalogoController::class, 'motivos']);
+            Route::get('formas-pagamento', [OutletCatalogoController::class, 'formas']);
         });
 
-        // 🔹 Dimensões, áreas e localizações
-        Route::get('/areas', [AreaEstoqueController::class, 'index']);
-        Route::post('/areas', [AreaEstoqueController::class, 'store']);
-        Route::put('/areas/{id}', [AreaEstoqueController::class, 'update']);
-        Route::delete('/areas/{id}', [AreaEstoqueController::class, 'destroy']);
-
-        Route::get('/dimensoes', [LocalizacaoDimensaoController::class, 'index']);
-        Route::post('/dimensoes', [LocalizacaoDimensaoController::class, 'store']);
-        Route::put('/dimensoes/{id}', [LocalizacaoDimensaoController::class, 'update']);
-        Route::delete('/dimensoes/{id}', [LocalizacaoDimensaoController::class, 'destroy']);
-    });
-
-    // 🔹 Depósitos
-    Route::apiResource('depositos', DepositoController::class);
-    Route::apiResource('depositos.estoque', EstoqueController::class)->shallow();
-
-    // 🔹 Localizações
-    Route::apiResource('localizacoes-estoque', LocalizacaoEstoqueController::class);
-
-    // 🔹 Importações
-    Route::prefix('imports/estoque')->group(function () {
-        Route::post('/', [ImportEstoqueController::class, 'store']);
-        Route::post('{id}/processar', [ImportEstoqueController::class, 'processar']);
-        Route::get('{id}', [ImportEstoqueController::class, 'show']);
-    });
-
-    // Clientes e Parceiros
-    Route::apiResource('clientes', ClienteController::class);
-    Route::get('clientes/verifica-documento/{documento}/{id?}', [ClienteController::class, 'verificaDocumento']);
-
-    Route::prefix('parceiros')->group(function () {
-        Route::get('/',        [ParceiroController::class, 'index']);
-        Route::post('/',       [ParceiroController::class, 'store']);
-        Route::get('/{id}',    [ParceiroController::class, 'show'])->whereNumber('id');
-        Route::put('/{id}',    [ParceiroController::class, 'update'])->whereNumber('id');
-        Route::delete('/{id}', [ParceiroController::class, 'destroy'])->whereNumber('id');
-        Route::post('/{id}/restore', [ParceiroController::class, 'restore'])->whereNumber('id');
-    });
-
-    Route::get('pedidos/exportar', [PedidoController::class, 'exportar']);
-    Route::get('pedidos/estatisticas', [PedidoController::class, 'estatisticas']);
-    Route::post('pedidos/importar', [PedidoController::class, 'importar']);
-    Route::post('pedidos/importar-pdf/confirmar', [PedidoController::class, 'confirmarImportacaoPDF']);
-
-    Route::prefix('pedidos/{pedido}')->group(function () {
-        Route::patch('status', [PedidoStatusHistoricoController::class, 'atualizarStatus']);
-        Route::get('historico-status', [PedidoStatusHistoricoController::class, 'historico']);
-        Route::get('previsoes', [PedidoStatusHistoricoController::class, 'previsoes']);
-        Route::get('fluxo-status', [PedidoStatusHistoricoController::class, 'fluxoStatus']);
-        Route::get('completo', [PedidoController::class, 'completo']);
-        Route::post('reservar-estoque', [PedidoEstoqueController::class, 'reservar']);
-        Route::post('expedir', [PedidoEstoqueController::class, 'expedir']);
-        Route::post('cancelar-reservas', [PedidoEstoqueController::class, 'cancelarReservas']);
-    });
-
-    Route::delete('pedidos/status/{statusHistorico}', [PedidoStatusHistoricoController::class, 'cancelarStatus']);
-    Route::apiResource('pedidos', PedidoController::class);
-    Route::apiResource('pedidos.itens', PedidoItemController::class)->parameters(['itens' => 'item']);
-    Route::get('/pedido-itens', [PedidoItemController::class, 'indexGlobal']);
-    Route::post('/pedido-itens/{id}/liberar-entrega', [PedidoItemController::class, 'liberarEntrega']);
-
-    Route::get('carrinhos', [CarrinhoController::class, 'index']);
-    Route::get('carrinhos/{id}', [CarrinhoController::class, 'show']);
-    Route::post('carrinhos', [CarrinhoController::class, 'store']);
-    Route::put('carrinhos/{id}', [CarrinhoController::class, 'update']);
-    Route::post('carrinhos/{id}/cancelar', [CarrinhoController::class, 'cancelar']);
-
-    Route::post('carrinho-itens', [CarrinhoItemController::class, 'store']);
-    Route::delete('carrinho-itens/{id}', [CarrinhoItemController::class, 'destroy']);
-    Route::delete('carrinho-itens/limpar/{idCarrinho}', [CarrinhoItemController::class, 'clear']);
-    Route::post('/carrinho-itens/atualizar-deposito', [CarrinhoItemController::class, 'atualizarDeposito']);
-
-    Route::prefix('consignacoes')->group(function () {
-        Route::get('/', [ConsignacaoController::class, 'index']);
-        Route::patch('{id}', [ConsignacaoController::class, 'atualizarStatus']);
-        Route::get('pedido/{pedido_id}', [ConsignacaoController::class, 'porPedido']);
-        Route::get('vencendo', [ConsignacaoController::class, 'vencendo']);
-        Route::get('clientes', [ConsignacaoController::class, 'clientes']);
-        Route::get('vendedores', [ConsignacaoController::class, 'vendedores']);
-        Route::post('{id}/devolucao', [ConsignacaoController::class, 'registrarDevolucao']);
-        Route::get('{id}', [ConsignacaoController::class, 'show']);
-        Route::get('/{id}/pdf', [ConsignacaoController::class, 'gerarPdf']);
-    });
-
-    Route::prefix('pedidos-fabrica')->group(function () {
-        Route::get('/', [PedidoFabricaController::class, 'index']);
-        Route::post('/', [PedidoFabricaController::class, 'store']);
-        Route::get('{id}', [PedidoFabricaController::class, 'show']);
-        Route::put('{id}', [PedidoFabricaController::class, 'update']);
-        Route::patch('{id}/status', [PedidoFabricaController::class, 'updateStatus']);
-        Route::delete('{id}', [PedidoFabricaController::class, 'destroy']);
-        Route::patch('itens/{itemId}/entrega', [PedidoFabricaController::class, 'registrarEntrega']);
-    });
-
-    Route::prefix('relatorios')->group(function () {
-        Route::get('estoque/atual', [EstoqueRelatorioController::class, 'estoqueAtual']);
-        Route::get('pedidos', [PedidosRelatorioController::class, 'pedidosPorPeriodo']);
-        Route::get('consignacoes/ativas', [ConsignacaoRelatorioController::class, 'consignacoesAtivas']);
-        Route::get('assistencias', [AssistenciaRelatorioController::class, 'assistencias']);
-
-        Route::get('/devedores', [ContaReceberRelatorioController::class, 'devedores']);
-        Route::get('/devedores/exportar/excel', [ContaReceberRelatorioController::class, 'exportarExcel']);
-        Route::get('/devedores/exportar/pdf', [ContaReceberRelatorioController::class, 'exportarPdf']);
-    });
-
-    Route::post('devolucoes', [DevolucaoController::class, 'store']);
-    Route::post('devolucoes/{id}/approve', [DevolucaoController::class, 'approve']);
-    Route::post('devolucoes/{id}/reject',  [DevolucaoController::class, 'reject']);
-
-    Route::prefix('feriados')->group(function () {
-        Route::get('/', [FeriadoController::class, 'index']);
-        Route::post('/sync', [FeriadoController::class, 'sync']);
-    });
-
-    Route::prefix('assistencias')->group(function () {
-        Route::get('/autorizadas', [AssistenciasController::class, 'index']);
-        Route::get('/autorizadas/{id}', [AssistenciasController::class, 'show']);
-        Route::post('/autorizadas', [AssistenciasController::class, 'store']);
-        Route::put('/autorizadas/{id}', [AssistenciasController::class, 'update']);
-        Route::delete('/autorizadas/{id}', [AssistenciasController::class, 'destroy']);
-
-        Route::get('/defeitos', [AssistenciaDefeitosController::class, 'index']);
-        Route::post('/defeitos', [AssistenciaDefeitosController::class, 'store']);
-        Route::put('/defeitos/{id}', [AssistenciaDefeitosController::class, 'update']);
-        Route::delete('/defeitos/{id}', [AssistenciaDefeitosController::class, 'destroy']);
-
-        Route::get('/chamados', [AssistenciaChamadoController::class, 'index']);
-        Route::post('/chamados', [AssistenciaChamadoController::class, 'store']);
-        Route::get('/chamados/{id}', [AssistenciaChamadoController::class, 'show']);
-        Route::put('/chamados/{id}', [AssistenciaChamadoController::class, 'update']);
-        Route::post('/chamados/{id}/cancelar', [AssistenciaChamadoController::class, 'cancelar']);
-
-        Route::post('/chamados/{id}/itens', [AssistenciaItemController::class, 'store']);
-        Route::post('/itens/{itemId}/iniciar-reparo', [AssistenciaItemController::class, 'iniciarReparo']);
-        Route::post('/itens/{itemId}/enviar', [AssistenciaItemController::class, 'enviar']);
-        Route::post('/itens/{itemId}/orcamento', [AssistenciaItemController::class, 'orcamento']);
-        Route::post('/itens/{itemId}/aprovar-orcamento', [AssistenciaItemController::class, 'aprovar']);
-        Route::post('/itens/{itemId}/reprovar-orcamento', [AssistenciaItemController::class, 'reprovar']);
-        Route::post('/itens/{itemId}/retorno', [AssistenciaItemController::class, 'retorno']);
-        Route::post('/itens/{itemId}/concluir-reparo', [AssistenciaItemController::class, 'concluirReparo']);
-
-        Route::post('/itens/{itemId}/aguardar-resposta', [AssistenciaItemController::class, 'aguardarResposta']);
-        Route::post('/itens/{itemId}/aguardar-peca', [AssistenciaItemController::class, 'aguardarPeca']);
-        Route::post('/itens/{itemId}/saida-fabrica', [AssistenciaItemController::class, 'saidaFabrica']);
-        Route::post('/itens/{itemId}/entregar', [AssistenciaItemController::class, 'entregar']);
-
-        Route::get('/pedidos/busca', [PedidoLookupController::class, 'buscar']);
-        Route::get('/pedidos/{pedido}/produtos', [PedidoLookupController::class, 'produtos']);
-
-        Route::get('/chamados/{id}/arquivos', [AssistenciaArquivoController::class, 'listByChamado']);
-        Route::post('/chamados/{id}/arquivos', [AssistenciaArquivoController::class, 'uploadToChamado']);
-
-        Route::get('/itens/{itemId}/arquivos', [AssistenciaArquivoController::class, 'listByItem']);
-        Route::post('/itens/{itemId}/arquivos', [AssistenciaArquivoController::class, 'uploadToItem']);
-
-        Route::get('/arquivos/{arquivo}', [AssistenciaArquivoController::class, 'show'])
-            ->whereNumber('arquivo');
-        Route::delete('/arquivos/{arquivo}', [AssistenciaArquivoController::class, 'destroy'])
-            ->whereNumber('arquivo');
-
-    });
-
-    Route::get('centros-custo', [CentroCustoController::class, 'index']);
-
-    Route::prefix('contas-pagar')->group(function () {
-        Route::get('export/excel', [ContaPagarController::class, 'exportExcel'])->name('contas-pagar.export.excel');
-        Route::get('export/pdf',   [ContaPagarController::class, 'exportPdf'])->name('contas-pagar.export.pdf');
-        Route::get('kpis',         [ContaPagarController::class, 'kpis'])->name('contas-pagar.kpis');
-
-        Route::post('{conta_pagar}/pagar', [ContaPagarController::class, 'pagar'])
-            ->whereNumber('conta_pagar')
-            ->name('contas-pagar.pagar');
-
-        Route::delete('{conta_pagar}/pagamentos/{pagamento}', [ContaPagarController::class, 'estornar'])
-            ->whereNumber(['conta_pagar', 'pagamento'])
-            ->name('contas-pagar.pagamentos.estornar');
-    });
-
-    Route::apiResource('contas-pagar', ContaPagarController::class)
-        ->parameters(['contas-pagar' => 'conta_pagar'])
-        ->names('contas-pagar')
-        ->except(['create', 'edit']);
-
-    Route::prefix('contas-receber')->group(function () {
-        Route::get('exportar/excel', [ContaReceberExportController::class, 'exportarExcel'])->name('contas-receber.export.excel');
-        Route::get('exportar/pdf',   [ContaReceberExportController::class, 'exportarPdf'])->name('contas-receber.export.pdf');
-        Route::get('kpis',           [ContaReceberExportController::class, 'kpis'])->name('contas-receber.kpis');
-
-        Route::get('/',        [ContaReceberController::class, 'index'])->name('contas-receber.index');
-        Route::get('{conta}',  [ContaReceberController::class, 'show'])->whereNumber('conta')->name('contas-receber.show');
-        Route::post('/',       [ContaReceberController::class, 'store'])->name('contas-receber.store');
-        Route::put('{conta}',  [ContaReceberController::class, 'update'])->whereNumber('conta')->name('contas-receber.update');
-        Route::delete('{conta}', [ContaReceberController::class, 'destroy'])->whereNumber('conta')->name('contas-receber.destroy');
-
-        Route::post('{conta}/pagar', [ContaReceberController::class, 'pagar'])
-            ->whereNumber('conta')
-            ->name('contas-receber.pagar');
-
-        Route::delete('{conta}/pagamentos/{pagamento}', [ContaReceberController::class, 'estornarPagamento'])
-            ->whereNumber(['conta', 'pagamento'])
-            ->name('contas-receber.pagamentos.estornar');
-    });
-
-    Route::prefix('financeiro')->group(function () {
-        Route::get('lancamentos/totais', [LancamentoFinanceiroController::class, 'totais']);
-        Route::apiResource('lancamentos', LancamentoFinanceiroController::class);
-
-        Route::get('dashboard', [FinanceiroDashboardController::class, 'show']);
-
-        Route::prefix('catalogo')->group(function () {
-            Route::get('categorias-financeiras', [CategoriaFinanceiraController::class, 'index']);
-            Route::get('contas-financeiras', [ContaFinanceiraController::class, 'index']);
+        // Outlet por variação (plural + padrão)
+        Route::prefix('variacoes/{variacao}/outlets')->whereNumber('variacao')->group(function () {
+            Route::get('/', [ProdutoVariacaoOutletController::class, 'buscar']); // index
+            Route::post('/', [ProdutoVariacaoOutletController::class, 'store']);
+            Route::put('{outlet}', [ProdutoVariacaoOutletController::class, 'update'])->whereNumber('outlet');
+            Route::delete('{outlet}', [ProdutoVariacaoOutletController::class, 'destroy'])->whereNumber('outlet');
         });
 
-        Route::get('despesas-recorrentes', [DespesaRecorrenteController::class, 'index']);
-        Route::get('despesas-recorrentes/{id}', [DespesaRecorrenteController::class, 'show']);
-        Route::post('despesas-recorrentes', [DespesaRecorrenteController::class, 'store']);
-        Route::put('despesas-recorrentes/{id}', [DespesaRecorrenteController::class, 'update']);
+        // Produtos
+        Route::prefix('produtos')->group(function () {
+            Route::get('estoque-baixo', [ProdutoController::class, 'estoqueBaixo']);
+            Route::get('sugestoes-outlet', [ProdutoController::class, 'sugestoesOutlet']);
 
-        Route::patch('despesas-recorrentes/{id}/pausar', [DespesaRecorrenteController::class, 'pause']);
-        Route::patch('despesas-recorrentes/{id}/ativar', [DespesaRecorrenteController::class, 'activate']);
-        Route::patch('despesas-recorrentes/{id}/cancelar', [DespesaRecorrenteController::class, 'cancel']);
+            // Importações XML (padronizado)
+            Route::post('importacoes/xml', [ProdutoController::class, 'importarXML']);
+            Route::post('importacoes/xml/confirmar', [ProdutoController::class, 'confirmarImportacao']);
 
-        Route::post('despesas-recorrentes/{id}/executar', [DespesaRecorrenteController::class, 'executar']);
+            // Imagens
+            Route::post('{produto}/imagens/{imagem}/definir-principal', [ProdutoImagemController::class, 'definirPrincipal'])
+                ->whereNumber(['produto', 'imagem']);
+
+            Route::apiResource('{produto}/imagens', ProdutoImagemController::class)
+                ->parameters(['imagens' => 'imagem'])
+                ->whereNumber(['produto', 'imagem'])
+                ->except(['create', 'edit']);
+
+            // Variações (nested resource)
+            Route::apiResource('{produto}/variacoes', ProdutoVariacaoController::class)
+                ->parameters(['variacoes' => 'variacao'])
+                ->whereNumber(['produto', 'variacao'])
+                ->except(['create', 'edit']);
+
+            // Bulk update de variações (não conflita com resource)
+            Route::patch('{produto}/variacoes/bulk', [ProdutoVariacaoController::class, 'update'])
+                ->whereNumber('produto');
+        });
+
+        Route::apiResource('produtos', ProdutoController::class)
+            ->whereNumber('produto')
+            ->except(['create', 'edit']);
+
+        /* ============================================================
+         * ESTOQUE
+         * ============================================================ */
+        Route::prefix('estoque')->group(function () {
+            Route::get('atual', [EstoqueController::class, 'listarEstoqueAtual']);
+            Route::get('resumo', [EstoqueController::class, 'resumoEstoque']);
+
+            // padroniza rota "por variação"
+            Route::get('variacoes/{variacao}', [EstoqueController::class, 'porVariacao'])
+                ->whereNumber('variacao');
+
+            // Movimentações (resource + ação em lote)
+            Route::apiResource('movimentacoes', EstoqueMovimentacaoController::class)
+                ->parameters(['movimentacoes' => 'movimentacao'])
+                ->whereNumber('movimentacao')
+                ->except(['create', 'edit']);
+
+            Route::post('movimentacoes/lote', [EstoqueMovimentacaoController::class, 'lote']);
+
+            // Áreas (sem show)
+            Route::apiResource('areas', AreaEstoqueController::class)
+                ->parameters(['areas' => 'area'])
+                ->whereNumber('area')
+                ->only(['index', 'store', 'update', 'destroy'])
+                ->except(['create', 'edit']);
+
+            // Dimensões (sem show)
+            Route::apiResource('dimensoes', LocalizacaoDimensaoController::class)
+                ->parameters(['dimensoes' => 'dimensao'])
+                ->whereNumber('dimensao')
+                ->only(['index', 'store', 'update', 'destroy'])
+                ->except(['create', 'edit']);
+        });
+
+        // Depósitos
+        Route::apiResource('depositos', DepositoController::class)
+            ->parameters(['depositos' => 'deposito'])
+            ->whereNumber('deposito')
+            ->except(['create', 'edit']);
+
+        // Estoque por depósito (NÃO shallow, para ficar previsível no front)
+        Route::apiResource('depositos.estoques', EstoqueController::class)
+            ->parameters(['depositos' => 'deposito', 'estoques' => 'estoque'])
+            ->whereNumber(['deposito', 'estoque'])
+            ->except(['create', 'edit']);
+
+        // Localizações de estoque
+        Route::apiResource('localizacoes-estoque', LocalizacaoEstoqueController::class)
+            ->parameters(['localizacoes-estoque' => 'localizacao'])
+            ->whereNumber('localizacao')
+            ->except(['create', 'edit']);
+
+        // Importações de estoque (pt-BR)
+        Route::prefix('importacoes/estoque')->group(function () {
+            Route::post('/', [ImportEstoqueController::class, 'store']);
+            Route::post('{importacao}/processar', [ImportEstoqueController::class, 'processar'])->whereNumber('importacao');
+            Route::get('{importacao}', [ImportEstoqueController::class, 'show'])->whereNumber('importacao');
+        });
+
+        /* ============================================================
+         * PESSOAS (CLIENTES / FORNECEDORES / PARCEIROS)
+         * ============================================================ */
+        Route::apiResource('clientes', ClienteController::class)
+            ->parameters(['clientes' => 'cliente'])
+            ->whereNumber('cliente')
+            ->except(['create', 'edit']);
+
+        // documento via query params (evita URL com dados sensíveis e é mais flexível)
+        Route::get('clientes/verificar-documento', [ClienteController::class, 'verificaDocumento']);
+        // espera: ?documento=...&ignorar_id=...
+
+        Route::apiResource('fornecedores', FornecedorController::class)
+            ->parameters(['fornecedores' => 'fornecedor'])
+            ->whereNumber('fornecedor')
+            ->except(['create', 'edit']);
+
+        Route::patch('fornecedores/{fornecedor}/restaurar', [FornecedorController::class, 'restore'])
+            ->whereNumber('fornecedor');
+
+        Route::get('fornecedores/{fornecedor}/produtos', [FornecedorController::class, 'produtos'])
+            ->whereNumber('fornecedor');
+
+        Route::apiResource('parceiros', ParceiroController::class)
+            ->parameters(['parceiros' => 'parceiro'])
+            ->whereNumber('parceiro')
+            ->except(['create', 'edit']);
+
+        Route::patch('parceiros/{parceiro}/restaurar', [ParceiroController::class, 'restore'])
+            ->whereNumber('parceiro');
+
+        /* ============================================================
+         * PEDIDOS / ITENS / STATUS / ESTOQUE DO PEDIDO
+         * ============================================================ */
+        Route::prefix('pedidos')->group(function () {
+            Route::get('export', [PedidoController::class, 'exportar']);
+            Route::get('stats', [PedidoController::class, 'estatisticas']);
+
+            Route::post('import', [PedidoController::class, 'importar']);
+            Route::post('import/pdf/confirm', [PedidoController::class, 'confirmarImportacaoPDF']);
+        });
+
+        Route::prefix('pedidos/{pedido}')->whereNumber('pedido')->group(function () {
+            Route::get('detalhado', [PedidoController::class, 'completo']);
+
+            // status (padronizado)
+            Route::patch('status', [PedidoStatusHistoricoController::class, 'atualizarStatus']);
+            Route::get('status/historico', [PedidoStatusHistoricoController::class, 'historico']);
+            Route::get('status/previsoes', [PedidoStatusHistoricoController::class, 'previsoes']);
+            Route::get('status/fluxo', [PedidoStatusHistoricoController::class, 'fluxoStatus']);
+
+            // ações de estoque do pedido
+            Route::post('estoque/reservar', [PedidoEstoqueController::class, 'reservar']);
+            Route::post('estoque/expedir', [PedidoEstoqueController::class, 'expedir']);
+            Route::post('estoque/cancelar-reservas', [PedidoEstoqueController::class, 'cancelarReservas']);
+        });
+
+        // remove status histórico vinculado ao pedido (mais consistente)
+        Route::delete('pedidos/{pedido}/status-historicos/{statusHistorico}', [PedidoStatusHistoricoController::class, 'cancelarStatus'])
+            ->whereNumber(['pedido', 'statusHistorico']);
+
+        Route::apiResource('pedidos', PedidoController::class)
+            ->parameters(['pedidos' => 'pedido'])
+            ->whereNumber('pedido')
+            ->except(['create', 'edit']);
+
+        Route::apiResource('pedidos.itens', PedidoItemController::class)
+            ->parameters(['pedidos' => 'pedido', 'itens' => 'item'])
+            ->whereNumber(['pedido', 'item'])
+            ->except(['create', 'edit']);
+
+        // itens global (antes era /pedido-itens)
+        Route::get('pedidos/itens', [PedidoItemController::class, 'indexGlobal']);
+        Route::patch('pedidos/itens/{item}/liberar-entrega', [PedidoItemController::class, 'liberarEntrega'])
+            ->whereNumber('item');
+
+        /* ============================================================
+         * CARRINHOS (resource + itens nested)
+         * ============================================================ */
+        Route::apiResource('carrinhos', CarrinhoController::class)
+            ->parameters(['carrinhos' => 'carrinho'])
+            ->whereNumber('carrinho')
+            ->only(['index', 'show', 'store', 'update'])
+            ->except(['create', 'edit']);
+
+        Route::patch('carrinhos/{carrinho}/cancelar', [CarrinhoController::class, 'cancelar'])
+            ->whereNumber('carrinho');
+
+        Route::prefix('carrinhos/{carrinho}/itens')->whereNumber('carrinho')->group(function () {
+            Route::post('/', [CarrinhoItemController::class, 'store']);
+            Route::delete('{item}', [CarrinhoItemController::class, 'destroy'])->whereNumber('item');
+            Route::delete('/', [CarrinhoItemController::class, 'clear']);
+            Route::patch('atualizar-deposito', [CarrinhoItemController::class, 'atualizarDeposito']);
+        });
+
+        /* ============================================================
+         * CONSIGNAÇÕES
+         * ============================================================ */
+        Route::prefix('consignacoes')->group(function () {
+            Route::get('/', [ConsignacaoController::class, 'index']);
+
+            Route::get('pedidos/{pedido}', [ConsignacaoController::class, 'porPedido'])->whereNumber('pedido');
+
+            Route::get('vencendo', [ConsignacaoController::class, 'vencendo']);
+            Route::get('clientes', [ConsignacaoController::class, 'clientes']);
+            Route::get('vendedores', [ConsignacaoController::class, 'vendedores']);
+
+            Route::get('{consignacao}', [ConsignacaoController::class, 'show'])->whereNumber('consignacao');
+
+            Route::patch('{consignacao}/status', [ConsignacaoController::class, 'atualizarStatus'])
+                ->whereNumber('consignacao');
+
+            Route::post('{consignacao}/devolucoes', [ConsignacaoController::class, 'registrarDevolucao'])
+                ->whereNumber('consignacao');
+
+            Route::get('{consignacao}/pdf', [ConsignacaoController::class, 'gerarPdf'])->whereNumber('consignacao');
+        });
+
+        /* ============================================================
+         * PEDIDOS FÁBRICA
+         * ============================================================ */
+        Route::apiResource('pedidos-fabrica', PedidoFabricaController::class)
+            ->parameters(['pedidos-fabrica' => 'pedidoFabrica'])
+            ->whereNumber('pedidoFabrica')
+            ->except(['create', 'edit']);
+
+        Route::patch('pedidos-fabrica/{pedidoFabrica}/status', [PedidoFabricaController::class, 'updateStatus'])
+            ->whereNumber('pedidoFabrica');
+
+        Route::patch('pedidos-fabrica/itens/{item}/entrega', [PedidoFabricaController::class, 'registrarEntrega'])
+            ->whereNumber('item');
+
+        /* ============================================================
+         * DEVOLUÇÕES (pt-BR + PATCH para estado)
+         * ============================================================ */
+        Route::post('devolucoes', [DevolucaoController::class, 'store']);
+        Route::patch('devolucoes/{devolucao}/aprovar', [DevolucaoController::class, 'approve'])->whereNumber('devolucao');
+        Route::patch('devolucoes/{devolucao}/reprovar', [DevolucaoController::class, 'reject'])->whereNumber('devolucao');
+
+        /* ============================================================
+         * RELATÓRIOS
+         * ============================================================ */
+        Route::prefix('relatorios')->group(function () {
+            Route::get('estoque/atual', [EstoqueRelatorioController::class, 'estoqueAtual']);
+            Route::get('pedidos', [PedidosRelatorioController::class, 'pedidosPorPeriodo']);
+            Route::get('consignacoes/ativas', [ConsignacaoRelatorioController::class, 'consignacoesAtivas']);
+            Route::get('assistencias', [AssistenciaRelatorioController::class, 'assistencias']);
+
+            Route::get('devedores', [ContaReceberRelatorioController::class, 'devedores']);
+            Route::get('devedores/export/excel', [ContaReceberRelatorioController::class, 'exportarExcel']);
+            Route::get('devedores/export/pdf', [ContaReceberRelatorioController::class, 'exportarPdf']);
+        });
+
+        /* ============================================================
+         * FERIADOS
+         * ============================================================ */
+        Route::prefix('feriados')->group(function () {
+            Route::get('/', [FeriadoController::class, 'index']);
+            Route::post('sincronizar', [FeriadoController::class, 'sync']);
+        });
+
+        /* ============================================================
+         * ASSISTÊNCIAS
+         * ============================================================ */
+        Route::prefix('assistencias')->group(function () {
+            // autorizadas
+            Route::apiResource('autorizadas', AssistenciasController::class)->except(['create', 'edit']);
+
+            // defeitos (sem show)
+            Route::apiResource('defeitos', AssistenciaDefeitosController::class)
+                ->only(['index', 'store', 'update', 'destroy'])
+                ->except(['create', 'edit']);
+
+            // chamados
+            Route::apiResource('chamados', AssistenciaChamadoController::class)->except(['create', 'edit']);
+            Route::patch('chamados/{chamado}/cancelar', [AssistenciaChamadoController::class, 'cancelar'])->whereNumber('chamado');
+
+            // itens do chamado
+            Route::post('chamados/{chamado}/itens', [AssistenciaItemController::class, 'store'])->whereNumber('chamado');
+
+            // ações por item (padroniza prefixo)
+            Route::prefix('itens/{item}')->whereNumber('item')->group(function () {
+                Route::post('iniciar-reparo', [AssistenciaItemController::class, 'iniciarReparo']);
+                Route::post('enviar', [AssistenciaItemController::class, 'enviar']);
+                Route::post('orcamento', [AssistenciaItemController::class, 'orcamento']);
+                Route::post('aprovar-orcamento', [AssistenciaItemController::class, 'aprovar']);
+                Route::post('reprovar-orcamento', [AssistenciaItemController::class, 'reprovar']);
+                Route::post('retorno', [AssistenciaItemController::class, 'retorno']);
+                Route::post('concluir-reparo', [AssistenciaItemController::class, 'concluirReparo']);
+
+                Route::post('aguardar-resposta', [AssistenciaItemController::class, 'aguardarResposta']);
+                Route::post('aguardar-peca', [AssistenciaItemController::class, 'aguardarPeca']);
+                Route::post('saida-fabrica', [AssistenciaItemController::class, 'saidaFabrica']);
+                Route::post('entregar', [AssistenciaItemController::class, 'entregar']);
+            });
+
+            // lookup pedidos
+            Route::get('pedidos/busca', [PedidoLookupController::class, 'buscar']);
+            Route::get('pedidos/{pedido}/produtos', [PedidoLookupController::class, 'produtos'])->whereNumber('pedido');
+
+            // arquivos
+            Route::get('chamados/{chamado}/arquivos', [AssistenciaArquivoController::class, 'listByChamado'])->whereNumber('chamado');
+            Route::post('chamados/{chamado}/arquivos', [AssistenciaArquivoController::class, 'uploadToChamado'])->whereNumber('chamado');
+
+            Route::get('itens/{item}/arquivos', [AssistenciaArquivoController::class, 'listByItem'])->whereNumber('item');
+            Route::post('itens/{item}/arquivos', [AssistenciaArquivoController::class, 'uploadToItem'])->whereNumber('item');
+
+            Route::get('arquivos/{arquivo}', [AssistenciaArquivoController::class, 'show'])->whereNumber('arquivo');
+            Route::delete('arquivos/{arquivo}', [AssistenciaArquivoController::class, 'destroy'])->whereNumber('arquivo');
+        });
+
+        /* ============================================================
+         * FINANCEIRO (tudo centralizado)
+         * ============================================================ */
+        Route::prefix('financeiro')->group(function () {
+            Route::get('dashboard', [FinanceiroDashboardController::class, 'show']);
+
+            Route::prefix('catalogos')->group(function () {
+                Route::get('categorias-financeiras', [CategoriaFinanceiraController::class, 'index']);
+                Route::get('contas-financeiras', [ContaFinanceiraController::class, 'index']);
+            });
+
+            Route::get('centros-custo', [CentroCustoController::class, 'index']);
+
+            Route::get('lancamentos/totais', [LancamentoFinanceiroController::class, 'totais']);
+            Route::apiResource('lancamentos', LancamentoFinanceiroController::class)->except(['create', 'edit']);
+
+            // Contas a pagar
+            Route::prefix('contas-pagar')->group(function () {
+                Route::get('export/excel', [ContaPagarController::class, 'exportExcel']);
+                Route::get('export/pdf', [ContaPagarController::class, 'exportPdf']);
+                Route::get('kpis', [ContaPagarController::class, 'kpis']);
+
+                Route::post('{conta_pagar}/pagar', [ContaPagarController::class, 'pagar'])->whereNumber('conta_pagar');
+                Route::delete('{conta_pagar}/pagamentos/{pagamento}', [ContaPagarController::class, 'estornar'])
+                    ->whereNumber(['conta_pagar', 'pagamento']);
+            });
+
+            Route::apiResource('contas-pagar', ContaPagarController::class)
+                ->parameters(['contas-pagar' => 'conta_pagar'])
+                ->whereNumber('conta_pagar')
+                ->except(['create', 'edit']);
+
+            // Contas a receber
+            Route::prefix('contas-receber')->group(function () {
+                Route::get('export/excel', [ContaReceberExportController::class, 'exportarExcel']);
+                Route::get('export/pdf', [ContaReceberExportController::class, 'exportarPdf']);
+                Route::get('kpis', [ContaReceberExportController::class, 'kpis']);
+
+                Route::post('{conta}/pagar', [ContaReceberController::class, 'pagar'])->whereNumber('conta');
+                Route::delete('{conta}/pagamentos/{pagamento}', [ContaReceberController::class, 'estornarPagamento'])
+                    ->whereNumber(['conta', 'pagamento']);
+            });
+
+            Route::apiResource('contas-receber', ContaReceberController::class)
+                ->parameters(['contas-receber' => 'conta'])
+                ->whereNumber('conta')
+                ->except(['create', 'edit']);
+
+            // Despesas recorrentes
+            Route::get('despesas-recorrentes', [DespesaRecorrenteController::class, 'index']);
+            Route::get('despesas-recorrentes/{id}', [DespesaRecorrenteController::class, 'show'])->whereNumber('id');
+            Route::post('despesas-recorrentes', [DespesaRecorrenteController::class, 'store']);
+            Route::put('despesas-recorrentes/{id}', [DespesaRecorrenteController::class, 'update'])->whereNumber('id');
+
+            Route::patch('despesas-recorrentes/{id}/pausar', [DespesaRecorrenteController::class, 'pause'])->whereNumber('id');
+            Route::patch('despesas-recorrentes/{id}/ativar', [DespesaRecorrenteController::class, 'activate'])->whereNumber('id');
+            Route::patch('despesas-recorrentes/{id}/cancelar', [DespesaRecorrenteController::class, 'cancel'])->whereNumber('id');
+
+            Route::post('despesas-recorrentes/{id}/executar', [DespesaRecorrenteController::class, 'executar'])->whereNumber('id');
+        });
+
+        /* ============================================================
+         * COMUNICAÇÃO (antes era /comms)
+         * ============================================================ */
+        Route::prefix('comunicacao')->group(function () {
+            // templates
+            Route::get('templates', [CommsProxyController::class, 'templatesIndex']);
+            Route::get('templates/{id}', [CommsProxyController::class, 'templatesShow']);
+            Route::post('templates', [CommsProxyController::class, 'templatesStore']);
+            Route::put('templates/{id}', [CommsProxyController::class, 'templatesUpdate']);
+            Route::post('templates/{id}/preview', [CommsProxyController::class, 'templatesPreview']);
+
+            // requests
+            Route::get('requests', [CommsProxyController::class, 'requestsIndex']);
+            Route::get('requests/{id}', [CommsProxyController::class, 'requestsShow']);
+            Route::post('requests/{id}/cancelar', [CommsProxyController::class, 'requestsCancel']);
+
+            // messages
+            Route::get('messages', [CommsProxyController::class, 'messagesIndex']);
+            Route::get('messages/{id}', [CommsProxyController::class, 'messagesShow']);
+            Route::post('messages/{id}/reprocessar', [CommsProxyController::class, 'messagesRetry']);
+        });
     });
-
-    Route::prefix('comms')->group(function () {
-        Route::get('/templates', [CommsProxyController::class, 'templatesIndex']);
-        Route::get('/templates/{id}', [CommsProxyController::class, 'templatesShow']);
-        Route::post('/templates', [CommsProxyController::class, 'templatesStore']);
-        Route::put('/templates/{id}', [CommsProxyController::class, 'templatesUpdate']);
-        Route::post('/templates/{id}/preview', [CommsProxyController::class, 'templatesPreview']);
-
-        Route::get('/requests', [CommsProxyController::class, 'requestsIndex']);
-        Route::get('/requests/{id}', [CommsProxyController::class, 'requestsShow']);
-        Route::post('/requests/{id}/cancel', [CommsProxyController::class, 'requestsCancel']);
-
-        Route::get('/messages', [CommsProxyController::class, 'messagesIndex']);
-        Route::get('/messages/{id}', [CommsProxyController::class, 'messagesShow']);
-        Route::post('/messages/{id}/retry', [CommsProxyController::class, 'messagesRetry']);
-    });
-
-});
-

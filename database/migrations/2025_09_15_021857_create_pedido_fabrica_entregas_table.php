@@ -6,9 +6,6 @@ use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
-    /**
-     * Tabela de histórico de entregas de itens de pedido de fábrica.
-     */
     public function up(): void
     {
         Schema::create('pedido_fabrica_entregas', function (Blueprint $table) {
@@ -25,8 +22,7 @@ return new class extends Migration
             $table->unsignedInteger('deposito_id')->nullable();
             $table->unsignedInteger('quantidade');
 
-            // padronizado p/ bater com acesso_usuarios.id
-            $table->unsignedInteger('usuario_id')->nullable();
+            $table->foreignId('usuario_id')->nullable();
 
             $table->text('observacao')->nullable();
             $table->timestamps();

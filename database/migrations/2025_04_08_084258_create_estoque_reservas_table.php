@@ -11,12 +11,12 @@ return new class extends Migration
         Schema::create('estoque_reservas', function (Blueprint $table) {
             $table->increments('id');
 
-            // padronizado para bater com produto_variacoes/depositos/pedidos (normalmente increments/unsignedInteger)
             $table->unsignedInteger('id_variacao');
             $table->unsignedInteger('id_deposito')->nullable();
             $table->unsignedInteger('pedido_id')->nullable();
             $table->unsignedInteger('pedido_item_id')->nullable();
-            $table->unsignedInteger('id_usuario')->nullable();
+
+            $table->foreignId('id_usuario')->nullable();
 
             $table->integer('quantidade');
             $table->unsignedInteger('quantidade_consumida')->default(0);
@@ -29,15 +29,15 @@ return new class extends Migration
 
             $table->timestamps();
 
-            // Índices
-            $table->index(['id_variacao', 'id_deposito']);
-            $table->index('status');
-            $table->index(['pedido_id', 'pedido_item_id']);
+            $table->index(['id_variacao', 'id_deposito'], 'ix_er_var_dep');
+            $table->index('status', 'ix_er_status');
+            $table->index(['pedido_id', 'pedido_item_id'], 'ix_er_pedido_item');
+            $table->index('id_usuario', 'ix_er_usuario');
+            $table->index('data_expira', 'ix_er_expira');
 
-            // FKs
             $table->foreign('id_variacao', 'estoque_reservas_id_variacao_fk')
                 ->references('id')->on('produto_variacoes')
-                ->onDelete('cascade')
+                ->cascadeOnDelete()
                 ->onUpdate('restrict');
 
             $table->foreign('id_deposito', 'estoque_reservas_id_deposito_fk')

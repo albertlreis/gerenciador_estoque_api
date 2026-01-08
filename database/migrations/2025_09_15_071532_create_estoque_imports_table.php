@@ -14,7 +14,7 @@ return new class extends Migration
             $table->string('arquivo_nome');
             $table->string('arquivo_hash')->unique();
 
-            $table->unsignedInteger('usuario_id')->nullable();
+            $table->foreignId('usuario_id')->nullable();
 
             $table->enum('status', ['pendente','processando','concluido','com_erro','cancelado'])
                 ->default('pendente');

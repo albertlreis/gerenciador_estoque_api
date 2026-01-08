@@ -11,14 +11,11 @@ return new class extends Migration
         Schema::create('pedidos_fabrica', function (Blueprint $table) {
             $table->id();
 
-            $table->enum('status', ['pendente', 'enviado', 'parcial', 'entregue', 'cancelado'])
-                ->default('pendente');
-
+            $table->enum('status', ['pendente', 'enviado', 'parcial', 'entregue', 'cancelado'])->default('pendente');
             $table->date('data_previsao_entrega')->nullable();
             $table->text('observacoes')->nullable();
 
-            // (opcional, mas muito útil) auditoria do usuário que criou/registrou o pedido
-            $table->unsignedInteger('usuario_id')->nullable();
+            $table->foreignId('usuario_id')->nullable();
 
             $table->timestamps();
 

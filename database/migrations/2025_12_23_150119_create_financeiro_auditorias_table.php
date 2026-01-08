@@ -18,8 +18,8 @@ return new class extends Migration
             $table->json('antes_json')->nullable();
             $table->json('depois_json')->nullable();
 
-            $table->unsignedInteger('usuario_id')->nullable()->index();
-            $table->foreign('usuario_id')->references('id')->on('acesso_usuarios')->nullOnDelete();
+            $table->foreignId('usuario_id')->nullable()->index();
+            $table->foreign('usuario_id')->references('id')->on('acesso_usuarios')->nullOnDelete()->onUpdate('restrict');
 
             $table->string('ip', 45)->nullable();
             $table->text('user_agent')->nullable();

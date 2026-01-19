@@ -305,7 +305,7 @@ Route::middleware('auth:sanctum')
             Route::post('{consignacao}/devolucoes', [ConsignacaoController::class, 'registrarDevolucao'])
                 ->whereNumber('consignacao');
 
-            Route::get('{consignacao}/pdf', [ConsignacaoController::class, 'gerarPdf'])->whereNumber('consignacao');
+            Route::get('{pedido}/pdf', [ConsignacaoController::class, 'gerarPdf'])->whereNumber('pedido');
         });
 
         /* ============================================================

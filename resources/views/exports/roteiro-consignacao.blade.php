@@ -42,7 +42,7 @@
 
 <table width="100%" style="margin-bottom: 10px;">
     <tr>
-        <td><strong>DATA:</strong> {{ $geradoEm ?? Carbon::now()->format('d/m/Y H:i') }}</td>
+        <td><strong>DATA:</strong> {{ $pedido->data_pedido ?? Carbon::parse($pedido->data_pedido)->format('d/m/Y') }}</td>
         <td><strong>VENDEDOR(A):</strong> {{ $pedido->usuario->nome ?? '-' }}</td>
     </tr>
     <tr>

@@ -35,7 +35,8 @@ class ConsignacaoController extends Controller
             'pedido.parceiro:id,nome',
             'pedido.statusAtual',
             'produtoVariacao.produto',
-        ]);
+        ])
+            ->withSum('devolucoes as devolvido_total', 'quantidade');
 
         if (!AuthHelper::hasPermissao('consignacoes.visualizar.todos')) {
             $query->whereHas('pedido', function ($q) {
@@ -184,13 +185,13 @@ class ConsignacaoController extends Controller
     public function atualizarStatus($id, Request $request): JsonResponse
     {
         $request->validate([
-            'status' => 'required|in:pendente,comprado,devolvido',
+            'status' => 'required|in:comprado,devolvido',
         ]);
 
         $consignacao = Consignacao::findOrFail($id);
 
         // Se já finalizada, não permitir alteração
-        if (in_array($consignacao->status, ['aceita', 'devolvida'])) {
+        if (in_array($consignacao->status, ['comprado', 'devolvido'])) {
             return response()->json(['erro' => 'Consignação já finalizada.'], 422);
         }
 
@@ -231,6 +232,10 @@ class ConsignacaoController extends Controller
         ]);
 
         $consignacao = Consignacao::with('devolucoes')->findOrFail($id);
+
+        if ($consignacao->status !== 'pendente') {
+            return response()->json(['erro' => 'Não é possível registrar devolução para consignação finalizada.'], 422);
+        }
 
         $quantidadeDevolvida = $consignacao->devolucoes->sum('quantidade');
         $restante = $consignacao->quantidade - $quantidadeDevolvida;
@@ -288,12 +293,12 @@ class ConsignacaoController extends Controller
         $pedido = Pedido::with([
             'cliente',
             'usuario',
-            'parceiro', // <-- exibir parceiro
+            'parceiro',
             'consignacoes.deposito',
             'consignacoes.produtoVariacao.produto.imagemPrincipal',
             'consignacoes.produtoVariacao.produto',
             'consignacoes.produtoVariacao.atributos',
-            'consignacoes.produtoVariacao.estoquesComLocalizacao', // <-- localização
+            'consignacoes.produtoVariacao.estoquesComLocalizacao',
         ])->findOrFail($id);
 
         $grupos = $pedido->consignacoes->groupBy(fn($item) => $item->deposito->nome ?? 'Sem depósito');

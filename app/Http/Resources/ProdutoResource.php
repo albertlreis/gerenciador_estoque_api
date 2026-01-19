@@ -56,7 +56,17 @@ class ProdutoResource extends JsonResource
     private function getEstoqueTotalAttributeSafely(): int
     {
         $variacoes = $this->getRelationValue('variacoes') ?? collect();
-        return $variacoes->sum(fn($v) => $v->getRelationValue('estoque')?->quantidade ?? 0);
+
+        return (int) $variacoes->sum(function ($v) {
+            $estoques = $v->getRelationValue('estoques');
+            if ($estoques instanceof \Illuminate\Support\Collection) {
+                return (float) $estoques->sum('quantidade');
+            }
+
+            // fallback caso exista legado "estoque" (singular)
+            $estoque = $v->getRelationValue('estoque');
+            return (float) ($estoque?->quantidade ?? 0);
+        });
     }
 
     private function getEstoqueOutletTotalAttributeSafely(): int

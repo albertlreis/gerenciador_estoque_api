@@ -15,12 +15,6 @@ use Throwable;
 
 class ProdutoService
 {
-    /**
-     * Cria um novo produto base.
-     *
-     * @param array $data
-     * @return Produto
-     */
     public function store(array $data): Produto
     {
         $manualPath = null;
@@ -45,14 +39,6 @@ class ProdutoService
         ]);
     }
 
-    /**
-     * Atualiza os dados do produto base.
-     *
-     * @param Produto $produto
-     * @param array $data
-     * @return Produto
-     * @throws \Exception
-     */
     public function update(Produto $produto, array $data): Produto
     {
         $updateData = [
@@ -78,13 +64,9 @@ class ProdutoService
         return $produto->refresh();
     }
 
-    /**
-     * @throws \Exception
-     */
     public function salvarManualConservacao(Produto $produto, UploadedFile $file): string
     {
         try {
-            // Valida extensão (garantia extra além do FormRequest)
             if ($file->getClientOriginalExtension() !== 'pdf') {
                 throw new Exception('Arquivo deve ser um PDF.');
             }
@@ -97,7 +79,6 @@ class ProdutoService
                 mkdir($folder, 0755, true);
             }
 
-            // Remove o arquivo anterior se existir
             if (!empty($produto->manual_conservacao)) {
                 $caminhoAntigo = public_path("uploads/manuais/$produto->manual_conservacao");
                 if (file_exists($caminhoAntigo)) {
@@ -105,10 +86,8 @@ class ProdutoService
                 }
             }
 
-            // Move o novo arquivo
             $file->move($folder, $filename);
 
-            // Atualiza o campo no banco
             $produto->manual_conservacao = $filename;
             $produto->save();
 
@@ -126,32 +105,51 @@ class ProdutoService
         }
     }
 
-    /**
-     * Lista ou busca produtos com filtros dinâmicos e controle contextual.
-     *
-     * @param Request $request
-     * @return LengthAwarePaginator
-     */
     public function listarProdutosFiltrados(Request $request): LengthAwarePaginator
     {
         $view           = $request->get('view', 'completa');
         $depositoId     = $request->input('deposito_id');
         $variacaoId     = $request->input('variacao_id');
         $comEstoque     = $request->boolean('com_estoque');
+        $status         = $request->input('estoque_status'); // com_estoque | sem_estoque | null
         $incluirEstoque = $request->boolean('incluir_estoque', in_array($view, ['completa', 'simplificada']));
+
+        // Escopos reutilizáveis
+        $estoqueNoDeposito = function ($q) use ($depositoId) {
+            if ($depositoId) {
+                $q->where('id_deposito', $depositoId);
+            }
+        };
+
+        $estoquePositivo = function ($q) use ($depositoId) {
+            if ($depositoId) {
+                $q->where('id_deposito', $depositoId);
+            }
+            $q->where('quantidade', '>', 0);
+        };
 
         $with = [
             'categoria',
-            'variacoes' => function ($q) use ($depositoId, $incluirEstoque) {
-                $q->with(['atributos']);
+            'variacoes' => function ($q) use ($depositoId, $incluirEstoque, $status, $comEstoque) {
+                // ✅ evita N+1 e mantém coerência do catálogo
+                $q->with([
+                    'atributos',
+                    'outlets', // se você precisa do outlet no catálogo
+                    'outlets.motivo',
+                    'outlets.formasPagamento.formaPagamento',
+                ]);
 
                 if ($incluirEstoque) {
-                    $q->with(['estoques' => function ($e) use ($depositoId) {
+                    $q->with(['estoques' => function ($e) use ($depositoId, $status, $comEstoque) {
                         if ($depositoId) {
                             $e->where('id_deposito', $depositoId);
                         }
 
-                        // traz as relações necessárias para a tela
+                        // Se o usuário pediu "com estoque", não faz sentido devolver linhas zeradas
+                        if ($status === 'com_estoque' || $comEstoque) {
+                            $e->where('quantidade', '>', 0);
+                        }
+
                         $e->with(['deposito', 'localizacao']);
                     }]);
                 }
@@ -161,21 +159,15 @@ class ProdutoService
         $query = Produto::with($with);
 
         if ($variacaoId) {
-            $query->whereHas('variacoes', fn($q) => $q->where('id', $variacaoId));
+            $query->whereHas('variacoes', fn ($q) => $q->where('id', $variacaoId));
         }
 
-        if ($depositoId) {
-            $query->whereHas('variacoes.estoques', fn($q) => $q->where('id_deposito', $depositoId));
-        }
-
-        // ========== BUSCA TEXTUAL FLEXÍVEL (acentos e cedilhas ignorados) ==========
+        // ========== BUSCA TEXTUAL ==========
         $term = $request->input('q') ?? $request->input('nome');
         if ($term) {
-            // Normaliza e remove acentos/cedilhas localmente
             $normalized = iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $term);
             $normalized = preg_replace('/[^A-Za-z0-9\s]/', '', $normalized);
             $normalized = trim(strtolower($normalized));
-
             $words = preg_split('/\s+/', $normalized);
 
             $query->where(function ($q) use ($words) {
@@ -183,10 +175,9 @@ class ProdutoService
                     $like = "%{$w}%";
 
                     $q->where(function ($qq) use ($like) {
-                        // 🔤 Usa COLLATE utf8mb4_0900_ai_ci para ignorar acentos, cedilha e case
                         $qq->whereRaw('LOWER(nome) COLLATE utf8mb4_0900_ai_ci LIKE ?', [$like])
                             ->orWhereRaw('LOWER(descricao) COLLATE utf8mb4_0900_ai_ci LIKE ?', [$like])
-                            ->orWhereHas('categoria', fn($qc) =>
+                            ->orWhereHas('categoria', fn ($qc) =>
                             $qc->whereRaw('LOWER(nome) COLLATE utf8mb4_0900_ai_ci LIKE ?', [$like])
                             )
                             ->orWhereHas('variacoes', function ($qv) use ($like) {
@@ -202,24 +193,21 @@ class ProdutoService
             });
         }
 
-        // ========== FILTROS DE ESTOQUE E DEPÓSITO ==========
+        // ========== FILTROS DE DEPÓSITO / ESTOQUE ==========
         if ($depositoId) {
-            $query->whereHas('variacoes.estoques', fn($qe) => $qe->where('id_deposito', $depositoId));
+            // restringe ao depósito informado (mesmo se estoque 0, para telas que só querem “existência no depósito”)
+            $query->whereHas('variacoes.estoques', $estoqueNoDeposito);
         }
 
         if ($comEstoque) {
-            $query->whereHas('variacoes.estoques', fn($qe) => $qe->where('quantidade', '>', 0));
+            $query->whereHas('variacoes.estoques', $estoquePositivo);
         }
 
-        if ($status = $request->input('estoque_status')) {
-            if ($status === 'com_estoque') {
-                $query->whereHas('variacoes.estoques', fn($q) => $q->where('quantidade', '>', 0));
-            } elseif ($status === 'sem_estoque') {
-                $query->where(function ($qq) {
-                    $qq->whereDoesntHave('variacoes.estoques')
-                        ->orWhereHas('variacoes.estoques', fn($q) => $q->where('quantidade', '<=', 0));
-                });
-            }
+        if ($status === 'com_estoque') {
+            $query->whereHas('variacoes.estoques', $estoquePositivo);
+
+        } elseif ($status === 'sem_estoque') {
+            $query->whereDoesntHave('variacoes.estoques', $estoquePositivo);
         }
 
         // ========== OUTROS FILTROS ==========
@@ -237,9 +225,9 @@ class ProdutoService
 
         if (!is_null($request->input('is_outlet'))) {
             if ($request->boolean('is_outlet')) {
-                $query->whereHas('variacoes.outlet', fn($q) => $q->where('quantidade_restante', '>', 0));
+                $query->whereHas('variacoes.outlet', fn ($q) => $q->where('quantidade_restante', '>', 0));
             } else {
-                $query->whereDoesntHave('variacoes.outlet', fn($q) => $q->where('quantidade_restante', '>', 0));
+                $query->whereDoesntHave('variacoes.outlet', fn ($q) => $q->where('quantidade_restante', '>', 0));
             }
         }
 
@@ -248,9 +236,6 @@ class ProdutoService
         return $query->paginate($request->integer('per_page', 15));
     }
 
-    /**
-     * Retorna um produto completo com todas as relações necessárias para edição ou exibição detalhada.
-     */
     public function obterProdutoCompleto(int $id, ?int $depositoId = null): Model|Collection|Builder|array|null
     {
         return Produto::with([
@@ -264,7 +249,6 @@ class ProdutoService
                         if ($depositoId) {
                             $e->where('id_deposito', $depositoId);
                         }
-
                         $e->with(['deposito', 'localizacao']);
                     },
                 ]);

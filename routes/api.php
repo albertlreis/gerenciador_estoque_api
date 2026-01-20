@@ -234,6 +234,7 @@ Route::middleware('auth:sanctum')
 
         Route::prefix('pedidos/{pedido}')->whereNumber('pedido')->group(function () {
             Route::get('detalhado', [PedidoController::class, 'completo']);
+            Route::get('pdf/roteiro', [PedidoController::class, 'roteiroPdf']);
 
             // status (padronizado)
             Route::patch('status', [PedidoStatusHistoricoController::class, 'atualizarStatus']);

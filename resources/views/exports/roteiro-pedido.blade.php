@@ -3,7 +3,7 @@
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
-    <title>Roteiro de Consignação</title>
+    <title>Roteiro do Pedido</title>
     <style>
         body { font-family: Arial, sans-serif; font-size: 11px; color: #000; }
         .header, .footer { text-align: center; margin-bottom: 10px; }
@@ -25,17 +25,17 @@
             padding-bottom: 10px;
         }
         .section-content img { display: block; margin: auto; border: 1px solid #ccc; }
-        .muted { color: #666; }
         .nowrap { white-space: nowrap; }
         .wrap { word-break: break-word; overflow-wrap: anywhere; white-space: normal; }
         tr { page-break-inside: avoid; }
         thead { display: table-header-group; }
+        .muted { color: #666; }
     </style>
 </head>
 <body>
 <div class="header">
     <img src="{{ public_path('logo.png') }}" width="120" alt="Logo"/>
-    <h3>ROTEIRO DE CONSIGNAÇÃO</h3>
+    <h3>ROTEIRO DO PEDIDO</h3>
 </div>
 
 @php
@@ -52,6 +52,10 @@
 @endphp
 
 <table width="100%" style="margin-bottom: 10px;">
+    <tr>
+        <td class="nowrap"><strong>PEDIDO:</strong> {{ $pedido->numero_externo ?? $pedido->id }}</td>
+        <td class="nowrap"><strong>GERADO EM:</strong> {{ $geradoEm ?? '-' }}</td>
+    </tr>
     <tr>
         <td class="nowrap"><strong>DATA:</strong> {{ $pedido->data_pedido ? Carbon::parse($pedido->data_pedido)->format('d/m/Y') : '-' }}</td>
         <td class="nowrap"><strong>VENDEDOR(A):</strong> {{ $pedido->usuario->nome ?? '-' }}</td>
@@ -78,30 +82,31 @@
                     <th style="width: 80px;">REF</th>
                     <th>DESCRIÇÃO</th>
                     <th style="width: 100px;">LOCALIZAÇÃO</th>
-                    <th style="width: 75px;">DATA ENVIO</th>
+                    <th style="width: 160px;">OBS</th>
                 </tr>
                 </thead>
                 <tbody>
                 @foreach ($itens as $item)
                     @php
-                        $variacao   = $item->produtoVariacao;
+                        $variacao   = $item->variacao;
                         $produto    = $variacao?->produto;
                         $referencia = $variacao?->referencia ?? '-';
                         $descricao  = $variacao?->nome_completo ?? '-';
-                        $dataEnvio  = $item->data_envio ? Carbon::parse($item->data_envio)->format('d/m/Y') : '-';
 
+                        // imagem principal (mesma lógica do roteiro-consignacao)
                         $imgRel = optional($produto?->imagemPrincipal)->url ?? '';
                         $imgAbs = ($imgRel && !empty($baseFsDir ?? null))
                             ? ($baseFsDir . DIRECTORY_SEPARATOR . $imgRel)
                             : '';
 
-                        // LOCALIZAÇÃO: Estoque.id_deposito (corrigido!) x item->deposito_id (Consignacao)
+                        // localização: pega estoque da variação no depósito do item (Estoque.id_deposito)
                         $locTexto = '—';
+                        $depositoId = (int)($item->id_deposito ?? 0);
+
                         $estoques = $variacao && $variacao->relationLoaded('estoquesComLocalizacao')
                             ? $variacao->estoquesComLocalizacao
                             : collect();
 
-                        $depositoId = (int)($item->deposito_id ?? 0);
                         if ($depositoId > 0 && $estoques->count()) {
                             $estoqueDoDeposito = $estoques->first(fn($e) => (int)($e->id_deposito ?? 0) === $depositoId);
 
@@ -120,7 +125,10 @@
                                 }
                             }
                         }
+
+                        $obsItem = trim((string)($item->observacoes ?? ''));
                     @endphp
+
                     <tr>
                         <td style="text-align:center;">
                             @if($imgAbs)
@@ -131,7 +139,7 @@
                         <td class="nowrap">{{ $referencia }}</td>
                         <td class="wrap">{{ $descricao }}</td>
                         <td class="wrap">{{ $locTexto }}</td>
-                        <td class="nowrap">{{ $dataEnvio }}</td>
+                        <td class="wrap">{{ $obsItem !== '' ? $obsItem : '—' }}</td>
                     </tr>
                 @endforeach
                 </tbody>
@@ -140,7 +148,7 @@
     </div>
 @endforeach
 
-<div style="margin-top: 10px;"><strong>OBS:</strong></div>
+<div style="margin-top: 10px;"><strong>OBS (GERAL):</strong></div>
 <div class="obs">{{ $pedido->observacoes ?? '' }}</div>
 
 <div class="recebido">

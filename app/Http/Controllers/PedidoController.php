@@ -4,11 +4,15 @@ namespace App\Http\Controllers;
 
 use App\Http\Requests\StorePedidoRequest;
 use App\Http\Resources\PedidoCompletoResource;
+use App\Models\Deposito;
+use App\Models\Pedido;
+use App\Models\ProdutoImagem;
 use App\Services\ExtratorPedidoPythonService;
 use App\Services\PedidoService;
 use App\Services\ImportacaoPedidoService;
 use App\Services\EstatisticaPedidoService;
 use App\Services\PedidoExportService;
+use Barryvdh\DomPDF\Facade\Pdf;
 use Exception;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -168,5 +172,114 @@ class PedidoController extends Controller
                 "erro" => $e->getMessage()
             ], 500);
         }
+    }
+
+    /**
+     * Gera PDF de roteiro do pedido.
+     * - Se houver consignações: usa o template existente (roteiro-consignacao).
+     * - Caso contrário: usa template novo (roteiro-pedido).
+     */
+    public function roteiroPdf(int $pedidoId): Response
+    {
+        // 1) Carrega o básico + statusAtual para decidir o tipo sem puxar consignações/itens
+        $pedidoBase = Pedido::with([
+            'cliente.enderecoPrincipal', // opcional, mas útil p/ PDF (se quiser)
+            'usuario',
+            'parceiro',
+            'statusAtual',
+        ])->findOrFail($pedidoId);
+
+        // Regra de negócio:
+        // - Pedido consignado = status atual consignado (e/ou existe consignação)
+        // Eu priorizo statusAtual por ser determinístico e mais barato.
+        $status = $pedidoBase->statusAtual?->status;
+        $isConsignado = ($status === 'consignado');
+
+        // Caso queira ser "à prova de inconsistência" (status divergente),
+        // você pode habilitar esse fallback (roda 1 exists()):
+        // if (!$isConsignado) $isConsignado = $pedidoBase->isConsignado();
+
+        $baseFsDir = public_path('storage' . DIRECTORY_SEPARATOR . ProdutoImagem::FOLDER);
+        Pdf::setOptions(['isRemoteEnabled' => true]);
+
+        // 2) Se for consignado: carrega APENAS consignações e gera o mesmo PDF existente
+        if ($isConsignado) {
+            $pedido = Pedido::with([
+                'cliente.enderecoPrincipal',
+                'usuario',
+                'parceiro',
+
+                'consignacoes.deposito',
+                'consignacoes.produtoVariacao.produto.imagemPrincipal',
+                'consignacoes.produtoVariacao.produto',
+                'consignacoes.produtoVariacao.atributos',
+
+                // localização
+                'consignacoes.produtoVariacao.estoquesComLocalizacao.localizacao.area',
+            ])->findOrFail($pedidoId);
+
+            $grupos = $pedido->consignacoes->groupBy(fn($c) => $c->deposito->nome ?? 'Sem depósito');
+
+            logAuditoria('pedido_pdf', 'Geração de PDF (roteiro consignação via pedidos)', [
+                'acao' => 'roteiro_pdf',
+                'pedido_id' => $pedidoId,
+                'tipo' => 'consignacao',
+            ]);
+
+            $pdf = Pdf::loadView('exports.roteiro-consignacao', [
+                'pedido'     => $pedido,
+                'grupos'     => $grupos,
+                'baseFsDir'  => $baseFsDir,
+                'geradoEm'   => now('America/Belem')->format('d/m/Y H:i'),
+            ])->setPaper('a4');
+
+            return $pdf->download("roteiro_consignacao_{$pedidoId}.pdf");
+        }
+
+        // 3) Caso contrário: carrega APENAS itens do pedido e gera o template novo
+        $pedido = Pedido::with([
+            'cliente.enderecoPrincipal',
+            'usuario',
+            'parceiro',
+
+            'itens.variacao.produto.imagemPrincipal',
+            'itens.variacao.produto',
+            'itens.variacao.atributos',
+
+            // localização
+            'itens.variacao.estoquesComLocalizacao.localizacao.area',
+        ])->findOrFail($pedidoId);
+
+        // Depósitos: temos id_deposito no item, e model Deposito existe.
+        $depositoIds = $pedido->itens
+            ->pluck('id_deposito')
+            ->filter(fn($id) => !is_null($id) && (int)$id > 0)
+            ->unique()
+            ->values();
+
+        $depositosMap = $depositoIds->isNotEmpty()
+            ? Deposito::whereIn('id', $depositoIds)->pluck('nome', 'id')
+            : collect();
+
+        $grupos = $pedido->itens->groupBy(function ($item) use ($depositosMap) {
+            $id = (int)($item->id_deposito ?? 0);
+            if ($id <= 0) return 'Sem depósito';
+            return $depositosMap[$id] ?? ("Depósito #{$id}");
+        });
+
+        logAuditoria('pedido_pdf', 'Geração de PDF (roteiro pedido)', [
+            'acao' => 'roteiro_pdf',
+            'pedido_id' => $pedidoId,
+            'tipo' => 'pedido',
+        ]);
+
+        $pdf = Pdf::loadView('exports.roteiro-pedido', [
+            'pedido'     => $pedido,
+            'grupos'     => $grupos,
+            'baseFsDir'  => $baseFsDir,
+            'geradoEm'   => now('America/Belem')->format('d/m/Y H:i'),
+        ])->setPaper('a4');
+
+        return $pdf->download("roteiro_pedido_{$pedidoId}.pdf");
     }
 }

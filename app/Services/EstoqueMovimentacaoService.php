@@ -5,13 +5,17 @@ namespace App\Services;
 use App\DTOs\FiltroMovimentacaoEstoqueDTO;
 use App\Enums\EstoqueMovimentacaoTipo;
 use App\Http\Resources\MovimentacaoResource;
+use App\Models\Estoque;
 use App\Models\EstoqueMovimentacao;
 use App\Models\EstoqueReserva;
+use App\Models\EstoqueTransferencia;
+use App\Models\EstoqueTransferenciaItem;
 use Carbon\Carbon;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use InvalidArgumentException;
 
 /**
@@ -370,33 +374,79 @@ class EstoqueMovimentacaoService
 
         $consolidados = collect($dados['itens'])
             ->groupBy('variacao_id')
-            ->map(fn($g) => $g->sum('quantidade'));
+            ->map(fn($g) => (int) $g->sum('quantidade'));
 
         $movs = [];
+        $transferencia = null;
 
-        DB::transaction(function () use (&$movs, $tipo, $origem, $destino, $observacao, $usuarioId, $consolidados) {
+        // um id único para agrupar tudo (serve pra PDF e rastreio)
+        $loteId = (string) Str::uuid();
+
+        DB::transaction(function () use (
+            &$movs, &$transferencia,
+            $tipo, $origem, $destino, $observacao, $usuarioId,
+            $consolidados, $loteId
+        ) {
+            // 1) Se for transferência, cria o "documento"
+            if ($tipo === 'transferencia') {
+                $transferencia = EstoqueTransferencia::create([
+                    'uuid' => $loteId,
+                    'deposito_origem_id' => (int) $origem,
+                    'deposito_destino_id' => (int) $destino,
+                    'id_usuario' => $usuarioId,
+                    'observacao' => $observacao,
+                    'status' => 'concluida',
+                    'total_itens' => $consolidados->count(),
+                    'total_pecas' => (int) $consolidados->sum(),
+                    'concluida_em' => now(),
+                ]);
+
+                // cria itens com snapshot de localização no depósito de origem
+                foreach ($consolidados as $variacaoId => $qtd) {
+                    $row = Estoque::query()
+                        ->where('id_variacao', (int)$variacaoId)
+                        ->where('id_deposito', (int)$origem)
+                        ->first();
+
+                    EstoqueTransferenciaItem::create([
+                        'transferencia_id' => $transferencia->id,
+                        'id_variacao' => (int) $variacaoId,
+                        'quantidade' => (int) $qtd,
+                        'corredor' => $row?->corredor,
+                        'prateleira' => $row?->prateleira,
+                        'nivel' => $row?->nivel,
+                    ]);
+                }
+            }
+
+            // 2) Registra as movimentações (debitando/creditando) e vincula ao lote/transferência
             foreach ($consolidados as $variacaoId => $qtd) {
                 $dadosMov = [
-                    'id_variacao' => $variacaoId,
-                    'quantidade'  => $qtd,
+                    'id_variacao' => (int) $variacaoId,
+                    'quantidade'  => (int) $qtd,
                     'id_usuario'  => $usuarioId,
                     'observacao'  => $observacao,
+
+                    // rastreio
+                    'lote_id'   => $loteId,
+                    'ref_type'  => $transferencia ? 'transferencia' : null,
+                    'ref_id'    => $transferencia?->id,
                 ];
 
                 switch ($tipo) {
                     case 'entrada':
-                        $dadosMov['id_deposito_destino'] = $destino;
+                        $dadosMov['id_deposito_destino'] = (int) $destino;
                         $dadosMov['tipo'] = 'entrada';
                         break;
 
                     case 'saida':
-                        $dadosMov['id_deposito_origem'] = $origem;
+                        $dadosMov['id_deposito_origem'] = (int) $origem;
                         $dadosMov['tipo'] = 'saida';
                         break;
 
                     case 'transferencia':
-                        $dadosMov['id_deposito_origem']  = $origem;
-                        $dadosMov['id_deposito_destino'] = $destino;
+                        $dadosMov['id_deposito_origem']  = (int) $origem;
+                        $dadosMov['id_deposito_destino'] = (int) $destino;
                         $dadosMov['tipo'] = 'transferencia';
                         break;
                 }
@@ -408,7 +458,14 @@ class EstoqueMovimentacaoService
         return [
             'sucesso' => true,
             'mensagem' => 'Movimentação concluída com sucesso.',
-            'total_itens' => $consolidados->sum(),
+            'total_itens' => $consolidados->count(),
+            'total_pecas' => (int) $consolidados->sum(),
+            'lote_id' => $loteId,
+            'transferencia_id' => $transferencia?->id,
+            'transferencia_pdf' => $transferencia
+                ? route('estoque.transferencias.pdf', ['transferencia' => $transferencia->id])
+                : null,
+
             'movimentacoes' => MovimentacaoResource::collection(collect($movs)),
         ];
     }

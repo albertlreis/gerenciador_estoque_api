@@ -22,7 +22,10 @@ class MovimentacaoResource extends JsonResource
             'deposito_destino_nome' => $this->depositoDestino?->nome,
             'usuario_id' => $this->usuario?->id,
             'usuario_nome' => $this->usuario?->nome,
-            'observacoes' => $this->observacoes,
+            'observacao' => $this->observacao,
+            'lote_id' => $this->lote_id,
+            'ref_type' => $this->ref_type,
+            'ref_id' => $this->ref_id,
         ];
     }
 }

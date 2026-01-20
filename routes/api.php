@@ -2,8 +2,7 @@
 
 use Illuminate\Support\Facades\Route;
 
-use App\Http\Controllers\{
-    AreaEstoqueController,
+use App\Http\Controllers\{AreaEstoqueController,
     CarrinhoController,
     CarrinhoItemController,
     CategoriaController,
@@ -25,6 +24,7 @@ use App\Http\Controllers\{
     EstoqueController,
     EstoqueMovimentacaoController,
     EstoqueRelatorioController,
+    EstoqueTransferenciaController,
     FeriadoController,
     FinanceiroDashboardController,
     FornecedorController,
@@ -45,8 +45,7 @@ use App\Http\Controllers\{
     ProdutoVariacaoController,
     ProdutoVariacaoOutletController,
     ProdutoAtributoController,
-    CommsProxyController
-};
+    CommsProxyController};
 
 use App\Http\Controllers\Assistencia\{
     AssistenciaArquivoController,
@@ -163,6 +162,14 @@ Route::middleware('auth:sanctum')
                 ->whereNumber('dimensao')
                 ->only(['index', 'store', 'update', 'destroy'])
                 ->except(['create', 'edit']);
+
+            Route::get('transferencias', [EstoqueTransferenciaController::class, 'index']);
+            Route::get('transferencias/{transferencia}', [EstoqueTransferenciaController::class, 'show'])->whereNumber('transferencia');
+
+            // PDF do roteiro de separação da transferência
+            Route::get('transferencias/{transferencia}/pdf', [EstoqueTransferenciaController::class, 'pdf'])
+                ->whereNumber('transferencia')
+                ->name('estoque.transferencias.pdf');
         });
 
         // Depósitos

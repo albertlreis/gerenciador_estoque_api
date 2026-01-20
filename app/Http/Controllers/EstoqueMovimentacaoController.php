@@ -121,8 +121,10 @@ class EstoqueMovimentacaoController extends Controller
     {
         $dados = $request->validate([
             'tipo' => ['required', Rule::in(['entrada', 'saida', 'transferencia'])],
-            'deposito_origem_id' => ['nullable', 'integer', 'exists:depositos,id'],
-            'deposito_destino_id' => ['nullable', 'integer', 'exists:depositos,id'],
+
+            'deposito_origem_id' => ['nullable', 'integer', 'exists:depositos,id', 'required_if:tipo,saida,transferencia'],
+            'deposito_destino_id' => ['nullable', 'integer', 'exists:depositos,id', 'required_if:tipo,entrada,transferencia'],
+
             'observacao' => ['nullable', 'string', 'max:1000'],
             'itens' => ['required', 'array', 'min:1'],
             'itens.*.variacao_id' => ['required', 'integer', 'exists:produto_variacoes,id'],

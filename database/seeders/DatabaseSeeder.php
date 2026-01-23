@@ -46,14 +46,14 @@ class DatabaseSeeder extends Seeder
 //            AssistenciaDepositoSeeder::class,
 //            AssistenciaDemoSeeder::class,
 
-            CentrosCustoSeeder::class,
-            CategoriasFinanceirasSeeder::class,
-            ContasFinanceirasSeeder::class,
-            ContaPagarSeeder::class,
-            ContaPagarPagamentoSeeder::class,
-            ContasReceberSeeder::class,
-            LancamentosFinanceirosSeeder::class,
-            DespesasRecorrentesSeeder::class,
+//            CentrosCustoSeeder::class,
+//            CategoriasFinanceirasSeeder::class,
+//            ContasFinanceirasSeeder::class,
+//            ContaPagarSeeder::class,
+//            ContaPagarPagamentoSeeder::class,
+//            ContasReceberSeeder::class,
+//            LancamentosFinanceirosSeeder::class,
+//            DespesasRecorrentesSeeder::class,
         ]);
     }
 }

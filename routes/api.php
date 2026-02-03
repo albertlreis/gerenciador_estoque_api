@@ -410,22 +410,29 @@ Route::middleware('auth:sanctum')
         });
 
         /* ============================================================
-         * FINANCEIRO (tudo centralizado)
+         * FINANCEIRO
          * ============================================================ */
         Route::prefix('financeiro')->group(function () {
             Route::get('dashboard', [FinanceiroDashboardController::class, 'show']);
 
-            Route::prefix('catalogos')->group(function () {
-                Route::get('categorias-financeiras', [CategoriaFinanceiraController::class, 'index']);
-                Route::get('contas-financeiras', [ContaFinanceiraController::class, 'index']);
-            });
+            Route::apiResource('categorias-financeiras', CategoriaFinanceiraController::class)
+                ->parameters(['categorias-financeiras' => 'categoriaFinanceira'])
+                ->whereNumber('categoriaFinanceira')
+                ->except(['create', 'edit']);
 
-            Route::get('centros-custo', [CentroCustoController::class, 'index']);
+            Route::apiResource('contas-financeiras', ContaFinanceiraController::class)
+                ->parameters(['contas-financeiras' => 'contaFinanceira'])
+                ->whereNumber('contaFinanceira')
+                ->except(['create', 'edit']);
+
+            Route::apiResource('centros-custo', CentroCustoController::class)
+                ->parameters(['centros-custo' => 'centroCusto'])
+                ->whereNumber('centroCusto')
+                ->except(['create', 'edit']);
 
             Route::get('lancamentos/totais', [LancamentoFinanceiroController::class, 'totais']);
             Route::apiResource('lancamentos', LancamentoFinanceiroController::class)->except(['create', 'edit']);
 
-            // Contas a pagar
             Route::prefix('contas-pagar')->group(function () {
                 Route::get('export/excel', [ContaPagarController::class, 'exportExcel']);
                 Route::get('export/pdf', [ContaPagarController::class, 'exportPdf']);
@@ -441,7 +448,6 @@ Route::middleware('auth:sanctum')
                 ->whereNumber('conta_pagar')
                 ->except(['create', 'edit']);
 
-            // Contas a receber
             Route::prefix('contas-receber')->group(function () {
                 Route::get('export/excel', [ContaReceberExportController::class, 'exportarExcel']);
                 Route::get('export/pdf', [ContaReceberExportController::class, 'exportarPdf']);
@@ -457,7 +463,6 @@ Route::middleware('auth:sanctum')
                 ->whereNumber('conta')
                 ->except(['create', 'edit']);
 
-            // Despesas recorrentes
             Route::get('despesas-recorrentes', [DespesaRecorrenteController::class, 'index']);
             Route::get('despesas-recorrentes/{id}', [DespesaRecorrenteController::class, 'show'])->whereNumber('id');
             Route::post('despesas-recorrentes', [DespesaRecorrenteController::class, 'store']);
@@ -471,22 +476,19 @@ Route::middleware('auth:sanctum')
         });
 
         /* ============================================================
-         * COMUNICAÇÃO (antes era /comms)
+         * COMUNICAÇÃO
          * ============================================================ */
         Route::prefix('comunicacao')->group(function () {
-            // templates
             Route::get('templates', [CommsProxyController::class, 'templatesIndex']);
             Route::get('templates/{id}', [CommsProxyController::class, 'templatesShow']);
             Route::post('templates', [CommsProxyController::class, 'templatesStore']);
             Route::put('templates/{id}', [CommsProxyController::class, 'templatesUpdate']);
             Route::post('templates/{id}/preview', [CommsProxyController::class, 'templatesPreview']);
 
-            // requests
             Route::get('requests', [CommsProxyController::class, 'requestsIndex']);
             Route::get('requests/{id}', [CommsProxyController::class, 'requestsShow']);
             Route::post('requests/{id}/cancelar', [CommsProxyController::class, 'requestsCancel']);
 
-            // messages
             Route::get('messages', [CommsProxyController::class, 'messagesIndex']);
             Route::get('messages/{id}', [CommsProxyController::class, 'messagesShow']);
             Route::post('messages/{id}/reprocessar', [CommsProxyController::class, 'messagesRetry']);

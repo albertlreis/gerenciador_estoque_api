@@ -33,6 +33,7 @@ class ProdutoResource extends JsonResource
             ),
             'estoque_total' => $this->getEstoqueTotalAttributeSafely(),
             'estoque_outlet_total' => $this->getEstoqueOutletTotalAttributeSafely(),
+            'depositos_disponiveis' => $this->getDepositosDisponiveisAttributeSafely(),
             'imagem_principal' => $this->imagemPrincipal?->url_completa,
             'data_ultima_saida' => $this->data_ultima_saida,
             'manual_conservacao' => $this->manual_conservacao
@@ -73,5 +74,48 @@ class ProdutoResource extends JsonResource
     {
         $variacoes = $this->getRelationValue('variacoes') ?? collect();
         return $variacoes->sum(fn($v) => $v->getRelationValue('outlets')?->sum('quantidade') ?? 0);
+    }
+
+    private function getDepositosDisponiveisAttributeSafely(): array
+    {
+        $variacoes = $this->getRelationValue('variacoes') ?? collect();
+        if (!$variacoes instanceof \Illuminate\Support\Collection || $variacoes->isEmpty()) {
+            return [];
+        }
+
+        $mapa = [];
+
+        foreach ($variacoes as $variacao) {
+            if (!$variacao->relationLoaded('estoques')) {
+                continue;
+            }
+            foreach ($variacao->estoques as $estoque) {
+                $quantidade = (float) ($estoque->quantidade ?? 0);
+                if ($quantidade <= 0) {
+                    continue;
+                }
+
+                $depositoId = $estoque->deposito_id ?? $estoque->id_deposito ?? null;
+                $depositoNome = null;
+                if ($estoque->relationLoaded('deposito')) {
+                    $depositoNome = $estoque->deposito?->nome;
+                }
+
+                $key = $depositoId ?: ($depositoNome ?? spl_object_id($estoque));
+                if (!isset($mapa[$key])) {
+                    $mapa[$key] = [
+                        'deposito_id' => $depositoId,
+                        'nome' => $depositoNome,
+                        'saldo' => 0.0,
+                    ];
+                }
+                $mapa[$key]['saldo'] += $quantidade;
+            }
+        }
+
+        return collect($mapa)
+            ->sortBy(fn ($d) => $d['nome'] ?? '')
+            ->values()
+            ->all();
     }
 }

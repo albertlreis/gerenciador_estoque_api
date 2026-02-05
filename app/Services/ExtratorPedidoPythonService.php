@@ -18,15 +18,15 @@ class ExtratorPedidoPythonService
      */
     public function processar(UploadedFile $pdf): array
     {
-        $url = 'http://167.99.51.172:8010/extrair-pedido';
-//        $url = 'http://localhost:8003/extrair-pedido';
+        $url = config('services.extrator_pedido.url');
 
         if (!$url) {
             throw new Exception("URL da API Python não configurada. Defina SERVICES_EXTRATOR_PEDIDO_URL no .env");
         }
 
         try {
-            $response = Http::timeout(120)
+            $response = Http::retry(2, 500)
+                ->timeout(120)
                 ->attach("pdf", file_get_contents($pdf->getRealPath()), $pdf->getClientOriginalName())
                 ->post($url);
 

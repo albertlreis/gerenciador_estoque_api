@@ -6,6 +6,7 @@ use App\Http\Requests\StorePedidoRequest;
 use App\Http\Resources\PedidoCompletoResource;
 use App\Models\Deposito;
 use App\Models\Pedido;
+use App\Models\PedidoImportacao;
 use App\Models\ProdutoImagem;
 use App\Services\ExtratorPedidoPythonService;
 use App\Services\PedidoService;
@@ -125,8 +126,32 @@ class PedidoController extends Controller
         ]);
 
         try {
+            $arquivo = $request->file('arquivo');
+            $hash = hash_file('sha256', $arquivo->getRealPath());
+
+            $importExistente = PedidoImportacao::query()
+                ->where('arquivo_hash', $hash)
+                ->first();
+
+            if ($importExistente && $importExistente->status === 'confirmado') {
+                return response()->json([
+                    'sucesso' => false,
+                    'mensagem' => 'Este arquivo jÃ¡ foi importado anteriormente.',
+                    'pedido_id' => $importExistente->pedido_id,
+                ], 409);
+            }
+
+            if ($importExistente && $importExistente->status === 'extraido' && $importExistente->dados_json) {
+                return response()->json([
+                    'sucesso' => true,
+                    'mensagem' => 'PDF jÃ¡ processado. Usando dados existentes.',
+                    'importacao_id' => $importExistente->id,
+                    'dados' => $importExistente->dados_json,
+                ]);
+            }
+
             // 1) Extrai via Python
-            $dados = $this->service->processar($request->file('arquivo'));
+            $dados = $this->service->processar($arquivo);
 
             $pedido = $dados['pedido'] ?? [];
             $itens  = $dados['itens'] ?? [];
@@ -155,17 +180,43 @@ class PedidoController extends Controller
                 "observacoes"    => "",
             ];
 
+            $payload = [
+                "cliente" => $cliente,
+                "pedido"  => $pedidoFormatado,
+                "itens"   => $itens
+            ];
+
+            $importacao = PedidoImportacao::updateOrCreate(
+                ['arquivo_hash' => $hash],
+                [
+                    'arquivo_nome' => $arquivo->getClientOriginalName(),
+                    'numero_externo' => $pedidoFormatado['numero_externo'] ?: null,
+                    'usuario_id' => auth()->id(),
+                    'status' => 'extraido',
+                    'dados_json' => $payload,
+                    'erro' => null,
+                ]
+            );
+
             return response()->json([
                 "sucesso" => true,
                 "mensagem" => "PDF processado com sucesso.",
-                "dados" => [
-                    "cliente" => $cliente,
-                    "pedido"  => $pedidoFormatado,
-                    "itens"   => $itens
-                ]
+                "importacao_id" => $importacao->id,
+                "dados" => $payload
             ]);
 
         } catch (Exception $e) {
+            $hashErro = $hash ?? hash('sha256', $request->file('arquivo')?->getClientOriginalName() ?? uniqid());
+            PedidoImportacao::updateOrCreate(
+                ['arquivo_hash' => $hashErro],
+                [
+                    'arquivo_nome' => $request->file('arquivo')?->getClientOriginalName(),
+                    'usuario_id' => auth()->id(),
+                    'status' => 'erro',
+                    'erro' => $e->getMessage(),
+                ]
+            );
+
             return response()->json([
                 "sucesso" => false,
                 "mensagem" => "Erro ao processar PDF.",

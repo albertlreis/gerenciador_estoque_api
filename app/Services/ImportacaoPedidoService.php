@@ -9,6 +9,7 @@ use App\Models\PedidoStatusHistorico;
 use App\Models\Produto;
 use App\Models\ProdutoVariacao;
 use App\Models\ProdutoVariacaoAtributo;
+use App\Models\PedidoImportacao;
 use App\Enums\PedidoStatus;
 use App\Helpers\StringHelper;
 use Illuminate\Http\JsonResponse;
@@ -34,18 +35,23 @@ class ImportacaoPedidoService
     {
         $validator = Validator::make($request->all(), [
             'pedido.tipo'          => 'required|in:venda,reposicao',
+            'importacao_id'        => 'nullable|integer|exists:pedido_importacoes,id',
 
             'cliente.id'           => 'nullable|numeric|min:1',
 
             'pedido.numero_externo'=> 'nullable|string|max:50|unique:pedidos,numero_externo',
             'pedido.total'         => 'nullable|numeric',
             'pedido.observacoes'   => 'nullable|string',
+            'pedido.data_pedido'   => 'nullable|date',
+            'pedido.data_inclusao' => 'nullable|date',
+            'pedido.data_entrega'  => 'nullable|date',
 
             'itens'                => 'required|array|min:1',
             'itens.*.nome'         => 'required|string',
             'itens.*.quantidade'   => 'required|numeric|min:0.01',
             'itens.*.valor'        => 'required|numeric|min:0',
             'itens.*.id_categoria' => 'required|integer',
+            'itens.*.id_deposito'  => 'nullable|integer|exists:depositos,id',
         ]);
 
         // Condicional: se for venda, cliente.id é obrigatório
@@ -62,20 +68,38 @@ class ImportacaoPedidoService
             $dadosCliente = (array) $request->cliente;
             $dadosPedido  = (array) $request->pedido;
             $itens        = (array) $request->itens;
+            $importacaoId = $request->input('importacao_id');
 
             $tipo = $dadosPedido['tipo'] ?? Pedido::TIPO_VENDA;
 
-            // -------------------------------------------------------------
-            // 🧍 CLIENTE (somente para venda)
-            // -------------------------------------------------------------
+            if ($importacaoId) {
+                /** @var PedidoImportacao $importacao */
+                $importacao = PedidoImportacao::query()
+                    ->lockForUpdate()
+                    ->findOrFail((int) $importacaoId);
+
+                if ($importacao->status === 'confirmado') {
+                    return response()->json([
+                        'message' => 'Esta importação já foi confirmada anteriormente.',
+                        'pedido_id' => $importacao->pedido_id,
+                    ], 409);
+                }
+            }
+
             $clienteId = null;
 
             if ($tipo === Pedido::TIPO_VENDA) {
-                // Se você realmente quer sempre usar o cliente selecionado, pode buscar direto pelo ID.
-                // Mantive sua lógica de normalização + firstOrCreate, mas note: documento vem vazio no front hoje.
                 $dadosCliente['documento'] = preg_replace('/\D/', '', $dadosCliente['documento'] ?? '');
+                $dadosCliente['nome'] = isset($dadosCliente['nome'])
+                    ? trim((string) $dadosCliente['nome'])
+                    : null;
+                $dadosCliente['email'] = isset($dadosCliente['email'])
+                    ? trim((string) $dadosCliente['email'])
+                    : null;
+                $dadosCliente['telefone'] = isset($dadosCliente['telefone'])
+                    ? preg_replace('/\D/', '', (string) $dadosCliente['telefone'])
+                    : null;
 
-                // Preferência: se veio id, usa direto
                 if (!empty($dadosCliente['id'])) {
                     $cliente = Cliente::findOrFail((int) data_get($request->cliente, 'id'));
                 } else {
@@ -93,19 +117,24 @@ class ImportacaoPedidoService
                 $clienteId = $cliente->id;
             }
 
-            // -------------------------------------------------------------
-            // 🧾 PEDIDO
-            // -------------------------------------------------------------
             $valorTotal = $dadosPedido['total']
                 ?? collect($itens)->sum(fn($i) => (float)$i['quantidade'] * (float)$i['valor']);
 
+            $numeroExterno = isset($dadosPedido['numero_externo'])
+                ? trim((string) $dadosPedido['numero_externo'])
+                : null;
+
+            $dataPedido = $this->normalizarData($dadosPedido['data_pedido'] ?? null);
+            $dataInclusao = $this->normalizarData($dadosPedido['data_inclusao'] ?? null);
+            $dataEntrega = $this->normalizarData($dadosPedido['data_entrega'] ?? null);
+
             $pedido = Pedido::create([
                 'tipo'          => $tipo,
-                'id_cliente'    => $clienteId, // null na reposição
+                'id_cliente'    => $clienteId,
                 'id_usuario'    => $usuario->id,
                 'id_parceiro'   => $dadosPedido['id_parceiro'] ?? null,
-                'numero_externo'=> $dadosPedido['numero_externo'] ?? null,
-                'data_pedido'   => now(),
+                'numero_externo'=> $numeroExterno ?: null,
+                'data_pedido'   => $dataPedido ?? now(),
                 'valor_total'   => $valorTotal,
                 'observacoes'   => $dadosPedido['observacoes'] ?? null,
             ]);
@@ -117,10 +146,13 @@ class ImportacaoPedidoService
                 'usuario_id'  => $usuario->id,
             ]);
 
-            // -------------------------------------------------------------
-            // 🧩 ITENS (igual ao seu fluxo atual)
-            // -------------------------------------------------------------
             foreach ($itens as $item) {
+                $item['nome'] = trim((string) ($item['nome'] ?? ''));
+                $item['ref'] = isset($item['ref']) ? trim((string) $item['ref']) : null;
+                $item['id_deposito'] = $item['id_deposito'] ?? null;
+                $quantidade = $this->toDecimal($item['quantidade'] ?? 0);
+                $valorUnit = $this->toDecimal($item['valor'] ?? 0);
+
                 $variacao = null;
 
                 if (!empty($item['id_variacao'])) {
@@ -165,11 +197,19 @@ class ImportacaoPedidoService
                 PedidoItem::create([
                     'id_pedido'      => $pedido->id,
                     'id_variacao'    => $variacao->id,
-                    'quantidade'     => $item['quantidade'],
-                    'preco_unitario' => $item['valor'],
-                    'subtotal'       => (float)$item['quantidade'] * (float)$item['valor'],
+                    'quantidade'     => $quantidade,
+                    'preco_unitario' => $valorUnit,
+                    'subtotal'       => (float)$quantidade * (float)$valorUnit,
                     'id_deposito'    => $item['id_deposito'] ?? null,
                     'observacoes'    => $item['atributos']['observacao'] ?? null,
+                ]);
+            }
+
+            if (isset($importacao)) {
+                $importacao->update([
+                    'status' => 'confirmado',
+                    'pedido_id' => $pedido->id,
+                    'numero_externo' => $numeroExterno ?: $importacao->numero_externo,
                 ]);
             }
 
@@ -192,6 +232,23 @@ class ImportacaoPedidoService
                 }),
             ]);
         });
+    }
+
+    private function normalizarData(mixed $valor): ?string
+    {
+        if (!$valor) return null;
+        try {
+            return \Carbon\Carbon::parse((string) $valor)->toDateTimeString();
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    private function toDecimal(mixed $v): float
+    {
+        if ($v === null || $v === '') return 0.0;
+        $s = str_replace(['.', ','], ['', '.'], (string)$v);
+        return is_numeric($s) ? (float)$s : 0.0;
     }
 
     /**

@@ -37,4 +37,8 @@ return [
         'api_secret' => env('COMMS_API_SECRET'),
     ],
 
+    'extrator_pedido' => [
+        'url' => env('SERVICES_EXTRATOR_PEDIDO_URL', 'http://167.99.51.172:8010/extrair-pedido'),
+    ],
+
 ];

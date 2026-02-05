@@ -78,7 +78,7 @@ class ContaReceberExportController extends Controller
         $aberto = (clone $query)->sum('saldo_aberto');
 
         $vencidas = (clone $query)
-            ->where('status', '!=', 'PAGO')
+            ->where('status', '!=', 'PAGA')
             ->where('data_vencimento', '<', now())
             ->sum('saldo_aberto');
 

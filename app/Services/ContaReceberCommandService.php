@@ -26,6 +26,7 @@ class ContaReceberCommandService
 
             $conta = ContaReceber::create($dados);
 
+            $this->syncValores($conta);
             $this->statusSvc->syncReceber($conta->fresh());
 
             $fresh = $conta->fresh();
@@ -43,6 +44,7 @@ class ContaReceberCommandService
 
             $conta->fill($dados)->save();
 
+            $this->syncValores($conta);
             $this->statusSvc->syncReceber($conta->fresh());
 
             $fresh = $conta->fresh();
@@ -89,6 +91,7 @@ class ContaReceberCommandService
 
             $pagamento->save();
 
+            $this->syncValores($conta->fresh());
             // Ledger (Fase 2 - Caminho A): RECEITA confirmada vinculada ao pagamento (idempotente)
             $lancamento = $this->ledger->criarLancamentoPorPagamento(
                 tipo: LancamentoTipo::RECEITA->value,
@@ -130,6 +133,7 @@ class ContaReceberCommandService
 
             $pagamento->delete();
 
+            $this->syncValores($conta->fresh());
             $this->statusSvc->syncReceber($conta->fresh());
 
             $fresh = $conta->fresh(['pedido.cliente', 'pagamentos.usuario']);
@@ -149,5 +153,17 @@ class ContaReceberCommandService
         $st = $conta->status;
         if ($st instanceof BackedEnum) return $st->value;
         return (string) $st;
+    }
+
+    private function syncValores(ContaReceber $conta): void
+    {
+        $valorLiquido = (float)($conta->valor_bruto - $conta->desconto + $conta->juros + $conta->multa);
+        $valorRecebido = (float) $conta->pagamentos()->sum('valor');
+        $saldoAberto = max(0.0, $valorLiquido - $valorRecebido);
+
+        $conta->valor_liquido = $valorLiquido;
+        $conta->valor_recebido = $valorRecebido;
+        $conta->saldo_aberto = $saldoAberto;
+        $conta->saveQuietly();
     }
 }

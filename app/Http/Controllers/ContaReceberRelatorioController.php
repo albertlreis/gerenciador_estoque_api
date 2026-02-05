@@ -23,7 +23,7 @@ class ContaReceberRelatorioController extends Controller
                 DB::raw('SUM(contas_receber.valor_liquido) AS total_liquido'),
                 DB::raw('SUM(contas_receber.valor_recebido) AS total_recebido'),
                 DB::raw('SUM(contas_receber.saldo_aberto) AS total_aberto'),
-                DB::raw('SUM(CASE WHEN contas_receber.data_vencimento < CURRENT_DATE AND contas_receber.status != "PAGO" THEN contas_receber.saldo_aberto ELSE 0 END) AS total_vencido'),
+                DB::raw('SUM(CASE WHEN contas_receber.data_vencimento < CURRENT_DATE AND contas_receber.status != "PAGA" THEN contas_receber.saldo_aberto ELSE 0 END) AS total_vencido'),
                 DB::raw('COUNT(contas_receber.id) AS qtd_titulos'),
                 DB::raw('MAX(contas_receber.data_vencimento) AS ultimo_vencimento')
             ])

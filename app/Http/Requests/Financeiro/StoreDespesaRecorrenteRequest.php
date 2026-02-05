@@ -15,8 +15,8 @@ class StoreDespesaRecorrenteRequest extends FormRequest
             'fornecedor_id' => ['nullable', 'integer'],
             'descricao' => ['required', 'string', 'max:180'],
             'numero_documento' => ['nullable', 'string', 'max:80'],
-            'centro_custo' => ['nullable', 'string', 'max:60'],
-            'categoria' => ['nullable', 'string', 'max:60'],
+            'centro_custo_id' => ['nullable', 'integer', 'exists:centros_custo,id'],
+            'categoria_id' => ['nullable', 'integer', 'exists:categorias_financeiras,id'],
 
             'valor_bruto' => ['nullable', 'numeric', 'min:0'],
             'desconto' => ['nullable', 'numeric', 'min:0'],

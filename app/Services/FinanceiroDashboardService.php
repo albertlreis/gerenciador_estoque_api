@@ -22,9 +22,9 @@ class FinanceiroDashboardService
         $fim    = !empty($f['data_fim']) ? Carbon::createFromFormat('Y-m-d', $f['data_fim'])->endOfDay() : null;
 
         $base = LancamentoFinanceiro::query()
-            ->where('status', 'pago')
-            ->when($inicio, fn($q) => $q->where('data_pagamento', '>=', $inicio))
-            ->when($fim, fn($q) => $q->where('data_pagamento', '<=', $fim));
+            ->where('status', 'confirmado')
+            ->when($inicio, fn($q) => $q->where('data_movimento', '>=', $inicio))
+            ->when($fim, fn($q) => $q->where('data_movimento', '<=', $fim));
 
         $receitas = (clone $base)->where('tipo', 'receita')->sum('valor');
         $despesas = (clone $base)->where('tipo', 'despesa')->sum('valor');

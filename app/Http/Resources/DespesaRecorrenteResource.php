@@ -16,8 +16,8 @@ class DespesaRecorrenteResource extends JsonResource
             'descricao' => $this->descricao,
             'numero_documento' => $this->numero_documento,
 
-            'centro_custo' => $this->centro_custo,
-            'categoria' => $this->categoria,
+            'centro_custo_id' => $this->centro_custo_id,
+            'categoria_id' => $this->categoria_id,
 
             'valor_bruto' => $this->valor_bruto,
             'desconto' => $this->desconto,

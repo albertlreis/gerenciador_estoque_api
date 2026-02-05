@@ -125,9 +125,8 @@ class DespesaRecorrenteService
                 'juros'            => (float) ($payload['juros'] ?? $despesa->juros ?? 0),
                 'multa'            => (float) ($payload['multa'] ?? $despesa->multa ?? 0),
                 'status'           => 'ABERTA',
-                'forma_pagamento'  => $payload['forma_pagamento'] ?? null,
-                'centro_custo'     => $payload['centro_custo'] ?? $despesa->centro_custo,
-                'categoria'        => $payload['categoria'] ?? $despesa->categoria,
+                'centro_custo_id'  => $payload['centro_custo_id'] ?? $despesa->centro_custo_id,
+                'categoria_id'     => $payload['categoria_id'] ?? $despesa->categoria_id,
                 'observacoes'      => $payload['observacoes'] ?? $despesa->observacoes,
             ]);
 

@@ -20,8 +20,8 @@ class ExecutarDespesaRecorrenteRequest extends FormRequest
             'juros' => ['nullable', 'numeric', 'min:0'],
             'multa' => ['nullable', 'numeric', 'min:0'],
             'forma_pagamento' => ['nullable', 'string', 'max:30'],
-            'centro_custo' => ['nullable', 'string', 'max:60'],
-            'categoria' => ['nullable', 'string', 'max:60'],
+            'centro_custo_id' => ['nullable', 'integer', 'exists:centros_custo,id'],
+            'categoria_id' => ['nullable', 'integer', 'exists:categorias_financeiras,id'],
             'observacoes' => ['nullable', 'string'],
         ];
     }

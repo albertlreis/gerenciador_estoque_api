@@ -33,13 +33,19 @@ class DespesaRecorrenteRepository
             $q->where('fornecedor_id', (int) $filtros['fornecedor_id']);
         }
 
+        if (!empty($filtros['categoria_id'])) {
+            $q->where('categoria_id', (int) $filtros['categoria_id']);
+        }
+
+        if (!empty($filtros['centro_custo_id'])) {
+            $q->where('centro_custo_id', (int) $filtros['centro_custo_id']);
+        }
+
         if (!empty($filtros['q'])) {
             $term = trim((string) $filtros['q']);
             $q->where(function (Builder $w) use ($term) {
                 $w->where('descricao', 'like', "%{$term}%")
-                    ->orWhere('numero_documento', 'like', "%{$term}%")
-                    ->orWhere('categoria', 'like', "%{$term}%")
-                    ->orWhere('centro_custo', 'like', "%{$term}%");
+                    ->orWhere('numero_documento', 'like', "%{$term}%");
             });
         }
 

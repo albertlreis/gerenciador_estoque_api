@@ -19,9 +19,8 @@ class ContasPagarExport implements FromCollection, WithHeadings, WithMapping
             busca: $this->params['busca'] ?? null,
             fornecedor_id: $this->params['fornecedor_id'] ?? null,
             status: $this->params['status'] ?? null,
-            forma_pagamento: $this->params['forma_pagamento'] ?? null,
-            centro_custo: $this->params['centro_custo'] ?? null,
-            categoria: $this->params['categoria'] ?? null,
+            centro_custo_id: isset($this->params['centro_custo_id']) ? (int)$this->params['centro_custo_id'] : null,
+            categoria_id: isset($this->params['categoria_id']) ? (int)$this->params['categoria_id'] : null,
             data_ini: $this->params['data_ini'] ?? null,
             data_fim: $this->params['data_fim'] ?? null,
             vencidas: $this->params['vencidas'] ?? null,
@@ -31,9 +30,8 @@ class ContasPagarExport implements FromCollection, WithHeadings, WithMapping
         if ($f->busca) $q->where(fn($w)=>$w->where('descricao','like',"%{$f->busca}%")->orWhere('numero_documento','like',"%{$f->busca}%"));
         if ($f->fornecedor_id)     $q->where('fornecedor_id', $f->fornecedor_id);
         if ($f->status)            $q->where('status', $f->status);
-        if ($f->forma_pagamento)   $q->where('forma_pagamento', $f->forma_pagamento);
-        if ($f->centro_custo)      $q->where('centro_custo', $f->centro_custo);
-        if ($f->categoria)         $q->where('categoria', $f->categoria);
+        if ($f->centro_custo_id)   $q->where('centro_custo_id', $f->centro_custo_id);
+        if ($f->categoria_id)      $q->where('categoria_id', $f->categoria_id);
         if ($f->data_ini)          $q->whereDate('data_vencimento','>=',$f->data_ini);
         if ($f->data_fim)          $q->whereDate('data_vencimento','<=',$f->data_fim);
 

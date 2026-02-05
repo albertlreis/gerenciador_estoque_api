@@ -24,10 +24,10 @@ class TransferenciaFinanceiraController extends Controller
                 'contaOrigem:id,nome,moeda,tipo',
                 'contaDestino:id,nome,moeda,tipo',
                 // se quiser mostrar os 2 lançamentos no index, descomente:
-                // 'lancamentos:id,referencia_id,referencia_type,descricao,tipo,status,conta_id,valor,data_movimento',
+                // 'lancamentos:id,referencia_id,referencia_type,descricao,tipo,status,conta_id,valor,data',
             ])
-            ->when(!empty($f['data_inicio']), fn ($qq) => $qq->whereDate('data_movimento', '>=', $f['data_inicio']))
-            ->when(!empty($f['data_fim']), fn ($qq) => $qq->whereDate('data_movimento', '<=', $f['data_fim']))
+            ->when(!empty($f['data_inicio']), fn ($qq) => $qq->whereDate('data', '>=', $f['data_inicio']))
+            ->when(!empty($f['data_fim']), fn ($qq) => $qq->whereDate('data', '<=', $f['data_fim']))
             ->when(!empty($f['status']), fn ($qq) => $qq->where('status', $f['status']))
             ->when(!empty($f['conta_id']), function ($qq) use ($f) {
                 $qq->where(function ($w) use ($f) {
@@ -40,7 +40,7 @@ class TransferenciaFinanceiraController extends Controller
                 // Na tabela nova não existe "descricao"; usamos observacoes como busca textual.
                 $qq->where('observacoes', 'like', "%{$term}%");
             })
-            ->orderByDesc('data_movimento')
+            ->orderByDesc('data')
             ->orderByDesc('id');
 
         $items = $q->get()->map(function (TransferenciaFinanceira $t) {
@@ -48,7 +48,7 @@ class TransferenciaFinanceiraController extends Controller
                 'id' => (int) $t->id,
                 'status' => (string) $t->status,
                 'valor' => (string) $t->valor,
-                'data_movimento' => optional($t->data_movimento)->toISOString(),
+                'data' => optional($t->data)->toISOString(),
                 'observacoes' => $t->observacoes,
 
                 'conta_origem_id' => (int) $t->conta_origem_id,
@@ -78,7 +78,7 @@ class TransferenciaFinanceiraController extends Controller
         $transferencia->load([
             'contaOrigem:id,nome,moeda,tipo',
             'contaDestino:id,nome,moeda,tipo',
-            'lancamentos:id,referencia_id,referencia_type,descricao,tipo,status,conta_id,valor,data_movimento',
+            'lancamentos:id,referencia_id,referencia_type,descricao,tipo,status,conta_id,valor,data',
         ]);
 
         return response()->json([
@@ -86,7 +86,7 @@ class TransferenciaFinanceiraController extends Controller
                 'id' => (int) $transferencia->id,
                 'status' => (string) $transferencia->status,
                 'valor' => (string) $transferencia->valor,
-                'data_movimento' => optional($transferencia->data_movimento)->toISOString(),
+                'data' => optional($transferencia->data)->toISOString(),
                 'observacoes' => $transferencia->observacoes,
 
                 'conta_origem_id' => (int) $transferencia->conta_origem_id,
@@ -113,7 +113,7 @@ class TransferenciaFinanceiraController extends Controller
                     'status' => (string) ($l->status?->value ?? $l->status),
                     'conta_id' => (int) $l->conta_id,
                     'valor' => (string) $l->valor,
-                    'data_movimento' => optional($l->data_movimento)->toISOString(),
+                    'data' => optional($l->data)->toISOString(),
                 ])->values(),
             ],
         ]);

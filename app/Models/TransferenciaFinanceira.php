@@ -9,7 +9,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class TransferenciaFinanceira extends Model
 {
-    use SoftDeletes;
+//    use SoftDeletes;
 
     protected $table = 'transferencias_financeiras';
 
@@ -17,7 +17,7 @@ class TransferenciaFinanceira extends Model
         'conta_origem_id',
         'conta_destino_id',
         'valor',
-        'data_movimento',
+        'data',
         'observacoes',
         'status',
         'created_by',
@@ -25,7 +25,7 @@ class TransferenciaFinanceira extends Model
 
     protected $casts = [
         'valor' => 'decimal:2',
-        'data_movimento' => 'datetime',
+        'data' => 'datetime',
     ];
 
     public function contaOrigem(): BelongsTo

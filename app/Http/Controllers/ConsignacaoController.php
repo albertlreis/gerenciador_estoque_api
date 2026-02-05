@@ -8,16 +8,16 @@ use App\Http\Resources\ConsignacaoResource;
 use App\Models\AcessoUsuario;
 use App\Models\Cliente;
 use App\Models\Consignacao;
-use App\Models\Estoque;
-use App\Models\EstoqueMovimentacao;
 use App\Models\Pedido;
 use App\Models\ProdutoImagem;
+use App\Services\EstoqueMovimentacaoService;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Http\Response;
 use Illuminate\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Facades\DB;
 
 class ConsignacaoController extends Controller
 {
@@ -246,39 +246,30 @@ class ConsignacaoController extends Controller
 
         $usuarioId = AuthHelper::getUsuarioId();
 
-        // Registrar movimentação de estoque
-        EstoqueMovimentacao::create([
-            'id_variacao' => $consignacao->produto_variacao_id,
-            'id_deposito_origem' => null,
-            'id_deposito_destino' => $request->deposito_id,
-            'tipo' => 'consignacao_devolucao',
-            'quantidade' => $request->quantidade,
-            'observacao' => $request->observacoes,
-            'data_movimentacao' => now(),
-            'id_usuario' => $usuarioId,
-        ]);
+        DB::transaction(function () use ($consignacao, $request, $quantidadeDevolvida, $usuarioId) {
+            app(EstoqueMovimentacaoService::class)->registrarMovimentacaoManual([
+                'id_variacao'         => (int) $consignacao->produto_variacao_id,
+                'id_deposito_origem'  => null,
+                'id_deposito_destino' => (int) $request->deposito_id,
+                'tipo'                => 'consignacao_devolucao',
+                'quantidade'          => (int) $request->quantidade,
+                'observacao'          => $request->observacoes,
+                'data_movimentacao'   => now(),
+            ], (int) $usuarioId);
 
-        // Atualizar ou criar estoque
-        $estoque = Estoque::firstOrNew([
-            'id_variacao' => $consignacao->produto_variacao_id,
-            'id_deposito' => $request->deposito_id,
-        ]);
+            $consignacao->devolucoes()->create([
+                'quantidade' => $request->quantidade,
+                'observacoes' => $request->observacoes,
+                'usuario_id' => AuthHelper::getUsuarioId(),
+            ]);
 
-        $consignacao->devolucoes()->create([
-            'quantidade' => $request->quantidade,
-            'observacoes' => $request->observacoes,
-            'usuario_id' => AuthHelper::getUsuarioId(),
-        ]);
-
-        $estoque->quantidade = ($estoque->quantidade ?? 0) + $request->quantidade;
-        $estoque->save();
-
-        $novaQtdDevolvida = $quantidadeDevolvida + $request->quantidade;
-        if ($novaQtdDevolvida >= $consignacao->quantidade) {
-            $consignacao->status = 'devolvido';
-            $consignacao->data_resposta = now();
-            $consignacao->save();
-        }
+            $novaQtdDevolvida = $quantidadeDevolvida + $request->quantidade;
+            if ($novaQtdDevolvida >= $consignacao->quantidade) {
+                $consignacao->status = 'devolvido';
+                $consignacao->data_resposta = now();
+                $consignacao->save();
+            }
+        });
 
         return response()->json(['mensagem' => 'Devolução registrada com sucesso.']);
     }

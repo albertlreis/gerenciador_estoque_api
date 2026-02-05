@@ -8,7 +8,7 @@ use App\Domain\Importacao\DTO\AtributoDTO;
 use App\Models\Produto;
 use App\Models\ProdutoVariacao;
 use App\Models\ProdutoVariacaoAtributo;
-use App\Models\EstoqueMovimentacao;
+use App\Services\EstoqueMovimentacaoService;
 use App\Support\RefHelpers;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Collection;
@@ -199,16 +199,15 @@ final class ImportacaoProdutosService
                     }
                 }
 
-                EstoqueMovimentacao::create([
-                    'id_variacao'          => $variacaoId,
-                    'id_deposito_origem'   => null,
-                    'id_deposito_destino'  => $depositoId,
-                    'tipo'                 => 'entrada',
-                    'quantidade'           => $dto->quantidade,
-                    'observacao'           => 'Importação NF-e nº ' . $nota->numero,
-                    'data_movimentacao'    => $dataEntrada ?: now(),
-                    'id_usuario'           => Auth::id(),
-                ]);
+                app(EstoqueMovimentacaoService::class)->registrarMovimentacaoManual([
+                    'id_variacao'         => (int) $variacaoId,
+                    'id_deposito_origem'  => null,
+                    'id_deposito_destino' => (int) $depositoId,
+                    'tipo'                => 'entrada',
+                    'quantidade'          => (int) $dto->quantidade,
+                    'observacao'          => 'Importação NF-e nº ' . $nota->numero,
+                    'data_movimentacao'   => $dataEntrada ?: now(),
+                ], Auth::id());
             }
         });
     }

@@ -6,12 +6,12 @@ use App\DTOs\FiltroMovimentacaoEstoqueDTO;
 use App\Http\Requests\StoreMovimentacaoRequest;
 use App\Http\Requests\UpdateMovimentacaoRequest;
 use App\Http\Resources\MovimentacaoResource;
-use App\Models\Produto;
 use App\Models\EstoqueMovimentacao;
 use App\Services\EstoqueMovimentacaoService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
+use InvalidArgumentException;
 
 /**
  * Controlador responsável por gerenciar movimentações de estoque.
@@ -50,31 +50,29 @@ class EstoqueMovimentacaoController extends Controller
      * Armazena uma nova movimentação de estoque.
      *
      * @param StoreMovimentacaoRequest $request
-     * @param Produto $produto
      * @return JsonResponse
      */
-    public function store(StoreMovimentacaoRequest $request, Produto $produto): JsonResponse
+    public function store(StoreMovimentacaoRequest $request): JsonResponse
     {
         $dados = $request->validated();
-        $dados['id_produto'] = $produto->id;
+        $usuarioId = auth()->id();
 
-        $movimentacao = EstoqueMovimentacao::create($dados);
-        return response()->json(new MovimentacaoResource($movimentacao), 201);
+        try {
+            $movimentacao = $this->service->registrarMovimentacaoManual($dados, $usuarioId);
+            return response()->json(new MovimentacaoResource($movimentacao), 201);
+        } catch (InvalidArgumentException $e) {
+            return response()->json(['error' => $e->getMessage()], 422);
+        }
     }
 
     /**
      * Exibe uma movimentação específica de um produto.
      *
-     * @param Produto $produto
      * @param EstoqueMovimentacao $movimentacao
      * @return JsonResponse
      */
-    public function show(Produto $produto, EstoqueMovimentacao $movimentacao): JsonResponse
+    public function show(EstoqueMovimentacao $movimentacao): JsonResponse
     {
-        if ($movimentacao->id_produto !== $produto->id) {
-            return response()->json(['error' => 'Movimentação não pertence a este produto'], 404);
-        }
-
         return response()->json(new MovimentacaoResource($movimentacao));
     }
 
@@ -86,14 +84,11 @@ class EstoqueMovimentacaoController extends Controller
      * @param EstoqueMovimentacao $movimentacao
      * @return JsonResponse
      */
-    public function update(UpdateMovimentacaoRequest $request, Produto $produto, EstoqueMovimentacao $movimentacao): JsonResponse
+    public function update(UpdateMovimentacaoRequest $request, EstoqueMovimentacao $movimentacao): JsonResponse
     {
-        if ($movimentacao->id_produto !== $produto->id) {
-            return response()->json(['error' => 'Movimentação não pertence a este produto'], 404);
-        }
-
-        $movimentacao->update($request->validated());
-        return response()->json(new MovimentacaoResource($movimentacao));
+        return response()->json([
+            'error' => 'Movimentações são imutáveis. Use o estorno para reverter.'
+        ], 405);
     }
 
     /**
@@ -103,14 +98,11 @@ class EstoqueMovimentacaoController extends Controller
      * @param EstoqueMovimentacao $movimentacao
      * @return JsonResponse
      */
-    public function destroy(Produto $produto, EstoqueMovimentacao $movimentacao): JsonResponse
+    public function destroy(EstoqueMovimentacao $movimentacao): JsonResponse
     {
-        if ($movimentacao->id_produto !== $produto->id) {
-            return response()->json(['error' => 'Movimentação não pertence a este produto'], 404);
-        }
-
-        $movimentacao->delete();
-        return response()->json(null, 204);
+        return response()->json([
+            'error' => 'Movimentações são imutáveis. Use o estorno para reverter.'
+        ], 405);
     }
 
     /**
@@ -135,5 +127,27 @@ class EstoqueMovimentacaoController extends Controller
 
         $result = $this->service->registrarMovimentacaoLote($dados, $usuarioId);
         return response()->json($result);
+    }
+
+    /**
+     * POST /v1/estoque/movimentacoes/{movimentacao}/estornar
+     */
+    public function estornar(Request $request, EstoqueMovimentacao $movimentacao): JsonResponse
+    {
+        $request->validate([
+            'observacao' => ['nullable', 'string', 'max:1000'],
+        ]);
+
+        try {
+            $estorno = $this->service->estornarMovimentacao(
+                (int) $movimentacao->id,
+                auth()->id(),
+                $request->input('observacao')
+            );
+
+            return response()->json(new MovimentacaoResource($estorno), 201);
+        } catch (InvalidArgumentException $e) {
+            return response()->json(['error' => $e->getMessage()], 422);
+        }
     }
 }

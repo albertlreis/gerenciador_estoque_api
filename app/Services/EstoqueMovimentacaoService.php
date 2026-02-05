@@ -17,6 +17,7 @@ use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
+use RuntimeException;
 
 /**
  * Serviço responsável pelas consultas e regras de movimentações de estoque.
@@ -119,6 +120,31 @@ class EstoqueMovimentacaoService
     }
 
     /**
+     * Registra movimentação manual (entrada/saída/transferência/estorno/consignação/assistência).
+     *
+     * @param array{
+     *   id_variacao:int,
+     *   id_deposito_origem:int|null,
+     *   id_deposito_destino:int|null,
+     *   tipo:string,
+     *   quantidade:int,
+     *   observacao:string|null,
+     *   data_movimentacao:string|\DateTimeInterface|null,
+     *   lote_id:string|null,
+     *   ref_type:string|null,
+     *   ref_id:int|null,
+     *   pedido_id:int|null,
+     *   pedido_item_id:int|null,
+     *   reserva_id:int|null
+     * } $dados
+     */
+    public function registrarMovimentacaoManual(array $dados, ?int $usuarioId = null): EstoqueMovimentacao
+    {
+        $dados['id_usuario'] = $usuarioId;
+        return $this->movimentar($dados);
+    }
+
+    /**
      * Registra a movimentação de envio para assistência (estoque → depósito da assistência).
      */
     public function registrarEnvioAssistencia(
@@ -210,7 +236,7 @@ class EstoqueMovimentacaoService
                 'quantidade'          => $qtd,
                 'id_usuario'          => $dados['id_usuario'] ?? null,
                 'observacao'          => $dados['observacao'] ?? null,
-                'data_movimentacao'   => Carbon::now(),
+                'data_movimentacao'   => $dados['data_movimentacao'] ?? Carbon::now(),
 
                 // ✅ extras (não obrigatórios)
                 'lote_id'        => $dados['lote_id'] ?? null,
@@ -363,6 +389,57 @@ class EstoqueMovimentacaoService
             'id_usuario'          => $usuarioId,
             'observacao'          => $observacao,
         ]);
+    }
+
+    /**
+     * Estorna uma movimentação existente, criando um novo registro inverso.
+     * Não altera a movimentação original (auditável e imutável).
+     */
+    public function estornarMovimentacao(int $movimentacaoId, ?int $usuarioId = null, ?string $observacao = null): EstoqueMovimentacao
+    {
+        return DB::transaction(function () use ($movimentacaoId, $usuarioId, $observacao) {
+            /** @var EstoqueMovimentacao $mov */
+            $mov = EstoqueMovimentacao::query()->lockForUpdate()->findOrFail($movimentacaoId);
+
+            if ($mov->tipo === EstoqueMovimentacaoTipo::ESTORNO->value) {
+                throw new InvalidArgumentException('Não é permitido estornar uma movimentação de estorno.');
+            }
+
+            $jaEstornado = EstoqueMovimentacao::query()
+                ->where('ref_type', 'estorno')
+                ->where('ref_id', $mov->id)
+                ->exists();
+
+            if ($jaEstornado) {
+                throw new InvalidArgumentException('Movimentação já estornada.');
+            }
+
+            $origem = $mov->id_deposito_origem;
+            $destino = $mov->id_deposito_destino;
+
+            if (!$origem && !$destino) {
+                throw new RuntimeException('Movimentação inválida para estorno (origem e destino ausentes).');
+            }
+
+            // Inverte a direção
+            $estornoOrigem = $destino ?: null;
+            $estornoDestino = $origem ?: null;
+
+            return $this->movimentar([
+                'id_variacao'         => (int) $mov->id_variacao,
+                'id_deposito_origem'  => $estornoOrigem,
+                'id_deposito_destino' => $estornoDestino,
+                'tipo'                => EstoqueMovimentacaoTipo::ESTORNO->value,
+                'quantidade'          => (int) $mov->quantidade,
+                'id_usuario'          => $usuarioId,
+                'observacao'          => $observacao
+                    ? "Estorno da movimentação #{$mov->id}. {$observacao}"
+                    : "Estorno da movimentação #{$mov->id}.",
+                'data_movimentacao'   => Carbon::now(),
+                'ref_type'            => 'estorno',
+                'ref_id'              => $mov->id,
+            ]);
+        });
     }
 
     public function registrarMovimentacaoLote(array $dados, int $usuarioId): array

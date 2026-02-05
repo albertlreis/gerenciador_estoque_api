@@ -148,6 +148,9 @@ Route::middleware('auth:sanctum')
                 ->whereNumber('movimentacao')
                 ->except(['create', 'edit']);
 
+            Route::post('movimentacoes/{movimentacao}/estornar', [EstoqueMovimentacaoController::class, 'estornar'])
+                ->whereNumber('movimentacao');
+
             Route::post('movimentacoes/lote', [EstoqueMovimentacaoController::class, 'lote']);
 
             // Áreas (sem show)

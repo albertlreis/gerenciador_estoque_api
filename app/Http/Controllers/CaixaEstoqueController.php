@@ -5,13 +5,12 @@ namespace App\Http\Controllers;
 use App\Enums\EstoqueMovimentacaoTipo;
 use App\Models\Estoque;
 use App\Models\EstoqueLog;
-use App\Models\EstoqueMovimentacao;
 use App\Models\ProdutoVariacao;
 use App\Services\EstoqueMovimentacaoService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
+use InvalidArgumentException;
 use RuntimeException;
 
 class CaixaEstoqueController extends Controller
@@ -106,94 +105,30 @@ class CaixaEstoqueController extends Controller
         $obs = $dados['observacao'] ?? null;
         $linhas = $dados['itens'];
 
-        // Consolida itens por variação
-        $consolidados = [];
-        foreach ($linhas as $l) {
-            $vid = (int) $l['variacao_id'];
-            $qtd = (int) $l['quantidade'];
-            $consolidados[$vid] = ($consolidados[$vid] ?? 0) + $qtd;
-        }
+        $usuarioId = (int) auth()->id();
 
-        $ids = array_keys($consolidados);
+        try {
+            $payload = [
+                'tipo' => $tipo,
+                'deposito_origem_id' => $tipo === EstoqueMovimentacaoTipo::SAIDA->value ? $depositoId : null,
+                'deposito_destino_id' => $tipo === EstoqueMovimentacaoTipo::ENTRADA->value ? $depositoId : null,
+                'observacao' => $obs,
+                'itens' => $linhas,
+            ];
 
-        // Validação de estoque para SAÍDA
-        $erros = [];
-        if ($tipo === EstoqueMovimentacaoTipo::SAIDA->value) {
-            $estoques = Estoque::query()
-                ->whereIn('id_variacao', $ids)
-                ->where('id_deposito', $depositoId)
-                ->get(['id', 'id_variacao', 'quantidade'])
-                ->keyBy('id_variacao');
-
-            foreach ($consolidados as $vid => $qtd) {
-                $qtdAtual = (int) ($estoques[$vid]->quantidade ?? 0);
-                if ($qtd > $qtdAtual) {
-                    $erros[] = "Variação {$vid}: estoque insuficiente (solicitado {$qtd}, disponível {$qtdAtual})";
-                }
-            }
-        }
-
-        if ($erros) {
+            $resultado = app(EstoqueMovimentacaoService::class)->registrarMovimentacaoLote($payload, $usuarioId);
+        } catch (InvalidArgumentException|RuntimeException $e) {
             return response()->json([
                 'sucesso' => false,
                 'mensagem' => 'Não foi possível finalizar o lote.',
-                'erros' => $erros,
+                'erros' => [$e->getMessage()],
             ], 422);
         }
-
-        $usuarioId = (int) auth()->id();
-
-        $resultado = DB::transaction(function () use ($tipo, $depositoId, $obs, $consolidados, $usuarioId) {
-            $movs = [];
-
-            foreach ($consolidados as $variacaoId => $qtd) {
-                /** @var Estoque|null $estoque */
-                $estoque = Estoque::query()
-                    ->where('id_variacao', $variacaoId)
-                    ->where('id_deposito', $depositoId)
-                    ->lockForUpdate()
-                    ->first();
-
-                if (!$estoque) {
-                    $estoque = new Estoque([
-                        'id_variacao' => $variacaoId,
-                        'id_deposito' => $depositoId,
-                        'quantidade'  => 0,
-                    ]);
-                }
-
-                if ($tipo === EstoqueMovimentacaoTipo::ENTRADA->value) {
-                    $estoque->quantidade = (int) $estoque->quantidade + $qtd;
-                } else {
-                    $estoque->quantidade = (int) $estoque->quantidade - $qtd;
-                    if ($estoque->quantidade < 0) {
-                        throw new RuntimeException("Estoque negativo para variação {$variacaoId}");
-                    }
-                }
-
-                $estoque->save();
-
-                $movs[] = EstoqueMovimentacao::create([
-                    'id_variacao'         => $variacaoId,
-                    'id_deposito_origem'  => $tipo === EstoqueMovimentacaoTipo::SAIDA->value ? $depositoId : null,
-                    'id_deposito_destino' => $tipo === EstoqueMovimentacaoTipo::ENTRADA->value ? $depositoId : null,
-                    'tipo'                => $tipo === 'entrada'
-                        ? EstoqueMovimentacaoTipo::ENTRADA->value
-                        : EstoqueMovimentacaoTipo::SAIDA->value,
-                    'quantidade'          => $qtd,
-                    'observacao'          => $obs,
-                    'data_movimentacao'   => now(),
-                    'id_usuario'          => $usuarioId,
-                ]);
-            }
-
-            return $movs;
-        });
 
         EstoqueLog::create([
             'id_usuario' => $usuarioId,
             'acao'       => $tipo, // 'entrada' | 'saida'
-            'payload'    => ['deposito_id' => $depositoId, 'total' => array_sum($consolidados), 'itens' => $consolidados],
+            'payload'    => ['deposito_id' => $depositoId, 'total' => $resultado['total_pecas'] ?? null],
             'ip'         => request()->ip(),
             'user_agent' => request()->userAgent(),
         ]);
@@ -201,8 +136,8 @@ class CaixaEstoqueController extends Controller
         return response()->json([
             'sucesso' => true,
             'mensagem' => 'Lote finalizado com sucesso.',
-            'total_itens' => array_sum($consolidados),
-            'movimentacoes' => $resultado,
+            'total_itens' => $resultado['total_itens'] ?? null,
+            'movimentacoes' => $resultado['movimentacoes'] ?? [],
         ]);
     }
 
@@ -234,108 +169,42 @@ class CaixaEstoqueController extends Controller
         $obs       = $dados['observacao'] ?? null;
         $usuarioId = (int) auth()->id();
 
-        // Consolida itens
-        $consolidados = [];
-        foreach ($dados['itens'] as $l) {
-            $vid = (int) $l['variacao_id'];
-            $qtd = (int) $l['quantidade'];
-            $consolidados[$vid] = ($consolidados[$vid] ?? 0) + $qtd;
-        }
-        $ids = array_keys($consolidados);
+        try {
+            $payload = [
+                'tipo' => 'transferencia',
+                'deposito_origem_id' => $origemId,
+                'deposito_destino_id' => $destinoId,
+                'observacao' => $obs,
+                'itens' => $dados['itens'],
+            ];
 
-        // Validação de estoque na ORIGEM
-        $estoquesOrigem = Estoque::query()
-            ->whereIn('id_variacao', $ids)
-            ->where('id_deposito', $origemId)
-            ->get(['id', 'id_variacao', 'quantidade'])
-            ->keyBy('id_variacao');
-
-        $erros = [];
-        foreach ($consolidados as $vid => $qtd) {
-            $disp = (int) ($estoquesOrigem[$vid]->quantidade ?? 0);
-            if ($qtd > $disp) {
-                $erros[] = "Variação {$vid}: estoque insuficiente na origem (solicitado {$qtd}, disponível {$disp})";
-            }
-        }
-        if ($erros) {
+            $resultado = app(EstoqueMovimentacaoService::class)->registrarMovimentacaoLote($payload, $usuarioId);
+        } catch (InvalidArgumentException|RuntimeException $e) {
             return response()->json([
                 'sucesso' => false,
                 'mensagem' => 'Não foi possível transferir.',
-                'erros' => $erros,
+                'erros' => [$e->getMessage()],
             ], 422);
         }
 
-        // Move saldo e registra UMA movimentação por item via service
-        $movs = DB::transaction(function () use ($origemId, $destinoId, $obs, $usuarioId, $consolidados) {
-            $resultado = [];
-
-            foreach ($consolidados as $vid => $qtd) {
-                // ORIGEM: decrementa
-                /** @var Estoque $origem */
-                $origem = Estoque::query()
-                    ->where('id_variacao', $vid)
-                    ->where('id_deposito', $origemId)
-                    ->lockForUpdate()
-                    ->first();
-
-                if (!$origem || $origem->quantidade < $qtd) {
-                    throw new RuntimeException("Estoque insuficiente na origem para a variação {$vid}");
-                }
-                $origem->quantidade -= $qtd;
-                $origem->save();
-
-                // DESTINO: incrementa (cria se necessário)
-                /** @var Estoque|null $destino */
-                $destino = Estoque::query()
-                    ->where('id_variacao', $vid)
-                    ->where('id_deposito', $destinoId)
-                    ->lockForUpdate()
-                    ->first();
-
-                if (!$destino) {
-                    $destino = new Estoque([
-                        'id_variacao' => $vid,
-                        'id_deposito' => $destinoId,
-                        'quantidade'  => 0,
-                    ]);
-                }
-                $destino->quantidade += $qtd;
-                $destino->save();
-
-                // Registra **uma** movimentação com enum TRANSFERENCIA
-                $obsBase = trim(($obs ?? '') . " [transferência {$origemId}→{$destinoId}]");
-                $mov = app(EstoqueMovimentacaoService::class)->registrarTransferencia(
-                    variacaoId: $vid,
-                    depositoOrigemId: $origemId,
-                    depositoDestinoId: $destinoId,
-                    quantidade: $qtd,
-                    usuarioId: $usuarioId,
-                    observacao: $obsBase
-                );
-                $resultado[] = $mov;
-
-                // LOG detalhado
-                EstoqueLog::create([
-                    'id_usuario' => $usuarioId,
-                    'acao'       => 'transferencia',
-                    'payload'    => [
-                        'variacao_id'         => $vid,
-                        'quantidade'          => $qtd,
-                        'deposito_origem_id'  => $origemId,
-                        'deposito_destino_id' => $destinoId,
-                    ],
-                    'ip'         => request()->ip(),
-                    'user_agent' => request()->userAgent(),
-                ]);
-            }
-
-            return $resultado;
-        });
+        EstoqueLog::create([
+            'id_usuario' => $usuarioId,
+            'acao'       => 'transferencia',
+            'payload'    => [
+                'deposito_origem_id'  => $origemId,
+                'deposito_destino_id' => $destinoId,
+                'total_pecas' => $resultado['total_pecas'] ?? null,
+            ],
+            'ip'         => request()->ip(),
+            'user_agent' => request()->userAgent(),
+        ]);
 
         return response()->json([
             'sucesso' => true,
             'mensagem' => 'Transferência concluída com sucesso.',
-            'movimentacoes' => $movs, // uma linha por item (tipo = transferencia)
+            'movimentacoes' => $resultado['movimentacoes'] ?? [],
+            'transferencia_id' => $resultado['transferencia_id'] ?? null,
+            'transferencia_pdf' => $resultado['transferencia_pdf'] ?? null,
         ]);
     }
 }

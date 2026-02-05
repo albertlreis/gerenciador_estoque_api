@@ -9,7 +9,7 @@ use App\Models\Deposito;
 use App\Models\Estoque;
 use App\Models\EstoqueImport;
 use App\Models\EstoqueImportRow;
-use App\Models\EstoqueMovimentacao;
+use App\Services\EstoqueMovimentacaoService;
 use Carbon\Carbon;
 use DateTimeInterface;
 use Illuminate\Http\UploadedFile;
@@ -280,18 +280,16 @@ final class EstoqueImportService
                 // Regra: só criar movimentação se qtdTotal > 0 e depósito for oficial
                 if ($qtdTotal > 0 && $depositoOficial) {
                     if (!$dryRun) {
-                        EstoqueMovimentacao::create([
-                            'id_variacao' => $variacao->id,
-                            'id_deposito_origem' => null,
-                            'id_deposito_destino' => $depositoModel->id,
-                            'tipo' => EstoqueMovimentacaoTipo::ENTRADA_DEPOSITO->value,
-                            'quantidade' => $qtdTotal,
-                            'observacao' => "Importação inicial #{$import->id}",
-                            'data_movimentacao' => now(),
-                            'id_usuario' => $import->usuario_id,
-                        ]);
-                        // Atualiza quantidade do estoque
-                        $estoque->increment('quantidade', $qtdTotal);
+                        app(EstoqueMovimentacaoService::class)->registrarMovimentacaoManual([
+                            'id_variacao'         => (int) $variacao->id,
+                            'id_deposito_origem'  => null,
+                            'id_deposito_destino' => (int) $depositoModel->id,
+                            'tipo'                => EstoqueMovimentacaoTipo::ENTRADA_DEPOSITO->value,
+                            'quantidade'          => (int) $qtdTotal,
+                            'observacao'          => "Importação inicial #{$import->id}",
+                            'data_movimentacao'   => now(),
+                        ], $import->usuario_id);
+
                         $movCriadas++;
                     }
                 }

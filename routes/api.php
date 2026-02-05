@@ -45,7 +45,8 @@ use App\Http\Controllers\{AreaEstoqueController,
     ProdutoVariacaoController,
     ProdutoVariacaoOutletController,
     ProdutoAtributoController,
-    CommsProxyController};
+    CommsProxyController,
+    TransferenciaFinanceiraController};
 
 use App\Http\Controllers\Assistencia\{
     AssistenciaArquivoController,
@@ -416,18 +417,19 @@ Route::middleware('auth:sanctum')
             Route::get('dashboard', [FinanceiroDashboardController::class, 'show']);
 
             Route::apiResource('categorias-financeiras', CategoriaFinanceiraController::class)
-                ->parameters(['categorias-financeiras' => 'categoriaFinanceira'])
-                ->whereNumber('categoriaFinanceira')
+                ->parameters(['categorias-financeiras' => 'categoria_financeira'])
                 ->except(['create', 'edit']);
 
             Route::apiResource('contas-financeiras', ContaFinanceiraController::class)
-                ->parameters(['contas-financeiras' => 'contaFinanceira'])
-                ->whereNumber('contaFinanceira')
+                ->parameters(['contas-financeiras' => 'conta_financeira'])
                 ->except(['create', 'edit']);
 
             Route::apiResource('centros-custo', CentroCustoController::class)
-                ->parameters(['centros-custo' => 'centroCusto'])
-                ->whereNumber('centroCusto')
+                ->parameters(['centros-custo' => 'centro_custo'])
+                ->except(['create', 'edit']);
+
+            Route::apiResource('transferencias', TransferenciaFinanceiraController::class)
+                ->parameters(['transferencias' => 'transferencia'])
                 ->except(['create', 'edit']);
 
             Route::get('lancamentos/totais', [LancamentoFinanceiroController::class, 'totais']);

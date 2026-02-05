@@ -25,7 +25,7 @@ class LancamentoFinanceiroIndexRequest extends FormRequest
             'data_fim'    => ['nullable', 'date', 'after_or_equal:data_inicio'],
 
             'status'      => ['nullable', 'in:confirmado,cancelado'],
-            'tipo'        => ['nullable', 'in:receita,despesa'],
+            'tipo'        => ['nullable', 'in:receita,despesa,transferencia,ajuste'],
 
             'categoria_id'=> ['nullable', 'integer', 'min:1'],
             'conta_id'    => ['nullable', 'integer', 'min:1'],

@@ -24,7 +24,7 @@ class LancamentoFinanceiroResource extends JsonResource
             'status'           => $this->enumValue($this->status),
 
             'valor'            => (string) $this->valor,
-
+            'data_pagamento'   => optional($this->data_pagamento)->toISOString(),
             'data_movimento'   => optional($this->data_movimento)->toISOString(),
             'competencia'      => $this->competencia?->format('Y-m-d'),
 

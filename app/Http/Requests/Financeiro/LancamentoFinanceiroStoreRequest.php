@@ -21,7 +21,7 @@ class LancamentoFinanceiroStoreRequest extends FormRequest
     {
         return [
             'descricao'      => ['required', 'string', 'max:255'],
-            'tipo'           => ['required', 'in:receita,despesa'],
+            'tipo'           => ['required', 'in:receita,despesa,transferencia,ajuste'],
             'status'         => ['nullable', 'in:confirmado,cancelado'],
 
             'categoria_id'   => ['nullable', 'integer', 'min:1'],
@@ -29,7 +29,7 @@ class LancamentoFinanceiroStoreRequest extends FormRequest
             'conta_id'       => ['nullable', 'integer', 'min:1'],
 
             'valor'          => ['required', 'numeric', 'min:0.01'],
-
+            'data_pagamento' => ['nullable', 'date'],
             'data_movimento' => ['required', 'date'],
             'competencia'    => ['nullable', 'date'], // ou date_format:Y-m-d se quiser travar
 

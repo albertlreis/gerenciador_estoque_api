@@ -43,18 +43,34 @@ class LancamentoFinanceiroService
         return $model->fresh(['categoria','conta','criador','centroCusto']);
     }
 
+    private function isAutomatico(LancamentoFinanceiro $m): bool
+    {
+        return !empty($m->pagamento_type) || !empty($m->pagamento_id)
+            || (!empty($m->referencia_type) && !empty($m->referencia_id));
+    }
+
     public function atualizar(LancamentoFinanceiro $model, array $data): LancamentoFinanceiro
     {
-        // prepara payload considerando estado atual do model
+        if ($this->isAutomatico($model)) {
+            // permitir só trocar status (ex.: cancelado) e observações, se quiser
+            $allowed = array_intersect_key($data, array_flip(['status', 'observacoes']));
+            $payload = $this->prepararPayloadParaPersistencia($allowed, $model);
+            $updated = $this->repo->update($model, $payload);
+            return $updated->fresh(['categoria','conta','criador','centroCusto']);
+        }
+
         $payload = $this->prepararPayloadParaPersistencia($data, $model);
-
         $updated = $this->repo->update($model, $payload);
-
         return $updated->fresh(['categoria','conta','criador','centroCusto']);
     }
 
     public function remover(LancamentoFinanceiro $model): void
     {
+        if ($this->isAutomatico($model)) {
+            throw ValidationException::withMessages([
+                'lancamento' => 'Este lançamento foi gerado automaticamente e não pode ser removido. Cancele-o (status) ou estorne na origem.'
+            ]);
+        }
         $this->repo->delete($model);
     }
 

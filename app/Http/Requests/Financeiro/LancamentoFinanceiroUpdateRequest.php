@@ -21,7 +21,7 @@ class LancamentoFinanceiroUpdateRequest extends FormRequest
     {
         return [
             'descricao'      => ['sometimes', 'required', 'string', 'max:255'],
-            'tipo'           => ['sometimes', 'required', 'in:receita,despesa'],
+            'tipo'           => ['sometimes', 'required', 'in:receita,despesa,transferencia,ajuste'],
             'status'         => ['sometimes', 'required', 'in:confirmado,cancelado'],
 
             'categoria_id'   => ['sometimes', 'nullable', 'integer', 'min:1'],
@@ -29,7 +29,7 @@ class LancamentoFinanceiroUpdateRequest extends FormRequest
             'conta_id'       => ['sometimes', 'nullable', 'integer', 'min:1'],
 
             'valor'          => ['sometimes', 'required', 'numeric', 'min:0.01'],
-
+            'data_pagamento' => ['sometimes', 'nullable', 'date'],
             'data_movimento' => ['sometimes', 'required', 'date'],
             'competencia'    => ['sometimes', 'nullable', 'date'],
 

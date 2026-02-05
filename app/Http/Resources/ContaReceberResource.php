@@ -10,6 +10,7 @@ class ContaReceberResource extends JsonResource
     {
         return [
             'id'                => $this->id,
+            'pedido_id'         => $this->pedido_id ? (int) $this->pedido_id : null,
             'descricao'         => $this->descricao,
             'numero_documento'  => $this->numero_documento,
             'data_emissao'      => optional($this->data_emissao)->format('Y-m-d'),
@@ -21,8 +22,10 @@ class ContaReceberResource extends JsonResource
             'valor_liquido'     => (float) $this->valor_liquido,
             'valor_recebido'    => (float) $this->valor_recebido,
             'saldo_aberto'      => (float) $this->saldo_aberto,
-            'status'            => $this->status,
+            'status'            => $this->status instanceof \BackedEnum ? $this->status->value : $this->status,
             'forma_recebimento' => $this->forma_recebimento,
+            'categoria_id'      => $this->categoria_id ? (int) $this->categoria_id : null,
+            'centro_custo_id'   => $this->centro_custo_id ? (int) $this->centro_custo_id : null,
             'categoria' => $this->whenLoaded('categoria', fn() => [
                 'id' => $this->categoria?->id,
                 'nome' => $this->categoria?->nome,

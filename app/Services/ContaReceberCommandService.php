@@ -22,6 +22,7 @@ class ContaReceberCommandService
     {
         return DB::transaction(function () use ($dados) {
 
+            $dados = $this->normalizarDados($dados);
             $dados['status'] = $dados['status'] ?? ContaStatus::ABERTA->value;
 
             $conta = ContaReceber::create($dados);
@@ -42,7 +43,7 @@ class ContaReceberCommandService
 
             $antes = $conta->fresh()->toArray();
 
-            $conta->fill($dados)->save();
+            $conta->fill($this->normalizarDados($dados, $conta))->save();
 
             $this->syncValores($conta);
             $this->statusSvc->syncReceber($conta->fresh());
@@ -157,13 +158,108 @@ class ContaReceberCommandService
 
     private function syncValores(ContaReceber $conta): void
     {
-        $valorLiquido = (float)($conta->valor_bruto - $conta->desconto + $conta->juros + $conta->multa);
-        $valorRecebido = (float) $conta->pagamentos()->sum('valor');
-        $saldoAberto = max(0.0, $valorLiquido - $valorRecebido);
+        $valorBruto = $this->toDecimal($conta->valor_bruto);
+        $desconto = $this->toDecimal($conta->desconto);
+        $juros = $this->toDecimal($conta->juros);
+        $multa = $this->toDecimal($conta->multa);
+
+        $valorLiquido = $this->bcAdd($this->bcSub($valorBruto, $desconto), $this->bcAdd($juros, $multa));
+
+        $hasPagamentos = $conta->pagamentos()->exists();
+        $valorRecebido = $hasPagamentos
+            ? $this->toDecimal($conta->pagamentos()->sum('valor'))
+            : $this->toDecimal($conta->valor_recebido);
+
+        $saldoAberto = $this->bcSub($valorLiquido, $valorRecebido);
+        if ($this->bcComp($saldoAberto, '0.00') < 0) {
+            $saldoAberto = '0.00';
+        }
 
         $conta->valor_liquido = $valorLiquido;
         $conta->valor_recebido = $valorRecebido;
         $conta->saldo_aberto = $saldoAberto;
         $conta->saveQuietly();
+    }
+
+    private function normalizarDados(array $dados, ?ContaReceber $conta = null): array
+    {
+        $out = $dados;
+
+        if (array_key_exists('descricao', $out) && $out['descricao'] !== null) {
+            $out['descricao'] = trim((string)$out['descricao']);
+        }
+        if (array_key_exists('numero_documento', $out)) {
+            $out['numero_documento'] = $out['numero_documento'] !== null
+                ? trim((string)$out['numero_documento'])
+                : null;
+        }
+        if (array_key_exists('observacoes', $out)) {
+            $out['observacoes'] = $out['observacoes'] !== null
+                ? trim((string)$out['observacoes'])
+                : null;
+        }
+        if (array_key_exists('forma_recebimento', $out)) {
+            $out['forma_recebimento'] = $out['forma_recebimento'] !== null
+                ? trim((string)$out['forma_recebimento'])
+                : null;
+        }
+
+        foreach (['valor_bruto','desconto','juros','multa','valor_recebido'] as $field) {
+            if (array_key_exists($field, $out)) {
+                $out[$field] = $this->toDecimal($out[$field]);
+            } elseif ($conta && in_array($field, ['desconto','juros','multa','valor_recebido'], true)) {
+                $out[$field] = $this->toDecimal($conta->$field);
+            }
+        }
+
+        $valorBruto = $this->toDecimal($out['valor_bruto'] ?? ($conta?->valor_bruto ?? '0'));
+        $desconto = $this->toDecimal($out['desconto'] ?? ($conta?->desconto ?? '0'));
+        $juros = $this->toDecimal($out['juros'] ?? ($conta?->juros ?? '0'));
+        $multa = $this->toDecimal($out['multa'] ?? ($conta?->multa ?? '0'));
+        $valorRecebido = $this->toDecimal($out['valor_recebido'] ?? ($conta?->valor_recebido ?? '0'));
+
+        $valorLiquido = $this->bcAdd($this->bcSub($valorBruto, $desconto), $this->bcAdd($juros, $multa));
+        $saldoAberto = $this->bcSub($valorLiquido, $valorRecebido);
+        if ($this->bcComp($saldoAberto, '0.00') < 0) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'valor_recebido' => 'Valor recebido não pode ser maior que o valor líquido.',
+            ]);
+        }
+
+        $out['valor_liquido'] = $valorLiquido;
+        $out['valor_recebido'] = $valorRecebido;
+        $out['saldo_aberto'] = $saldoAberto;
+
+        return $out;
+    }
+
+    private function toDecimal(mixed $value): string
+    {
+        if ($value === null || $value === '') return '0.00';
+        $v = is_string($value) ? str_replace(',', '.', trim($value)) : (string)$value;
+        if (function_exists('bcadd')) {
+            return bcadd($v, '0', 2);
+        }
+        return number_format((float)$v, 2, '.', '');
+    }
+
+    private function bcAdd(string $a, string $b): string
+    {
+        if (function_exists('bcadd')) return bcadd($a, $b, 2);
+        return number_format(((float)$a + (float)$b), 2, '.', '');
+    }
+
+    private function bcSub(string $a, string $b): string
+    {
+        if (function_exists('bcsub')) return bcsub($a, $b, 2);
+        return number_format(((float)$a - (float)$b), 2, '.', '');
+    }
+
+    private function bcComp(string $a, string $b): int
+    {
+        if (function_exists('bccomp')) return bccomp($a, $b, 2);
+        $af = (float)$a;
+        $bf = (float)$b;
+        return $af <=> $bf;
     }
 }

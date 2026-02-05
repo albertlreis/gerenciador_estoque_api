@@ -16,7 +16,9 @@ class ContaReceber extends Model
 
     protected $fillable = [
         'pedido_id','descricao','numero_documento','data_emissao','data_vencimento',
-        'valor_bruto','desconto','juros','multa','status',
+        'valor_bruto','desconto','juros','multa',
+        'valor_liquido','valor_recebido','saldo_aberto',
+        'status','forma_recebimento',
         'categoria_id','centro_custo_id','observacoes'
     ];
 
@@ -27,6 +29,9 @@ class ContaReceber extends Model
         'desconto' => 'decimal:2',
         'juros' => 'decimal:2',
         'multa' => 'decimal:2',
+        'valor_liquido' => 'decimal:2',
+        'valor_recebido' => 'decimal:2',
+        'saldo_aberto' => 'decimal:2',
         'status' => ContaStatus::class,
     ];
 

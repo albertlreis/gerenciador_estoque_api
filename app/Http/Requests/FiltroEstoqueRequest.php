@@ -15,7 +15,8 @@ class FiltroEstoqueRequest extends FormRequest
      * Regras para filtros de estoque/movimentações.
      *
      * Observação:
-     * - periodo deve ser array com 2 datas (YYYY-MM-DD).
+      * - periodo deve ser array com 2 datas (YYYY-MM-DD).
+     * - em /estoque/atual, periodo considera data_movimentacao (não estoque.updated_at).
      * - sort_order só aceita asc|desc.
      */
     public function rules(): array

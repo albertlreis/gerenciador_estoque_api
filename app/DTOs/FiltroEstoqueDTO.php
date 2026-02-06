@@ -22,7 +22,7 @@ class FiltroEstoqueDTO
     public ?int $fornecedor = null;
 
     /**
-     * Período [início, fim] para filtrar por estoque.updated_at.
+     * Período [início, fim] para filtrar variações com movimentação no intervalo.
      *
      * @var PeriodoRange|null
      */

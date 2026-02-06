@@ -4,6 +4,7 @@ namespace App\Repositories;
 
 use App\DTOs\FiltroEstoqueDTO;
 use App\Models\ProdutoVariacao;
+use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Builder;
 
 /**
@@ -82,6 +83,30 @@ class EstoqueRepository
                         ->orWhere('produto_variacoes.referencia', 'like', "%{$term}%");
                 }
             });
+        }
+
+        // Período filtra variações com movimentação no intervalo informado.
+        if ($filtros->periodo && count($filtros->periodo) === 2) {
+            [$ini, $fim] = $filtros->periodo;
+            $inicio = $ini ? Carbon::parse($ini)->startOfDay() : null;
+            $final = $fim ? Carbon::parse($fim)->endOfDay() : null;
+
+            if ($inicio && $final) {
+                $query->whereExists(function ($sub) use ($inicio, $final, $filtros) {
+                    $sub->selectRaw('1')
+                        ->from('estoque_movimentacoes as em')
+                        ->whereColumn('em.id_variacao', 'produto_variacoes.id')
+                        ->whereBetween('em.data_movimentacao', [$inicio, $final]);
+
+                    if ($filtros->deposito) {
+                        $deposito = (int) $filtros->deposito;
+                        $sub->where(function ($q) use ($deposito) {
+                            $q->where('em.id_deposito_origem', $deposito)
+                                ->orWhere('em.id_deposito_destino', $deposito);
+                        });
+                    }
+                });
+            }
         }
 
         if ($filtros->deposito) {

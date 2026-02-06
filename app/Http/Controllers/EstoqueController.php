@@ -17,6 +17,8 @@ class EstoqueController extends Controller
     /**
      * Lista o estoque atual agrupado por produto e depósito com filtros e ordenação.
      *
+     * @queryParam periodo array Opcional. [YYYY-MM-DD, YYYY-MM-DD] para considerar movimentações no intervalo.
+     *
      * @param \App\Http\Requests\FiltroEstoqueRequest $request Instância da requisição HTTP com os parâmetros de filtro
      * @param EstoqueService $service Serviço responsável pela lógica de estoque
      * @return \Illuminate\Http\JsonResponse|\Symfony\Component\HttpFoundation\Response

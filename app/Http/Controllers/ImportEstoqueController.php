@@ -16,6 +16,7 @@ class ImportEstoqueController extends Controller
     public function store(ImportEstoqueUploadRequest $request): JsonResponse
     {
         set_time_limit(600);
+        ini_set('memory_limit', '1G');
 
         $import = $this->service->criarStaging($request->file('arquivo'), auth()->id());
 

@@ -12,7 +12,8 @@ class EstoqueImportRow extends Model
     protected $fillable = [
         'import_id','linha_planilha','hash_linha',
         'cod','nome','categoria','madeira','tecido_1','tecido_2','metal_vidro',
-        'localizacao','deposito','cliente','data_nf','data','valor','qtd',
+        'localizacao','deposito','status','setor','coluna','nivel','area',
+        'cliente','data_nf','data','valor','qtd',
         'parsed_dimensoes','parsed_localizacao','valido','erros','warnings',
     ];
 
@@ -25,6 +26,7 @@ class EstoqueImportRow extends Model
         'data_nf' => 'date',
         'data' => 'date',
         'valor' => 'decimal:2',
+        'nivel' => 'integer',
     ];
 
     public function import(): BelongsTo

@@ -15,10 +15,12 @@ return new class extends Migration
             $table->char('arquivo_hash', 64);
 
             $table->string('numero_externo', 50)->nullable();
-            $table->unsignedBigInteger('pedido_id')->nullable();
+
+            $table->unsignedInteger('pedido_id')->nullable();
+
             $table->unsignedBigInteger('usuario_id')->nullable();
 
-            $table->string('status', 30)->default('extraido'); // extraido|confirmado|erro
+            $table->string('status', 30)->default('extraido');
             $table->text('erro')->nullable();
             $table->json('dados_json')->nullable();
 

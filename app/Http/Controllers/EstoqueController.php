@@ -9,7 +9,6 @@ use App\Http\Resources\ResumoEstoqueResource;
 use App\Models\Estoque;
 use App\Services\EstoqueService;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
 
 class EstoqueController extends Controller
@@ -46,13 +45,10 @@ class EstoqueController extends Controller
      * @param EstoqueService $service
      * @return JsonResponse
      */
-    public function resumoEstoque(Request $request, EstoqueService $service): JsonResponse
+    public function resumoEstoque(FiltroEstoqueRequest $request, EstoqueService $service): JsonResponse
     {
-        $resumo = $service->gerarResumo(
-            produto: $request->input('produto'),
-            deposito: $request->input('deposito'),
-            periodo: $request->input('periodo')
-        );
+        $dto = new FiltroEstoqueDTO($request->validated());
+        $resumo = $service->gerarResumo($dto);
 
         return response()->json(new ResumoEstoqueResource($resumo));
     }

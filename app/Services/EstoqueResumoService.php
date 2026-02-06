@@ -2,6 +2,8 @@
 
 namespace App\Services;
 
+use App\DTOs\FiltroEstoqueDTO;
+use App\Repositories\EstoqueRepository;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -9,52 +11,41 @@ use Illuminate\Support\Facades\DB;
  */
 class EstoqueResumoService
 {
+    public function __construct(
+        private readonly EstoqueRepository $estoqueRepository
+    ) {}
+
     /**
-     * Gera um resumo do estoque a partir de filtros simples.
-     *
-     * Observações de desempenho:
-     * - totalProdutos e totalDepositos são contagens simples (podem ser cacheadas se necessário).
-     * - totalPecas reaproveita a query base de estoque com joins.
-     *
-     * @param string|null $produto   Texto para busca em produtos.nome ou produto_variacoes.referencia
-     * @param int|null    $deposito  ID do depósito
-     * @param array|null  $periodo   Intervalo [inicio, fim] (string/datetime aceito pelo banco)
+     * Gera resumo com a mesma base de filtros da listagem de /estoque/atual.
      *
      * @return array{totalProdutos:int,totalPecas:int,totalDepositos:int}
      */
-    public function gerarResumoEstoque(
-        ?string $produto = null,
-        ?int $deposito = null,
-        ?array $periodo = null
-    ): array {
-        $estoqueQuery = DB::table('estoque')
-            ->join('produto_variacoes', 'estoque.id_variacao', '=', 'produto_variacoes.id')
-            ->join('produtos', 'produto_variacoes.produto_id', '=', 'produtos.id');
+    public function gerarResumoEstoque(FiltroEstoqueDTO $filtros): array
+    {
+        $query = $this->estoqueRepository->queryBase($filtros);
+        $baseSub = DB::query()->fromSub((clone $query)->toBase(), 'estoque_base');
 
-        if ($produto) {
-            $term = trim($produto);
+        $totalProdutos = (int) (clone $baseSub)->distinct()->count('produto_id');
+        $totalPecas = (int) ((clone $baseSub)->sum('quantidade_estoque') ?? 0);
 
-            $estoqueQuery->where(function ($q) use ($term) {
-                $q->where('produtos.nome', 'like', "%{$term}%")
-                    ->orWhere('produto_variacoes.referencia', 'like', "%{$term}%");
-            });
+        $variacoesSub = DB::query()
+            ->fromSub((clone $query)->toBase(), 'estoque_base')
+            ->select('id');
+
+        $depositosQuery = DB::table('estoque as e')
+            ->whereIn('e.id_variacao', $variacoesSub);
+
+        if ($filtros->deposito) {
+            $depositosQuery->where('e.id_deposito', (int) $filtros->deposito);
         }
-
-        if ($deposito) {
-            $estoqueQuery->where('estoque.id_deposito', $deposito);
+        if (!$filtros->zerados) {
+            $depositosQuery->where('e.quantidade', '>', 0);
         }
-
-        if ($periodo && count($periodo) === 2 && $periodo[0] && $periodo[1]) {
-            $estoqueQuery->whereBetween('estoque.updated_at', [$periodo[0], $periodo[1]]);
-        }
-
-        // Clona por segurança (evita efeitos colaterais se você estender essa query no futuro)
-        $sumQuery = clone $estoqueQuery;
 
         return [
-            'totalProdutos'  => DB::table('produtos')->count(),
-            'totalPecas'     => (int) $sumQuery->sum('estoque.quantidade'),
-            'totalDepositos' => DB::table('depositos')->count(),
+            'totalProdutos'  => $totalProdutos,
+            'totalPecas'     => $totalPecas,
+            'totalDepositos' => (int) $depositosQuery->distinct()->count('e.id_deposito'),
         ];
     }
 }

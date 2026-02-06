@@ -21,6 +21,9 @@ class FiltroEstoqueDTO
     /** ID do fornecedor do produto */
     public ?int $fornecedor = null;
 
+    /** Tipo de movimentação relacionado ao filtro de período (entrada|saida). */
+    public ?string $tipo = null;
+
     /**
      * Período [início, fim] para filtrar variações com movimentação no intervalo.
      *
@@ -53,6 +56,10 @@ class FiltroEstoqueDTO
         $this->deposito = $this->toNullablePositiveInt($data['deposito'] ?? null);
         $this->categoria = $this->toNullablePositiveInt($data['categoria'] ?? null);
         $this->fornecedor = $this->toNullablePositiveInt($data['fornecedor'] ?? null);
+        $this->tipo = isset($data['tipo']) ? trim((string) $data['tipo']) : null;
+        if ($this->tipo === '') {
+            $this->tipo = null;
+        }
 
         // Período: [inicio, fim]
         $periodo = $data['periodo'] ?? null;

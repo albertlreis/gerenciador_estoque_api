@@ -69,6 +69,16 @@ class EstoqueMovimentacaoService
             }
         }
 
+        if (!empty($filtros->categoria)) {
+            $categoriaId = (int) $filtros->categoria;
+            $query->whereHas('variacao.produto', fn (Builder $sub) => $sub->where('id_categoria', $categoriaId));
+        }
+
+        if (!empty($filtros->fornecedor)) {
+            $fornecedorId = (int) $filtros->fornecedor;
+            $query->whereHas('variacao.produto', fn (Builder $sub) => $sub->where('id_fornecedor', $fornecedorId));
+        }
+
         if (!empty($filtros->deposito)) {
             $depositoId = (int) $filtros->deposito;
             $query->where(function (Builder $q) use ($depositoId) {

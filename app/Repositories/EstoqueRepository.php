@@ -85,28 +85,43 @@ class EstoqueRepository
             });
         }
 
-        // Período filtra variações com movimentação no intervalo informado.
-        if ($filtros->periodo && count($filtros->periodo) === 2) {
-            [$ini, $fim] = $filtros->periodo;
-            $inicio = $ini ? Carbon::parse($ini)->startOfDay() : null;
-            $final = $fim ? Carbon::parse($fim)->endOfDay() : null;
+        // Filtros de movimentação aplicáveis ao estoque atual:
+        // - periodo: limita pela data da movimentação
+        // - tipo: limita pelo tipo da movimentação
+        $hasPeriodo = $filtros->periodo && count($filtros->periodo) === 2;
+        $hasTipo = !empty($filtros->tipo);
 
-            if ($inicio && $final) {
-                $query->whereExists(function ($sub) use ($inicio, $final, $filtros) {
-                    $sub->selectRaw('1')
-                        ->from('estoque_movimentacoes as em')
-                        ->whereColumn('em.id_variacao', 'produto_variacoes.id')
-                        ->whereBetween('em.data_movimentacao', [$inicio, $final]);
+        if ($hasPeriodo || $hasTipo) {
+            $inicio = null;
+            $final = null;
 
-                    if ($filtros->deposito) {
-                        $deposito = (int) $filtros->deposito;
-                        $sub->where(function ($q) use ($deposito) {
-                            $q->where('em.id_deposito_origem', $deposito)
-                                ->orWhere('em.id_deposito_destino', $deposito);
-                        });
-                    }
-                });
+            if ($hasPeriodo) {
+                [$ini, $fim] = $filtros->periodo;
+                $inicio = $ini ? Carbon::parse($ini)->startOfDay() : null;
+                $final = $fim ? Carbon::parse($fim)->endOfDay() : null;
             }
+
+            $query->whereExists(function ($sub) use ($inicio, $final, $hasPeriodo, $filtros) {
+                $sub->selectRaw('1')
+                    ->from('estoque_movimentacoes as em')
+                    ->whereColumn('em.id_variacao', 'produto_variacoes.id');
+
+                if ($hasPeriodo && $inicio && $final) {
+                    $sub->whereBetween('em.data_movimentacao', [$inicio, $final]);
+                }
+
+                if (!empty($filtros->tipo)) {
+                    $sub->where('em.tipo', $filtros->tipo);
+                }
+
+                if ($filtros->deposito) {
+                    $deposito = (int) $filtros->deposito;
+                    $sub->where(function ($q) use ($deposito) {
+                        $q->where('em.id_deposito_origem', $deposito)
+                            ->orWhere('em.id_deposito_destino', $deposito);
+                    });
+                }
+            });
         }
 
         if ($filtros->deposito) {

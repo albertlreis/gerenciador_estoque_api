@@ -115,16 +115,11 @@ class EstoqueService
     /**
      * Gera resumo simples do estoque.
      *
-     * @param string|null $produto
-     * @param int|null $deposito
-     * @param array|null $periodo Intervalo [inicio, fim]
+     * @param FiltroEstoqueDTO $filtros
      * @return array{totalProdutos:int,totalPecas:int,totalDepositos:int}
      */
-    public function gerarResumo(
-        ?string $produto = null,
-        ?int $deposito = null,
-        ?array $periodo = null
-    ): array {
-        return $this->estoqueResumoService->gerarResumoEstoque($produto, $deposito, $periodo);
+    public function gerarResumo(FiltroEstoqueDTO $filtros): array
+    {
+        return $this->estoqueResumoService->gerarResumoEstoque($filtros);
     }
 }

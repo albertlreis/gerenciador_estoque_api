@@ -50,6 +50,7 @@ class ImportEstoqueController extends Controller
     public function show(int $id): JsonResponse
     {
         $import = EstoqueImport::withCount('rows')->findOrFail($id);
+
         return response()->json([
             'sucesso' => true,
             'data' => $import

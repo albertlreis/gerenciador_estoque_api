@@ -10,7 +10,7 @@ use Illuminate\Support\Str;
  * Atributo de uma variação de produto (ex: cor = vermelho).
  *
  * Regras:
- * - atributo: salvo sempre "squish + lower" (padroniza 'Cor', 'COR', '  cor   ' -> 'cor')
+ * - atributo: salvo sempre "squish + lower + ascii" (padroniza 'Cor', 'COR', '  cor   ' -> 'cor')
  * - valor: salvo com "squish" (mantém caixa do valor, mas remove espaços excedentes)
  */
 class ProdutoVariacaoAtributo extends Model
@@ -29,7 +29,10 @@ class ProdutoVariacaoAtributo extends Model
     /** Normaliza a chave do atributo antes de salvar. */
     public function setAtributoAttribute($value): void
     {
-        $this->attributes['atributo'] = (string) Str::of((string) $value)->squish()->lower();
+        $this->attributes['atributo'] = (string) Str::of((string) $value)
+            ->squish()
+            ->lower()
+            ->ascii();
     }
 
     /** Higieniza o valor (mantém caixa, remove espaçamentos estranhos). */
@@ -38,12 +41,12 @@ class ProdutoVariacaoAtributo extends Model
         $this->attributes['valor'] = (string) Str::of((string) $value)->squish();
     }
 
-    /** Fornece uma label bonitinha para UI (ex.: 'cor' -> 'Cor'). */
+    /** Fornece uma label amigável para UI (ex.: 'cor_primaria' -> 'Cor Primaria'). */
     public function getAtributoLabelAttribute(): string
     {
-        $attr = $this->attributes['atributo'] ?? '';
+        $attr = (string)($this->attributes['atributo'] ?? '');
         if ($attr === '') return '';
-        // Apenas primeira letra maiúscula:
-        return mb_strtoupper(mb_substr($attr, 0, 1)) . mb_substr($attr, 1);
+
+        return (string) Str::of($attr)->replace('_', ' ')->headline();
     }
 }

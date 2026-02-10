@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Support\Str;
 
 /**
  * Representa uma variação específica de um produto,
@@ -24,6 +25,11 @@ class ProdutoVariacao extends Model
         'estoque_total',
         'estoque_outlet_total',
         'outlet_restante_total',
+    ];
+
+    protected $casts = [
+        'preco' => 'float',
+        'custo' => 'float',
     ];
 
     public function produto(): BelongsTo
@@ -54,12 +60,17 @@ class ProdutoVariacao extends Model
      */
     public function getEstoqueTotalAttribute(): int
     {
-        // 1) veio do withSum?
+        // 1) veio de alias com withSum([... as quantidade_estoque], 'quantidade')?
         if (array_key_exists('quantidade_estoque', $this->attributes)) {
             return (int) ($this->attributes['quantidade_estoque'] ?? 0);
         }
 
-        // 2) relação carregada?
+        // 2) veio de withSum('estoques','quantidade')? (nome padrão do Laravel)
+        if (array_key_exists('estoques_sum_quantidade', $this->attributes)) {
+            return (int) ($this->attributes['estoques_sum_quantidade'] ?? 0);
+        }
+
+        // 3) relação carregada?
         if ($this->relationLoaded('estoques')) {
             return (int) $this->estoques->sum('quantidade');
         }
@@ -69,32 +80,54 @@ class ProdutoVariacao extends Model
 
     public function getNomeCompletoAttribute(): string
     {
-        // Evita lazy loading
-        $produto = $this->relationLoaded('produto') ? $this->produto : $this->getRelationValue('produto');
-        $produtoNome = trim($produto?->nome ?? '');
+        // Evitar lazy loading: só usa produto se estiver eager loaded ou se veio por select alias
+        $produtoNome = '';
 
-        // Garante atributos carregados
+        if ($this->relationLoaded('produto')) {
+            $produtoNome = trim((string)($this->produto?->nome ?? ''));
+        } elseif (array_key_exists('produto_nome', $this->attributes)) {
+            $produtoNome = trim((string)($this->attributes['produto_nome'] ?? ''));
+        }
+
+        // Atributos: só usar se estiverem carregados (evita query)
         $atributos = $this->relationLoaded('atributos') ? $this->atributos : collect();
 
-        if ($atributos->isNotEmpty()) {
-            // Agrupa atributos por nome
-            $agrupados = $atributos->groupBy('atributo')->map(function ($itens, $atributo) {
-                $valores = $itens->pluck('valor')->filter()->unique()->join(', ');
-                return ucfirst($atributo) . ': ' . $valores;
-            });
+        // Base do nome quando produto não veio carregado
+        $nomeVar = trim((string)($this->nome ?? ''));
+        $base = $produtoNome !== '' ? $produtoNome : ($nomeVar !== '' ? $nomeVar : '-');
 
-            // Junta tudo num único texto, separado por " | "
+        if ($atributos->isNotEmpty()) {
+            // Ordena por atributo e depois ordena valores para ficar determinístico
+            $agrupados = $atributos
+                ->groupBy('atributo')
+                ->sortKeys()
+                ->map(function ($itens, $atributo) {
+                    $valores = $itens->pluck('valor')
+                        ->filter(fn($v) => $v !== null && $v !== '')
+                        ->unique()
+                        ->sort()
+                        ->values()
+                        ->join(', ');
+
+                    $label = (string) Str::of((string)$atributo)->replace('_', ' ')->headline();
+
+                    return trim($label . ': ' . $valores);
+                })
+                ->filter()
+                ->values();
+
             $atributosTexto = $agrupados->join(' | ');
 
-            return trim("{$produtoNome} ({$atributosTexto})");
+            return $atributosTexto !== '' ? trim("{$base} ({$atributosTexto})") : $base;
         }
 
-        // Se não tiver atributos, retorna o nome base da variação ou do produto
-        if (!empty($this->nome)) {
-            return trim("{$produtoNome} - {$this->nome}");
+        // Se não tiver atributos:
+        // - Se produto existe e variação tem nome, usa "Produto - Variação"
+        if ($produtoNome !== '' && $nomeVar !== '') {
+            return trim("{$produtoNome} - {$nomeVar}");
         }
 
-        return $produtoNome ?: '-';
+        return $base;
     }
 
     public function outlets(): HasMany
@@ -109,14 +142,54 @@ class ProdutoVariacao extends Model
             ->latest();
     }
 
+    /**
+     * Total de quantidade em outlets.
+     *
+     * Preferências:
+     * - Se veio por withSum (alias), usa.
+     * - Se veio por withSum padrão do Laravel, usa.
+     * - Se relação carregada, soma em memória.
+     * - fallback 0.
+     */
     public function getEstoqueOutletTotalAttribute(): int
     {
-        return $this->outlets->sum('quantidade') ?? 0;
+        // alias recomendado: withSum('outlets as quantidade_outlet', 'quantidade')
+        if (array_key_exists('quantidade_outlet', $this->attributes)) {
+            return (int) ($this->attributes['quantidade_outlet'] ?? 0);
+        }
+
+        // padrão do Laravel: withSum('outlets','quantidade')
+        if (array_key_exists('outlets_sum_quantidade', $this->attributes)) {
+            return (int) ($this->attributes['outlets_sum_quantidade'] ?? 0);
+        }
+
+        if ($this->relationLoaded('outlets')) {
+            return (int) $this->outlets->sum('quantidade');
+        }
+
+        return 0;
     }
 
+    /**
+     * Total restante de outlets.
+     */
     public function getOutletRestanteTotalAttribute(): int
     {
-        return $this->outlets->sum('quantidade_restante') ?? 0;
+        // alias recomendado: withSum('outlets as quantidade_outlet_restante', 'quantidade_restante')
+        if (array_key_exists('quantidade_outlet_restante', $this->attributes)) {
+            return (int) ($this->attributes['quantidade_outlet_restante'] ?? 0);
+        }
+
+        // padrão do Laravel: withSum('outlets','quantidade_restante')
+        if (array_key_exists('outlets_sum_quantidade_restante', $this->attributes)) {
+            return (int) ($this->attributes['outlets_sum_quantidade_restante'] ?? 0);
+        }
+
+        if ($this->relationLoaded('outlets')) {
+            return (int) $this->outlets->sum('quantidade_restante');
+        }
+
+        return 0;
     }
 
     /**
@@ -130,5 +203,4 @@ class ProdutoVariacao extends Model
     {
         return $this->hasMany(Estoque::class, 'id_variacao');
     }
-
 }

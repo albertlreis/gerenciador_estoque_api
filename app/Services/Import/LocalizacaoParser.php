@@ -5,7 +5,7 @@ namespace App\Services\Import;
 final class LocalizacaoParser
 {
     /**
-     * Regras de localização (valor já virá limpo pela sua rotina):
+     * Regras de localização:
      * - "setor-coluna-nivel": ex. "6-F1"  => setor=6, coluna=F, nivel=1
      * - "setor-coluna":       ex. "8-I"   => setor=8, coluna=I, nivel=null
      * - Qualquer outro texto: tratar como "área" (Assistência, Lavagem, etc.)
@@ -13,16 +13,17 @@ final class LocalizacaoParser
      * Retorno:
      * [
      *   'setor'  => int|null,
-     *   'coluna' => string|null,   // sempre uppercase quando presente
-     *   'nivel'  => int|null,      // opcional
-     *   'area'   => string|null,   // quando não casar com padrão posicional
-     *   'codigo' => string|null,   // representação canônica
+     *   'coluna' => string|null,   // uppercase quando presente
+     *   'nivel'  => int|null,
+     *   'area'   => string|null,
+     *   'codigo' => string|null,
      *   'tipo'   => 'posicao'|'area'|'vazio'
      * ]
      */
     public function parse(?string $raw): array
     {
         $raw = trim((string)$raw);
+
         if ($raw === '') {
             return [
                 'setor' => null, 'coluna' => null, 'nivel' => null,
@@ -30,19 +31,17 @@ final class LocalizacaoParser
             ];
         }
 
-        // Padrões aceitos:
-        // 1) setor-coluna-nivel: 6-F1 (nível opcional)
-        //    - setor: dígitos
-        //    - coluna: uma letra
-        //    - nível: dígitos (opcional)
-        //
-        // Ex.: "6-F1", "6-F 1", "8-I"
-        if (preg_match('/^\s*(\d+)\s*[-–]\s*([A-Za-z])\s*(\d+)?\s*$/u', $raw, $m)) {
+        /**
+         * Aceita:
+         * - "6-F1", "6-F 1", "8-I"
+         * - também tolera separador ausente: "6F1", "8I"
+         * - letras 1..2 (caso exista AA/AB etc)
+         */
+        if (preg_match('/^\s*(\d+)\s*[-–—]?\s*([A-Za-z]{1,2})\s*(\d+)?\s*$/u', $raw, $m)) {
             $setor  = (int)$m[1];
             $coluna = strtoupper($m[2]);
             $nivel  = isset($m[3]) && $m[3] !== '' ? (int)$m[3] : null;
 
-            // Monta código canônico sempre como "setor-COLUNA{nivel?}"
             $codigo = $nivel === null
                 ? sprintf('%d-%s', $setor, $coluna)
                 : sprintf('%d-%s%d', $setor, $coluna, $nivel);
@@ -57,7 +56,7 @@ final class LocalizacaoParser
             ];
         }
 
-        // Caso contrário, considerar como ÁREA (ex.: Assistência, Lavagem, Base, Tampo...)
+        // Caso contrário, considerar como ÁREA
         return [
             'setor' => null, 'coluna' => null, 'nivel' => null,
             'area' => $raw, 'codigo' => $raw, 'tipo' => 'area'

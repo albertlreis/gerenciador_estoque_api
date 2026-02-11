@@ -62,22 +62,42 @@ class ProdutoVariacaoController extends Controller
         };
     }
 
-    public function update(Request $request, int $produtoId, ProdutoVariacaoService $service): JsonResponse
+
+    public function update(Request $request, Produto $produto, ProdutoVariacaoService $service, ProdutoVariacao $variacao = null): JsonResponse
     {
         $dados = $request->all();
 
         if (!is_array($dados)) {
-            return response()->json(['message' => 'Formato inválido.'], 400);
+            return response()->json(['message' => 'Formato inv??lido.'], 400);
         }
 
+        $isList = array_is_list($dados);
+
         try {
-            $service->atualizarLote($produtoId, $dados);
-            return response()->json(['message' => 'Variações atualizadas com sucesso.']);
+            if ($isList) {
+                $service->atualizarLote($produto->id, $dados);
+                return response()->json(['message' => 'Varia????es atualizadas com sucesso.']);
+            }
+
+            if (!$variacao) {
+                return response()->json(['message' => 'Formato inv??lido.'], 400);
+            }
+
+            if ($variacao->produto_id !== $produto->id) {
+                return response()->json(['error' => 'Varia????o n??o pertence a este produto'], 404);
+            }
+
+            $variacaoAtualizada = $service->atualizarIndividual($variacao, $dados);
+
+            return response()->json($variacaoAtualizada);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            throw $e;
         } catch (Throwable $e) {
             report($e);
             return response()->json(['message' => 'Erro inesperado.'], 500);
         }
     }
+
 
     public function destroy(Produto $produto, ProdutoVariacao $variacao)
     {

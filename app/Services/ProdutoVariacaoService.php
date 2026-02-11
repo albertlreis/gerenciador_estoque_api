@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
 class ProdutoVariacaoService
@@ -72,6 +73,60 @@ class ProdutoVariacaoService
 
         // Remove variações que não foram incluídas no payload
         $produto->variacoes()->whereNotIn('id', $idsRecebidos)->delete();
+    }
+
+    /**
+     * Atualiza uma variaÃ§Ã£o individual sem quebrar o contrato do update em lote.
+     *
+     * @param ProdutoVariacao $variacao
+     * @param array $data
+     * @return ProdutoVariacao
+     * @throws ValidationException
+     */
+    public function atualizarIndividual(ProdutoVariacao $variacao, array $data): ProdutoVariacao
+    {
+        Validator::make($data, [
+            'preco' => 'sometimes|numeric|min:0',
+            'custo' => 'sometimes|nullable|numeric|min:0',
+            'referencia' => [
+                'sometimes',
+                'string',
+                'max:255',
+                Rule::unique('produto_variacoes', 'referencia')->ignore($variacao->id),
+            ],
+            'codigo_barras' => 'sometimes|nullable|string|max:255',
+            'atributos' => 'sometimes|array',
+            'atributos.*.atributo' => 'required_with:atributos.*.valor|string|max:255',
+            'atributos.*.valor' => 'required_with:atributos.*.atributo|string|max:255',
+        ])->validate();
+
+        $updates = [];
+        if (array_key_exists('preco', $data)) {
+            $updates['preco'] = $data['preco'];
+        }
+        if (array_key_exists('custo', $data)) {
+            $updates['custo'] = $data['custo'];
+        }
+        if (array_key_exists('referencia', $data)) {
+            $updates['referencia'] = $data['referencia'];
+        }
+        if (array_key_exists('codigo_barras', $data)) {
+            $updates['codigo_barras'] = $data['codigo_barras'];
+        }
+
+        if (!empty($updates)) {
+            $variacao->fill($updates);
+        }
+
+        if ($variacao->isDirty()) {
+            $variacao->save();
+        }
+
+        if (array_key_exists('atributos', $data)) {
+            $this->sincronizarAtributos($variacao, $data['atributos'] ?? []);
+        }
+
+        return $variacao->refresh()->load('atributos');
     }
 
     /**

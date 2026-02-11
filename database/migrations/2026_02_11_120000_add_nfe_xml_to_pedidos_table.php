@@ -12,13 +12,15 @@ return new class extends Migration
             $table->string('nfe_xml_path')->nullable()->after('data_limite_entrega');
             $table->string('nfe_xml_nome')->nullable()->after('nfe_xml_path');
             $table->string('nfe_xml_hash', 64)->nullable()->after('nfe_xml_nome');
-            $table->unsignedInteger('nfe_xml_uploaded_by')->nullable()->after('nfe_xml_hash');
+            $table->unsignedBigInteger('nfe_xml_uploaded_by')->nullable();
             $table->timestamp('nfe_xml_uploaded_at')->nullable()->after('nfe_xml_uploaded_by');
 
             $table->foreign('nfe_xml_uploaded_by')
-                ->references('id')->on('acesso_usuarios')
-                ->nullOnDelete()
-                ->onUpdate('restrict');
+                ->references('id')
+                ->on('acesso_usuarios')
+                ->nullOnDelete();
+
+
         });
     }
 

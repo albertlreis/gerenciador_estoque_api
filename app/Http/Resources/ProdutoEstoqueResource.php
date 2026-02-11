@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources;
 
+use App\Helpers\AuthHelper;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Support\Collection;
 
@@ -31,6 +32,9 @@ class ProdutoEstoqueResource extends JsonResource
 
         $deposito = $estoque?->deposito;
         $localizacao = $estoque?->localizacao;
+        $quantidade = (int) ($this->quantidade_estoque ?? 0);
+        $canViewCusto = AuthHelper::hasPermissao('pedidos.visualizar.todos');
+        $custoUnitario = $this->custo;
 
         // Monta estrutura de dimensões dinâmicas
         $dimensoes = [];
@@ -52,7 +56,15 @@ class ProdutoEstoqueResource extends JsonResource
             'produto_referencia' => $this->referencia,
             'deposito_nome' => $deposito?->nome ?? '—',
             'deposito_id'   => $deposito?->id ?? '—',
-            'quantidade'    => (int) ($this->quantidade_estoque ?? 0),
+            'quantidade'    => $quantidade,
+            'custo_unitario' => $this->when(
+                $canViewCusto,
+                $custoUnitario !== null ? (float) $custoUnitario : null
+            ),
+            'valor_estoque_atual' => $this->when(
+                $canViewCusto && $custoUnitario !== null,
+                (float) $quantidade * (float) $custoUnitario
+            ),
 
             'localizacao' => $localizacao ? [
                 'id'              => $localizacao->id,

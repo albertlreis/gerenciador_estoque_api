@@ -107,6 +107,12 @@ final class FinalizarPedidoService
             $prazoPadrao  = (int) config('orders.prazo_padrao_dias_uteis', 60);
             $prazoUteis   = (int) ($request->input('prazo_dias_uteis') ?? $prazoPadrao);
 
+            $prazoConsignacao = null;
+            if ($emConsignacao) {
+                $prazoConsignacao = (int) ($request->input('prazo_consignacao') ?? $prazoPadrao);
+                $prazoUteis = $prazoConsignacao > 0 ? $prazoConsignacao : $prazoPadrao;
+            }
+
             // Pedido + itens + status inicial
             $pedido = $this->pedidoFactory->criarPedido([
                 'id_cliente'       => $request->id_cliente,
@@ -123,7 +129,7 @@ final class FinalizarPedidoService
 
             // Consignação (registros + status)
             if ($emConsignacao) {
-                $prazoDias  = (int) $request->input('prazo_consignacao');
+                $prazoDias  = $prazoConsignacao ?: $prazoPadrao;
                 $prazoData  = Carbon::now('America/Belem')->addDays($prazoDias);
 
                 // Usa o mapa resolvido para definir depósito das consignações
@@ -139,7 +145,7 @@ final class FinalizarPedidoService
             }
 
             // Data limite
-            $this->prazoService->definirDataLimite($pedido);
+            $this->prazoService->definirDataLimite($pedido, $prazoUteis);
 
             // Cria conta a receber (apenas se não for consignado)
             if (!$emConsignacao) {

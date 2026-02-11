@@ -21,7 +21,7 @@ class StorePedidoRequest extends FormRequest
             'observacoes'         => 'nullable|string|max:1000',
 
             'modo_consignacao'    => 'sometimes|boolean',
-            'prazo_consignacao'   => 'required_if:modo_consignacao,true|integer|min:1|max:30',
+            'prazo_consignacao'   => 'required_if:modo_consignacao,true|integer|min:1|max:60',
 
             'depositos_por_item'                  => 'sometimes|array',
             'depositos_por_item.*.id_carrinho_item' => 'required_with:depositos_por_item|exists:carrinho_itens,id',
@@ -35,6 +35,22 @@ class StorePedidoRequest extends FormRequest
         }
 
         return $rules;
+    }
+
+    protected function prepareForValidation(): void
+    {
+        if (!$this->boolean('modo_consignacao')) {
+            return;
+        }
+
+        $prazo = $this->input('prazo_consignacao');
+        $prazoValido = is_numeric($prazo) ? (int) $prazo : null;
+
+        if ($prazo === null || $prazo === '' || ($prazoValido !== null && $prazoValido <= 0)) {
+            $this->merge([
+                'prazo_consignacao' => (int) config('orders.prazo_padrao_dias_uteis', 60),
+            ]);
+        }
     }
 
     public function messages(): array

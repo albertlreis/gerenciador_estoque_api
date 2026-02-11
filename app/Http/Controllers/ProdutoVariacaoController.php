@@ -25,7 +25,13 @@ class ProdutoVariacaoController extends Controller
     public function index(Produto $produto): AnonymousResourceCollection
     {
         $variacoes = $produto->variacoes()
-            ->with(['atributos', 'produto'])
+            ->with([
+                'atributos',
+                'produto',
+                'estoques',
+                'outlets.motivo',
+                'outlets.formasPagamento.formaPagamento',
+            ])
             ->get();
 
         return ProdutoVariacaoResource::collection($variacoes);

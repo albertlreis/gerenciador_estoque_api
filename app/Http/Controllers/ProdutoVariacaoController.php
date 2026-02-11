@@ -38,10 +38,25 @@ class ProdutoVariacaoController extends Controller
             'preco' => 'required|numeric',
             'custo' => 'required|numeric',
             'codigo_barras' => 'nullable|string|max:100',
+            'atributos' => 'nullable|array',
+            'atributos.*.atributo' => 'required_with:atributos.*.valor|string|max:255',
+            'atributos.*.valor' => 'required_with:atributos.*.atributo|string|max:255',
         ]);
 
         $validated['produto_id'] = $produto->id;
         $variacao = ProdutoVariacao::create($validated);
+
+        $atributos = collect($validated['atributos'] ?? [])
+            ->filter(fn($attr) => trim((string)($attr['atributo'] ?? '')) !== '' && trim((string)($attr['valor'] ?? '')) !== '')
+            ->map(fn($attr) => [
+                'atributo' => $attr['atributo'],
+                'valor' => $attr['valor'],
+            ])
+            ->values();
+
+        if ($atributos->isNotEmpty()) {
+            $variacao->atributos()->createMany($atributos->all());
+        }
 
         return response()->json($variacao, 201);
     }

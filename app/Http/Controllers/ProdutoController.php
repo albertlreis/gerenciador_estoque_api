@@ -8,6 +8,7 @@ use App\Domain\Importacao\DTO\NotaDTO;
 use App\Domain\Importacao\DTO\ProdutoImportadoDTO;
 use App\Domain\Importacao\Services\ImportacaoProdutosService;
 use App\Http\Resources\ProdutoMiniResource;
+use App\Http\Resources\ProdutoListaResource;
 use App\Http\Resources\ProdutoSimplificadoResource;
 use App\Services\LogService;
 use App\Services\ProdutoSugestoesOutletService;
@@ -60,6 +61,7 @@ class ProdutoController extends Controller
         $produtos = $this->produtoService->listarProdutosFiltrados($request);
 
         return match ($view) {
+            'lista' => ProdutoListaResource::collection($produtos)->response(),
             'minima' => ProdutoMiniResource::collection($produtos)->response(),
             'simplificada' => ProdutoSimplificadoResource::collection($produtos)->response(),
             default => ProdutoResource::collection($produtos)->response(),

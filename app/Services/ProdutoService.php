@@ -173,33 +173,56 @@ class ProdutoService
             $q->where('quantidade', '>', 0);
         };
 
-        $with = [
-            'categoria',
-            'variacoes' => function ($q) use ($depositoId, $incluirEstoque, $status, $comEstoque) {
-                // ✅ evita N+1 e mantém coerência do catálogo
-                $q->with([
-                    'atributos',
-                    'outlets', // se você precisa do outlet no catálogo
-                    'outlets.motivo',
-                    'outlets.formasPagamento.formaPagamento',
-                ]);
+        if ($view === 'lista') {
+            $with = [
+                'imagemPrincipal',
+                'categoria',
+                'variacoes' => function ($q) use ($depositoId, $status, $comEstoque) {
+                    $q->select(['id', 'produto_id', 'referencia', 'preco']);
 
-                if ($incluirEstoque) {
-                    $q->with(['estoques' => function ($e) use ($depositoId, $status, $comEstoque) {
+                    $q->withSum(['estoques as quantidade_estoque' => function ($e) use ($depositoId, $status, $comEstoque) {
                         if ($depositoId) {
                             $e->where('id_deposito', $depositoId);
                         }
-
-                        // Se o usuário pediu "com estoque", não faz sentido devolver linhas zeradas
                         if ($status === 'com_estoque' || $comEstoque) {
                             $e->where('quantidade', '>', 0);
                         }
+                    }], 'quantidade');
 
-                        $e->with(['deposito', 'localizacao']);
-                    }]);
-                }
-            },
-        ];
+                    $q->withSum(['outlets as quantidade_outlet_restante' => function ($o) {
+                        $o->where('quantidade_restante', '>', 0);
+                    }], 'quantidade_restante');
+                },
+            ];
+        } else {
+            $with = [
+                'categoria',
+                'variacoes' => function ($q) use ($depositoId, $incluirEstoque, $status, $comEstoque) {
+                    // ✅ evita N+1 e mantém coerência do catálogo
+                    $q->with([
+                        'atributos',
+                        'outlets', // se você precisa do outlet no catálogo
+                        'outlets.motivo',
+                        'outlets.formasPagamento.formaPagamento',
+                    ]);
+
+                    if ($incluirEstoque) {
+                        $q->with(['estoques' => function ($e) use ($depositoId, $status, $comEstoque) {
+                            if ($depositoId) {
+                                $e->where('id_deposito', $depositoId);
+                            }
+
+                            // Se o usuário pediu "com estoque", não faz sentido devolver linhas zeradas
+                            if ($status === 'com_estoque' || $comEstoque) {
+                                $e->where('quantidade', '>', 0);
+                            }
+
+                            $e->with(['deposito', 'localizacao']);
+                        }]);
+                    }
+                },
+            ];
+        }
 
         $query = Produto::with($with);
 

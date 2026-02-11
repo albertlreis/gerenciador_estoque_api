@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\Usuario;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Laravel\Sanctum\Sanctum;
@@ -68,6 +69,7 @@ class ProdutoVariacaoStoreTest extends TestCase
     {
         $usuario = $this->criarUsuario();
         Sanctum::actingAs($usuario);
+        Cache::put('permissoes_usuario_' . $usuario->id, ['produto_variacoes.criar'], now()->addHour());
 
         [$produtoId] = $this->criarProdutoBase();
 

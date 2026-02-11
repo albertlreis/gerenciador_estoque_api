@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Helpers\AuthHelper;
 use App\Domain\Importacao\DTO\AtributoDTO;
 use App\Domain\Importacao\DTO\NotaDTO;
 use App\Domain\Importacao\DTO\ProdutoImportadoDTO;
@@ -76,6 +77,10 @@ class ProdutoController extends Controller
      */
     public function store(StoreProdutoRequest $request): JsonResponse
     {
+        if ($resposta = $this->autorizarProduto('criar')) {
+            return $resposta;
+        }
+
         $produto = $this->produtoService->store($request->validated());
 
         return response()->json([
@@ -115,6 +120,10 @@ class ProdutoController extends Controller
      */
     public function update(UpdateProdutoRequest $request, int $id): JsonResponse
     {
+        if ($resposta = $this->autorizarProduto('editar')) {
+            return $resposta;
+        }
+
         $produto = Produto::findOrFail($id);
         $this->produtoService->update($produto, $request->validated());
 
@@ -132,6 +141,10 @@ class ProdutoController extends Controller
      */
     public function destroy(int $id): JsonResponse
     {
+        if ($resposta = $this->autorizarProduto('excluir')) {
+            return $resposta;
+        }
+
         try {
             DB::beginTransaction();
 
@@ -175,6 +188,10 @@ class ProdutoController extends Controller
     /** Upload e parsing do XML */
     public function importarXML(ImportarXmlRequest $request): JsonResponse
     {
+        if ($resposta = $this->autorizarProduto('importar')) {
+            return $resposta;
+        }
+
         [$notaDto, $produtosDto, $xmlString] = $this->service->parsearXml($request->file('arquivo'));
 
         // 🔹 Gera identificador único e salva XML temporário
@@ -222,6 +239,10 @@ class ProdutoController extends Controller
     /** Confirma a importação */
     public function confirmarImportacao(ConfirmarImportacaoRequest $request): JsonResponse
     {
+        if ($resposta = $this->autorizarProduto('importar')) {
+            return $resposta;
+        }
+
         $notaArr    = $request->input('nota');
         $depositoId = (int)$request->input('deposito_id');
         $produtos   = collect($request->input('produtos'));
@@ -349,5 +370,25 @@ class ProdutoController extends Controller
         $result = $service->listarPorVariacao($request);
 
         return response()->json($result);
+    }
+
+    private function autorizarProduto(string $acao): ?JsonResponse
+    {
+        $mapa = [
+            'criar' => ['produtos.criar', 'produtos.gerenciar'],
+            'editar' => ['produtos.editar', 'produtos.gerenciar'],
+            'excluir' => ['produtos.excluir', 'produtos.gerenciar'],
+            'importar' => ['produtos.importar', 'produtos.gerenciar'],
+        ];
+
+        $permissoes = $mapa[$acao] ?? [];
+
+        foreach ($permissoes as $permissao) {
+            if (AuthHelper::hasPermissao($permissao)) {
+                return null;
+            }
+        }
+
+        return response()->json(['message' => 'Sem permissÃ£o para esta aÃ§Ã£o.'], 403);
     }
 }

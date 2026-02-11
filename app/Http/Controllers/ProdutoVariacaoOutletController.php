@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Helpers\AuthHelper;
 use App\Http\Requests\StoreProdutoVariacaoOutletRequest;
 use App\Http\Resources\ProdutoVariacaoOutletResource;
 use App\Models\OutletFormaPagamento;
@@ -35,6 +36,10 @@ class ProdutoVariacaoOutletController extends Controller
 
     public function store(StoreProdutoVariacaoOutletRequest $request, int $id): JsonResponse
     {
+        if ($resposta = $this->autorizarOutlet('criar')) {
+            return $resposta;
+        }
+
         $variacao = ProdutoVariacao::with(['estoque', 'outlets'])->findOrFail($id);
 
         $estoqueTotal = (int)($variacao->estoque->quantidade ?? 0);
@@ -92,6 +97,10 @@ class ProdutoVariacaoOutletController extends Controller
 
     public function update(Request $request, int $id, int $outletId): ProdutoVariacaoOutletResource|JsonResponse
     {
+        if ($resposta = $this->autorizarOutlet('editar')) {
+            return $resposta;
+        }
+
         $variacao = ProdutoVariacao::with(['estoque','outlets'])->findOrFail($id);
 
         $estoqueTotal = (int)($variacao->estoque->quantidade ?? 0);
@@ -139,10 +148,34 @@ class ProdutoVariacaoOutletController extends Controller
 
     public function destroy(int $id, int $outletId): JsonResponse
     {
+        if ($resposta = $this->autorizarOutlet('excluir')) {
+            return $resposta;
+        }
+
         $outlet = ProdutoVariacaoOutlet::where('produto_variacao_id', $id)->findOrFail($outletId);
         $outlet->delete();
 
         return response()->json(['message' => 'Outlet removido com sucesso']);
+    }
+
+
+    private function autorizarOutlet(string $acao): ?JsonResponse
+    {
+        $mapa = [
+            'criar' => ['produtos.outlet.cadastrar', 'produtos.gerenciar'],
+            'editar' => ['produtos.outlet.editar', 'produtos.gerenciar'],
+            'excluir' => ['produtos.outlet.excluir', 'produtos.gerenciar'],
+        ];
+
+        $permissoes = $mapa[$acao] ?? [];
+
+        foreach ($permissoes as $permissao) {
+            if (AuthHelper::hasPermissao($permissao)) {
+                return null;
+            }
+        }
+
+        return response()->json(['message' => 'Sem permiss??o para esta a????o.'], 403);
     }
 
 }

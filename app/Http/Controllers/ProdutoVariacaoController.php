@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Helpers\AuthHelper;
 use App\Http\Resources\ProdutoMiniResource;
 use App\Http\Resources\ProdutoSimplificadoResource;
 use App\Http\Resources\ProdutoVariacaoResource;
@@ -39,6 +40,10 @@ class ProdutoVariacaoController extends Controller
 
     public function store(Request $request, Produto $produto): JsonResponse
     {
+        if ($resposta = $this->autorizarVariacao('criar')) {
+            return $resposta;
+        }
+
         $validated = $request->validate([
             'referencia' => 'required|string|max:100|unique:produto_variacoes,referencia',
             'preco' => 'required|numeric',
@@ -86,6 +91,10 @@ class ProdutoVariacaoController extends Controller
 
     public function update(Request $request, Produto $produto, ProdutoVariacaoService $service, ProdutoVariacao $variacao = null): JsonResponse
     {
+        if ($resposta = $this->autorizarVariacao('editar')) {
+            return $resposta;
+        }
+
         $dados = $request->all();
 
         if (!is_array($dados)) {
@@ -122,6 +131,10 @@ class ProdutoVariacaoController extends Controller
 
     public function destroy(Produto $produto, ProdutoVariacao $variacao)
     {
+        if ($resposta = $this->autorizarVariacao('excluir')) {
+            return $resposta;
+        }
+
         if ($variacao->produto_id !== $produto->id) {
             return response()->json(['error' => 'Variação não pertence a este produto'], 404);
         }
@@ -162,6 +175,26 @@ class ProdutoVariacaoController extends Controller
                 ];
             })
         );
+    }
+
+
+    private function autorizarVariacao(string $acao): ?JsonResponse
+    {
+        $mapa = [
+            'criar' => ['produto_variacoes.criar', 'produtos.editar', 'produtos.gerenciar'],
+            'editar' => ['produto_variacoes.editar', 'produtos.editar', 'produtos.gerenciar'],
+            'excluir' => ['produto_variacoes.excluir', 'produtos.excluir', 'produtos.gerenciar'],
+        ];
+
+        $permissoes = $mapa[$acao] ?? [];
+
+        foreach ($permissoes as $permissao) {
+            if (AuthHelper::hasPermissao($permissao)) {
+                return null;
+            }
+        }
+
+        return response()->json(['message' => 'Sem permiss??o para esta a????o.'], 403);
     }
 
 }

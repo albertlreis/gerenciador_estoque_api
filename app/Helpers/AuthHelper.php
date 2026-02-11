@@ -3,6 +3,7 @@
 namespace App\Helpers;
 
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 
 class AuthHelper
 {
@@ -15,7 +16,7 @@ class AuthHelper
             return false;
         }
 
-        $permissoes = Cache::get('permissoes_usuario_' . auth()->id(), []);
+        $permissoes = self::getPermissoes();
 
         return in_array($slug, $permissoes);
     }
@@ -33,7 +34,8 @@ class AuthHelper
      */
     public static function getPerfil(): ?string
     {
-        return auth()->check() ? auth()->user()->perfil : null;
+        $perfis = self::getPerfis();
+        return $perfis[0] ?? null;
     }
 
     /**
@@ -42,5 +44,83 @@ class AuthHelper
     public static function getUsuario(): array
     {
         return auth()->check() ? auth()->user()->toArray() : [];
+    }
+
+    /**
+     * Retorna lista de permissões do usuário (cache + fallback em banco).
+     */
+    public static function getPermissoes(): array
+    {
+        if (!auth()->check()) {
+            return [];
+        }
+
+        $userId = auth()->id();
+        $cacheKey = 'permissoes_usuario_' . $userId;
+
+        if (Cache::has($cacheKey)) {
+            $cached = Cache::get($cacheKey, []);
+            return is_array($cached) ? $cached : [];
+        }
+
+        $permissoes = DB::table('acesso_usuario_perfil')
+            ->join('acesso_perfil_permissao', 'acesso_usuario_perfil.id_perfil', '=', 'acesso_perfil_permissao.id_perfil')
+            ->join('acesso_permissoes', 'acesso_perfil_permissao.id_permissao', '=', 'acesso_permissoes.id')
+            ->where('acesso_usuario_perfil.id_usuario', $userId)
+            ->pluck('acesso_permissoes.slug')
+            ->unique()
+            ->values()
+            ->all();
+
+        Cache::put($cacheKey, $permissoes, now()->addHours(6));
+
+        return $permissoes;
+    }
+
+    /**
+     * Retorna lista de perfis do usuário (cache + fallback em banco).
+     */
+    public static function getPerfis(): array
+    {
+        if (!auth()->check()) {
+            return [];
+        }
+
+        $userId = auth()->id();
+        $cacheKey = 'perfis_usuario_' . $userId;
+
+        if (Cache::has($cacheKey)) {
+            $cached = Cache::get($cacheKey, []);
+            return is_array($cached) ? $cached : [];
+        }
+
+        $perfis = DB::table('acesso_usuario_perfil')
+            ->join('acesso_perfis', 'acesso_usuario_perfil.id_perfil', '=', 'acesso_perfis.id')
+            ->where('acesso_usuario_perfil.id_usuario', $userId)
+            ->pluck('acesso_perfis.nome')
+            ->unique()
+            ->values()
+            ->all();
+
+        Cache::put($cacheKey, $perfis, now()->addHours(6));
+
+        return $perfis;
+    }
+
+    /**
+     * Verifica se o usuário possui algum dos perfis informados.
+     */
+    public static function hasPerfil(string|array $perfis): bool
+    {
+        $lista = self::getPerfis();
+        $perfis = is_array($perfis) ? $perfis : [$perfis];
+
+        foreach ($perfis as $perfil) {
+            if (in_array($perfil, $lista, true)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

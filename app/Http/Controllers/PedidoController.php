@@ -2,7 +2,9 @@
 
 namespace App\Http\Controllers;
 
+use App\Helpers\AuthHelper;
 use App\Http\Requests\StorePedidoRequest;
+use App\Http\Requests\UpdatePedidoRequest;
 use App\Http\Resources\PedidoCompletoResource;
 use App\Models\Deposito;
 use App\Models\Pedido;
@@ -10,6 +12,7 @@ use App\Models\PedidoImportacao;
 use App\Models\ProdutoImagem;
 use App\Services\ExtratorPedidoPythonService;
 use App\Services\PedidoService;
+use App\Services\PedidoUpdateService;
 use App\Services\ImportacaoPedidoService;
 use App\Services\EstatisticaPedidoService;
 use App\Services\PedidoExportService;
@@ -30,6 +33,7 @@ class PedidoController extends Controller
     protected EstatisticaPedidoService $estatisticaService;
     protected PedidoExportService $exportService;
     protected ExtratorPedidoPythonService $service;
+    protected PedidoUpdateService $pedidoUpdateService;
 
     /**
      * Injeta as dependências necessárias.
@@ -39,13 +43,15 @@ class PedidoController extends Controller
         ImportacaoPedidoService $importacaoService,
         EstatisticaPedidoService $estatisticaService,
         PedidoExportService $exportService,
-        ExtratorPedidoPythonService $service
+        ExtratorPedidoPythonService $service,
+        PedidoUpdateService $pedidoUpdateService
     ) {
         $this->pedidoService = $pedidoService;
         $this->importacaoService = $importacaoService;
         $this->estatisticaService = $estatisticaService;
         $this->exportService = $exportService;
         $this->service = $service;
+        $this->pedidoUpdateService = $pedidoUpdateService;
     }
 
     /**
@@ -69,6 +75,40 @@ class PedidoController extends Controller
     public function store(StorePedidoRequest $request): JsonResponse
     {
         return $this->pedidoService->criarPedido($request);
+    }
+
+    /**
+     * Atualiza um pedido existente (cabeÃ§alho + itens).
+     */
+    public function update(UpdatePedidoRequest $request, Pedido $pedido): JsonResponse
+    {
+        if (!AuthHelper::hasPermissao('pedidos.editar')) {
+            return response()->json(['message' => 'Sem permissÃ£o para editar pedidos.'], 403);
+        }
+
+        $updated = $this->pedidoUpdateService->atualizar(
+            $pedido,
+            $request->validated(),
+            auth()->id()
+        );
+
+        $pedidoCompleto = $updated->load([
+            'cliente:id,nome,email,telefone',
+            'parceiro:id,nome',
+            'usuario:id,nome',
+            'statusAtual',
+            'itens.variacao.produto.imagens',
+            'itens.variacao.atributos',
+            'historicoStatus.usuario:id,nome',
+            'devolucoes.itens.pedidoItem.variacao.produto',
+            'devolucoes.itens.trocaItens.variacaoNova.produto',
+            'devolucoes.credito',
+        ]);
+
+        return response()->json([
+            'message' => 'Pedido atualizado com sucesso.',
+            'data' => new PedidoCompletoResource($pedidoCompleto),
+        ]);
     }
 
     /**

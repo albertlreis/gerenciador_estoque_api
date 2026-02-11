@@ -15,6 +15,8 @@ class PedidoItemResource extends JsonResource
 
         return [
             'id' => $this->id,
+            'id_variacao' => $this->id_variacao,
+            'id_deposito' => $this->id_deposito,
             'produto_id' => $this->variacao->produto_id ?? null,
             'nome_produto' => $this->variacao->produto->nome ?? '-',
             'referencia' => $this->variacao->referencia ?? '-',

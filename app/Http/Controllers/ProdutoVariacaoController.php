@@ -113,7 +113,11 @@ class ProdutoVariacaoController extends Controller
             $variacoes->map(function ($v) {
                 return [
                     'id' => $v->id,
-                    'nome_completo' => $v->nome_completo
+                    'nome_completo' => $v->nome_completo,
+                    'referencia' => $v->referencia,
+                    'produto_id' => $v->produto_id,
+                    'produto_nome' => $v->produto?->nome,
+                    'preco' => (float) ($v->preco ?? 0),
                 ];
             })
         );

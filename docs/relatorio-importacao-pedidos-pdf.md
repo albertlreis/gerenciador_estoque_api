@@ -110,6 +110,8 @@ Back-end:
   - cobre múltiplos formatos e erro em formato inválido.
 - `tests/Feature/PedidoImportacaoPdfDatasTest.php`
   - confirma importação com datas em `DD/MM/YYYY` e `DD.MM.YY`.
+- `database/migrations/2025_04_08_000000_create_acesso_usuarios_table_for_tests.php`
+  - cria `acesso_usuarios` **somente em ambiente testing** para permitir as FKs de `pedidos`.
 
 Como rodar:
 - `php artisan test`

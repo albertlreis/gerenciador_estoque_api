@@ -12,10 +12,12 @@ use App\Models\ProdutoVariacaoAtributo;
 use App\Models\PedidoImportacao;
 use App\Enums\PedidoStatus;
 use App\Helpers\StringHelper;
+use App\Support\Dates\DateNormalizer;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
 
@@ -33,6 +35,12 @@ class ImportacaoPedidoService
      */
     public function confirmarImportacaoPDF(Request $request): JsonResponse
     {
+        Log::info('Importação PDF - confirmação iniciada', [
+            'usuario_id' => Auth::id(),
+            'importacao_id' => $request->input('importacao_id'),
+            'itens_total' => is_array($request->input('itens')) ? count($request->input('itens')) : 0,
+        ]);
+
         $validator = Validator::make($request->all(), [
             'pedido.tipo'          => 'required|in:venda,reposicao',
             'importacao_id'        => 'nullable|integer|exists:pedido_importacoes,id',
@@ -42,9 +50,9 @@ class ImportacaoPedidoService
             'pedido.numero_externo'=> 'nullable|string|max:50|unique:pedidos,numero_externo',
             'pedido.total'         => 'nullable|numeric',
             'pedido.observacoes'   => 'nullable|string',
-            'pedido.data_pedido'   => 'nullable|date',
-            'pedido.data_inclusao' => 'nullable|date',
-            'pedido.data_entrega'  => 'nullable|date',
+            'pedido.data_pedido'   => 'nullable|string',
+            'pedido.data_inclusao' => 'nullable|string',
+            'pedido.data_entrega'  => 'nullable|string',
 
             'itens'                => 'required|array|min:1',
             'itens.*.nome'         => 'required|string',
@@ -60,10 +68,15 @@ class ImportacaoPedidoService
         });
 
         if ($validator->fails()) {
+            Log::warning('Importação PDF - validação falhou', [
+                'usuario_id' => Auth::id(),
+                'erros' => $validator->errors()->toArray(),
+            ]);
             throw new ValidationException($validator);
         }
 
-        return DB::transaction(function () use ($request) {
+        try {
+            return DB::transaction(function () use ($request) {
             $usuario     = Auth::user();
             $dadosCliente = (array) $request->cliente;
             $dadosPedido  = (array) $request->pedido;
@@ -124,9 +137,9 @@ class ImportacaoPedidoService
                 ? trim((string) $dadosPedido['numero_externo'])
                 : null;
 
-            $dataPedido = $this->normalizarData($dadosPedido['data_pedido'] ?? null);
-            $dataInclusao = $this->normalizarData($dadosPedido['data_inclusao'] ?? null);
-            $dataEntrega = $this->normalizarData($dadosPedido['data_entrega'] ?? null);
+            $dataPedido = DateNormalizer::normalizeDate($dadosPedido['data_pedido'] ?? null, 'pedido.data_pedido');
+            DateNormalizer::normalizeDate($dadosPedido['data_inclusao'] ?? null, 'pedido.data_inclusao');
+            DateNormalizer::normalizeDate($dadosPedido['data_entrega'] ?? null, 'pedido.data_entrega');
 
             $pedido = Pedido::create([
                 'tipo'          => $tipo,
@@ -134,7 +147,7 @@ class ImportacaoPedidoService
                 'id_usuario'    => $usuario->id,
                 'id_parceiro'   => $dadosPedido['id_parceiro'] ?? null,
                 'numero_externo'=> $numeroExterno ?: null,
-                'data_pedido'   => $dataPedido ?? now(),
+                'data_pedido'   => $dataPedido?->toDateTimeString() ?? now(),
                 'valor_total'   => $valorTotal,
                 'observacoes'   => $dadosPedido['observacoes'] ?? null,
             ]);
@@ -213,6 +226,13 @@ class ImportacaoPedidoService
                 ]);
             }
 
+            Log::info('Importação PDF - pedido confirmado', [
+                'usuario_id' => $usuario->id,
+                'pedido_id' => $pedido->id,
+                'importacao_id' => $importacaoId,
+                'itens_total' => count($itens),
+            ]);
+
             $itensConfirmados = $pedido->itens()
                 ->with('variacao.produto', 'variacao.atributos')
                 ->get();
@@ -231,16 +251,24 @@ class ImportacaoPedidoService
                     ];
                 }),
             ]);
-        });
-    }
-
-    private function normalizarData(mixed $valor): ?string
-    {
-        if (!$valor) return null;
-        try {
-            return \Carbon\Carbon::parse((string) $valor)->toDateTimeString();
-        } catch (\Throwable) {
-            return null;
+            });
+        } catch (ValidationException $e) {
+            Log::warning('Importação PDF - erro de normalização/validação', [
+                'usuario_id' => Auth::id(),
+                'erros' => $e->errors(),
+            ]);
+            throw $e;
+        } catch (\Throwable $e) {
+            Log::error('Importação PDF - erro ao confirmar', [
+                'usuario_id' => Auth::id(),
+                'mensagem' => $e->getMessage(),
+            ]);
+            throw $e;
+        } finally {
+            Log::info('Importação PDF - confirmação finalizada', [
+                'usuario_id' => Auth::id(),
+                'importacao_id' => $request->input('importacao_id'),
+            ]);
         }
     }
 

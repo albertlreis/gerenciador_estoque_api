@@ -18,6 +18,7 @@ use Exception;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Illuminate\Support\Facades\Log;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 /**
@@ -129,6 +130,13 @@ class PedidoController extends Controller
             $arquivo = $request->file('arquivo');
             $hash = hash_file('sha256', $arquivo->getRealPath());
 
+            Log::info('Importação PDF - início', [
+                'usuario_id' => auth()->id(),
+                'arquivo_nome' => $arquivo->getClientOriginalName(),
+                'arquivo_tamanho' => $arquivo->getSize(),
+                'arquivo_hash' => $hash,
+            ]);
+
             $importExistente = PedidoImportacao::query()
                 ->where('arquivo_hash', $hash)
                 ->first();
@@ -142,6 +150,11 @@ class PedidoController extends Controller
             }
 
             if ($importExistente && $importExistente->status === 'extraido' && $importExistente->dados_json) {
+                Log::info('Importa??o PDF - preview reutilizado', [
+                    'usuario_id' => auth()->id(),
+                    'importacao_id' => $importExistente->id,
+                ]);
+
                 return response()->json([
                     'sucesso' => true,
                     'mensagem' => 'PDF jÃ¡ processado. Usando dados existentes.',
@@ -198,6 +211,13 @@ class PedidoController extends Controller
                 ]
             );
 
+            Log::info('Importa??o PDF - extra??o conclu?da', [
+                'usuario_id' => auth()->id(),
+                'importacao_id' => $importacao->id,
+                'itens_total' => count($itens),
+                'numero_externo' => $pedidoFormatado['numero_externo'] ?? null,
+            ]);
+
             return response()->json([
                 "sucesso" => true,
                 "mensagem" => "PDF processado com sucesso.",
@@ -216,6 +236,12 @@ class PedidoController extends Controller
                     'erro' => $e->getMessage(),
                 ]
             );
+
+            Log::error('Importa??o PDF - erro ao processar', [
+                'usuario_id' => auth()->id(),
+                'arquivo_hash' => $hashErro,
+                'mensagem' => $e->getMessage(),
+            ]);
 
             return response()->json([
                 "sucesso" => false,

@@ -39,6 +39,49 @@ class StoreProdutoRequest extends FormRequest
         ];
     }
 
+    protected function prepareForValidation(): void
+    {
+        $data = $this->all();
+
+        foreach (['altura', 'largura', 'profundidade', 'peso'] as $field) {
+            if (array_key_exists($field, $data)) {
+                $data[$field] = $this->normalizeDecimal($data[$field]);
+            }
+        }
+
+        foreach (['id_categoria', 'id_fornecedor', 'estoque_minimo'] as $field) {
+            if (array_key_exists($field, $data)) {
+                $data[$field] = $this->normalizeNullable($data[$field]);
+            }
+        }
+
+        $this->merge($data);
+    }
+
+    private function normalizeNullable(mixed $value): mixed
+    {
+        if (is_string($value)) {
+            $trim = trim($value);
+            return $trim === '' ? null : $trim;
+        }
+
+        return $value;
+    }
+
+    private function normalizeDecimal(mixed $value): mixed
+    {
+        $value = $this->normalizeNullable($value);
+        if ($value === null || !is_string($value)) {
+            return $value;
+        }
+
+        if (str_contains($value, ',') && str_contains($value, '.')) {
+            $value = str_replace('.', '', $value);
+        }
+
+        return str_replace(',', '.', $value);
+    }
+
     /**
      * Mensagens de erro personalizadas.
      *

@@ -21,6 +21,7 @@ use Exception;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 /**
@@ -120,6 +121,82 @@ class PedidoController extends Controller
     public function completo(int $pedidoId): PedidoCompletoResource
     {
         return $this->pedidoService->obterPedidoCompleto($pedidoId);
+    }
+
+    /**
+     * Upload e vincula XML de NF-e ao pedido.
+     */
+    public function uploadXml(Request $request, Pedido $pedido): JsonResponse
+    {
+        if (!AuthHelper::hasPermissao('pedidos.editar')) {
+            return response()->json(['message' => 'Sem permissÃ£o para anexar XML.'], 403);
+        }
+
+        $maxKb = (int) config('orders.nfe_xml_max_kb', 2048);
+
+        $request->validate([
+            'arquivo' => "required|file|mimes:xml|max:{$maxKb}",
+        ]);
+
+        $arquivo = $request->file('arquivo');
+        $hash = hash_file('sha256', $arquivo->getRealPath());
+        $nomeOriginal = $arquivo->getClientOriginalName() ?: 'nfe.xml';
+
+        $disk = Storage::disk('local');
+        $dir = "pedidos/{$pedido->id}";
+        $path = "{$dir}/nfe.xml";
+
+        if ($pedido->nfe_xml_path && $pedido->nfe_xml_path !== $path && $disk->exists($pedido->nfe_xml_path)) {
+            $disk->delete($pedido->nfe_xml_path);
+        }
+
+        $disk->putFileAs($dir, $arquivo, 'nfe.xml');
+
+        $pedido->forceFill([
+            'nfe_xml_path' => $path,
+            'nfe_xml_nome' => $nomeOriginal,
+            'nfe_xml_hash' => $hash,
+            'nfe_xml_uploaded_by' => auth()->id(),
+            'nfe_xml_uploaded_at' => now(),
+        ])->save();
+
+        logAuditoria('pedido_xml', 'Upload de XML de NF-e', [
+            'acao' => 'upload_xml',
+            'pedido_id' => $pedido->id,
+            'usuario_id' => auth()->id(),
+            'arquivo_nome' => $nomeOriginal,
+            'arquivo_hash' => $hash,
+        ]);
+
+        return response()->json([
+            'message' => 'XML vinculado com sucesso.',
+            'data' => [
+                'nfe_xml_vinculado' => true,
+                'nfe_xml_nome' => $pedido->nfe_xml_nome,
+                'nfe_xml_uploaded_at' => $pedido->nfe_xml_uploaded_at,
+                'nfe_xml_uploaded_by' => $pedido->nfe_xml_uploaded_by,
+            ],
+        ]);
+    }
+
+    /**
+     * Download do XML de NF-e vinculado ao pedido.
+     */
+    public function downloadXml(Pedido $pedido): BinaryFileResponse|JsonResponse
+    {
+        if (!AuthHelper::hasPermissao('pedidos.visualizar.todos') && $pedido->id_usuario !== auth()->id()) {
+            return response()->json(['message' => 'Sem permissÃ£o para acessar este pedido.'], 403);
+        }
+
+        if (!$pedido->nfe_xml_path || !Storage::disk('local')->exists($pedido->nfe_xml_path)) {
+            return response()->json(['message' => 'XML nÃ£o encontrado para este pedido.'], 404);
+        }
+
+        $nome = $pedido->nfe_xml_nome ?: "pedido_{$pedido->id}_nfe.xml";
+
+        return Storage::disk('local')->download($pedido->nfe_xml_path, $nome, [
+            'Content-Type' => 'application/xml',
+        ]);
     }
 
     /**

@@ -67,6 +67,11 @@ class PedidoCompletoResource extends JsonResource
             'valor_total' => $this->valor_total,
             'observacoes' => $this->observacoes,
 
+            'nfe_xml_vinculado'   => !empty($this->nfe_xml_path),
+            'nfe_xml_nome'        => $this->nfe_xml_nome,
+            'nfe_xml_uploaded_at' => $this->nfe_xml_uploaded_at,
+            'nfe_xml_uploaded_by' => $this->nfe_xml_uploaded_by,
+
             'prazo_dias_uteis'     => $this->prazo_dias_uteis,
             'data_limite_entrega'  => $dataLimite?->toDateString(),
             'data_limite_entrega_calculada' => $dataLimiteCalculada,

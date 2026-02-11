@@ -11,6 +11,8 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Throwable;
 
 class ProdutoService
@@ -20,7 +22,7 @@ class ProdutoService
         $manualPath = null;
 
         if (isset($data['manual_conservacao']) && $data['manual_conservacao'] instanceof UploadedFile) {
-            $manualPath = $data['manual_conservacao']->store('manuais');
+            $manualPath = $this->armazenarManualConservacao($data['manual_conservacao']);
         }
 
         return Produto::create([
@@ -64,37 +66,19 @@ class ProdutoService
         return $produto->refresh();
     }
 
+
     public function salvarManualConservacao(Produto $produto, UploadedFile $file): string
     {
         try {
-            if ($file->getClientOriginalExtension() !== 'pdf') {
-                throw new Exception('Arquivo deve ser um PDF.');
-            }
+            $path = $this->armazenarManualConservacao($file);
+            $this->removerManualConservacao($produto);
 
-            $hash = md5(uniqid(rand(), true));
-            $filename = $hash . '.' . $file->getClientOriginalExtension();
-            $folder = public_path('uploads/manuais');
-
-            if (!is_dir($folder)) {
-                mkdir($folder, 0755, true);
-            }
-
-            if (!empty($produto->manual_conservacao)) {
-                $caminhoAntigo = public_path("uploads/manuais/$produto->manual_conservacao");
-                if (file_exists($caminhoAntigo)) {
-                    unlink($caminhoAntigo);
-                }
-            }
-
-            $file->move($folder, $filename);
-
-            $produto->manual_conservacao = $filename;
+            $produto->manual_conservacao = $path;
             $produto->save();
 
-            return $filename;
-
+            return $path;
         } catch (Throwable $e) {
-            Log::error('Erro ao salvar manual de conservação', [
+            Log::error('Erro ao salvar manual de conserva????o', [
                 'produto_id' => $produto->id,
                 'file' => $file?->getClientOriginalName(),
                 'size' => $file?->getSize(),
@@ -104,6 +88,67 @@ class ProdutoService
             throw new Exception("Erro ao salvar o manual: " . $e->getMessage());
         }
     }
+
+    private function armazenarManualConservacao(UploadedFile $file): string
+    {
+        if (strtolower($file->getClientOriginalExtension()) !== 'pdf') {
+            throw new Exception('Arquivo deve ser um PDF.');
+        }
+
+        $hash = md5(uniqid((string) random_int(1000, 9999), true));
+        $filename = $hash . '.pdf';
+        $folder = 'manuais';
+
+        Storage::disk('public')->putFileAs($folder, $file, $filename, 'public');
+
+        return $folder . '/' . $filename;
+    }
+
+    private function removerManualConservacao(Produto $produto): void
+    {
+        $manual = $produto->manual_conservacao;
+        if (!$manual) {
+            return;
+        }
+
+        $manual = trim((string) $manual);
+        if ($manual === '') {
+            return;
+        }
+
+        if (Str::startsWith($manual, ['http://', 'https://'])) {
+            return;
+        }
+
+        if (Str::startsWith($manual, ['/storage/', 'storage/'])) {
+            $relative = ltrim(Str::replaceFirst('/storage/', '', $manual), '/');
+            Storage::disk('public')->delete($relative);
+            return;
+        }
+
+        if (Str::startsWith($manual, ['/uploads/', 'uploads/'])) {
+            $relative = ltrim(Str::replaceFirst('/uploads/', '', $manual), '/');
+            $path = public_path($relative);
+            if (file_exists($path)) {
+                @unlink($path);
+            }
+            return;
+        }
+
+        if (Str::startsWith($manual, 'manuais/')) {
+            Storage::disk('public')->delete($manual);
+            return;
+        }
+
+        $legacyPath = public_path('uploads/manuais/' . $manual);
+        if (file_exists($legacyPath)) {
+            @unlink($legacyPath);
+            return;
+        }
+
+        Storage::disk('public')->delete('manuais/' . $manual);
+    }
+
 
     public function listarProdutosFiltrados(Request $request): LengthAwarePaginator
     {

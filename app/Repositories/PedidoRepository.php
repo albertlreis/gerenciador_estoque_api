@@ -26,6 +26,10 @@ class PedidoRepository
             $query->where('id_usuario', auth()->id());
         }
 
+        if (!$request->boolean('incluir_consignacoes')) {
+            $query->whereDoesntHave('consignacoes');
+        }
+
         if ($request->filled('status')) {
             $query->whereHas('statusAtual', fn($q) => $q->where('status', $request->status));
         }

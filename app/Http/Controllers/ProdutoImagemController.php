@@ -40,6 +40,11 @@ class ProdutoImagemController extends Controller
             return response()->json(['message' => 'Sem permiss??o para esta a????o.'], 403);
         }
 
+        $validated = $request->validate([
+            'image' => 'required|image|mimes:jpg,jpeg,png,webp|max:5120',
+            'principal' => 'sometimes|boolean',
+        ]);
+
         try {
             /** @var UploadedFile $file */
             $file = $request->file('image');
@@ -55,7 +60,7 @@ class ProdutoImagemController extends Controller
             $imagem = ProdutoImagem::create([
                 'id_produto' => $produto->id,
                 'url'        => $filename, // <- somente nome do arquivo
-                'principal'  => $request->boolean('principal'),
+                'principal'  => (bool) ($validated['principal'] ?? false),
             ]);
 
             $imagem->append('url_completa');
@@ -73,7 +78,7 @@ class ProdutoImagemController extends Controller
             ]);
 
             return response()->json([
-                'error' => "Erro interno ao salvar imagem. Detalhes: {$e->getMessage()}",
+                'error' => 'Erro interno ao salvar imagem.',
             ], 500);
         }
     }

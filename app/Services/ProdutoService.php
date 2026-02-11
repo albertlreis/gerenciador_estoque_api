@@ -193,6 +193,15 @@ class ProdutoService
             });
         }
 
+        if ($referencia = $request->input('referencia')) {
+            $ref = trim((string) $referencia);
+            if ($ref !== '') {
+                $query->whereHas('variacoes', function ($q) use ($ref) {
+                    $q->where('referencia', 'like', "%{$ref}%");
+                });
+            }
+        }
+
         // ========== FILTROS DE DEPÓSITO / ESTOQUE ==========
         if ($depositoId) {
             // restringe ao depósito informado (mesmo se estoque 0, para telas que só querem “existência no depósito”)

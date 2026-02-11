@@ -107,6 +107,9 @@ Route::middleware('auth:sanctum')
             Route::post('importacoes/xml', [ProdutoController::class, 'importarXML']);
             Route::post('importacoes/xml/confirmar', [ProdutoController::class, 'confirmarImportacao']);
 
+            // Exportação de catálogo outlet (selecionados)
+            Route::post('outlet/export', [ProdutoController::class, 'exportarOutlet']);
+
             // Imagens
             Route::post('{produto}/imagens/{imagem}/definir-principal', [ProdutoImagemController::class, 'definirPrincipal'])
                 ->whereNumber(['produto', 'imagem']);

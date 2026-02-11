@@ -18,6 +18,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use App\Http\Requests\{ConfirmarImportacaoRequest,
+    ExportarProdutosOutletRequest,
     FiltrarProdutosRequest,
     ImportarXmlRequest,
     StoreProdutoRequest,
@@ -63,6 +64,80 @@ class ProdutoController extends Controller
             'simplificada' => ProdutoSimplificadoResource::collection($produtos)->response(),
             default => ProdutoResource::collection($produtos)->response(),
         };
+    }
+
+    /**
+     * Exporta produtos em outlet selecionados (CSV).
+     */
+    public function exportarOutlet(ExportarProdutosOutletRequest $request)
+    {
+        $ids = $request->validated()['ids'] ?? [];
+
+        $produtos = Produto::query()
+            ->whereIn('id', $ids)
+            ->whereHas('variacoes.outlet')
+            ->with([
+                'categoria',
+                'variacoes.outlets',
+            ])
+            ->get();
+
+        if ($produtos->isEmpty()) {
+            return response()->json([
+                'message' => 'Nenhum produto outlet encontrado para exportacao.',
+            ], 422);
+        }
+
+        $filename = 'catalogo_outlet.csv';
+
+        return response()->streamDownload(function () use ($produtos) {
+            $out = fopen('php://output', 'w');
+
+            // UTF-8 BOM para melhor compatibilidade com Excel
+            fwrite($out, "\xEF\xBB\xBF");
+
+            fputcsv($out, [
+                'ID',
+                'Nome',
+                'Categoria',
+                'Referencias',
+                'Preco_Minimo',
+                'Outlet_Restante',
+            ], ';');
+
+            foreach ($produtos as $produto) {
+                $variacoes = $produto->variacoes ?? collect();
+                $referencias = $variacoes
+                    ->pluck('referencia')
+                    ->filter()
+                    ->unique()
+                    ->implode(', ');
+
+                $precoMin = $variacoes
+                    ->pluck('preco')
+                    ->filter(fn ($v) => $v !== null)
+                    ->min();
+
+                $outletRestante = $variacoes->sum(function ($v) {
+                    return $v->relationLoaded('outlets')
+                        ? (int) $v->outlets->sum('quantidade_restante')
+                        : 0;
+                });
+
+                fputcsv($out, [
+                    $produto->id,
+                    $produto->nome,
+                    $produto->categoria?->nome ?? '',
+                    $referencias,
+                    $precoMin !== null ? number_format((float) $precoMin, 2, ',', '') : '',
+                    $outletRestante,
+                ], ';');
+            }
+
+            fclose($out);
+        }, $filename, [
+            'Content-Type' => 'text/csv; charset=UTF-8',
+        ]);
     }
 
     /**

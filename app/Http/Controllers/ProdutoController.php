@@ -97,7 +97,7 @@ class ProdutoController extends Controller
             Pdf::setOptions(['isRemoteEnabled' => true]);
             $baseFsDir = public_path('storage' . DIRECTORY_SEPARATOR . ProdutoImagem::FOLDER);
 
-            $pdf = Pdf::loadView('exports.outlet', [
+            $pdf = Pdf::loadView('exports.outlet-catalogo', [
                 'produtos' => $produtos,
                 'baseFsDir' => $baseFsDir,
             ])->setPaper('a4', 'landscape');

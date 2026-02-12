@@ -10,6 +10,7 @@ use App\Http\Resources\ProdutoMiniResource;
 use App\Http\Resources\ProdutoSimplificadoResource;
 use App\Services\LogService;
 use App\Services\ProdutoSugestoesOutletService;
+use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -67,18 +68,20 @@ class ProdutoController extends Controller
     }
 
     /**
-     * Exporta produtos em outlet selecionados (CSV).
+     * Exporta produtos em outlet selecionados (CSV ou PDF).
      */
     public function exportarOutlet(ExportarProdutosOutletRequest $request)
     {
         $ids = $request->validated()['ids'] ?? [];
+        $format = strtolower((string) $request->input('format', 'csv'));
+        $format = in_array($format, ['csv', 'pdf'], true) ? $format : 'csv';
 
         $produtos = Produto::query()
             ->whereIn('id', $ids)
             ->whereHas('variacoes.outlet')
             ->with([
                 'categoria',
-                'variacoes.outlets',
+                'variacoes.outlets.formasPagamento',
             ])
             ->get();
 
@@ -86,6 +89,18 @@ class ProdutoController extends Controller
             return response()->json([
                 'message' => 'Nenhum produto outlet encontrado para exportacao.',
             ], 422);
+        }
+
+        if ($format === 'pdf') {
+            Pdf::setOptions(['isRemoteEnabled' => true]);
+
+            $pdf = Pdf::loadView('exports.outlet', [
+                'produtos' => $produtos,
+                'geradoEm' => now('America/Belem')->format('d/m/Y H:i'),
+            ])->setPaper('a4', 'landscape');
+
+            $dateRef = now('America/Belem')->format('Y-m-d');
+            return $pdf->download("catalogo_outlet_{$dateRef}.pdf");
         }
 
         $filename = 'catalogo_outlet.csv';

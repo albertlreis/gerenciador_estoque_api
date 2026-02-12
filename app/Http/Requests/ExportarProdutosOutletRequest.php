@@ -16,6 +16,7 @@ class ExportarProdutosOutletRequest extends FormRequest
         return [
             'ids' => ['required', 'array', 'min:1', 'max:2000'],
             'ids.*' => ['integer', 'distinct', 'exists:produtos,id'],
+            'format' => ['nullable', 'in:csv,pdf'],
         ];
     }
 
@@ -27,6 +28,7 @@ class ExportarProdutosOutletRequest extends FormRequest
             'ids.min' => 'Informe ao menos um produto para exportacao.',
             'ids.max' => 'Quantidade de produtos excede o limite permitido.',
             'ids.*.exists' => 'Algum produto informado nao existe.',
+            'format.in' => 'Formato invalido. Use csv ou pdf.',
         ];
     }
 }

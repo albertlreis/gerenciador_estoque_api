@@ -16,6 +16,8 @@ final class ProdutoUpsertService
     public function upsertProdutoVariacao(array $payload): array
     {
         return DB::transaction(function () use ($payload) {
+            $produtoCriado = false;
+            $variacaoCriada = false;
 
             /**
              * Regras:
@@ -44,9 +46,11 @@ final class ProdutoUpsertService
             if ($variacaoExistente) {
                 $produto = $variacaoExistente->produto;
             } else {
+                $produtoCriado = true;
                 $produto = Produto::create([
                     'nome' => $payload['nome_limpo'] ?? $payload['nome_completo'] ?? 'Produto',
                     'id_categoria' => $payload['categoria_id'] ?? null,
+                    'id_fornecedor' => $payload['fornecedor_id'] ?? null,
                     'descricao' => null,
                     'altura' => $payload['a_cm'] ?? null,
                     'largura' => $payload['w_cm'] ?? null,
@@ -69,6 +73,9 @@ final class ProdutoUpsertService
 
             if (!empty($payload['categoria_id']) && empty($produto->id_categoria)) {
                 $produto->id_categoria = $payload['categoria_id'];
+            }
+            if (!empty($payload['fornecedor_id']) && empty($produto->id_fornecedor)) {
+                $produto->id_fornecedor = $payload['fornecedor_id'];
             }
 
             /**
@@ -151,6 +158,7 @@ final class ProdutoUpsertService
             if ($variacaoEncontrada) {
                 $variacaoEncontrada->update([
                     'preco' => $payload['valor'] ?? $variacaoEncontrada->preco,
+                    'custo' => $payload['custo'] ?? $variacaoEncontrada->custo,
                 ]);
 
                 $this->syncAtributos($variacaoEncontrada->id, $normalizedAttrs);
@@ -158,18 +166,21 @@ final class ProdutoUpsertService
                 return [
                     'produto' => $produto,
                     'variacao' => $variacaoEncontrada,
+                    'produto_criado' => $produtoCriado,
+                    'variacao_criada' => false,
                 ];
             }
 
             // --------------------------
             // NÃO ACHOU → CRIA NOVA VARIAÇÃO
             // --------------------------
+            $variacaoCriada = true;
             $variacao = ProdutoVariacao::create([
                 'produto_id' => $produto->id,
                 'referencia' => $referencia,
                 'preco' => $payload['valor'] ?? null,
+                'custo' => $payload['custo'] ?? null,
                 'nome' => null,
-                'custo' => null,
                 'codigo_barras' => null,
             ]);
 
@@ -181,7 +192,12 @@ final class ProdutoUpsertService
                 ]);
             }
 
-            return compact('produto', 'variacao');
+            return [
+                'produto' => $produto,
+                'variacao' => $variacao,
+                'produto_criado' => $produtoCriado,
+                'variacao_criada' => $variacaoCriada,
+            ];
         });
     }
 
@@ -191,8 +207,9 @@ final class ProdutoUpsertService
         $nome = (string) Str::of($nome)->squish()->lower()->ascii();
 
         $cat = (string)($payload['categoria_id'] ?? '0');
+        $fornecedor = (string)($payload['fornecedor_id'] ?? '0');
 
-        $base = $cat . '|' . $nome;
+        $base = $cat . '|' . $fornecedor . '|' . $nome;
         if ($base === '0|') {
             $base = json_encode($payload, JSON_UNESCAPED_UNICODE);
         }

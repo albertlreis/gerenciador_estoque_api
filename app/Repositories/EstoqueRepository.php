@@ -89,8 +89,10 @@ class EstoqueRepository
 
         if ($filtros->produto) {
             $term = trim($filtros->produto);
+            $termLikeAny = '%' . $this->escapeLike($term) . '%';
+            $termLikePrefix = $this->escapeLike($term) . '%';
 
-            $query->where(function (Builder $q) use ($term) {
+            $query->where(function (Builder $q) use ($term, $termLikeAny, $termLikePrefix) {
                 // 1) FULLTEXT (quando termo for "minimamente" útil)
                 // MySQL FULLTEXT ignora termos muito curtos dependendo da config, então evitamos forçar.
                 if (mb_strlen($term) >= 3) {
@@ -109,20 +111,22 @@ class EstoqueRepository
 
                     // 2) Reforço para referência "prefixo" quando parece referência
                     if ($this->looksLikeReference($term)) {
-                        $q->orWhere('produto_variacoes.referencia', 'like', $term . '%');
+                        $q->orWhereRaw("produto_variacoes.referencia LIKE ? ESCAPE '\\\\'", [$termLikePrefix]);
                     }
 
                     // 3) Fallback LIKE (garante "qualquer pedaço" mesmo se FT falhar)
-                    $q->orWhereHas('produto', fn ($sub) => $sub->where('nome', 'like', "%{$term}%"))
-                        ->orWhere('produto_variacoes.referencia', 'like', "%{$term}%");
+                    $q->orWhereHas('produto', fn ($sub) =>
+                    $sub->whereRaw("nome LIKE ? ESCAPE '\\\\'", [$termLikeAny]))
+                        ->orWhereRaw("produto_variacoes.referencia LIKE ? ESCAPE '\\\\'", [$termLikeAny]);
                 } else {
                     // Termo muito curto: vai só de LIKE + prefixo (se for referência)
                     if ($this->looksLikeReference($term)) {
-                        $q->where('produto_variacoes.referencia', 'like', $term . '%');
+                        $q->whereRaw("produto_variacoes.referencia LIKE ? ESCAPE '\\\\'", [$termLikePrefix]);
                     }
 
-                    $q->orWhereHas('produto', fn ($sub) => $sub->where('nome', 'like', "%{$term}%"))
-                        ->orWhere('produto_variacoes.referencia', 'like', "%{$term}%");
+                    $q->orWhereHas('produto', fn ($sub) =>
+                    $sub->whereRaw("nome LIKE ? ESCAPE '\\\\'", [$termLikeAny]))
+                        ->orWhereRaw("produto_variacoes.referencia LIKE ? ESCAPE '\\\\'", [$termLikeAny]);
                 }
             });
         }
@@ -223,6 +227,11 @@ class EstoqueRepository
 
         // tem pelo menos um número ou tem hífen/barra comum em referência
         return (bool) preg_match('/\d|[-\/_]/', $t);
+    }
+
+    private function escapeLike(string $value): string
+    {
+        return str_replace(['\\', '%', '_'], ['\\\\', '\%', '\_'], $value);
     }
 
     /**

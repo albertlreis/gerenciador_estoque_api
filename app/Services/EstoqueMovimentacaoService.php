@@ -53,19 +53,20 @@ class EstoqueMovimentacaoService
 
         if (!empty($filtros->produto)) {
             $produto = trim((string) $filtros->produto);
+            $produtoLike = '%' . $this->escapeLike($produto) . '%';
 
             // Se vier número, aceita como possível ID de produto/variação
             if (ctype_digit($produto)) {
                 $idPossivel = (int) $produto;
-                $query->where(function (Builder $q) use ($idPossivel, $produto) {
+                $query->where(function (Builder $q) use ($idPossivel, $produtoLike) {
                     $q->whereHas('variacao.produto', fn (Builder $sub) => $sub->where('produtos.id', $idPossivel))
                         ->orWhere('id_variacao', $idPossivel)
-                        ->orWhereHas('variacao', fn (Builder $sub) => $sub->where('referencia', 'like', "%{$produto}%"));
+                        ->orWhereHas('variacao', fn (Builder $sub) => $sub->whereRaw("referencia LIKE ? ESCAPE '\\\\'", [$produtoLike]));
                 });
             } else {
-                $query->where(function (Builder $q) use ($produto) {
-                    $q->whereHas('variacao.produto', fn (Builder $sub) => $sub->where('nome', 'like', "%{$produto}%"))
-                        ->orWhereHas('variacao', fn (Builder $sub) => $sub->where('referencia', 'like', "%{$produto}%"));
+                $query->where(function (Builder $q) use ($produtoLike) {
+                    $q->whereHas('variacao.produto', fn (Builder $sub) => $sub->whereRaw("nome LIKE ? ESCAPE '\\\\'", [$produtoLike]))
+                        ->orWhereHas('variacao', fn (Builder $sub) => $sub->whereRaw("referencia LIKE ? ESCAPE '\\\\'", [$produtoLike]));
                 });
             }
         }
@@ -388,6 +389,11 @@ class EstoqueMovimentacaoService
         }
 
         return Carbon::parse((string) $rawDate);
+    }
+
+    private function escapeLike(string $value): string
+    {
+        return str_replace(['\\', '%', '_'], ['\\\\', '\%', '\_'], $value);
     }
 
     private function isMovimentacaoVenda(string $tipo, array $dadosMovimentacao): bool

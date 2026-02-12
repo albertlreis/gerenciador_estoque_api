@@ -15,9 +15,10 @@ class FiltrarProdutosRequest extends FormRequest
     {
         // Alias de 'q' → 'nome'
         $referencia = is_string($this->referencia) ? trim($this->referencia) : $this->referencia;
-        $q = $this->q ?? $this->nome;
+        $q = $this->q ?? $this->nome ?? $this->search;
 
         $this->merge([
+            'q'                => $q,
             'nome'             => $q,
             'referencia'       => $referencia,
             'ativo'            => $this->toBoolean($this->ativo),
@@ -46,6 +47,7 @@ class FiltrarProdutosRequest extends FormRequest
     {
         return [
             'q'                 => ['nullable', 'string', 'max:255'],
+            'search'            => ['nullable', 'string', 'max:255'],
             'nome'              => ['nullable', 'string', 'max:255'],
             'referencia'        => ['nullable', 'string', 'max:255'],
             'id_categoria'      => ['nullable', 'array'],

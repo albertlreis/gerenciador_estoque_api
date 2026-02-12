@@ -21,6 +21,29 @@ class AuthHelper
     }
 
     /**
+     * Regra central para exibir preco de custo em pedidos.
+     * Admin/Estoque devem ver custo; vendedor nao deve.
+     * Mantem compatibilidade com permissoes legadas.
+     */
+    public static function podeVerCustoPedido(): bool
+    {
+        $slugs = [
+            'pedidos.ver_custo',
+            'produtos.gerenciar',
+            'estoque.movimentacao',
+            'estoque.movimentar',
+        ];
+
+        foreach ($slugs as $slug) {
+            if (self::hasPermissao($slug)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * Retorna o ID do usuário logado.
      */
     public static function getUsuarioId(): ?int

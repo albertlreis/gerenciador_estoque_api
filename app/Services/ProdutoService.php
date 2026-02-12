@@ -153,6 +153,15 @@ class ProdutoService
                         $e->with(['deposito', 'localizacao']);
                     }]);
                 }
+
+                if ($status === 'com_estoque' || $comEstoque) {
+                    $q->whereHas('estoques', function ($e) use ($depositoId) {
+                        if ($depositoId) {
+                            $e->where('id_deposito', $depositoId);
+                        }
+                        $e->where('quantidade', '>', 0);
+                    });
+                }
             },
         ];
 

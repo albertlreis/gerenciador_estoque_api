@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Http\Requests\StorePedidoRequest;
+use App\Http\Requests\UpdatePedidoRequest;
 use App\Http\Resources\PedidoCompletoResource;
 use App\Models\Deposito;
 use App\Models\Pedido;
@@ -10,6 +11,7 @@ use App\Models\PedidoImportacao;
 use App\Models\ProdutoImagem;
 use App\Services\ExtratorPedidoPythonService;
 use App\Services\PedidoService;
+use App\Services\PedidoUpdateService;
 use App\Services\ImportacaoPedidoService;
 use App\Services\EstatisticaPedidoService;
 use App\Services\PedidoExportService;
@@ -27,6 +29,7 @@ use Symfony\Component\HttpFoundation\BinaryFileResponse;
 class PedidoController extends Controller
 {
     protected PedidoService $pedidoService;
+    protected PedidoUpdateService $pedidoUpdateService;
     protected ImportacaoPedidoService $importacaoService;
     protected EstatisticaPedidoService $estatisticaService;
     protected PedidoExportService $exportService;
@@ -40,13 +43,15 @@ class PedidoController extends Controller
         ImportacaoPedidoService $importacaoService,
         EstatisticaPedidoService $estatisticaService,
         PedidoExportService $exportService,
-        ExtratorPedidoPythonService $service
+        ExtratorPedidoPythonService $service,
+        PedidoUpdateService $pedidoUpdateService
     ) {
         $this->pedidoService = $pedidoService;
         $this->importacaoService = $importacaoService;
         $this->estatisticaService = $estatisticaService;
         $this->exportService = $exportService;
         $this->service = $service;
+        $this->pedidoUpdateService = $pedidoUpdateService;
     }
 
     /**
@@ -81,6 +86,20 @@ class PedidoController extends Controller
     public function completo(int $pedidoId): PedidoCompletoResource
     {
         return $this->pedidoService->obterPedidoCompleto($pedidoId);
+    }
+
+    /**
+     * Atualiza um pedido e seus itens.
+     *
+     * @param UpdatePedidoRequest $request
+     * @param Pedido $pedido
+     * @return JsonResponse
+     */
+    public function update(UpdatePedidoRequest $request, Pedido $pedido): JsonResponse
+    {
+        $pedidoAtualizado = $this->pedidoUpdateService->atualizar($pedido, $request->validated());
+
+        return response()->json(new PedidoCompletoResource($pedidoAtualizado));
     }
 
     /**

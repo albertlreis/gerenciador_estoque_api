@@ -13,6 +13,7 @@ use App\Models\PedidoImportacao;
 use App\Enums\PedidoStatus;
 use App\Helpers\StringHelper;
 use App\Support\Dates\DateNormalizer;
+use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -53,6 +54,18 @@ class ImportacaoPedidoService
             'pedido.data_pedido'   => 'nullable|string',
             'pedido.data_inclusao' => 'nullable|string',
             'pedido.data_entrega'  => 'nullable|string',
+            'pedido.entregue'      => 'nullable|boolean',
+            'pedido.previsao_tipo' => 'nullable|in:DATA,DIAS_UTEIS,DIAS_CORRIDOS',
+            'pedido.data_prevista' => 'nullable|string',
+            'pedido.dias_uteis_previstos' => 'nullable|integer|min:0|max:3650',
+            'pedido.dias_corridos_previstos' => 'nullable|integer|min:0|max:3650',
+
+            'entregue'             => 'nullable|boolean',
+            'data_entrega'         => 'nullable|string',
+            'previsao_tipo'        => 'nullable|in:DATA,DIAS_UTEIS,DIAS_CORRIDOS',
+            'data_prevista'        => 'nullable|string',
+            'dias_uteis_previstos' => 'nullable|integer|min:0|max:3650',
+            'dias_corridos_previstos' => 'nullable|integer|min:0|max:3650',
 
             'itens'                => 'required|array|min:1',
             'itens.*.nome'         => 'required|string',
@@ -133,41 +146,154 @@ class ImportacaoPedidoService
             }
 
             $valorTotal = $dadosPedido['total']
-                ?? collect($itens)->sum(fn($i) => (float)$i['quantidade'] * (float)$i['valor']);
+                ?? collect($itens)->sum(fn($i) => (float) ($i['quantidade'] ?? 0) * (float) ($i['valor'] ?? 0));
 
             $numeroExterno = isset($dadosPedido['numero_externo'])
                 ? trim((string) $dadosPedido['numero_externo'])
                 : null;
 
-            $dataPedido = DateNormalizer::normalizeDate($dadosPedido['data_pedido'] ?? null, 'pedido.data_pedido');
-            DateNormalizer::normalizeDate($dadosPedido['data_inclusao'] ?? null, 'pedido.data_inclusao');
-            DateNormalizer::normalizeDate($dadosPedido['data_entrega'] ?? null, 'pedido.data_entrega');
+            $dataPedidoNormalizada = DateNormalizer::normalizeDate($dadosPedido['data_pedido'] ?? null, 'pedido.data_pedido');
+            $dataInclusao = DateNormalizer::normalizeDate($dadosPedido['data_inclusao'] ?? null, 'pedido.data_inclusao');
+            $dataBasePedido = $dataPedidoNormalizada ?? $dataInclusao ?? CarbonImmutable::now(config('app.timezone'));
 
-            $pedido = Pedido::create([
+            $previsaoTipo = $this->normalizePrevisaoTipo(
+                $request->input('previsao_tipo') ?? ($dadosPedido['previsao_tipo'] ?? null)
+            );
+            $diasUteisPrevistos = $this->toNullableInt(
+                $request->input('dias_uteis_previstos') ?? ($dadosPedido['dias_uteis_previstos'] ?? null)
+            );
+            $diasCorridosPrevistos = $this->toNullableInt(
+                $request->input('dias_corridos_previstos') ?? ($dadosPedido['dias_corridos_previstos'] ?? null)
+            );
+
+            $dataPrevista = DateNormalizer::normalizeDate(
+                $request->input('data_prevista') ?? ($dadosPedido['data_prevista'] ?? null),
+                'data_prevista'
+            );
+
+            $entregue = $this->toBoolean($request->input('entregue', $dadosPedido['entregue'] ?? false));
+            $dataEntregaTopLevel = $request->input('data_entrega');
+            $dataEntregaPedidoLegado = $dadosPedido['data_entrega'] ?? null;
+            $dataEntrega = DateNormalizer::normalizeDate(
+                $dataEntregaTopLevel ?? $dataEntregaPedidoLegado,
+                'data_entrega'
+            );
+
+            if (!$previsaoTipo && !$dataPrevista && !$entregue && $this->hasValue($dataEntregaPedidoLegado)) {
+                $previsaoTipo = 'DATA';
+                $dataPrevista = DateNormalizer::normalizeDate($dataEntregaPedidoLegado, 'pedido.data_entrega');
+                $dataEntrega = null;
+            }
+
+            if ($entregue && !$dataEntrega) {
+                throw ValidationException::withMessages([
+                    'data_entrega' => ['Informe a data de entrega quando o pedido já foi entregue.'],
+                ]);
+            }
+
+            if ($previsaoTipo === 'DATA' && !$dataPrevista) {
+                throw ValidationException::withMessages([
+                    'data_prevista' => ['Informe a data prevista quando o tipo de previsão for DATA.'],
+                ]);
+            }
+
+            if ($previsaoTipo === 'DIAS_UTEIS' && $diasUteisPrevistos === null) {
+                throw ValidationException::withMessages([
+                    'dias_uteis_previstos' => ['Informe os dias úteis previstos.'],
+                ]);
+            }
+
+            if ($previsaoTipo === 'DIAS_CORRIDOS' && $diasCorridosPrevistos === null) {
+                throw ValidationException::withMessages([
+                    'dias_corridos_previstos' => ['Informe os dias corridos previstos.'],
+                ]);
+            }
+
+            if ($dataEntrega && $dataEntrega->startOfDay()->lt($dataBasePedido->startOfDay())) {
+                throw ValidationException::withMessages([
+                    'data_entrega' => ['A data de entrega não pode ser anterior à data do pedido.'],
+                ]);
+            }
+
+            $entregaPrevista = $this->resolverEntregaPrevista(
+                $previsaoTipo,
+                $dataBasePedido,
+                $dataPrevista,
+                $diasUteisPrevistos,
+                $diasCorridosPrevistos
+            );
+
+            $pedidoPayload = [
                 'tipo'          => $tipo,
                 'id_cliente'    => $clienteId,
                 'id_usuario'    => $usuario->id,
                 'id_parceiro'   => $dadosPedido['id_parceiro'] ?? null,
                 'numero_externo'=> $numeroExterno ?: null,
-                'data_pedido'   => $dataPedido?->toDateTimeString() ?? now(),
+                'data_pedido'   => $dataBasePedido->toDateTimeString(),
                 'valor_total'   => $valorTotal,
                 'observacoes'   => $dadosPedido['observacoes'] ?? null,
-            ]);
+            ];
+
+            if ($entregaPrevista) {
+                $pedidoPayload['data_limite_entrega'] = $entregaPrevista->toDateString();
+            }
+
+            if ($previsaoTipo === 'DIAS_UTEIS' && $diasUteisPrevistos !== null) {
+                $pedidoPayload['prazo_dias_uteis'] = $diasUteisPrevistos;
+            }
+
+            $pedido = Pedido::create($pedidoPayload);
 
             PedidoStatusHistorico::create([
                 'pedido_id'   => $pedido->id,
                 'status'      => PedidoStatus::PEDIDO_CRIADO,
-                'data_status' => now(),
+                'data_status' => $dataBasePedido->toDateTimeString(),
                 'usuario_id'  => $usuario->id,
             ]);
 
-            foreach ($itens as $item) {
+            if ($entregue) {
+                PedidoStatusHistorico::create([
+                    'pedido_id'   => $pedido->id,
+                    'status'      => PedidoStatus::ENTREGA_CLIENTE,
+                    'data_status' => $dataEntrega?->toDateTimeString(),
+                    'usuario_id'  => $usuario->id,
+                    'observacoes' => 'Status aplicado na confirmação da importação PDF.',
+                ]);
+            }
+
+            foreach ($itens as $index => $item) {
                 $item['nome'] = trim((string) ($item['nome'] ?? ''));
                 $item['ref'] = isset($item['ref']) ? trim((string) $item['ref']) : null;
                 $item['id_deposito'] = $item['id_deposito'] ?? null;
+
                 $quantidade = $this->toDecimal($item['quantidade'] ?? 0);
-                $valorUnit = $this->toDecimal($item['valor'] ?? ($item['preco_unitario'] ?? 0));
-                $custoUnit = $this->toDecimal($item['custo_unitario'] ?? ($item['preco_unitario'] ?? ($item['preco'] ?? $item['valor'] ?? 0)));
+                $precoUnitarioFonte = $item['preco_unitario'] ?? ($item['preco'] ?? null);
+
+                if (!$this->hasValue($item['custo_unitario'] ?? null) && !$this->hasValue($precoUnitarioFonte)) {
+                    throw ValidationException::withMessages([
+                        "itens.$index.preco_unitario" => [
+                            'Preço unitário obrigatório para definir o custo do item importado.',
+                        ],
+                    ]);
+                }
+
+                $valorUnit = $this->toDecimal($item['valor'] ?? $precoUnitarioFonte);
+                $custoUnit = $this->toDecimal(
+                    $this->hasValue($item['custo_unitario'] ?? null)
+                        ? $item['custo_unitario']
+                        : $precoUnitarioFonte
+                );
+
+                if ($index < 3) {
+                    Log::info('Importação PDF - item normalizado para persistência', [
+                        'index' => $index,
+                        'referencia' => $item['ref'] ?? null,
+                        'quantidade' => $quantidade,
+                        'preco_unitario' => $valorUnit,
+                        'custo_unitario' => $custoUnit,
+                        'valor_total_linha' => $this->toDecimal($item['valor_total_linha'] ?? ($item['valor_total'] ?? 0)),
+                    ]);
+                }
 
                 $variacao = null;
 
@@ -309,6 +435,72 @@ class ImportacaoPedidoService
         }
 
         return is_numeric($s) ? (float)$s : 0.0;
+    }
+
+    private function toBoolean(mixed $value): bool
+    {
+        if (is_bool($value)) {
+            return $value;
+        }
+
+        if ($value === null || $value === '') {
+            return false;
+        }
+
+        return filter_var($value, FILTER_VALIDATE_BOOLEAN);
+    }
+
+    private function normalizePrevisaoTipo(mixed $value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        $normalized = strtoupper(trim((string) $value));
+        if ($normalized === '') {
+            return null;
+        }
+
+        return in_array($normalized, ['DATA', 'DIAS_UTEIS', 'DIAS_CORRIDOS'], true)
+            ? $normalized
+            : null;
+    }
+
+    private function toNullableInt(mixed $value): ?int
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        if (is_numeric($value)) {
+            return (int) $value;
+        }
+
+        return null;
+    }
+
+    private function resolverEntregaPrevista(
+        ?string $previsaoTipo,
+        CarbonImmutable $dataBasePedido,
+        ?CarbonImmutable $dataPrevista,
+        ?int $diasUteisPrevistos,
+        ?int $diasCorridosPrevistos
+    ): ?CarbonImmutable {
+        if ($previsaoTipo === null) {
+            return null;
+        }
+
+        return match ($previsaoTipo) {
+            'DATA' => $dataPrevista?->startOfDay(),
+            'DIAS_UTEIS' => $dataBasePedido->startOfDay()->addWeekdays(max(0, (int) ($diasUteisPrevistos ?? 0))),
+            'DIAS_CORRIDOS' => $dataBasePedido->startOfDay()->addDays(max(0, (int) ($diasCorridosPrevistos ?? 0))),
+            default => null,
+        };
+    }
+
+    private function hasValue(mixed $value): bool
+    {
+        return !($value === null || (is_string($value) && trim($value) === ''));
     }
 
     /**

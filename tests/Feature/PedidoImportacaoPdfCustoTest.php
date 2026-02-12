@@ -58,7 +58,7 @@ class PedidoImportacaoPdfCustoTest extends TestCase
         $this->assertSame('120.00', number_format((float) $item->preco_unitario, 2, '.', ''));
     }
 
-    public function test_confirma_importacao_com_fallback_legado_de_custo_unitario(): void
+    public function test_confirma_importacao_rejeita_item_sem_preco_unitario_e_sem_custo_unitario(): void
     {
         $usuario = Usuario::create([
             'nome' => 'Usuario Legado',
@@ -94,10 +94,9 @@ class PedidoImportacaoPdfCustoTest extends TestCase
         $response = $this->actingAs($usuario, 'sanctum')
             ->postJson('/api/v1/pedidos/import/pdf/confirm', $payload);
 
-        $response->assertStatus(200);
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['itens.0.preco_unitario']);
 
-        $item = PedidoItem::query()->first();
-        $this->assertNotNull($item);
-        $this->assertSame('180.00', number_format((float) $item->custo_unitario, 2, '.', ''));
+        $this->assertDatabaseCount('pedido_itens', 0);
     }
 }

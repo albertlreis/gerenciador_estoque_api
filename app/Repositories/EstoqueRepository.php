@@ -6,6 +6,7 @@ use App\DTOs\FiltroEstoqueDTO;
 use App\Models\ProdutoVariacao;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Repositório de consultas do estoque.
@@ -25,7 +26,48 @@ class EstoqueRepository
      */
     public function queryBase(FiltroEstoqueDTO $filtros): Builder
     {
+        $subqueryDataEntrada = DB::table('estoque as e')
+            ->select('e.data_entrada_estoque_atual')
+            ->whereColumn('e.id_variacao', 'produto_variacoes.id');
+
+        $subqueryUltimaVenda = DB::table('estoque as e')
+            ->select('e.ultima_venda_em')
+            ->whereColumn('e.id_variacao', 'produto_variacoes.id');
+
+        $subqueryDiasSemVenda = DB::table('estoque as e')
+            ->selectRaw('DATEDIFF(CURDATE(), DATE(e.ultima_venda_em))')
+            ->whereColumn('e.id_variacao', 'produto_variacoes.id')
+            ->whereNotNull('e.ultima_venda_em');
+
+        if ($filtros->deposito) {
+            $subqueryDataEntrada->where('e.id_deposito', $filtros->deposito);
+            $subqueryUltimaVenda->where('e.id_deposito', $filtros->deposito);
+            $subqueryDiasSemVenda->where('e.id_deposito', $filtros->deposito);
+        } else {
+            $subqueryDataEntrada->where('e.quantidade', '>', 0);
+            $subqueryUltimaVenda->where('e.quantidade', '>', 0);
+            $subqueryDiasSemVenda->where('e.quantidade', '>', 0);
+        }
+
+        $subqueryDataEntrada
+            ->orderByDesc('e.quantidade')
+            ->orderBy('e.id_deposito')
+            ->limit(1);
+
+        $subqueryUltimaVenda
+            ->orderByDesc('e.quantidade')
+            ->orderBy('e.id_deposito')
+            ->limit(1);
+
+        $subqueryDiasSemVenda
+            ->orderByDesc('e.ultima_venda_em')
+            ->limit(1);
+
         $query = ProdutoVariacao::query()
+            ->select('produto_variacoes.*')
+            ->selectSub($subqueryDataEntrada, 'data_entrada_estoque_atual')
+            ->selectSub($subqueryUltimaVenda, 'ultima_venda_em')
+            ->selectSub($subqueryDiasSemVenda, 'dias_sem_venda')
             ->whereHas('produto', fn ($q) => $q->where('ativo', 1))
             ->with(['produto.categoria', 'produto.fornecedor', 'atributos'])
             ->withSum(

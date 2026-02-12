@@ -11,6 +11,7 @@ use App\Models\EstoqueReserva;
 use App\Models\EstoqueTransferencia;
 use App\Models\EstoqueTransferenciaItem;
 use Carbon\Carbon;
+use Carbon\CarbonInterface;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Arr;
@@ -226,14 +227,16 @@ class EstoqueMovimentacaoService
         }
 
         return DB::transaction(function () use ($dados, $variacaoId, $origem, $destino, $tipo, $qtd) {
+            $dataMovimentacao = $this->resolveDataMovimentacao($dados['data_movimentacao'] ?? null);
+
             // 1) Ajuste de saldos na tabela `estoque`
             if ($origem) {
                 // debita origem (valida disponível >= qtd)
-                $this->debitarEstoque($variacaoId, (int)$origem, $qtd);
+                $this->debitarEstoque($variacaoId, (int) $origem, $qtd, $dataMovimentacao, $tipo, $dados);
             }
             if ($destino) {
                 // credita destino (cria linha se não existir)
-                $this->creditarEstoque($variacaoId, (int)$destino, $qtd);
+                $this->creditarEstoque($variacaoId, (int) $destino, $qtd, $dataMovimentacao, $tipo);
             }
 
             // 2) Persiste a movimentação (se algo falhar acima, tudo é revertido)
@@ -246,7 +249,7 @@ class EstoqueMovimentacaoService
                 'quantidade'          => $qtd,
                 'id_usuario'          => $dados['id_usuario'] ?? null,
                 'observacao'          => $dados['observacao'] ?? null,
-                'data_movimentacao'   => $dados['data_movimentacao'] ?? Carbon::now(),
+                'data_movimentacao'   => $dataMovimentacao,
 
                 // ✅ extras (não obrigatórios)
                 'lote_id'        => $dados['lote_id'] ?? null,
@@ -264,7 +267,14 @@ class EstoqueMovimentacaoService
     /**
      * Debita (–) saldo do depósito. Valida disponível (quantidade - reservas).
      */
-    private function debitarEstoque(int $variacaoId, int $depositoId, int $qtd): void
+    private function debitarEstoque(
+        int $variacaoId,
+        int $depositoId,
+        int $qtd,
+        Carbon $dataMovimentacao,
+        string $tipo,
+        array $dadosMovimentacao
+    ): void
     {
         // trava a linha de estoque (se existir) para evitar corrida
         $row = DB::table('estoque') // <- ajuste o nome da tabela se necessário
@@ -290,19 +300,35 @@ class EstoqueMovimentacaoService
 
         $novaQtd = $quantidadeAtual - $qtd;
 
+        $updatePayload = [
+            'quantidade' => $novaQtd,
+            'updated_at' => Carbon::now(),
+        ];
+
+        if ($novaQtd === 0) {
+            $updatePayload['data_entrada_estoque_atual'] = null;
+        }
+
+        if ($this->isMovimentacaoVenda($tipo, $dadosMovimentacao)) {
+            $updatePayload['ultima_venda_em'] = $dataMovimentacao;
+        }
+
         DB::table('estoque')
             ->where('id_variacao', $variacaoId)
             ->where('id_deposito', $depositoId)
-            ->update([
-                'quantidade' => $novaQtd,
-                'updated_at' => Carbon::now(),
-            ]);
+            ->update($updatePayload);
     }
 
     /**
      * Credita (+) saldo no depósito. Faz upsert se a linha não existir.
      */
-    private function creditarEstoque(int $variacaoId, int $depositoId, int $qtd): void
+    private function creditarEstoque(
+        int $variacaoId,
+        int $depositoId,
+        int $qtd,
+        Carbon $dataMovimentacao,
+        string $tipo
+    ): void
     {
         // tenta travar a linha se existir
         $row = DB::table('estoque') // <- ajuste o nome da tabela se necessário
@@ -314,25 +340,86 @@ class EstoqueMovimentacaoService
         if ($row) {
             $novaQtd = (int) $row->quantidade + $qtd;
 
+            $updatePayload = [
+                'quantidade' => $novaQtd,
+                'updated_at' => Carbon::now(),
+            ];
+
+            if ($this->deveDefinirDataEntradaAtual($tipo, (int) $row->quantidade, $novaQtd)) {
+                $updatePayload['data_entrada_estoque_atual'] = $dataMovimentacao;
+            }
+
             DB::table('estoque')
                 ->where('id_variacao', $variacaoId)
                 ->where('id_deposito', $depositoId)
-                ->update([
-                    'quantidade' => $novaQtd,
-                    'updated_at' => Carbon::now(),
-                ]);
+                ->update($updatePayload);
 
             return;
         }
 
         // não existe: cria
-        DB::table('estoque')->insert([
+        $insertPayload = [
             'id_variacao' => $variacaoId,
             'id_deposito' => $depositoId,
             'quantidade'  => $qtd,
             'created_at'  => Carbon::now(),
             'updated_at'  => Carbon::now(),
-        ]);
+        ];
+
+        if ($this->deveDefinirDataEntradaAtual($tipo, 0, $qtd)) {
+            $insertPayload['data_entrada_estoque_atual'] = $dataMovimentacao;
+        }
+
+        DB::table('estoque')->insert($insertPayload);
+    }
+
+    private function resolveDataMovimentacao(mixed $rawDate): Carbon
+    {
+        if ($rawDate instanceof CarbonInterface) {
+            return Carbon::instance($rawDate);
+        }
+
+        if ($rawDate instanceof \DateTimeInterface) {
+            return Carbon::instance($rawDate);
+        }
+
+        if ($rawDate === null || $rawDate === '') {
+            return Carbon::now();
+        }
+
+        return Carbon::parse((string) $rawDate);
+    }
+
+    private function isMovimentacaoVenda(string $tipo, array $dadosMovimentacao): bool
+    {
+        if ($tipo === EstoqueMovimentacaoTipo::SAIDA_ENTREGA_CLIENTE->value) {
+            return true;
+        }
+
+        if ($tipo !== EstoqueMovimentacaoTipo::SAIDA->value) {
+            return false;
+        }
+
+        if (!empty($dadosMovimentacao['pedido_id']) || !empty($dadosMovimentacao['pedido_item_id'])) {
+            return true;
+        }
+
+        return ($dadosMovimentacao['ref_type'] ?? null) === 'pedido';
+    }
+
+    private function isTipoEntradaParaDataEstoque(string $tipo): bool
+    {
+        return in_array($tipo, [
+            EstoqueMovimentacaoTipo::ENTRADA->value,
+            EstoqueMovimentacaoTipo::ENTRADA_DEPOSITO->value,
+        ], true);
+    }
+
+    private function deveDefinirDataEntradaAtual(string $tipo, int $saldoAnterior, int $saldoNovo): bool
+    {
+        return $this->isTipoEntradaParaDataEstoque($tipo)
+            && $saldoAnterior === 0
+            && $saldoNovo > 0;
     }
 
     /**

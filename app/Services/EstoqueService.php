@@ -107,6 +107,10 @@ class EstoqueService
             'referencia' => $query->orderBy('produto_variacoes.referencia', $direction),
 
             'quantidade_estoque' => $query->orderBy('quantidade_estoque', $direction),
+            'custo_unitario' => $query->orderBy('produto_variacoes.custo', $direction),
+            'data_entrada_estoque_atual' => $query->orderBy('data_entrada_estoque_atual', $direction),
+            'ultima_venda_em' => $query->orderBy('ultima_venda_em', $direction),
+            'dias_sem_venda' => $query->orderBy('dias_sem_venda', $direction),
 
             default => null,
         };

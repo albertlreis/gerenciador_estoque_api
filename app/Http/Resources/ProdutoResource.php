@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources;
 
+use App\Services\OutletCatalogoPricingService;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Support\Facades\Storage;
 
@@ -10,9 +11,7 @@ class ProdutoResource extends JsonResource
     public function toArray($request): array
     {
         $variacoes = $this->getRelationValue('variacoes') ?? collect();
-        $variacoes->each(function ($v) {
-            $v->loadMissing(['outlets.formasPagamento']);
-        });
+        $outletCatalogo = app(OutletCatalogoPricingService::class)->build($variacoes);
 
         return [
             'id' => $this->id,
@@ -32,8 +31,18 @@ class ProdutoResource extends JsonResource
                 $v->relationLoaded('outlet') && $v->outlet?->quantidade_restante > 0
             ),
             'estoque_total' => $this->getEstoqueTotalAttributeSafely(),
+            'estoque_resumo' => $this->getEstoqueResumoAttributeSafely(),
             'estoque_outlet_total' => $this->getEstoqueOutletTotalAttributeSafely(),
             'depositos_disponiveis' => $this->getDepositosDisponiveisAttributeSafely(),
+            // Campos novos e opcionais para o catalogo outlet (retrocompativel)
+            'preco_venda' => $outletCatalogo['preco_venda'],
+            'preco_outlet' => $outletCatalogo['preco_outlet'],
+            'preco_final_venda' => $outletCatalogo['preco_final_venda'],
+            'percentual_desconto' => $outletCatalogo['percentual_desconto'],
+            'pagamento_label' => $outletCatalogo['pagamento_label'],
+            'pagamento_detalhes' => $outletCatalogo['pagamento_detalhes'],
+            'pagamento_condicoes' => $outletCatalogo['pagamento_condicoes'],
+            'outlet_catalogo' => $outletCatalogo,
             'imagem_principal' => $this->imagemPrincipal?->url_completa,
             'data_ultima_saida' => $this->data_ultima_saida,
             'manual_conservacao' => $this->manual_conservacao
@@ -118,4 +127,45 @@ class ProdutoResource extends JsonResource
             ->values()
             ->all();
     }
+
+    private function getEstoqueResumoAttributeSafely(): array
+    {
+        $variacoes = $this->getRelationValue('variacoes') ?? collect();
+
+        if (!$variacoes instanceof \Illuminate\Support\Collection || $variacoes->isEmpty()) {
+            return [
+                'total_variacoes' => 0,
+                'variacoes_com_estoque' => 0,
+                'variacoes_sem_estoque' => 0,
+                'total_disponivel' => 0,
+                'max_disponivel' => 0,
+            ];
+        }
+
+        $quantidades = $variacoes->map(fn ($variacao) => $this->getQuantidadeVariacaoSafely($variacao));
+        $comEstoque = $quantidades->filter(fn ($qtd) => $qtd > 0)->count();
+        $semEstoque = $quantidades->filter(fn ($qtd) => $qtd <= 0)->count();
+        $totalDisponivel = (int) $quantidades->filter(fn ($qtd) => $qtd > 0)->sum();
+        $maxDisponivel = (int) $quantidades->max();
+
+        return [
+            'total_variacoes' => (int) $variacoes->count(),
+            'variacoes_com_estoque' => (int) $comEstoque,
+            'variacoes_sem_estoque' => (int) $semEstoque,
+            'total_disponivel' => max(0, $totalDisponivel),
+            'max_disponivel' => max(0, $maxDisponivel),
+        ];
+    }
+
+    private function getQuantidadeVariacaoSafely($variacao): int
+    {
+        $estoques = $variacao->getRelationValue('estoques');
+        if ($estoques instanceof \Illuminate\Support\Collection) {
+            return (int) $estoques->sum('quantidade');
+        }
+
+        $estoque = $variacao->getRelationValue('estoque');
+        return (int) ($estoque?->quantidade ?? 0);
+    }
+
 }

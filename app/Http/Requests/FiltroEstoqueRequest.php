@@ -34,7 +34,8 @@ class FiltroEstoqueRequest extends FormRequest
             'periodo.0' => ['nullable', 'date_format:Y-m-d'],
             'periodo.1' => ['nullable', 'date_format:Y-m-d'],
 
-            'zerados' => ['nullable'], // boolean vem como 0/1 ou "true"/"false" no front
+            'estoque_status' => ['nullable', 'in:com_estoque,sem_estoque'],
+            'zerados' => ['nullable', 'boolean'], // boolean vem como 0/1 ou "true"/"false" no front
 
             'per_page' => ['nullable', 'integer', 'min:1', 'max:200'],
             'page' => ['nullable', 'integer', 'min:1'],
@@ -59,6 +60,13 @@ class FiltroEstoqueRequest extends FormRequest
             if (array_key_exists($k, $input) && is_string($input[$k])) {
                 $input[$k] = trim($input[$k]);
                 if ($input[$k] === '') $input[$k] = null;
+            }
+        }
+
+        if (array_key_exists('estoque_status', $input) && is_string($input['estoque_status'])) {
+            $input['estoque_status'] = strtolower(trim($input['estoque_status']));
+            if ($input['estoque_status'] === '' || $input['estoque_status'] === 'all' || $input['estoque_status'] === 'todos') {
+                $input['estoque_status'] = null;
             }
         }
 

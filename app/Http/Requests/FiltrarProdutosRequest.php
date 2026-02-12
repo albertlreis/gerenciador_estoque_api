@@ -14,10 +14,13 @@ class FiltrarProdutosRequest extends FormRequest
     protected function prepareForValidation(): void
     {
         // Alias de 'q' → 'nome'
-        $q = $this->q ?? $this->nome;
+        $referencia = is_string($this->referencia) ? trim($this->referencia) : $this->referencia;
+        $q = $this->q ?? $this->nome ?? $this->search;
 
         $this->merge([
+            'q'                => $q,
             'nome'             => $q,
+            'referencia'       => $referencia,
             'ativo'            => $this->toBoolean($this->ativo),
             'is_outlet'        => $this->toBoolean($this->is_outlet),
             'id_categoria'     => $this->castToArray($this->id_categoria),
@@ -44,7 +47,9 @@ class FiltrarProdutosRequest extends FormRequest
     {
         return [
             'q'                 => ['nullable', 'string', 'max:255'],
+            'search'            => ['nullable', 'string', 'max:255'],
             'nome'              => ['nullable', 'string', 'max:255'],
+            'referencia'        => ['nullable', 'string', 'max:255'],
             'id_categoria'      => ['nullable', 'array'],
             'id_categoria.*'    => ['integer', 'exists:categorias,id'],
             'fornecedor_id'     => ['nullable', 'array'],

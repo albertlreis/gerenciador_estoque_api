@@ -9,8 +9,11 @@ use App\Domain\Importacao\Services\ImportacaoProdutosService;
 use App\Http\Resources\ProdutoMiniResource;
 use App\Http\Resources\ProdutoSimplificadoResource;
 use App\Services\LogService;
+use App\Services\OutletCatalogoPricingService;
 use App\Services\ProdutoSugestoesOutletService;
+use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Throwable;
@@ -18,13 +21,15 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use App\Http\Requests\{ConfirmarImportacaoRequest,
+    ExportarProdutosOutletRequest,
     FiltrarProdutosRequest,
     ImportarXmlRequest,
     StoreProdutoRequest,
     UpdateProdutoRequest};
 use App\Http\Resources\ProdutoResource;
 use App\Models\{
-    Produto
+    Produto,
+    ProdutoImagem
 };
 use App\Services\ProdutoService;
 
@@ -63,6 +68,183 @@ class ProdutoController extends Controller
             'simplificada' => ProdutoSimplificadoResource::collection($produtos)->response(),
             default => ProdutoResource::collection($produtos)->response(),
         };
+    }
+
+    /**
+     * Exporta produtos em outlet selecionados (CSV ou PDF).
+     */
+    public function exportarOutlet(ExportarProdutosOutletRequest $request)
+    {
+        $start = microtime(true);
+        $ids = $request->validated()['ids'] ?? [];
+        $format = strtolower((string) $request->input('format', 'csv'));
+        $format = in_array($format, ['csv', 'pdf'], true) ? $format : 'csv';
+        $pricingService = app(OutletCatalogoPricingService::class);
+
+        $produtos = Produto::query()
+            ->whereIn('id', $ids)
+            ->whereHas('variacoes.outlet')
+            ->with([
+                'categoria',
+                'imagemPrincipal',
+                'variacoes.outlets.formasPagamento.formaPagamento',
+            ])
+            ->get();
+
+        if ($produtos->isEmpty()) {
+            return response()->json([
+                'message' => 'Nenhum produto outlet encontrado para exportacao.',
+            ], 422);
+        }
+
+        $baseFsDir = public_path('storage' . DIRECTORY_SEPARATOR . ProdutoImagem::FOLDER);
+        $itensExportacao = $produtos
+            ->map(fn ($produto) => $this->mapearProdutoParaExportacaoOutlet($produto, $pricingService, $baseFsDir))
+            ->values();
+
+        if (app()->environment('local')) {
+            Log::info('Exportacao de catalogo outlet iniciada', [
+                'total_produtos' => $itensExportacao->count(),
+                'ids' => array_values($ids),
+                'amostra' => $itensExportacao->take(3)->map(fn ($item) => [
+                    'id' => $item['id'],
+                    'referencias' => $item['referencias'],
+                    'preco_venda' => $item['preco_venda'],
+                    'preco_final_venda' => $item['preco_final_venda'],
+                    'percentual_desconto' => $item['percentual_desconto'],
+                    'pagamento_label' => $item['pagamento_label'],
+                ])->all(),
+            ]);
+        }
+
+        if ($format === 'pdf') {
+            Pdf::setOptions(['isRemoteEnabled' => true]);
+            $viewData = [
+                'itens' => $itensExportacao,
+            ];
+
+            if (app()->environment('local')) {
+                $html = view('exports.outlet-catalogo', $viewData)->render();
+                Storage::disk('local')->put('debug/outlet.html', $html);
+                $pdf = Pdf::loadHTML($html)->setPaper('a4', 'landscape');
+            } else {
+                $pdf = Pdf::loadView('exports.outlet-catalogo', $viewData)->setPaper('a4', 'landscape');
+            }
+
+            $dateRef = now('America/Belem')->format('Y-m-d');
+            if (app()->environment('local')) {
+                Log::info('Exportacao de catalogo outlet em PDF finalizada', [
+                    'total_produtos' => $itensExportacao->count(),
+                    'tempo_ms' => (int) ((microtime(true) - $start) * 1000),
+                ]);
+            }
+            return $pdf->download("catalogo_outlet_{$dateRef}.pdf");
+        }
+
+        $filename = 'catalogo_outlet.csv';
+
+        return response()->streamDownload(function () use ($itensExportacao) {
+            $out = fopen('php://output', 'w');
+
+            // UTF-8 BOM para melhor compatibilidade com Excel
+            fwrite($out, "\xEF\xBB\xBF");
+
+            fputcsv($out, [
+                'ID',
+                'Nome',
+                'Categoria',
+                'Referencias',
+                'Preco_Minimo',
+                'Outlet_Restante',
+            ], ';');
+
+            foreach ($itensExportacao as $item) {
+                fputcsv($out, [
+                    $item['id'],
+                    $item['nome'],
+                    $item['categoria_nome'],
+                    $item['referencias'],
+                    $item['preco_venda'] !== null ? number_format((float) $item['preco_venda'], 2, ',', '') : '',
+                    $item['outlet_restante_total'],
+                ], ';');
+            }
+
+            fclose($out);
+        }, $filename, [
+            'Content-Type' => 'text/csv; charset=UTF-8',
+        ]);
+    }
+
+    private function mapearProdutoParaExportacaoOutlet(
+        Produto $produto,
+        OutletCatalogoPricingService $pricingService,
+        string $baseFsDir
+    ): array {
+        $variacoes = $produto->variacoes ?? collect();
+        $catalogo = $pricingService->build($variacoes);
+
+        $referencias = $variacoes
+            ->pluck('referencia')
+            ->filter()
+            ->unique()
+            ->implode(', ');
+
+        $outletRestanteTotal = $variacoes->sum(function ($variacao) {
+            return $variacao->relationLoaded('outlets')
+                ? (int) $variacao->outlets->sum('quantidade_restante')
+                : 0;
+        });
+
+        $imagem = $this->resolverImagemCatalogoOutlet($produto, $baseFsDir);
+
+        return [
+            'id' => $produto->id,
+            'nome' => $produto->nome,
+            'categoria_nome' => $produto->categoria?->nome,
+            'referencias' => $referencias,
+            'imagem_src' => $imagem,
+            'preco_venda' => $catalogo['preco_venda'],
+            'preco_outlet' => $catalogo['preco_outlet'],
+            'preco_final_venda' => $catalogo['preco_final_venda'],
+            'percentual_desconto' => $catalogo['percentual_desconto'],
+            'pagamento_label' => $catalogo['pagamento_label'],
+            'pagamento_detalhes' => $catalogo['pagamento_detalhes'],
+            'pagamento_condicoes' => $catalogo['pagamento_condicoes'],
+            'outlet_restante_total' => (int) $outletRestanteTotal,
+        ];
+    }
+
+    private function resolverImagemCatalogoOutlet(Produto $produto, string $baseFsDir): ?string
+    {
+        $imagemPrincipal = $produto->imagemPrincipal;
+        if (!$imagemPrincipal) {
+            return null;
+        }
+
+        $url = (string) ($imagemPrincipal->url ?? $imagemPrincipal->url_completa ?? '');
+        if ($url === '') {
+            return null;
+        }
+
+        if (preg_match('#^https?://#i', $url) === 1) {
+            return $url;
+        }
+
+        $normalizado = trim($url);
+        $normalizado = str_replace(['\\', '/storage/'], [DIRECTORY_SEPARATOR, ''], $normalizado);
+        $normalizado = ltrim($normalizado, DIRECTORY_SEPARATOR);
+
+        $caminhoDireto = $baseFsDir . DIRECTORY_SEPARATOR . $normalizado;
+        if (is_file($caminhoDireto)) {
+            return $caminhoDireto;
+        }
+
+        $caminhoPublicStorage = public_path('storage' . DIRECTORY_SEPARATOR . $normalizado);
+        if (is_file($caminhoPublicStorage)) {
+            return $caminhoPublicStorage;
+        }
+
+        return null;
     }
 
     /**

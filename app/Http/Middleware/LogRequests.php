@@ -25,12 +25,14 @@ class LogRequests
                 }
             }
 
-            Log::channel('estoque')->info('Requisição API', [
+            Log::channel('estoque')->info('Requisicao API', [
                 'user' => auth()->user()?->email,
                 'method' => $request->method(),
                 'uri' => $request->getRequestUri(),
                 'payload' => $safePayload,
-                'status' => $response->status(),
+                'status' => method_exists($response, 'status')
+                    ? $response->status()
+                    : (method_exists($response, 'getStatusCode') ? $response->getStatusCode() : null),
             ]);
         }
 

@@ -57,6 +57,7 @@ class ProdutoVariacaoResource extends JsonResource
 
             // ✅ estoques compat + agregado
             'estoque_total' => $estoqueTotal,
+            'quantidade_disponivel' => $estoqueTotal,
 //            'estoque' => ['quantidade' => $estoqueTotal],
             'estoques' => EstoqueResource::collection($this->whenLoaded('estoques')),
 

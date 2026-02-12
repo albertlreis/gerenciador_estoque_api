@@ -128,9 +128,16 @@ class ProdutoService
             $q->where('quantidade', '>', 0);
         };
 
+        $estoqueZerado = function ($q) use ($depositoId) {
+            if ($depositoId) {
+                $q->where('id_deposito', $depositoId);
+            }
+            $q->where('quantidade', '=', 0);
+        };
+
         $with = [
             'categoria',
-            'variacoes' => function ($q) use ($depositoId, $incluirEstoque, $status, $comEstoque) {
+            'variacoes' => function ($q) use ($depositoId, $incluirEstoque) {
                 // ✅ evita N+1 e mantém coerência do catálogo
                 $q->with([
                     'atributos',
@@ -140,16 +147,10 @@ class ProdutoService
                 ]);
 
                 if ($incluirEstoque) {
-                    $q->with(['estoques' => function ($e) use ($depositoId, $status, $comEstoque) {
+                    $q->with(['estoques' => function ($e) use ($depositoId) {
                         if ($depositoId) {
                             $e->where('id_deposito', $depositoId);
                         }
-
-                        // Se o usuário pediu "com estoque", não faz sentido devolver linhas zeradas
-                        if ($status === 'com_estoque' || $comEstoque) {
-                            $e->where('quantidade', '>', 0);
-                        }
-
                         $e->with(['deposito', 'localizacao']);
                     }]);
                 }
@@ -165,32 +166,47 @@ class ProdutoService
         // ========== BUSCA TEXTUAL ==========
         $term = $request->input('q') ?? $request->input('nome');
         if ($term) {
-            $normalized = iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $term);
-            $normalized = preg_replace('/[^A-Za-z0-9\s]/', '', $normalized);
-            $normalized = trim(strtolower($normalized));
-            $words = preg_split('/\s+/', $normalized);
+            $normalized = trim(mb_strtolower((string) $term));
+            $words = array_values(array_filter(preg_split('/\s+/u', $normalized) ?: []));
 
-            $query->where(function ($q) use ($words) {
-                foreach ($words as $w) {
-                    $like = "%{$w}%";
+            if (!empty($words)) {
+                $query->where(function ($q) use ($words) {
+                    foreach ($words as $w) {
+                        $escaped = $this->escapeLike($w);
+                        if ($escaped === '') {
+                            continue;
+                        }
 
-                    $q->where(function ($qq) use ($like) {
-                        $qq->whereRaw('LOWER(nome) COLLATE utf8mb4_0900_ai_ci LIKE ?', [$like])
-                            ->orWhereRaw('LOWER(descricao) COLLATE utf8mb4_0900_ai_ci LIKE ?', [$like])
-                            ->orWhereHas('categoria', fn ($qc) =>
-                            $qc->whereRaw('LOWER(nome) COLLATE utf8mb4_0900_ai_ci LIKE ?', [$like])
-                            )
-                            ->orWhereHas('variacoes', function ($qv) use ($like) {
-                                $qv->whereRaw('LOWER(referencia) COLLATE utf8mb4_0900_ai_ci LIKE ?', [$like])
-                                    ->orWhereRaw('LOWER(codigo_barras) COLLATE utf8mb4_0900_ai_ci LIKE ?', [$like])
-                                    ->orWhereHas('atributos', function ($qa) use ($like) {
-                                        $qa->whereRaw('LOWER(atributo) COLLATE utf8mb4_0900_ai_ci LIKE ?', [$like])
-                                            ->orWhereRaw('LOWER(valor) COLLATE utf8mb4_0900_ai_ci LIKE ?', [$like]);
-                                    });
-                            });
-                    });
-                }
-            });
+                        $like = "%{$escaped}%";
+
+                        $q->where(function ($qq) use ($like) {
+                            $qq->whereRaw("LOWER(nome) COLLATE utf8mb4_0900_ai_ci LIKE ? ESCAPE '\\\\'", [$like])
+                                ->orWhereRaw("LOWER(descricao) COLLATE utf8mb4_0900_ai_ci LIKE ? ESCAPE '\\\\'", [$like])
+                                ->orWhereHas('categoria', fn ($qc) =>
+                                $qc->whereRaw("LOWER(nome) COLLATE utf8mb4_0900_ai_ci LIKE ? ESCAPE '\\\\'", [$like])
+                                )
+                                ->orWhereHas('variacoes', function ($qv) use ($like) {
+                                    $qv->whereRaw("LOWER(referencia) COLLATE utf8mb4_0900_ai_ci LIKE ? ESCAPE '\\\\'", [$like])
+                                        ->orWhereRaw("LOWER(codigo_barras) COLLATE utf8mb4_0900_ai_ci LIKE ? ESCAPE '\\\\'", [$like])
+                                        ->orWhereHas('atributos', function ($qa) use ($like) {
+                                            $qa->whereRaw("LOWER(atributo) COLLATE utf8mb4_0900_ai_ci LIKE ? ESCAPE '\\\\'", [$like])
+                                                ->orWhereRaw("LOWER(valor) COLLATE utf8mb4_0900_ai_ci LIKE ? ESCAPE '\\\\'", [$like]);
+                                        });
+                                });
+                        });
+                    }
+                });
+            }
+        }
+
+        if ($referencia = $request->input('referencia')) {
+            $ref = trim((string) $referencia);
+            if ($ref !== '') {
+                $likeRef = '%' . $this->escapeLike(mb_strtolower($ref)) . '%';
+                $query->whereHas('variacoes', function ($q) use ($likeRef) {
+                    $q->whereRaw("LOWER(referencia) COLLATE utf8mb4_0900_ai_ci LIKE ? ESCAPE '\\\\'", [$likeRef]);
+                });
+            }
         }
 
         // ========== FILTROS DE DEPÓSITO / ESTOQUE ==========
@@ -207,7 +223,8 @@ class ProdutoService
             $query->whereHas('variacoes.estoques', $estoquePositivo);
 
         } elseif ($status === 'sem_estoque') {
-            $query->whereDoesntHave('variacoes.estoques', $estoquePositivo);
+            // Regra de catálogo: produto entra quando existir ao menos uma variação zerada.
+            $query->whereHas('variacoes.estoques', $estoqueZerado);
         }
 
         // ========== OUTROS FILTROS ==========
@@ -257,5 +274,10 @@ class ProdutoService
             'categoria',
             'imagens',
         ])->findOrFail($id);
+    }
+
+    private function escapeLike(string $value): string
+    {
+        return str_replace(['\\', '%', '_'], ['\\\\', '\%', '\_'], $value);
     }
 }

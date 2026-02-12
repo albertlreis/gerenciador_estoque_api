@@ -92,7 +92,7 @@ Route::middleware('auth:sanctum')
 
         // Outlet por variação (plural + padrão)
         Route::prefix('variacoes/{variacao}/outlets')->whereNumber('variacao')->group(function () {
-            Route::get('/', [ProdutoVariacaoOutletController::class, 'buscar']); // index
+            Route::get('/', [ProdutoVariacaoOutletController::class, 'index']);
             Route::post('/', [ProdutoVariacaoOutletController::class, 'store']);
             Route::put('{outlet}', [ProdutoVariacaoOutletController::class, 'update'])->whereNumber('outlet');
             Route::delete('{outlet}', [ProdutoVariacaoOutletController::class, 'destroy'])->whereNumber('outlet');
@@ -106,6 +106,9 @@ Route::middleware('auth:sanctum')
             // Importações XML (padronizado)
             Route::post('importacoes/xml', [ProdutoController::class, 'importarXML']);
             Route::post('importacoes/xml/confirmar', [ProdutoController::class, 'confirmarImportacao']);
+
+            // Exportação de catálogo outlet (selecionados)
+            Route::post('outlet/export', [ProdutoController::class, 'exportarOutlet']);
 
             // Imagens
             Route::post('{produto}/imagens/{imagem}/definir-principal', [ProdutoImagemController::class, 'definirPrincipal'])

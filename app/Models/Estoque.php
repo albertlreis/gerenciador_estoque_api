@@ -14,13 +14,17 @@ class Estoque extends Model
         'id_variacao',
         'id_deposito',
         'quantidade',
+        'data_entrada_estoque_atual',
+        'ultima_venda_em',
         'corredor',
         'prateleira',
         'nivel',
     ];
 
     protected $casts = [
-        'quantidade' => 'integer'
+        'quantidade' => 'integer',
+        'data_entrada_estoque_atual' => 'datetime',
+        'ultima_venda_em' => 'datetime',
     ];
 
     /** @return BelongsTo<ProdutoVariacao,Estoque> */

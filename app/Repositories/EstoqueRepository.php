@@ -6,6 +6,7 @@ use App\DTOs\FiltroEstoqueDTO;
 use App\Models\ProdutoVariacao;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Repositório de consultas do estoque.
@@ -25,7 +26,48 @@ class EstoqueRepository
      */
     public function queryBase(FiltroEstoqueDTO $filtros): Builder
     {
+        $subqueryDataEntrada = DB::table('estoque as e')
+            ->select('e.data_entrada_estoque_atual')
+            ->whereColumn('e.id_variacao', 'produto_variacoes.id');
+
+        $subqueryUltimaVenda = DB::table('estoque as e')
+            ->select('e.ultima_venda_em')
+            ->whereColumn('e.id_variacao', 'produto_variacoes.id');
+
+        $subqueryDiasSemVenda = DB::table('estoque as e')
+            ->selectRaw('DATEDIFF(CURDATE(), DATE(e.ultima_venda_em))')
+            ->whereColumn('e.id_variacao', 'produto_variacoes.id')
+            ->whereNotNull('e.ultima_venda_em');
+
+        if ($filtros->deposito) {
+            $subqueryDataEntrada->where('e.id_deposito', $filtros->deposito);
+            $subqueryUltimaVenda->where('e.id_deposito', $filtros->deposito);
+            $subqueryDiasSemVenda->where('e.id_deposito', $filtros->deposito);
+        } else {
+            $subqueryDataEntrada->where('e.quantidade', '>', 0);
+            $subqueryUltimaVenda->where('e.quantidade', '>', 0);
+            $subqueryDiasSemVenda->where('e.quantidade', '>', 0);
+        }
+
+        $subqueryDataEntrada
+            ->orderByDesc('e.quantidade')
+            ->orderBy('e.id_deposito')
+            ->limit(1);
+
+        $subqueryUltimaVenda
+            ->orderByDesc('e.quantidade')
+            ->orderBy('e.id_deposito')
+            ->limit(1);
+
+        $subqueryDiasSemVenda
+            ->orderByDesc('e.ultima_venda_em')
+            ->limit(1);
+
         $query = ProdutoVariacao::query()
+            ->select('produto_variacoes.*')
+            ->selectSub($subqueryDataEntrada, 'data_entrada_estoque_atual')
+            ->selectSub($subqueryUltimaVenda, 'ultima_venda_em')
+            ->selectSub($subqueryDiasSemVenda, 'dias_sem_venda')
             ->whereHas('produto', fn ($q) => $q->where('ativo', 1))
             ->with(['produto.categoria', 'produto.fornecedor', 'atributos'])
             ->withSum(
@@ -47,8 +89,10 @@ class EstoqueRepository
 
         if ($filtros->produto) {
             $term = trim($filtros->produto);
+            $termLikeAny = '%' . $this->escapeLike($term) . '%';
+            $termLikePrefix = $this->escapeLike($term) . '%';
 
-            $query->where(function (Builder $q) use ($term) {
+            $query->where(function (Builder $q) use ($term, $termLikeAny, $termLikePrefix) {
                 // 1) FULLTEXT (quando termo for "minimamente" útil)
                 // MySQL FULLTEXT ignora termos muito curtos dependendo da config, então evitamos forçar.
                 if (mb_strlen($term) >= 3) {
@@ -67,20 +111,22 @@ class EstoqueRepository
 
                     // 2) Reforço para referência "prefixo" quando parece referência
                     if ($this->looksLikeReference($term)) {
-                        $q->orWhere('produto_variacoes.referencia', 'like', $term . '%');
+                        $q->orWhereRaw("produto_variacoes.referencia LIKE ? ESCAPE '\\\\'", [$termLikePrefix]);
                     }
 
                     // 3) Fallback LIKE (garante "qualquer pedaço" mesmo se FT falhar)
-                    $q->orWhereHas('produto', fn ($sub) => $sub->where('nome', 'like', "%{$term}%"))
-                        ->orWhere('produto_variacoes.referencia', 'like', "%{$term}%");
+                    $q->orWhereHas('produto', fn ($sub) =>
+                    $sub->whereRaw("nome LIKE ? ESCAPE '\\\\'", [$termLikeAny]))
+                        ->orWhereRaw("produto_variacoes.referencia LIKE ? ESCAPE '\\\\'", [$termLikeAny]);
                 } else {
                     // Termo muito curto: vai só de LIKE + prefixo (se for referência)
                     if ($this->looksLikeReference($term)) {
-                        $q->where('produto_variacoes.referencia', 'like', $term . '%');
+                        $q->whereRaw("produto_variacoes.referencia LIKE ? ESCAPE '\\\\'", [$termLikePrefix]);
                     }
 
-                    $q->orWhereHas('produto', fn ($sub) => $sub->where('nome', 'like', "%{$term}%"))
-                        ->orWhere('produto_variacoes.referencia', 'like', "%{$term}%");
+                    $q->orWhereHas('produto', fn ($sub) =>
+                    $sub->whereRaw("nome LIKE ? ESCAPE '\\\\'", [$termLikeAny]))
+                        ->orWhereRaw("produto_variacoes.referencia LIKE ? ESCAPE '\\\\'", [$termLikeAny]);
                 }
             });
         }
@@ -124,16 +170,10 @@ class EstoqueRepository
             });
         }
 
-        if ($filtros->deposito) {
-            if ($filtros->zerados) {
-                $query->havingRaw('(quantidade_estoque IS NULL OR quantidade_estoque = ?)', [0]);
-            } else {
-                $query->havingRaw('quantidade_estoque > ?', [0]);
-            }
-        } else {
-            if ($filtros->zerados) {
-                $query->havingRaw('(quantidade_estoque IS NULL OR quantidade_estoque = ?)', [0]);
-            }
+        if ($filtros->comEstoque) {
+            $query->havingRaw('quantidade_estoque > ?', [0]);
+        } elseif ($filtros->zerados) {
+            $query->havingRaw('(quantidade_estoque IS NULL OR quantidade_estoque = ?)', [0]);
         }
 
         return $query;
@@ -187,6 +227,11 @@ class EstoqueRepository
 
         // tem pelo menos um número ou tem hífen/barra comum em referência
         return (bool) preg_match('/\d|[-\/_]/', $t);
+    }
+
+    private function escapeLike(string $value): string
+    {
+        return str_replace(['\\', '%', '_'], ['\\\\', '\%', '\_'], $value);
     }
 
     /**

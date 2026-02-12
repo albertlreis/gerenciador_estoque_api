@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Http\Requests\StorePedidoRequest;
+use App\Http\Requests\UpdatePedidoRequest;
 use App\Http\Resources\PedidoCompletoResource;
 use App\Models\Deposito;
 use App\Models\Pedido;
@@ -10,6 +11,7 @@ use App\Models\PedidoImportacao;
 use App\Models\ProdutoImagem;
 use App\Services\ExtratorPedidoPythonService;
 use App\Services\PedidoService;
+use App\Services\PedidoUpdateService;
 use App\Services\ImportacaoPedidoService;
 use App\Services\EstatisticaPedidoService;
 use App\Services\PedidoExportService;
@@ -18,6 +20,7 @@ use Exception;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Illuminate\Support\Facades\Log;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 /**
@@ -26,6 +29,7 @@ use Symfony\Component\HttpFoundation\BinaryFileResponse;
 class PedidoController extends Controller
 {
     protected PedidoService $pedidoService;
+    protected PedidoUpdateService $pedidoUpdateService;
     protected ImportacaoPedidoService $importacaoService;
     protected EstatisticaPedidoService $estatisticaService;
     protected PedidoExportService $exportService;
@@ -39,13 +43,15 @@ class PedidoController extends Controller
         ImportacaoPedidoService $importacaoService,
         EstatisticaPedidoService $estatisticaService,
         PedidoExportService $exportService,
-        ExtratorPedidoPythonService $service
+        ExtratorPedidoPythonService $service,
+        PedidoUpdateService $pedidoUpdateService
     ) {
         $this->pedidoService = $pedidoService;
         $this->importacaoService = $importacaoService;
         $this->estatisticaService = $estatisticaService;
         $this->exportService = $exportService;
         $this->service = $service;
+        $this->pedidoUpdateService = $pedidoUpdateService;
     }
 
     /**
@@ -80,6 +86,20 @@ class PedidoController extends Controller
     public function completo(int $pedidoId): PedidoCompletoResource
     {
         return $this->pedidoService->obterPedidoCompleto($pedidoId);
+    }
+
+    /**
+     * Atualiza um pedido e seus itens.
+     *
+     * @param UpdatePedidoRequest $request
+     * @param Pedido $pedido
+     * @return JsonResponse
+     */
+    public function update(UpdatePedidoRequest $request, Pedido $pedido): JsonResponse
+    {
+        $pedidoAtualizado = $this->pedidoUpdateService->atualizar($pedido, $request->validated());
+
+        return response()->json(new PedidoCompletoResource($pedidoAtualizado));
     }
 
     /**
@@ -129,6 +149,13 @@ class PedidoController extends Controller
             $arquivo = $request->file('arquivo');
             $hash = hash_file('sha256', $arquivo->getRealPath());
 
+            Log::info('Importação PDF - início', [
+                'usuario_id' => auth()->id(),
+                'arquivo_nome' => $arquivo->getClientOriginalName(),
+                'arquivo_tamanho' => $arquivo->getSize(),
+                'arquivo_hash' => $hash,
+            ]);
+
             $importExistente = PedidoImportacao::query()
                 ->where('arquivo_hash', $hash)
                 ->first();
@@ -142,6 +169,11 @@ class PedidoController extends Controller
             }
 
             if ($importExistente && $importExistente->status === 'extraido' && $importExistente->dados_json) {
+                Log::info('Importa??o PDF - preview reutilizado', [
+                    'usuario_id' => auth()->id(),
+                    'importacao_id' => $importExistente->id,
+                ]);
+
                 return response()->json([
                     'sucesso' => true,
                     'mensagem' => 'PDF jÃ¡ processado. Usando dados existentes.',
@@ -198,6 +230,13 @@ class PedidoController extends Controller
                 ]
             );
 
+            Log::info('Importa??o PDF - extra??o conclu?da', [
+                'usuario_id' => auth()->id(),
+                'importacao_id' => $importacao->id,
+                'itens_total' => count($itens),
+                'numero_externo' => $pedidoFormatado['numero_externo'] ?? null,
+            ]);
+
             return response()->json([
                 "sucesso" => true,
                 "mensagem" => "PDF processado com sucesso.",
@@ -216,6 +255,12 @@ class PedidoController extends Controller
                     'erro' => $e->getMessage(),
                 ]
             );
+
+            Log::error('Importa??o PDF - erro ao processar', [
+                'usuario_id' => auth()->id(),
+                'arquivo_hash' => $hashErro,
+                'mensagem' => $e->getMessage(),
+            ]);
 
             return response()->json([
                 "sucesso" => false,

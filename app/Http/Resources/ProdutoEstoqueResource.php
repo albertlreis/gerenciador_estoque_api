@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources;
 
+use Carbon\CarbonImmutable;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Support\Collection;
 
@@ -31,6 +32,17 @@ class ProdutoEstoqueResource extends JsonResource
 
         $deposito = $estoque?->deposito;
         $localizacao = $estoque?->localizacao;
+        $custoUnitario = $this->custo ?? null;
+        $dataEntradaAtual = $estoque?->data_entrada_estoque_atual ?? $this->data_entrada_estoque_atual ?? null;
+        $ultimaVendaEm = $estoque?->ultima_venda_em ?? $this->ultima_venda_em ?? null;
+        $diasSemVenda = $this->dias_sem_venda ?? null;
+
+        if ($diasSemVenda === null && $ultimaVendaEm) {
+            $timezone = config('app.timezone', 'America/Belem');
+            $diasSemVenda = CarbonImmutable::parse($ultimaVendaEm, $timezone)
+                ->startOfDay()
+                ->diffInDays(CarbonImmutable::now($timezone)->startOfDay());
+        }
 
         // Monta estrutura de dimensões dinâmicas
         $dimensoes = [];
@@ -53,6 +65,10 @@ class ProdutoEstoqueResource extends JsonResource
             'deposito_nome' => $deposito?->nome ?? '—',
             'deposito_id'   => $deposito?->id ?? '—',
             'quantidade'    => (int) ($this->quantidade_estoque ?? 0),
+            'custo_unitario' => $custoUnitario !== null ? (float) $custoUnitario : null,
+            'data_entrada_estoque_atual' => $dataEntradaAtual ? CarbonImmutable::parse($dataEntradaAtual)->toDateString() : null,
+            'ultima_venda_em' => $ultimaVendaEm ? CarbonImmutable::parse($ultimaVendaEm)->toDateString() : null,
+            'dias_sem_venda' => $diasSemVenda !== null ? (int) $diasSemVenda : null,
 
             'localizacao' => $localizacao ? [
                 'id'              => $localizacao->id,

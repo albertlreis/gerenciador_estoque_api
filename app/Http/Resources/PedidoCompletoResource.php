@@ -28,9 +28,12 @@ class PedidoCompletoResource extends JsonResource
         return [
             'id'          => $this->id,
             'numero'      => $this->numero_externo,
+            'numero_externo' => $this->numero_externo,
             'data_pedido' => $this->data_pedido,
             'status'      => $statusAtualEnum,
+            'tipo'        => $this->tipo,
 
+            'id_cliente'  => $this->id_cliente,
             'cliente' => $this->cliente ? [
                 'id'       => $this->cliente->id,
                 'nome'     => $this->cliente->nome,
@@ -38,11 +41,13 @@ class PedidoCompletoResource extends JsonResource
                 'telefone' => $this->cliente->telefone,
             ] : null,
 
+            'id_parceiro' => $this->id_parceiro,
             'parceiro' => $this->parceiro ? [
                 'id'   => $this->parceiro->id,
                 'nome' => $this->parceiro->nome,
             ] : null,
 
+            'id_usuario' => $this->id_usuario,
             'usuario' => $this->usuario ? [
                 'id'   => $this->usuario->id,
                 'nome' => $this->usuario->nome,

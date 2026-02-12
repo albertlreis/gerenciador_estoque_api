@@ -10,11 +10,6 @@ class ProdutoResource extends JsonResource
     public function toArray($request): array
     {
         $variacoes = $this->getRelationValue('variacoes') ?? collect();
-        if ($variacoes instanceof \Illuminate\Database\Eloquent\Collection) {
-            $variacoes->loadMissing([
-                'outlets.formasPagamento.formaPagamento',
-            ]);
-        }
         $outletCatalogo = $this->buildOutletCatalogoData($variacoes);
 
         return [

@@ -28,59 +28,127 @@ class CatalogoProdutosEstoqueVariacoesTest extends TestCase
         Sanctum::actingAs($usuario);
     }
 
-    public function test_filtro_com_estoque_retorna_apenas_variacoes_disponiveis(): void
+    private function criarVariacaoComEstoque(Produto $produto, Deposito $deposito, string $referencia, int $quantidade): ProdutoVariacao
+    {
+        $variacao = ProdutoVariacao::create([
+            'produto_id' => $produto->id,
+            'referencia' => $referencia,
+            'nome' => "Variacao {$referencia}",
+            'preco' => 100,
+            'custo' => 70,
+        ]);
+
+        Estoque::updateOrCreate([
+            'id_variacao' => $variacao->id,
+            'id_deposito' => $deposito->id,
+        ], [
+            'quantidade' => $quantidade,
+        ]);
+
+        return $variacao;
+    }
+
+    public function test_filtro_com_estoque_retorna_produtos_com_ao_menos_uma_variacao_disponivel(): void
     {
         $this->autenticar();
 
         $categoria = Categoria::create(['nome' => 'Categoria Teste']);
         $deposito = Deposito::create(['nome' => 'Deposito 1']);
 
-        $produto = Produto::create([
+        $produtoA = Produto::create([
             'nome' => 'Produto A',
             'descricao' => 'Descricao',
             'id_categoria' => $categoria->id,
             'ativo' => true,
         ]);
-
-        $variacaoSemEstoque = ProdutoVariacao::create([
-            'produto_id' => $produto->id,
-            'referencia' => 'REF-SEM',
-            'nome' => 'Variacao sem estoque',
-            'preco' => 120,
-            'custo' => 80,
+        $produtoB = Produto::create([
+            'nome' => 'Produto B',
+            'descricao' => 'Descricao',
+            'id_categoria' => $categoria->id,
+            'ativo' => true,
+        ]);
+        $produtoC = Produto::create([
+            'nome' => 'Produto C',
+            'descricao' => 'Descricao',
+            'id_categoria' => $categoria->id,
+            'ativo' => true,
         ]);
 
-        $variacaoComEstoque = ProdutoVariacao::create([
-            'produto_id' => $produto->id,
-            'referencia' => 'REF-COM',
-            'nome' => 'Variacao com estoque',
-            'preco' => 150,
-            'custo' => 90,
-        ]);
-
-        Estoque::updateOrCreate([
-            'id_variacao' => $variacaoSemEstoque->id,
-            'id_deposito' => $deposito->id,
-        ], [
-            'quantidade' => 0,
-        ]);
-
-        Estoque::updateOrCreate([
-            'id_variacao' => $variacaoComEstoque->id,
-            'id_deposito' => $deposito->id,
-        ], [
-            'quantidade' => 3,
-        ]);
+        $this->criarVariacaoComEstoque($produtoA, $deposito, 'A-SEM', 0);
+        $variacaoACom = $this->criarVariacaoComEstoque($produtoA, $deposito, 'A-COM', 3);
+        $this->criarVariacaoComEstoque($produtoB, $deposito, 'B-SEM-1', 0);
+        $this->criarVariacaoComEstoque($produtoB, $deposito, 'B-SEM-2', 0);
+        $variacaoCCom = $this->criarVariacaoComEstoque($produtoC, $deposito, 'C-COM', 5);
 
         $response = $this->getJson('/api/v1/produtos?estoque_status=com_estoque&deposito_id=' . $deposito->id);
 
-        $response->assertStatus(200)
-            ->assertJsonCount(1, 'data');
+        $response->assertStatus(200);
 
-        $variacoes = $response->json('data.0.variacoes');
+        $data = collect($response->json('data'));
+        $idsRetornados = $data->pluck('id')->all();
 
-        $this->assertCount(1, $variacoes);
-        $this->assertSame($variacaoComEstoque->id, $variacoes[0]['id']);
-        $this->assertEquals(3, (int) $variacoes[0]['estoque_total']);
+        $this->assertContains($produtoA->id, $idsRetornados);
+        $this->assertContains($produtoC->id, $idsRetornados);
+        $this->assertNotContains($produtoB->id, $idsRetornados);
+
+        $produtoAData = $data->firstWhere('id', $produtoA->id);
+        $variacoesA = collect($produtoAData['variacoes'] ?? []);
+        $this->assertCount(2, $variacoesA);
+        $this->assertTrue($variacoesA->contains('id', $variacaoACom->id));
+        $this->assertSame(1, (int) data_get($produtoAData, 'estoque_resumo.variacoes_com_estoque'));
+        $this->assertSame(1, (int) data_get($produtoAData, 'estoque_resumo.variacoes_sem_estoque'));
+
+        $produtoCData = $data->firstWhere('id', $produtoC->id);
+        $variacoesC = collect($produtoCData['variacoes'] ?? []);
+        $this->assertCount(1, $variacoesC);
+        $this->assertTrue($variacoesC->contains('id', $variacaoCCom->id));
+    }
+
+    public function test_filtro_sem_estoque_retorna_produtos_com_ao_menos_uma_variacao_zerada(): void
+    {
+        $this->autenticar();
+
+        $categoria = Categoria::create(['nome' => 'Categoria Teste']);
+        $deposito = Deposito::create(['nome' => 'Deposito 1']);
+
+        $produtoA = Produto::create([
+            'nome' => 'Produto A',
+            'descricao' => 'Descricao',
+            'id_categoria' => $categoria->id,
+            'ativo' => true,
+        ]);
+        $produtoB = Produto::create([
+            'nome' => 'Produto B',
+            'descricao' => 'Descricao',
+            'id_categoria' => $categoria->id,
+            'ativo' => true,
+        ]);
+        $produtoC = Produto::create([
+            'nome' => 'Produto C',
+            'descricao' => 'Descricao',
+            'id_categoria' => $categoria->id,
+            'ativo' => true,
+        ]);
+
+        $this->criarVariacaoComEstoque($produtoA, $deposito, 'A-SEM', 0);
+        $this->criarVariacaoComEstoque($produtoA, $deposito, 'A-COM', 3);
+        $this->criarVariacaoComEstoque($produtoB, $deposito, 'B-SEM-1', 0);
+        $this->criarVariacaoComEstoque($produtoB, $deposito, 'B-SEM-2', 0);
+        $this->criarVariacaoComEstoque($produtoC, $deposito, 'C-COM', 5);
+
+        $response = $this->getJson('/api/v1/produtos?estoque_status=sem_estoque&deposito_id=' . $deposito->id);
+
+        $response->assertStatus(200);
+
+        $data = collect($response->json('data'));
+        $idsRetornados = $data->pluck('id')->all();
+
+        $this->assertContains($produtoA->id, $idsRetornados);
+        $this->assertContains($produtoB->id, $idsRetornados);
+        $this->assertNotContains($produtoC->id, $idsRetornados);
+
+        $produtoAData = $data->firstWhere('id', $produtoA->id);
+        $this->assertSame(1, (int) data_get($produtoAData, 'estoque_resumo.variacoes_sem_estoque'));
+        $this->assertSame(1, (int) data_get($produtoAData, 'estoque_resumo.variacoes_com_estoque'));
     }
 }

@@ -128,9 +128,16 @@ class ProdutoService
             $q->where('quantidade', '>', 0);
         };
 
+        $estoqueZerado = function ($q) use ($depositoId) {
+            if ($depositoId) {
+                $q->where('id_deposito', $depositoId);
+            }
+            $q->where('quantidade', '=', 0);
+        };
+
         $with = [
             'categoria',
-            'variacoes' => function ($q) use ($depositoId, $incluirEstoque, $status, $comEstoque) {
+            'variacoes' => function ($q) use ($depositoId, $incluirEstoque) {
                 // ✅ evita N+1 e mantém coerência do catálogo
                 $q->with([
                     'atributos',
@@ -140,27 +147,12 @@ class ProdutoService
                 ]);
 
                 if ($incluirEstoque) {
-                    $q->with(['estoques' => function ($e) use ($depositoId, $status, $comEstoque) {
+                    $q->with(['estoques' => function ($e) use ($depositoId) {
                         if ($depositoId) {
                             $e->where('id_deposito', $depositoId);
                         }
-
-                        // Se o usuário pediu "com estoque", não faz sentido devolver linhas zeradas
-                        if ($status === 'com_estoque' || $comEstoque) {
-                            $e->where('quantidade', '>', 0);
-                        }
-
                         $e->with(['deposito', 'localizacao']);
                     }]);
-                }
-
-                if ($status === 'com_estoque' || $comEstoque) {
-                    $q->whereHas('estoques', function ($e) use ($depositoId) {
-                        if ($depositoId) {
-                            $e->where('id_deposito', $depositoId);
-                        }
-                        $e->where('quantidade', '>', 0);
-                    });
                 }
             },
         ];
@@ -225,7 +217,8 @@ class ProdutoService
             $query->whereHas('variacoes.estoques', $estoquePositivo);
 
         } elseif ($status === 'sem_estoque') {
-            $query->whereDoesntHave('variacoes.estoques', $estoquePositivo);
+            // Regra de catálogo: produto entra quando existir ao menos uma variação zerada.
+            $query->whereHas('variacoes.estoques', $estoqueZerado);
         }
 
         // ========== OUTROS FILTROS ==========

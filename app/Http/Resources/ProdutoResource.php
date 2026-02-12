@@ -32,6 +32,7 @@ class ProdutoResource extends JsonResource
                 $v->relationLoaded('outlet') && $v->outlet?->quantidade_restante > 0
             ),
             'estoque_total' => $this->getEstoqueTotalAttributeSafely(),
+            'estoque_resumo' => $this->getEstoqueResumoAttributeSafely(),
             'estoque_outlet_total' => $this->getEstoqueOutletTotalAttributeSafely(),
             'depositos_disponiveis' => $this->getDepositosDisponiveisAttributeSafely(),
             'imagem_principal' => $this->imagemPrincipal?->url_completa,
@@ -117,5 +118,45 @@ class ProdutoResource extends JsonResource
             ->sortBy(fn ($d) => $d['nome'] ?? '')
             ->values()
             ->all();
+    }
+
+    private function getEstoqueResumoAttributeSafely(): array
+    {
+        $variacoes = $this->getRelationValue('variacoes') ?? collect();
+
+        if (!$variacoes instanceof \Illuminate\Support\Collection || $variacoes->isEmpty()) {
+            return [
+                'total_variacoes' => 0,
+                'variacoes_com_estoque' => 0,
+                'variacoes_sem_estoque' => 0,
+                'total_disponivel' => 0,
+                'max_disponivel' => 0,
+            ];
+        }
+
+        $quantidades = $variacoes->map(fn ($variacao) => $this->getQuantidadeVariacaoSafely($variacao));
+        $comEstoque = $quantidades->filter(fn ($qtd) => $qtd > 0)->count();
+        $semEstoque = $quantidades->filter(fn ($qtd) => $qtd <= 0)->count();
+        $totalDisponivel = (int) $quantidades->filter(fn ($qtd) => $qtd > 0)->sum();
+        $maxDisponivel = (int) $quantidades->max();
+
+        return [
+            'total_variacoes' => (int) $variacoes->count(),
+            'variacoes_com_estoque' => (int) $comEstoque,
+            'variacoes_sem_estoque' => (int) $semEstoque,
+            'total_disponivel' => max(0, $totalDisponivel),
+            'max_disponivel' => max(0, $maxDisponivel),
+        ];
+    }
+
+    private function getQuantidadeVariacaoSafely($variacao): int
+    {
+        $estoques = $variacao->getRelationValue('estoques');
+        if ($estoques instanceof \Illuminate\Support\Collection) {
+            return (int) $estoques->sum('quantidade');
+        }
+
+        $estoque = $variacao->getRelationValue('estoque');
+        return (int) ($estoque?->quantidade ?? 0);
     }
 }

@@ -35,9 +35,9 @@ class ProdutoVariacaoOutletController extends Controller
 
     public function store(StoreProdutoVariacaoOutletRequest $request, int $id): JsonResponse
     {
-        $variacao = ProdutoVariacao::with(['estoque', 'outlets'])->findOrFail($id);
+        $variacao = ProdutoVariacao::with(['estoques', 'outlets'])->findOrFail($id);
 
-        $estoqueTotal = (int)($variacao->estoque->quantidade ?? 0);
+        $estoqueTotal = (int) $variacao->estoques->sum('quantidade');
         $totalOutletJaRegistrado = (int)$variacao->outlets->sum('quantidade');
         $quantidadeNova = (int)$request->quantidade;
 
@@ -92,9 +92,9 @@ class ProdutoVariacaoOutletController extends Controller
 
     public function update(Request $request, int $id, int $outletId): ProdutoVariacaoOutletResource|JsonResponse
     {
-        $variacao = ProdutoVariacao::with(['estoque','outlets'])->findOrFail($id);
+        $variacao = ProdutoVariacao::with(['estoques', 'outlets'])->findOrFail($id);
 
-        $estoqueTotal = (int)($variacao->estoque->quantidade ?? 0);
+        $estoqueTotal = (int) $variacao->estoques->sum('quantidade');
         $totalOutros = (int)$variacao->outlets->where('id','!=',$outletId)->sum('quantidade');
         $novaQtd = (int)$request->input('quantidade', 0);
 

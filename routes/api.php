@@ -92,7 +92,7 @@ Route::middleware('auth:sanctum')
 
         // Outlet por variação (plural + padrão)
         Route::prefix('variacoes/{variacao}/outlets')->whereNumber('variacao')->group(function () {
-            Route::get('/', [ProdutoVariacaoOutletController::class, 'buscar']); // index
+            Route::get('/', [ProdutoVariacaoOutletController::class, 'index']);
             Route::post('/', [ProdutoVariacaoOutletController::class, 'store']);
             Route::put('{outlet}', [ProdutoVariacaoOutletController::class, 'update'])->whereNumber('outlet');
             Route::delete('{outlet}', [ProdutoVariacaoOutletController::class, 'destroy'])->whereNumber('outlet');

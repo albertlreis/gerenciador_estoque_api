@@ -25,13 +25,13 @@ return new class extends Migration
     {
         Schema::disableForeignKeyConstraints();
 
-        Schema::table('estoque_movimentacoes', function (Blueprint $table) {
-            $table->dropIndex('ix_em_var_data');
-            $table->dropIndex('ix_em_var_tipo_data');
-            $table->dropIndex('ix_em_dep_orig_data');
-            $table->dropIndex('ix_em_dep_dest_data');
-            $table->dropIndex('ix_em_data_id');
-        });
+//        Schema::table('estoque_movimentacoes', function (Blueprint $table) {
+//            $table->dropIndex('ix_em_var_data');
+//            $table->dropIndex('ix_em_var_tipo_data');
+//            $table->dropIndex('ix_em_dep_orig_data');
+//            $table->dropIndex('ix_em_dep_dest_data');
+//            $table->dropIndex('ix_em_data_id');
+//        });
 
         Schema::enableForeignKeyConstraints();
     }

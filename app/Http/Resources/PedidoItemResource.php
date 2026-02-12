@@ -30,7 +30,11 @@ class PedidoItemResource extends JsonResource
         ];
 
         if ($podeVerCusto) {
-            $precoCusto = (float) ($this->variacao->custo ?? 0);
+            $precoCusto = $this->custo_unitario;
+            if ($precoCusto === null) {
+                $precoCusto = $this->variacao->custo ?? 0;
+            }
+            $precoCusto = (float) $precoCusto;
             $item['preco_custo'] = $precoCusto;
             $item['total_custo'] = round($precoCusto * $quantidade, 2);
         }

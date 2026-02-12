@@ -20,6 +20,7 @@ class PedidoItem extends Model
         'id_variacao',
         'quantidade',
         'preco_unitario',
+        'custo_unitario',
         'subtotal',
         'observacoes',
         'id_deposito'
@@ -27,6 +28,7 @@ class PedidoItem extends Model
 
     protected $casts = [
         'preco_unitario' => 'decimal:2',
+        'custo_unitario' => 'decimal:2',
         'subtotal' => 'decimal:2',
         'entrega_pendente' => 'boolean',
         'data_liberacao_entrega' => 'datetime',

@@ -58,6 +58,8 @@ class ImportacaoPedidoService
             'itens.*.nome'         => 'required|string',
             'itens.*.quantidade'   => 'required|numeric|min:0.01',
             'itens.*.valor'        => 'required|numeric|min:0',
+            'itens.*.preco_unitario' => 'nullable|numeric|min:0',
+            'itens.*.custo_unitario' => 'nullable|numeric|min:0',
             'itens.*.id_categoria' => 'required|integer',
             'itens.*.id_deposito'  => 'nullable|integer|exists:depositos,id',
         ]);
@@ -164,7 +166,8 @@ class ImportacaoPedidoService
                 $item['ref'] = isset($item['ref']) ? trim((string) $item['ref']) : null;
                 $item['id_deposito'] = $item['id_deposito'] ?? null;
                 $quantidade = $this->toDecimal($item['quantidade'] ?? 0);
-                $valorUnit = $this->toDecimal($item['valor'] ?? 0);
+                $valorUnit = $this->toDecimal($item['valor'] ?? ($item['preco_unitario'] ?? 0));
+                $custoUnit = $this->toDecimal($item['custo_unitario'] ?? ($item['preco_unitario'] ?? ($item['preco'] ?? $item['valor'] ?? 0)));
 
                 $variacao = null;
 
@@ -188,8 +191,8 @@ class ImportacaoPedidoService
                         'produto_id' => $produto->id,
                         'referencia' => $item['ref'] ?? null,
                         'nome'       => $item['nome'],
-                        'preco'      => $item['valor'],
-                        'custo'      => $item['valor'],
+                        'preco'      => $valorUnit,
+                        'custo'      => $custoUnit,
                     ]);
 
                     foreach ($item['atributos'] ?? [] as $atrib => $valor) {
@@ -212,6 +215,7 @@ class ImportacaoPedidoService
                     'id_variacao'    => $variacao->id,
                     'quantidade'     => $quantidade,
                     'preco_unitario' => $valorUnit,
+                    'custo_unitario' => $custoUnit,
                     'subtotal'       => (float)$quantidade * (float)$valorUnit,
                     'id_deposito'    => $item['id_deposito'] ?? null,
                     'observacoes'    => $item['atributos']['observacao'] ?? null,
@@ -274,8 +278,36 @@ class ImportacaoPedidoService
 
     private function toDecimal(mixed $v): float
     {
-        if ($v === null || $v === '') return 0.0;
-        $s = str_replace(['.', ','], ['', '.'], (string)$v);
+        if ($v === null || $v === '') {
+            return 0.0;
+        }
+
+        if (is_int($v) || is_float($v)) {
+            return (float) $v;
+        }
+
+        $s = preg_replace('/[^\d,.\-]/', '', trim((string) $v));
+        if ($s === null || $s === '' || $s === '-' || $s === '.' || $s === ',') {
+            return 0.0;
+        }
+
+        $lastComma = strrpos($s, ',');
+        $lastDot = strrpos($s, '.');
+
+        if ($lastComma !== false && $lastDot !== false) {
+            if ($lastComma > $lastDot) {
+                $s = str_replace('.', '', $s);
+                $s = str_replace(',', '.', $s);
+            } else {
+                $s = str_replace(',', '', $s);
+            }
+        } elseif ($lastComma !== false) {
+            $s = str_replace('.', '', $s);
+            $s = str_replace(',', '.', $s);
+        } else {
+            $s = str_replace(',', '', $s);
+        }
+
         return is_numeric($s) ? (float)$s : 0.0;
     }
 

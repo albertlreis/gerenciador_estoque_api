@@ -10,13 +10,13 @@ return new class extends Migration
     {
         Schema::disableForeignKeyConstraints();
 
-        Schema::table('estoque_movimentacoes', function (Blueprint $table) {
-            $table->index(['id_variacao', 'data_movimentacao'], 'ix_em_var_data');
-            $table->index(['id_variacao', 'tipo', 'data_movimentacao'], 'ix_em_var_tipo_data');
-            $table->index(['id_deposito_origem', 'data_movimentacao'], 'ix_em_dep_orig_data');
-            $table->index(['id_deposito_destino', 'data_movimentacao'], 'ix_em_dep_dest_data');
-            $table->index(['data_movimentacao', 'id'], 'ix_em_data_id');
-        });
+//        Schema::table('estoque_movimentacoes', function (Blueprint $table) {
+//            $table->index(['id_variacao', 'data_movimentacao'], 'ix_em_var_data');
+//            $table->index(['id_variacao', 'tipo', 'data_movimentacao'], 'ix_em_var_tipo_data');
+//            $table->index(['id_deposito_origem', 'data_movimentacao'], 'ix_em_dep_orig_data');
+//            $table->index(['id_deposito_destino', 'data_movimentacao'], 'ix_em_dep_dest_data');
+//            $table->index(['data_movimentacao', 'id'], 'ix_em_data_id');
+//        });
 
         Schema::enableForeignKeyConstraints();
     }

@@ -1,13 +1,11 @@
-@php use Carbon\Carbon; @endphp
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
-    <title>Catálogo Outlet</title>
+    <title>Cat?logo Outlet</title>
     <style>
         body { font-family: Arial, sans-serif; font-size: 11px; color: #000; }
         .header { text-align: center; margin-bottom: 12px; }
-        .muted { color: #666; font-size: 10px; }
         table { width: 100%; border-collapse: collapse; }
         th, td { border: 1px solid #ccc; padding: 4px; font-size: 10px; vertical-align: top; }
         th { background: #f3c000; text-transform: uppercase; font-weight: bold; }
@@ -20,20 +18,19 @@
 <body>
 <div class="header">
     <img src="{{ public_path('logo.png') }}" width="120" alt="Logo"/>
-    <h3>CATÁLOGO OUTLET</h3>
-    <div class="muted">Gerado em: {{ $geradoEm ?? Carbon::now('America/Belem')->format('d/m/Y H:i') }}</div>
+    <h3>CAT?LOGO OUTLET</h3>
 </div>
 
 <table>
     <thead>
     <tr>
-        <th style="width: 120px;">Referência</th>
+        <th style="width: 90px;">Img</th>
+        <th style="width: 120px;">Refer?ncia</th>
         <th>Nome</th>
         <th style="width: 140px;">Categoria</th>
-        <th style="width: 90px;">Preço normal</th>
-        <th style="width: 90px;">Desc. máx.</th>
-        <th style="width: 90px;">Preço outlet</th>
-        <th style="width: 80px;">Outlet restante</th>
+        <th style="width: 90px;">Pre?o normal</th>
+        <th style="width: 90px;">Desconto</th>
+        <th style="width: 90px;">Pre?o outlet</th>
     </tr>
     </thead>
     <tbody>
@@ -56,24 +53,29 @@
                 ? $precoMin * (1 - ($descontoMax / 100))
                 : null;
 
-            $outletRestante = $variacoes->sum(function ($v) {
-                return ($v->outlets ?? collect())->sum('quantidade_restante');
-            });
+            $imgRel = optional($produto?->imagemPrincipal)->url ?? '';
+            $imgAbs = ($imgRel && !empty($baseFsDir ?? null))
+                ? ($baseFsDir . DIRECTORY_SEPARATOR . $imgRel)
+                : '';
         @endphp
         <tr>
-            <td class="wrap">{{ $refs ?: '—' }}</td>
-            <td class="wrap">{{ $produto->nome ?? '—' }}</td>
-            <td class="wrap">{{ $produto->categoria?->nome ?? '—' }}</td>
+            <td style="text-align:center;">
+                @if($imgAbs)
+                    <img src="{{ $imgAbs }}" width="80" style="max-height:64px;" alt="Imagem produto"/>
+                @endif
+            </td>
+            <td class="wrap">{{ $refs ?: '?' }}</td>
+            <td class="wrap">{{ $produto->nome ?? '?' }}</td>
+            <td class="wrap">{{ $produto->categoria?->nome ?? '?' }}</td>
             <td class="nowrap">
-                {{ $precoMin !== null ? number_format($precoMin, 2, ',', '.') : '—' }}
+                {{ $precoMin !== null ? number_format($precoMin, 2, ',', '.') : '?' }}
             </td>
             <td class="nowrap">
-                {{ $descontoMax !== null ? number_format($descontoMax, 2, ',', '.') . '%' : '—' }}
+                {{ $descontoMax !== null ? number_format($descontoMax, 2, ',', '.') . '%' : '?' }}
             </td>
             <td class="nowrap">
-                {{ $precoOutlet !== null ? number_format($precoOutlet, 2, ',', '.') : '—' }}
+                {{ $precoOutlet !== null ? number_format($precoOutlet, 2, ',', '.') : '?' }}
             </td>
-            <td class="nowrap">{{ (int) $outletRestante }}</td>
         </tr>
     @endforeach
     </tbody>

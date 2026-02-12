@@ -26,7 +26,8 @@ use App\Http\Requests\{ConfirmarImportacaoRequest,
     UpdateProdutoRequest};
 use App\Http\Resources\ProdutoResource;
 use App\Models\{
-    Produto
+    Produto,
+    ProdutoImagem
 };
 use App\Services\ProdutoService;
 
@@ -81,6 +82,7 @@ class ProdutoController extends Controller
             ->whereHas('variacoes.outlet')
             ->with([
                 'categoria',
+                'imagemPrincipal',
                 'variacoes.outlets.formasPagamento',
             ])
             ->get();
@@ -93,10 +95,11 @@ class ProdutoController extends Controller
 
         if ($format === 'pdf') {
             Pdf::setOptions(['isRemoteEnabled' => true]);
+            $baseFsDir = public_path('storage' . DIRECTORY_SEPARATOR . ProdutoImagem::FOLDER);
 
             $pdf = Pdf::loadView('exports.outlet', [
                 'produtos' => $produtos,
-                'geradoEm' => now('America/Belem')->format('d/m/Y H:i'),
+                'baseFsDir' => $baseFsDir,
             ])->setPaper('a4', 'landscape');
 
             $dateRef = now('America/Belem')->format('Y-m-d');

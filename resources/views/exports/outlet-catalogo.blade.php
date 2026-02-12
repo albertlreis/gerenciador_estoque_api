@@ -6,7 +6,7 @@
     <style>
         body { font-family: "DejaVu Sans", sans-serif; font-size: 11px; color: #000; }
         .header { text-align: center; margin-bottom: 10px; }
-        .grid { width: 100%; border-collapse: collapse; }
+        .grid { width: 100%; border-collapse: collapse; table-layout: fixed; }
         .grid td { width: 50%; vertical-align: top; padding: 6px; }
         .card { border: 1px solid #ddd; border-radius: 6px; padding: 8px; }
         .card-title { font-weight: bold; font-size: 12px; margin: 6px 0 2px; }
@@ -15,7 +15,7 @@
         .badge-discount { display: inline-block; padding: 2px 6px; border-radius: 10px; background: #ffe7b3; font-size: 9px; color: #7a4b00; }
         .img-box { width: 140px; height: 140px; border: 1px solid #ccc; text-align: center; padding: 2px; }
         .img-box img { display: block; margin: 0 auto; width: 140px; max-height: 140px; }
-        .img-placeholder { width: 140px; height: 140px; display: table-cell; vertical-align: middle; text-align: center; color: #888; font-size: 10px; }
+        .img-placeholder { width: 140px; height: 140px; line-height: 140px; text-align: center; color: #888; font-size: 10px; }
         .price-old { color: #888; text-decoration: line-through; font-size: 10px; margin-top: 6px; }
         .price-new { font-size: 14px; font-weight: bold; margin-top: 4px; }
         .page-break { page-break-after: always; }
@@ -30,6 +30,7 @@
 
 @foreach($produtos->chunk(6) as $pagina)
     <table class="grid">
+        <tbody>
         @foreach($pagina->chunk(2) as $linha)
             <tr>
                 @foreach($linha as $produto)
@@ -60,7 +61,7 @@
                         <div class="card">
                             <div class="img-box">
                                 @if($imgAbs)
-                                    <img src="{{ $imgAbs }}" alt="Imagem produto"/>
+                                    <img src="{{ $imgAbs }}" alt="Imagem do produto"/>
                                 @else
                                     <div class="img-placeholder">Sem imagem</div>
                                 @endif
@@ -98,6 +99,7 @@
                 @endif
             </tr>
         @endforeach
+        </tbody>
     </table>
 
     <div class="footer">Sujeito à disponibilidade</div>

@@ -96,11 +96,18 @@ class ProdutoController extends Controller
         if ($format === 'pdf') {
             Pdf::setOptions(['isRemoteEnabled' => true]);
             $baseFsDir = public_path('storage' . DIRECTORY_SEPARATOR . ProdutoImagem::FOLDER);
-
-            $pdf = Pdf::loadView('exports.outlet-catalogo', [
+            $viewData = [
                 'produtos' => $produtos,
                 'baseFsDir' => $baseFsDir,
-            ])->setPaper('a4', 'landscape');
+            ];
+
+            if (app()->environment('local')) {
+                $html = view('exports.outlet-catalogo', $viewData)->render();
+                Storage::disk('local')->put('debug/outlet.html', $html);
+                $pdf = Pdf::loadHTML($html)->setPaper('a4', 'landscape');
+            } else {
+                $pdf = Pdf::loadView('exports.outlet-catalogo', $viewData)->setPaper('a4', 'landscape');
+            }
 
             $dateRef = now('America/Belem')->format('Y-m-d');
             return $pdf->download("catalogo_outlet_{$dateRef}.pdf");

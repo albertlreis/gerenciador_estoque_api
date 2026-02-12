@@ -136,4 +136,27 @@ class EstoqueMovimentacaoIndicadoresTest extends TestCase
         $this->assertSame('2026-02-05', $linha['ultima_venda_em']);
         $this->assertArrayHasKey('dias_sem_venda', $linha);
     }
+
+    public function test_filtro_de_movimentacoes_aceita_busca_com_barra_na_referencia(): void
+    {
+        [$usuario, $variacao, $deposito] = $this->criarCenarioBase();
+        Sanctum::actingAs($usuario);
+
+        $variacao->update(['referencia' => 'VENDA/001']);
+
+        $service = app(EstoqueMovimentacaoService::class);
+        $service->registrarMovimentacaoManual([
+            'id_variacao' => $variacao->id,
+            'id_deposito_destino' => $deposito->id,
+            'tipo' => EstoqueMovimentacaoTipo::ENTRADA->value,
+            'quantidade' => 2,
+            'data_movimentacao' => '2026-02-10 08:00:00',
+        ], $usuario->id);
+
+        $response = $this->getJson('/api/v1/estoque/movimentacoes?produto=VENDA%2F001');
+        $response->assertOk();
+
+        $referencias = collect($response->json('data'))->pluck('produto_referencia')->filter()->all();
+        $this->assertContains('VENDA/001', $referencias);
+    }
 }

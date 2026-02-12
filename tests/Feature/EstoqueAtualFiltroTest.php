@@ -101,4 +101,19 @@ class EstoqueAtualFiltroTest extends TestCase
         $this->assertContains($variacaoSem->id, $ids);
         $this->assertNotContains($variacaoCom->id, $ids);
     }
+
+    public function test_filtro_produto_com_barra_na_referencia_funciona_no_estoque_atual(): void
+    {
+        [$variacaoCom, $variacaoSem] = $this->seedBase();
+
+        $variacaoCom->update(['referencia' => 'MOV/ABC-123']);
+        $variacaoSem->update(['referencia' => 'OUTRO-ITEM']);
+
+        $response = $this->getJson('/api/v1/estoque/atual?produto=MOV%2FABC-123');
+        $response->assertOk();
+
+        $ids = collect($response->json('data'))->pluck('variacao_id')->all();
+        $this->assertContains($variacaoCom->id, $ids);
+        $this->assertNotContains($variacaoSem->id, $ids);
+    }
 }

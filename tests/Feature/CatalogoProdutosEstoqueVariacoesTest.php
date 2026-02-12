@@ -151,4 +151,31 @@ class CatalogoProdutosEstoqueVariacoesTest extends TestCase
         $this->assertSame(1, (int) data_get($produtoAData, 'estoque_resumo.variacoes_sem_estoque'));
         $this->assertSame(1, (int) data_get($produtoAData, 'estoque_resumo.variacoes_com_estoque'));
     }
+
+    public function test_busca_por_referencia_com_barra_e_caracteres_especiais_retorna_produto(): void
+    {
+        $this->autenticar();
+
+        $categoria = Categoria::create(['nome' => 'Categoria Busca']);
+        $produto = Produto::create([
+            'nome' => 'Produto Busca Barra',
+            'descricao' => 'Descricao',
+            'id_categoria' => $categoria->id,
+            'ativo' => true,
+        ]);
+
+        ProdutoVariacao::create([
+            'produto_id' => $produto->id,
+            'referencia' => 'ABC/123_%',
+            'nome' => 'Variacao Busca Barra',
+            'preco' => 100,
+            'custo' => 70,
+        ]);
+
+        $response = $this->getJson('/api/v1/produtos?q=ABC%2F123_%25');
+
+        $response->assertStatus(200);
+        $data = collect($response->json('data'));
+        $this->assertTrue($data->pluck('id')->contains($produto->id));
+    }
 }

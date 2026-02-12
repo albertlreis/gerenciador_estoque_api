@@ -124,16 +124,10 @@ class EstoqueRepository
             });
         }
 
-        if ($filtros->deposito) {
-            if ($filtros->zerados) {
-                $query->havingRaw('(quantidade_estoque IS NULL OR quantidade_estoque = ?)', [0]);
-            } else {
-                $query->havingRaw('quantidade_estoque > ?', [0]);
-            }
-        } else {
-            if ($filtros->zerados) {
-                $query->havingRaw('(quantidade_estoque IS NULL OR quantidade_estoque = ?)', [0]);
-            }
+        if ($filtros->comEstoque) {
+            $query->havingRaw('quantidade_estoque > ?', [0]);
+        } elseif ($filtros->zerados) {
+            $query->havingRaw('(quantidade_estoque IS NULL OR quantidade_estoque = ?)', [0]);
         }
 
         return $query;

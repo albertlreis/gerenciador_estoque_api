@@ -34,8 +34,14 @@ class FiltroEstoqueDTO
     /** Número de registros por página */
     public int $perPage = 10;
 
+    /** Status de estoque (com_estoque | sem_estoque) */
+    public ?string $estoqueStatus = null;
+
     /** Se deve exibir apenas produtos com estoque zerado */
     public bool $zerados = false;
+
+    /** Se deve exibir apenas produtos com estoque positivo */
+    public bool $comEstoque = false;
 
     /** Campo para ordenação */
     public ?string $sortField = null;
@@ -75,12 +81,23 @@ class FiltroEstoqueDTO
         $perPage = (int) ($data['per_page'] ?? 10);
         $this->perPage = max(1, min(200, $perPage));
 
+        // estoque_status (com_estoque | sem_estoque) tem precedência sobre "zerados"
+        $status = isset($data['estoque_status']) ? strtolower(trim((string) $data['estoque_status'])) : null;
+        $this->estoqueStatus = in_array($status, ['com_estoque', 'sem_estoque'], true) ? $status : null;
+
         // zerados (aceita 1/0, "true"/"false", true/false)
-        $this->zerados = filter_var(
+        $zerados = filter_var(
             $data['zerados'] ?? false,
             FILTER_VALIDATE_BOOLEAN,
             FILTER_NULL_ON_FAILURE
         ) ?? false;
+
+        $this->comEstoque = $this->estoqueStatus === 'com_estoque';
+        if ($this->comEstoque) {
+            $this->zerados = false;
+        } else {
+            $this->zerados = $this->estoqueStatus === 'sem_estoque' ? true : $zerados;
+        }
 
         // sort
         $this->sortField = isset($data['sort_field']) ? trim((string) $data['sort_field']) : null;

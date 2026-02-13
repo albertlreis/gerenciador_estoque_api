@@ -87,6 +87,7 @@ class ProdutoController extends Controller
             ->with([
                 'categoria',
                 'imagemPrincipal',
+                'variacoes.atributos',
                 'variacoes.outlets.formasPagamento.formaPagamento',
             ])
             ->get();
@@ -182,6 +183,34 @@ class ProdutoController extends Controller
     ): array {
         $variacoes = $produto->variacoes ?? collect();
         $catalogo = $pricingService->build($variacoes);
+        $atributosAcabamentos = $variacoes
+            ->flatMap(function ($variacao) {
+                if (!$variacao->relationLoaded('atributos')) {
+                    return collect();
+                }
+
+                return $variacao->atributos->map(function ($atributo) {
+                    $nome = trim((string) ($atributo->atributo_label ?? $atributo->atributo ?? ''));
+                    $valor = trim((string) ($atributo->valor ?? ''));
+
+                    if ($nome === '' && $valor === '') {
+                        return null;
+                    }
+
+                    if ($nome === '') {
+                        return $valor;
+                    }
+
+                    if ($valor === '') {
+                        return $nome;
+                    }
+
+                    return "{$nome}: {$valor}";
+                })->filter();
+            })
+            ->unique()
+            ->values()
+            ->all();
 
         $referencias = $variacoes
             ->pluck('referencia')
@@ -200,8 +229,12 @@ class ProdutoController extends Controller
         return [
             'id' => $produto->id,
             'nome' => $produto->nome,
+            'altura' => $produto->altura,
+            'largura' => $produto->largura,
+            'profundidade' => $produto->profundidade,
             'categoria_nome' => $produto->categoria?->nome,
             'referencias' => $referencias,
+            'atributos_acabamentos' => $atributosAcabamentos,
             'imagem_src' => $imagem,
             'preco_venda' => $catalogo['preco_venda'],
             'preco_outlet' => $catalogo['preco_outlet'],

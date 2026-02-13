@@ -8,14 +8,21 @@
         .header { text-align: center; margin-bottom: 10px; }
         .grid { width: 100%; border-collapse: collapse; table-layout: fixed; }
         .grid td { width: 50%; vertical-align: top; padding: 6px; }
-        .card { border: 1px solid #ddd; border-radius: 6px; padding: 8px; min-height: 270px; }
-        .card-title { font-weight: bold; font-size: 12px; margin: 6px 0 2px; }
+        .card { border: 1px solid #ddd; border-radius: 6px; padding: 8px; min-height: 220px; }
+        .card-layout { width: 100%; border-collapse: collapse; table-layout: fixed; }
+        .card-layout td { vertical-align: top; }
+        .card-image-col { width: 155px; padding-right: 8px; }
+        .card-info-col { padding-left: 4px; }
+        .card-title { font-weight: bold; font-size: 12px; margin: 0 0 4px; line-height: 1.25; }
         .card-ref { color: #666; font-size: 10px; margin-bottom: 6px; }
         .badge { display: inline-block; padding: 2px 6px; border-radius: 10px; background: #f3c000; font-size: 9px; font-weight: bold; }
         .badge-discount { display: inline-block; padding: 2px 6px; border-radius: 10px; background: #ffe7b3; font-size: 9px; color: #7a4b00; }
         .img-box { width: 140px; height: 140px; border: 1px solid #ccc; text-align: center; padding: 2px; }
         .img-box img { display: block; margin: 0 auto; width: 140px; max-height: 140px; }
         .img-placeholder { width: 140px; height: 140px; line-height: 140px; text-align: center; color: #888; font-size: 10px; }
+        .attrs-title { margin-top: 6px; font-size: 10px; font-weight: bold; color: #222; }
+        .attrs-list { margin: 3px 0 0 0; padding-left: 14px; font-size: 9px; color: #333; }
+        .attrs-list li { margin: 0 0 2px; }
         .price-old { color: #888; text-decoration: line-through; font-size: 10px; margin-top: 6px; }
         .price-new { font-size: 14px; font-weight: bold; margin-top: 4px; }
         .payment { margin-top: 6px; font-size: 10px; color: #333; }
@@ -41,52 +48,83 @@
                         $precoFinal = isset($item['preco_final_venda']) ? (float) $item['preco_final_venda'] : null;
                         $desconto = isset($item['percentual_desconto']) ? (float) $item['percentual_desconto'] : 0;
                         $temDesconto = $desconto > 0 && $precoVenda !== null;
+                        $altura = $item['altura'] ?? null;
+                        $largura = $item['largura'] ?? null;
+                        $profundidade = $item['profundidade'] ?? null;
+                        $temMedidas = $altura !== null || $largura !== null || $profundidade !== null;
+                        $medidas = $temMedidas
+                            ? 'A ' . ($altura !== null && $altura !== '' ? $altura : '-') .
+                                ' x L ' . ($largura !== null && $largura !== '' ? $largura : '-') .
+                                ' x P ' . ($profundidade !== null && $profundidade !== '' ? $profundidade : '-') . ' cm'
+                            : null;
+                        $atributos = collect($item['atributos_acabamentos'] ?? [])->filter()->values();
                     @endphp
                     <td>
                         <div class="card">
-                            <div class="img-box">
-                                @if(!empty($item['imagem_src']))
-                                    <img src="{{ $item['imagem_src'] }}" alt="Imagem do produto"/>
-                                @else
-                                    <div class="img-placeholder">Sem imagem</div>
-                                @endif
-                            </div>
+                            <table class="card-layout">
+                                <tbody>
+                                <tr>
+                                    <td class="card-image-col">
+                                        <div class="img-box">
+                                            @if(!empty($item['imagem_src']))
+                                                <img src="{{ $item['imagem_src'] }}" alt="Imagem do produto"/>
+                                            @else
+                                                <div class="img-placeholder">Sem imagem</div>
+                                            @endif
+                                        </div>
+                                    </td>
+                                    <td class="card-info-col">
+                                        <div class="card-title">
+                                            {{ $item['nome'] ?? '-' }}@if($medidas) - {{ $medidas }}@endif
+                                        </div>
+                                        <div class="card-ref">Ref.: {{ $item['referencias'] ?: '-' }}</div>
+                                        <div class="badge">{{ $item['categoria_nome'] ?? 'Sem categoria' }}</div>
 
-                            <div class="card-title">{{ $item['nome'] ?? '-' }}</div>
-                            <div class="card-ref">Ref.: {{ $item['referencias'] ?: '-' }}</div>
+                                        @if($temDesconto)
+                                            <div style="margin-top: 4px;">
+                                                <span class="badge-discount">Desconto: {{ number_format($desconto, 2, ',', '.') }}%</span>
+                                            </div>
+                                        @endif
 
-                            <div class="badge">{{ $item['categoria_nome'] ?? 'Sem categoria' }}</div>
+                                        @if($precoVenda !== null && $temDesconto)
+                                            <div class="price-old">
+                                                R$ {{ number_format($precoVenda, 2, ',', '.') }}
+                                            </div>
+                                        @endif
 
-                            @if($temDesconto)
-                                <div style="margin-top: 4px;">
-                                    <span class="badge-discount">Desconto: {{ number_format($desconto, 2, ',', '.') }}%</span>
-                                </div>
-                            @endif
+                                        <div class="price-new">
+                                            @if($precoFinal !== null)
+                                                R$ {{ number_format($precoFinal, 2, ',', '.') }}
+                                            @elseif($precoVenda !== null)
+                                                R$ {{ number_format($precoVenda, 2, ',', '.') }}
+                                            @else
+                                                -
+                                            @endif
+                                        </div>
 
-                            @if($precoVenda !== null && $temDesconto)
-                                <div class="price-old">
-                                    R$ {{ number_format($precoVenda, 2, ',', '.') }}
-                                </div>
-                            @endif
+                                        @if(!empty($item['pagamento_label']))
+                                            <div class="payment">
+                                                Condicao: {{ $item['pagamento_label'] }}
+                                                @if(!empty($item['pagamento_detalhes']))
+                                                    <small>{{ $item['pagamento_detalhes'] }}</small>
+                                                @endif
+                                            </div>
+                                        @endif
 
-                            <div class="price-new">
-                                @if($precoFinal !== null)
-                                    R$ {{ number_format($precoFinal, 2, ',', '.') }}
-                                @elseif($precoVenda !== null)
-                                    R$ {{ number_format($precoVenda, 2, ',', '.') }}
-                                @else
-                                    -
-                                @endif
-                            </div>
-
-                            @if(!empty($item['pagamento_label']))
-                                <div class="payment">
-                                    Condicao: {{ $item['pagamento_label'] }}
-                                    @if(!empty($item['pagamento_detalhes']))
-                                        <small>{{ $item['pagamento_detalhes'] }}</small>
-                                    @endif
-                                </div>
-                            @endif
+                                        <div class="attrs-title">Atributos / Acabamentos</div>
+                                        @if($atributos->isNotEmpty())
+                                            <ul class="attrs-list">
+                                                @foreach($atributos->take(6) as $atributoLinha)
+                                                    <li>{{ $atributoLinha }}</li>
+                                                @endforeach
+                                            </ul>
+                                        @else
+                                            <div class="card-ref">Nao informado</div>
+                                        @endif
+                                    </td>
+                                </tr>
+                                </tbody>
+                            </table>
                         </div>
                     </td>
                 @endforeach

@@ -45,6 +45,7 @@ class ImportacaoPedidoService
         $validator = Validator::make($request->all(), [
             'pedido.tipo'          => 'required|in:venda,reposicao',
             'importacao_id'        => 'nullable|integer|exists:pedido_importacoes,id',
+            'tipo_importacao'      => 'nullable|in:PRODUTOS_PDF_SIERRA,PRODUTOS_PDF_AVANTI,PRODUTOS_PDF_QUAKER,ADORNOS_XML_NFE',
 
             'cliente.id'           => 'nullable|numeric|min:1',
 

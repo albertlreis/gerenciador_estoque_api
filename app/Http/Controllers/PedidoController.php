@@ -141,16 +141,51 @@ class PedidoController extends Controller
      */
     public function importar(Request $request): JsonResponse
     {
+        $tiposPermitidos = [
+            'PRODUTOS_PDF_SIERRA',
+            'PRODUTOS_PDF_AVANTI',
+            'PRODUTOS_PDF_QUAKER',
+            'ADORNOS_XML_NFE',
+        ];
+
+        $tipoImportacao = strtoupper((string) $request->input('tipo_importacao', 'PRODUTOS_PDF_SIERRA'));
+
+        if (!in_array($tipoImportacao, $tiposPermitidos, true)) {
+            return response()->json([
+                'sucesso' => false,
+                'mensagem' => 'Tipo de importação inválido.',
+                'errors' => [
+                    'tipo_importacao' => [
+                        'Informe um tipo válido: PRODUTOS_PDF_SIERRA, PRODUTOS_PDF_AVANTI, PRODUTOS_PDF_QUAKER ou ADORNOS_XML_NFE.',
+                    ],
+                ],
+            ], 422);
+        }
+
+        $isXml = $tipoImportacao === 'ADORNOS_XML_NFE';
+
         $request->validate([
-            'arquivo' => 'required|file|mimes:pdf|max:10240'
+            'arquivo' => [
+                'required',
+                'file',
+                $isXml ? 'mimes:xml' : 'mimes:pdf',
+                'max:10240',
+            ],
+            'tipo_importacao' => 'nullable|string',
+        ], [
+            'arquivo.mimes' => $isXml
+                ? 'Para ADORNOS_XML_NFE, envie um arquivo XML válido.'
+                : 'Para importação de produtos, envie um arquivo PDF válido.',
         ]);
 
         try {
             $arquivo = $request->file('arquivo');
-            $hash = hash_file('sha256', $arquivo->getRealPath());
+            $hashArquivo = hash_file('sha256', $arquivo->getRealPath());
+            $hash = hash('sha256', $hashArquivo . '|' . $tipoImportacao);
 
-            Log::info('Importação PDF - início', [
+            Log::info('Importação de pedido - início', [
                 'usuario_id' => auth()->id(),
+                'tipo_importacao' => $tipoImportacao,
                 'arquivo_nome' => $arquivo->getClientOriginalName(),
                 'arquivo_tamanho' => $arquivo->getSize(),
                 'arquivo_hash' => $hash,
@@ -163,59 +198,58 @@ class PedidoController extends Controller
             if ($importExistente && $importExistente->status === 'confirmado') {
                 return response()->json([
                     'sucesso' => false,
-                    'mensagem' => 'Este arquivo jÃ¡ foi importado anteriormente.',
+                    'mensagem' => 'Este arquivo já foi importado anteriormente para este tipo de importação.',
                     'pedido_id' => $importExistente->pedido_id,
                 ], 409);
             }
 
             if ($importExistente && $importExistente->status === 'extraido' && $importExistente->dados_json) {
-                Log::info('Importa??o PDF - preview reutilizado', [
+                Log::info('Importação de pedido - preview reutilizado', [
                     'usuario_id' => auth()->id(),
                     'importacao_id' => $importExistente->id,
+                    'tipo_importacao' => $tipoImportacao,
                 ]);
 
                 return response()->json([
                     'sucesso' => true,
-                    'mensagem' => 'PDF jÃ¡ processado. Usando dados existentes.',
+                    'mensagem' => 'Arquivo já processado. Usando dados existentes.',
                     'importacao_id' => $importExistente->id,
                     'dados' => $importExistente->dados_json,
                 ]);
             }
 
-            // 1) Extrai via Python
-            $dados = $this->service->processar($arquivo);
+            $dados = $this->service->processar($arquivo, $tipoImportacao);
 
             $pedido = $dados['pedido'] ?? [];
-            $itens  = $dados['itens'] ?? [];
+            $itens = $dados['itens'] ?? [];
             $totais = $dados['totais'] ?? [];
 
-            // 2) Mescla itens com banco
             $itens = app(ImportacaoPedidoService::class)
                 ->mesclarItensComVariacoes($itens);
 
-            // 3) Normalização do cliente
             $cliente = [
-                "nome" => $pedido["cliente"] ?? "",
-                "documento" => "",
-                "email" => "",
-                "telefone" => "",
-                "endereco" => "",
+                'nome' => $pedido['cliente'] ?? '',
+                'documento' => '',
+                'email' => '',
+                'telefone' => '',
+                'endereco' => '',
             ];
 
-            // 4) Normalização do pedido
             $pedidoFormatado = [
-                "numero_externo" => $pedido["numero_pedido"] ?? "",
-                "data_pedido"    => $pedido["data_pedido"] ?? null,
-                "data_inclusao"  => $pedido["data_inclusao"] ?? null,
-                "data_entrega"   => $pedido["data_entrega"] ?? null,
-                "total"          => floatval(str_replace(",", ".", str_replace(".", "", $totais["total_liquido"] ?? "0"))),
-                "observacoes"    => "",
+                'numero_externo' => $pedido['numero_pedido'] ?? '',
+                'data_pedido' => $pedido['data_pedido'] ?? null,
+                'data_inclusao' => $pedido['data_inclusao'] ?? null,
+                'data_entrega' => $pedido['data_entrega'] ?? null,
+                'total' => floatval(str_replace(',', '.', str_replace('.', '', $totais['total_liquido'] ?? '0'))),
+                'observacoes' => $pedido['observacoes'] ?? '',
             ];
 
             $payload = [
-                "cliente" => $cliente,
-                "pedido"  => $pedidoFormatado,
-                "itens"   => $itens
+                'tipo_importacao' => $tipoImportacao,
+                'cliente' => $cliente,
+                'pedido' => $pedidoFormatado,
+                'itens' => $itens,
+                'totais' => $totais,
             ];
 
             $importacao = PedidoImportacao::updateOrCreate(
@@ -230,22 +264,25 @@ class PedidoController extends Controller
                 ]
             );
 
-            Log::info('Importa??o PDF - extra??o conclu?da', [
+            Log::info('Importação de pedido - extração concluída', [
                 'usuario_id' => auth()->id(),
                 'importacao_id' => $importacao->id,
+                'tipo_importacao' => $tipoImportacao,
                 'itens_total' => count($itens),
                 'numero_externo' => $pedidoFormatado['numero_externo'] ?? null,
             ]);
 
             return response()->json([
-                "sucesso" => true,
-                "mensagem" => "PDF processado com sucesso.",
-                "importacao_id" => $importacao->id,
-                "dados" => $payload
+                'sucesso' => true,
+                'mensagem' => 'Arquivo processado com sucesso.',
+                'importacao_id' => $importacao->id,
+                'dados' => $payload,
             ]);
-
         } catch (Exception $e) {
-            $hashErro = $hash ?? hash('sha256', $request->file('arquivo')?->getClientOriginalName() ?? uniqid());
+            $hashErro = isset($hash)
+                ? $hash
+                : hash('sha256', ($request->file('arquivo')?->getClientOriginalName() ?? uniqid()) . '|' . $tipoImportacao);
+
             PedidoImportacao::updateOrCreate(
                 ['arquivo_hash' => $hashErro],
                 [
@@ -256,24 +293,23 @@ class PedidoController extends Controller
                 ]
             );
 
-            Log::error('Importa??o PDF - erro ao processar', [
+            Log::error('Importação de pedido - erro ao processar', [
                 'usuario_id' => auth()->id(),
+                'tipo_importacao' => $tipoImportacao,
                 'arquivo_hash' => $hashErro,
                 'mensagem' => $e->getMessage(),
             ]);
 
             return response()->json([
-                "sucesso" => false,
-                "mensagem" => "Erro ao processar PDF.",
-                "erro" => $e->getMessage()
+                'sucesso' => false,
+                'mensagem' => 'Erro ao processar arquivo.',
+                'erro' => $e->getMessage(),
             ], 500);
         }
     }
 
     /**
      * Gera PDF de roteiro do pedido.
-     * - Se houver consignações: usa o template existente (roteiro-consignacao).
-     * - Caso contrário: usa template novo (roteiro-pedido).
      */
     public function roteiroPdf(int $pedidoId): Response
     {

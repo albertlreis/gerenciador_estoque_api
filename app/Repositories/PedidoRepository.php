@@ -22,7 +22,7 @@ class PedidoRepository
     {
         $query = Pedido::with(['cliente', 'parceiro', 'usuario', 'statusAtual', 'historicoStatus', 'devolucoes:id,pedido_id',]);
 
-        if (!AuthHelper::hasPermissao('pedidos.visualizar.todos')) {
+        if (!AuthHelper::podeVisualizarPedidosDeTodos()) {
             $query->where('id_usuario', auth()->id());
         }
 

@@ -25,7 +25,7 @@ class CarrinhoItemController extends Controller
     {
         $query = Carrinho::where('id', $request->id_carrinho);
 
-        if (!AuthHelper::hasPermissao('carrinhos.visualizar.todos')) {
+        if (!AuthHelper::podeVisualizarCarrinhosDeTodos()) {
             $query->where('id_usuario', Auth::id());
         }
 
@@ -56,7 +56,7 @@ class CarrinhoItemController extends Controller
     public function destroy(int $id): JsonResponse
     {
         $item = CarrinhoItem::whereHas('carrinho', function ($q) {
-            if (!AuthHelper::hasPermissao('carrinhos.visualizar.todos')) {
+            if (!AuthHelper::podeVisualizarCarrinhosDeTodos()) {
                 $q->where('id_usuario', Auth::id());
             }
         })->findOrFail($id);
@@ -76,7 +76,7 @@ class CarrinhoItemController extends Controller
     {
         $query = Carrinho::where('id', $idCarrinho);
 
-        if (!AuthHelper::hasPermissao('carrinhos.visualizar.todos')) {
+        if (!AuthHelper::podeVisualizarCarrinhosDeTodos()) {
             $query->where('id_usuario', Auth::id());
         }
 
@@ -102,7 +102,7 @@ class CarrinhoItemController extends Controller
 
         $item = CarrinhoItem::where('id', $request->id_carrinho_item)
             ->whereHas('carrinho', function ($q) {
-                if (!AuthHelper::hasPermissao('carrinhos.visualizar.todos')) {
+                if (!AuthHelper::podeVisualizarCarrinhosDeTodos()) {
                     $q->where('id_usuario', Auth::id());
                 }
             })

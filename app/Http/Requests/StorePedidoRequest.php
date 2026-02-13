@@ -30,7 +30,7 @@ class StorePedidoRequest extends FormRequest
             'registrar_movimentacao' => 'sometimes|boolean',
         ];
 
-        if (AuthHelper::hasPermissao('carrinhos.selecionar.vendedor')) {
+        if (AuthHelper::podeSelecionarVendedorPedido()) {
             $rules['id_usuario'] = 'nullable|exists:acesso_usuarios,id';
         }
 

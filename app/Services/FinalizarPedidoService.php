@@ -12,6 +12,7 @@ use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 use RuntimeException;
 use Throwable;
 
@@ -67,12 +68,13 @@ final class FinalizarPedidoService
     public function executar(StorePedidoRequest $request): JsonResponse
     {
         $usuarioId      = auth()->id();
-        $idUsuarioFinal = $request->input('id_usuario');
+        $idUsuarioInput = $request->input('id_usuario');
+        $idUsuarioFinal = (int) $usuarioId;
 
         $query = Carrinho::with(['itens.variacao.produto'])
             ->where('id', $request->id_carrinho);
 
-        if (!AuthHelper::hasPermissao('carrinhos.visualizar.todos')) {
+        if (!AuthHelper::podeVisualizarCarrinhosDeTodos()) {
             $query->where('id_usuario', $usuarioId);
         }
 
@@ -81,8 +83,15 @@ final class FinalizarPedidoService
             return response()->json(['message' => 'Carrinho está vazio.'], 422);
         }
 
-        // Usuário final (vendedor)
-        $idUsuarioFinal = $idUsuarioFinal ?: $carrinho->id_usuario;
+        if ($idUsuarioInput !== null) {
+            if (!AuthHelper::podeSelecionarVendedorPedido()) {
+                throw ValidationException::withMessages([
+                    'id_usuario' => ['Sem permissao para selecionar vendedor.'],
+                ]);
+            }
+
+            $idUsuarioFinal = (int) $idUsuarioInput;
+        }
 
         // 1) Mapa bruto vindo da UI
         $depositosMapBruto = collect($request->input('depositos_por_item', []))

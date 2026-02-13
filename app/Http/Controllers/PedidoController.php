@@ -21,6 +21,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 /**
@@ -141,6 +142,9 @@ class PedidoController extends Controller
      */
     public function importar(Request $request): JsonResponse
     {
+        $requestId = (string) ($request->header('X-Request-Id') ?: Str::uuid());
+        $inicioImportacao = microtime(true);
+
         $tiposPermitidos = [
             'PRODUTOS_PDF_SIERRA',
             'PRODUTOS_PDF_AVANTI',
@@ -184,6 +188,8 @@ class PedidoController extends Controller
             $hash = hash('sha256', $hashArquivo . '|' . $tipoImportacao);
 
             Log::info('Importação de pedido - início', [
+                'request_id' => $requestId,
+                'etapa' => 'upload',
                 'usuario_id' => auth()->id(),
                 'tipo_importacao' => $tipoImportacao,
                 'arquivo_nome' => $arquivo->getClientOriginalName(),
@@ -205,9 +211,12 @@ class PedidoController extends Controller
 
             if ($importExistente && $importExistente->status === 'extraido' && $importExistente->dados_json) {
                 Log::info('Importação de pedido - preview reutilizado', [
+                    'request_id' => $requestId,
+                    'etapa' => 'staging',
                     'usuario_id' => auth()->id(),
                     'importacao_id' => $importExistente->id,
                     'tipo_importacao' => $tipoImportacao,
+                    'tempo_ms' => (int) ((microtime(true) - $inicioImportacao) * 1000),
                 ]);
 
                 return response()->json([
@@ -218,7 +227,7 @@ class PedidoController extends Controller
                 ]);
             }
 
-            $dados = $this->service->processar($arquivo, $tipoImportacao);
+            $dados = $this->service->processar($arquivo, $tipoImportacao, $requestId);
 
             $pedido = $dados['pedido'] ?? [];
             $itens = $dados['itens'] ?? [];
@@ -265,11 +274,14 @@ class PedidoController extends Controller
             );
 
             Log::info('Importação de pedido - extração concluída', [
+                'request_id' => $requestId,
+                'etapa' => 'staging',
                 'usuario_id' => auth()->id(),
                 'importacao_id' => $importacao->id,
                 'tipo_importacao' => $tipoImportacao,
                 'itens_total' => count($itens),
                 'numero_externo' => $pedidoFormatado['numero_externo'] ?? null,
+                'tempo_ms' => (int) ((microtime(true) - $inicioImportacao) * 1000),
             ]);
 
             return response()->json([
@@ -294,10 +306,13 @@ class PedidoController extends Controller
             );
 
             Log::error('Importação de pedido - erro ao processar', [
+                'request_id' => $requestId,
+                'etapa' => 'importar',
                 'usuario_id' => auth()->id(),
                 'tipo_importacao' => $tipoImportacao,
                 'arquivo_hash' => $hashErro,
                 'mensagem' => $e->getMessage(),
+                'tempo_ms' => (int) ((microtime(true) - $inicioImportacao) * 1000),
             ]);
 
             return response()->json([

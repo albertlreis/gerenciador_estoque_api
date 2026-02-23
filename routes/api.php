@@ -3,6 +3,7 @@
 use Illuminate\Support\Facades\Route;
 
 use App\Http\Controllers\{AreaEstoqueController,
+    AvisoController,
     AuditoriaController,
     CarrinhoController,
     CarrinhoItemController,
@@ -80,6 +81,18 @@ Route::middleware('auth:sanctum')
             Route::get('eventos', [AuditoriaController::class, 'index']);
             Route::get('eventos/{id}', [AuditoriaController::class, 'show'])->whereNumber('id');
             Route::get('entidade', [AuditoriaController::class, 'entidade']);
+        });
+
+        /* ============================================================
+         * MURAL DE AVISOS
+         * ============================================================ */
+        Route::prefix('avisos')->group(function () {
+            Route::get('/', [AvisoController::class, 'index']);
+            Route::post('/', [AvisoController::class, 'store']);
+            Route::get('{id}', [AvisoController::class, 'show'])->whereNumber('id');
+            Route::patch('{id}', [AvisoController::class, 'update'])->whereNumber('id');
+            Route::delete('{id}', [AvisoController::class, 'destroy'])->whereNumber('id');
+            Route::post('{id}/ler', [AvisoController::class, 'ler'])->whereNumber('id');
         });
 
         /* ============================================================

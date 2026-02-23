@@ -25,6 +25,7 @@ class ProdutoVariacao extends Model
         'estoque_total',
         'estoque_outlet_total',
         'outlet_restante_total',
+        'imagem_url',
     ];
 
     protected $casts = [
@@ -40,6 +41,11 @@ class ProdutoVariacao extends Model
     public function atributos(): HasMany
     {
         return $this->hasMany(ProdutoVariacaoAtributo::class, 'id_variacao');
+    }
+
+    public function imagem(): HasOne
+    {
+        return $this->hasOne(ProdutoVariacaoImagem::class, 'id_variacao');
     }
 
     /**
@@ -136,6 +142,11 @@ class ProdutoVariacao extends Model
         }
 
         return $base;
+    }
+
+    public function getImagemUrlAttribute(): ?string
+    {
+        return $this->imagem?->url;
     }
 
     public function outlets(): HasMany

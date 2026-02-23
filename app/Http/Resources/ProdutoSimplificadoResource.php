@@ -18,6 +18,7 @@ class ProdutoSimplificadoResource extends JsonResource
                 'id'            => $v->id,
                 'referencia'    => $v->referencia,
                 'codigo_barras' => $v->codigo_barras,
+                'imagem_url'    => $v->imagem_url,
                 'atributos'     => $v->relationLoaded('atributos')
                     ? $v->atributos->map(fn($a) => ['atributo' => $a->atributo, 'valor' => $a->valor])
                     : [],

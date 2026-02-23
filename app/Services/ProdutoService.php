@@ -186,6 +186,7 @@ class ProdutoService
                 // ✅ evita N+1 e mantém coerência do catálogo
                 $q->with([
                     'atributos',
+                    'imagem',
                     'outlets', // se você precisa do outlet no catálogo
                     'outlets.motivo',
                     'outlets.formasPagamento.formaPagamento',
@@ -304,6 +305,7 @@ class ProdutoService
             'variacoes' => function ($q) use ($depositoId) {
                 $q->with([
                     'atributos',
+                    'imagem',
                     'outlets',
                     'outlets.motivo',
                     'outlets.formasPagamento.formaPagamento',

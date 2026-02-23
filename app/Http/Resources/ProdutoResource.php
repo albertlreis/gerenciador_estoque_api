@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources;
 
+use App\Models\ProdutoImagem;
 use App\Services\OutletCatalogoPricingService;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Support\Facades\Storage;

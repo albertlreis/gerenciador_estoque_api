@@ -50,6 +50,7 @@ class ProdutoVariacaoResource extends JsonResource
             'nome_completo' => $this->nome_completo,
             'referencia' => $this->referencia,
             'codigo_barras' => $this->codigo_barras,
+            'imagem_url' => $this->imagem_url,
 
             'preco' => $preco,
             'preco_promocional' => $temDesconto ? (float) $precoPromocional : null,

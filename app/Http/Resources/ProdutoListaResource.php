@@ -35,6 +35,7 @@ class ProdutoListaResource extends JsonResource
                         'preco' => (float) ($v->preco ?? 0),
                         'estoque_total' => (int) ($v->estoque_total ?? 0),
                         'outlet_restante_total' => (int) ($v->outlet_restante_total ?? 0),
+                        'imagem_url' => $v->imagem_url,
                     ];
                 })->values();
             }),

@@ -22,6 +22,7 @@ class ProdutoMiniResource extends JsonResource
                     'referencia'    => $v->referencia,
                     'codigo_barras' => $v->codigo_barras,
                     'nome_completo' => $v->nome_completo,
+                    'imagem_url'    => $v->imagem_url,
                 ]);
             }),
         ];

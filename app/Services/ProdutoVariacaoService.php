@@ -21,6 +21,7 @@ class ProdutoVariacaoService
         $variacao = ProdutoVariacao::with([
             'produto',
             'atributos',
+            'imagem',
             'estoque',
             'outlets',
             'outlets.motivo',
@@ -126,7 +127,7 @@ class ProdutoVariacaoService
             $this->sincronizarAtributos($variacao, $data['atributos'] ?? []);
         }
 
-        return $variacao->refresh()->load('atributos');
+        return $variacao->refresh()->load('atributos', 'imagem');
     }
 
     /**

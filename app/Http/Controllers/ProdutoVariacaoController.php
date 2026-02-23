@@ -28,6 +28,7 @@ class ProdutoVariacaoController extends Controller
         $variacoes = $produto->variacoes()
             ->with([
                 'atributos',
+                'imagem',
                 'produto',
                 'estoques',
                 'outlets.motivo',
@@ -146,7 +147,7 @@ class ProdutoVariacaoController extends Controller
     public function buscar(Request $request): JsonResponse
     {
         $query = ProdutoVariacao::query()
-            ->with(['produto', 'atributos'])
+            ->with(['produto', 'atributos', 'imagem'])
             ->orderBy('id', 'desc');
 
         if ($request->filled('search')) {
@@ -172,6 +173,7 @@ class ProdutoVariacaoController extends Controller
                     'produto_id' => $v->produto_id,
                     'produto_nome' => $v->produto?->nome,
                     'preco' => (float) ($v->preco ?? 0),
+                    'imagem_url' => $v->imagem?->url,
                 ];
             })
         );

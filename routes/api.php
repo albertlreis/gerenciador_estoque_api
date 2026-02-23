@@ -43,6 +43,7 @@ use App\Http\Controllers\{AreaEstoqueController,
     ProdutoController,
     ProdutoImagemController,
     ProdutoVariacaoController,
+    ProdutoVariacaoImagemController,
     ProdutoVariacaoOutletController,
     ProdutoAtributoController,
     CommsProxyController,
@@ -83,6 +84,13 @@ Route::middleware('auth:sanctum')
 
         // Variações (busca/listagem global)
         Route::get('variacoes', [ProdutoVariacaoController::class, 'buscar']);
+
+        Route::prefix('variacoes/{variacao}')->whereNumber('variacao')->group(function () {
+            Route::get('imagem', [ProdutoVariacaoImagemController::class, 'show']);
+            Route::post('imagem', [ProdutoVariacaoImagemController::class, 'store']);
+            Route::put('imagem', [ProdutoVariacaoImagemController::class, 'update']);
+            Route::delete('imagem', [ProdutoVariacaoImagemController::class, 'destroy']);
+        });
 
         // Catálogo Outlet
         Route::prefix('outlet')->group(function () {

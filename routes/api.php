@@ -46,6 +46,7 @@ use App\Http\Controllers\{AreaEstoqueController,
     ProdutoController,
     ProdutoImagemController,
     ProdutoVariacaoController,
+    ProdutoVariacaoPatchController,
     ProdutoVariacaoImagemController,
     ProdutoVariacaoOutletController,
     ProdutoAtributoController,
@@ -117,6 +118,9 @@ Route::middleware('auth:sanctum')
             Route::put('imagem', [ProdutoVariacaoImagemController::class, 'update']);
             Route::delete('imagem', [ProdutoVariacaoImagemController::class, 'destroy']);
         });
+
+        Route::patch('produto-variacoes/{id}', [ProdutoVariacaoPatchController::class, 'update'])
+            ->whereNumber('id');
 
         // Catálogo Outlet
         Route::prefix('outlet')->group(function () {

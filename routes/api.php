@@ -3,6 +3,7 @@
 use Illuminate\Support\Facades\Route;
 
 use App\Http\Controllers\{AreaEstoqueController,
+    AuditoriaController,
     CarrinhoController,
     CarrinhoItemController,
     CategoriaController,
@@ -71,6 +72,15 @@ Route::middleware('auth:sanctum')
         Route::put('configuracoes/{chave}', [ConfiguracaoController::class, 'atualizar']);
 
         Route::get('dashboard/resumo', [DashboardController::class, 'resumo']);
+
+        /* ============================================================
+         * AUDITORIA
+         * ============================================================ */
+        Route::prefix('auditoria')->group(function () {
+            Route::get('eventos', [AuditoriaController::class, 'index']);
+            Route::get('eventos/{id}', [AuditoriaController::class, 'show'])->whereNumber('id');
+            Route::get('entidade', [AuditoriaController::class, 'entidade']);
+        });
 
         /* ============================================================
          * CATÁLOGO (CATEGORIAS / ATRIBUTOS / PRODUTOS / VARIAÇÕES / OUTLET)

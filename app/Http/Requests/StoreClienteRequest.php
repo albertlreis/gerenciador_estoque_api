@@ -22,6 +22,7 @@ class StoreClienteRequest extends FormRequest
             'email' => ['nullable', 'email', 'max:255'],
             'telefone' => ['nullable', 'string', 'max:30'],
             'whatsapp' => ['nullable', 'string', 'max:30'],
+            'data_nascimento' => ['nullable', 'date'],
 
             'enderecos' => ['nullable', 'array', 'min:1'],
             'enderecos.*.cep' => ['nullable', 'string', 'max:10'],

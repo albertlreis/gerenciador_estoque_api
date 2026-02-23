@@ -3,6 +3,7 @@
 use Illuminate\Support\Facades\Route;
 
 use App\Http\Controllers\{AreaEstoqueController,
+    AniversarioController,
     AvisoController,
     AuditoriaController,
     CarrinhoController,
@@ -94,6 +95,8 @@ Route::middleware('auth:sanctum')
             Route::delete('{id}', [AvisoController::class, 'destroy'])->whereNumber('id');
             Route::post('{id}/ler', [AvisoController::class, 'ler'])->whereNumber('id');
         });
+
+        Route::get('aniversarios', [AniversarioController::class, 'index']);
 
         /* ============================================================
          * CATÁLOGO (CATEGORIAS / ATRIBUTOS / PRODUTOS / VARIAÇÕES / OUTLET)

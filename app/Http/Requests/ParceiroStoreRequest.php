@@ -14,6 +14,7 @@ class ParceiroStoreRequest extends FormRequest
             'nome'       => ['required', 'string', 'max:255'],
             'tipo'       => ['required', 'string', 'max:50'],
             'documento'  => ['nullable', 'string', 'max:50'], // pode ser CPF/CNPJ ou vazio
+            'data_nascimento' => ['nullable', 'date'],
             'email'      => ['nullable', 'email', 'max:100'],
             'telefone'   => ['nullable', 'string', 'max:50'],
             'endereco'   => ['nullable', 'string'],

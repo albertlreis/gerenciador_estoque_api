@@ -14,6 +14,7 @@ class ParceiroUpdateRequest extends FormRequest
             'nome'       => ['sometimes', 'required', 'string', 'max:255'],
             'tipo'       => ['sometimes', 'required', 'string', 'max:50'],
             'documento'  => ['sometimes', 'nullable', 'string', 'max:50'],
+            'data_nascimento' => ['sometimes', 'nullable', 'date'],
             'email'      => ['sometimes', 'nullable', 'email', 'max:100'],
             'telefone'   => ['sometimes', 'nullable', 'string', 'max:50'],
             'endereco'   => ['sometimes', 'nullable', 'string'],

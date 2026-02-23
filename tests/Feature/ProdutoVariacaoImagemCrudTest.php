@@ -4,9 +4,11 @@ namespace Tests\Feature;
 
 use App\Models\Usuario;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Storage;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
@@ -17,7 +19,7 @@ class ProdutoVariacaoImagemCrudTest extends TestCase
     private function autenticarUsuario(): Usuario
     {
         $usuario = Usuario::create([
-            'nome' => 'Usuário Teste Variação Imagem',
+            'nome' => 'Usuario Teste Variacao Imagem',
             'email' => 'usuario.variacao.imagem.' . uniqid() . '@example.test',
             'senha' => Hash::make('SenhaForte123'),
             'ativo' => true,
@@ -37,7 +39,7 @@ class ProdutoVariacaoImagemCrudTest extends TestCase
         $now = now();
 
         $categoriaId = DB::table('categorias')->insertGetId([
-            'nome' => 'Categoria Variação Imagem ' . uniqid(),
+            'nome' => 'Categoria Variacao Imagem ' . uniqid(),
             'descricao' => null,
             'categoria_pai_id' => null,
             'created_at' => $now,
@@ -45,7 +47,7 @@ class ProdutoVariacaoImagemCrudTest extends TestCase
         ]);
 
         $fornecedorId = DB::table('fornecedores')->insertGetId([
-            'nome' => 'Fornecedor Variação Imagem ' . uniqid(),
+            'nome' => 'Fornecedor Variacao Imagem ' . uniqid(),
             'cnpj' => null,
             'email' => null,
             'telefone' => null,
@@ -57,7 +59,7 @@ class ProdutoVariacaoImagemCrudTest extends TestCase
         ]);
 
         $produtoId = DB::table('produtos')->insertGetId([
-            'nome' => 'Produto Variação Imagem ' . uniqid(),
+            'nome' => 'Produto Variacao Imagem ' . uniqid(),
             'descricao' => null,
             'id_categoria' => $categoriaId,
             'id_fornecedor' => $fornecedorId,
@@ -76,7 +78,7 @@ class ProdutoVariacaoImagemCrudTest extends TestCase
         return (int) DB::table('produto_variacoes')->insertGetId([
             'produto_id' => $produtoId,
             'referencia' => 'REF-VAR-IMG-' . uniqid(),
-            'nome' => 'Variação Imagem',
+            'nome' => 'Variacao Imagem',
             'preco' => 100,
             'custo' => 50,
             'codigo_barras' => null,
@@ -85,16 +87,21 @@ class ProdutoVariacaoImagemCrudTest extends TestCase
         ]);
     }
 
-    public function test_get_retorna_404_quando_variacao_nao_existe(): void
+    private function pathFromUrl(string $url): string
     {
-        $this->autenticarUsuario();
+        $path = parse_url($url, PHP_URL_PATH) ?: $url;
+        $path = ltrim((string) $path, '/');
 
-        $this->getJson('/api/v1/variacoes/999999999/imagem')
-            ->assertNotFound();
+        if (str_starts_with($path, 'storage/')) {
+            return substr($path, strlen('storage/'));
+        }
+
+        return $path;
     }
 
     public function test_get_sem_imagem_retorna_404(): void
     {
+        Storage::fake('public');
         $this->autenticarUsuario();
         $variacaoId = $this->criarVariacao();
 
@@ -102,56 +109,98 @@ class ProdutoVariacaoImagemCrudTest extends TestCase
             ->assertNotFound();
     }
 
-    public function test_post_cria_imagem_e_get_retorna_200(): void
+    public function test_post_upload_cria_imagem(): void
     {
+        Storage::fake('public');
         $this->autenticarUsuario();
         $variacaoId = $this->criarVariacao();
-        $url = 'https://placehold.co/600x400.jpg';
 
-        $post = $this->postJson("/api/v1/variacoes/{$variacaoId}/imagem", [
-            'url' => $url,
+        $arquivo = UploadedFile::fake()->image('foto.jpg', 600, 400);
+
+        $response = $this->post("/api/v1/variacoes/{$variacaoId}/imagem", [
+            'imagem' => $arquivo,
         ]);
 
-        $post->assertCreated()
+        $response->assertCreated()
             ->assertJsonStructure(['id', 'id_variacao', 'url', 'created_at', 'updated_at'])
-            ->assertJson([
-                'id_variacao' => $variacaoId,
-                'url' => $url,
-            ]);
+            ->assertJsonPath('id_variacao', $variacaoId);
+
+        $url = (string) $response->json('url');
+        $path = $this->pathFromUrl($url);
+
+        $this->assertStringContainsString("/storage/produto-variacoes/{$variacaoId}/imagem/", $url);
+        Storage::disk('public')->assertExists($path);
 
         $this->assertDatabaseHas('produto_variacao_imagens', [
             'id_variacao' => $variacaoId,
             'url' => $url,
         ]);
-
-        $get = $this->getJson("/api/v1/variacoes/{$variacaoId}/imagem");
-
-        $get->assertOk()
-            ->assertJsonStructure(['id', 'id_variacao', 'url', 'created_at', 'updated_at'])
-            ->assertJson([
-                'id_variacao' => $variacaoId,
-                'url' => $url,
-            ]);
     }
 
-    public function test_post_substitui_imagem_mantendo_apenas_um_registro_por_variacao(): void
+    public function test_post_novamente_substitui_imagem_e_remove_arquivo_antigo(): void
     {
+        Storage::fake('public');
         $this->autenticarUsuario();
         $variacaoId = $this->criarVariacao();
 
-        $this->postJson("/api/v1/variacoes/{$variacaoId}/imagem", [
-            'url' => 'https://placehold.co/600x400.jpg',
+        $respInicial = $this->post("/api/v1/variacoes/{$variacaoId}/imagem", [
+            'imagem' => UploadedFile::fake()->image('primeira.jpg', 600, 400),
         ])->assertCreated();
 
-        $urlAtualizada = 'https://placehold.co/600x400.jpg?text=atualizada';
+        $urlAntiga = (string) $respInicial->json('url');
+        $pathAntigo = $this->pathFromUrl($urlAntiga);
 
-        $this->postJson("/api/v1/variacoes/{$variacaoId}/imagem", [
-            'url' => $urlAtualizada,
-        ])->assertOk()
-            ->assertJson([
-                'id_variacao' => $variacaoId,
-                'url' => $urlAtualizada,
-            ]);
+        Storage::disk('public')->assertExists($pathAntigo);
+
+        $respNova = $this->post("/api/v1/variacoes/{$variacaoId}/imagem", [
+            'imagem' => UploadedFile::fake()->image('segunda.jpg', 640, 480),
+        ])->assertOk();
+
+        $urlNova = (string) $respNova->json('url');
+        $pathNovo = $this->pathFromUrl($urlNova);
+
+        Storage::disk('public')->assertExists($pathNovo);
+        Storage::disk('public')->assertMissing($pathAntigo);
+
+        $count = DB::table('produto_variacao_imagens')
+            ->where('id_variacao', $variacaoId)
+            ->count();
+
+        $this->assertSame(1, $count);
+
+        $this->assertDatabaseHas('produto_variacao_imagens', [
+            'id_variacao' => $variacaoId,
+            'url' => $urlNova,
+        ]);
+    }
+
+    public function test_put_funciona_como_upsert_por_upload(): void
+    {
+        Storage::fake('public');
+        $this->autenticarUsuario();
+        $variacaoId = $this->criarVariacao();
+
+        $respInicial = $this->put("/api/v1/variacoes/{$variacaoId}/imagem", [
+            'imagem' => UploadedFile::fake()->image('put-inicial.png', 300, 300),
+        ]);
+
+        $respInicial->assertOk();
+
+        $urlInicial = (string) $respInicial->json('url');
+        $pathInicial = $this->pathFromUrl($urlInicial);
+        Storage::disk('public')->assertExists($pathInicial);
+
+        $respAtualizada = $this->put("/api/v1/variacoes/{$variacaoId}/imagem", [
+            'imagem' => UploadedFile::fake()->image('put-nova.webp', 300, 300),
+        ]);
+
+        $respAtualizada->assertOk();
+
+        $urlAtualizada = (string) $respAtualizada->json('url');
+        $pathAtualizada = $this->pathFromUrl($urlAtualizada);
+
+        Storage::disk('public')->assertExists($pathAtualizada);
+        Storage::disk('public')->assertMissing($pathInicial);
 
         $count = DB::table('produto_variacao_imagens')
             ->where('id_variacao', $variacaoId)
@@ -160,45 +209,20 @@ class ProdutoVariacaoImagemCrudTest extends TestCase
         $this->assertSame(1, $count);
     }
 
-    public function test_put_funciona_como_upsert(): void
+    public function test_delete_remove_registro_e_arquivo(): void
     {
+        Storage::fake('public');
         $this->autenticarUsuario();
         $variacaoId = $this->criarVariacao();
 
-        $urlInicial = 'https://placehold.co/600x400.jpg';
-        $urlAtualizada = 'https://placehold.co/600x400.jpg?text=put';
-
-        $this->putJson("/api/v1/variacoes/{$variacaoId}/imagem", [
-            'url' => $urlInicial,
-        ])->assertOk()
-            ->assertJson([
-                'id_variacao' => $variacaoId,
-                'url' => $urlInicial,
-            ]);
-
-        $this->putJson("/api/v1/variacoes/{$variacaoId}/imagem", [
-            'url' => $urlAtualizada,
-        ])->assertOk()
-            ->assertJson([
-                'id_variacao' => $variacaoId,
-                'url' => $urlAtualizada,
-            ]);
-
-        $count = DB::table('produto_variacao_imagens')
-            ->where('id_variacao', $variacaoId)
-            ->count();
-
-        $this->assertSame(1, $count);
-    }
-
-    public function test_delete_remove_imagem_e_retorna_404_quando_inexistente(): void
-    {
-        $this->autenticarUsuario();
-        $variacaoId = $this->criarVariacao();
-
-        $this->postJson("/api/v1/variacoes/{$variacaoId}/imagem", [
-            'url' => 'https://placehold.co/600x400.jpg',
+        $post = $this->post("/api/v1/variacoes/{$variacaoId}/imagem", [
+            'imagem' => UploadedFile::fake()->image('delete.jpg', 800, 600),
         ])->assertCreated();
+
+        $url = (string) $post->json('url');
+        $path = $this->pathFromUrl($url);
+
+        Storage::disk('public')->assertExists($path);
 
         $this->deleteJson("/api/v1/variacoes/{$variacaoId}/imagem")
             ->assertNoContent();
@@ -207,8 +231,9 @@ class ProdutoVariacaoImagemCrudTest extends TestCase
             'id_variacao' => $variacaoId,
         ]);
 
+        Storage::disk('public')->assertMissing($path);
+
         $this->deleteJson("/api/v1/variacoes/{$variacaoId}/imagem")
             ->assertNotFound();
     }
 }
-

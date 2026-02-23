@@ -14,8 +14,7 @@ class ProdutoVariacaoImagemUpsertRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'url' => 'required|string|url',
+            'imagem' => 'required|file|image|mimes:jpg,jpeg,png,webp|max:5120',
         ];
     }
 }
-

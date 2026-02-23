@@ -5,17 +5,19 @@ namespace App\Http\Controllers;
 use App\Http\Requests\ProdutoVariacaoImagemUpsertRequest;
 use App\Models\ProdutoVariacao;
 use App\Models\ProdutoVariacaoImagem;
+use App\Services\ProdutoVariacaoImagemService;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Support\Facades\DB;
 
 class ProdutoVariacaoImagemController extends Controller
 {
+    public function __construct(private readonly ProdutoVariacaoImagemService $service) {}
+
     public function show(ProdutoVariacao $variacao): JsonResponse
     {
         $imagem = $variacao->imagem()->first();
 
         if (!$imagem) {
-            return response()->json(['message' => 'Imagem da variação não encontrada.'], 404);
+            return response()->json(['message' => 'Imagem da variacao nao encontrada.'], 404);
         }
 
         return response()->json($this->toPayload($imagem));
@@ -23,39 +25,24 @@ class ProdutoVariacaoImagemController extends Controller
 
     public function store(ProdutoVariacaoImagemUpsertRequest $request, ProdutoVariacao $variacao): JsonResponse
     {
-        $imagem = DB::transaction(function () use ($request, $variacao) {
-            return ProdutoVariacaoImagem::query()->updateOrCreate(
-                ['id_variacao' => $variacao->id],
-                ['url' => $request->validated('url')]
-            );
-        });
-
-        $status = $imagem->wasRecentlyCreated ? 201 : 200;
+        [$imagem, $created] = $this->service->upsertByUpload($variacao, $request->file('imagem'));
+        $status = $created ? 201 : 200;
 
         return response()->json($this->toPayload($imagem), $status);
     }
 
     public function update(ProdutoVariacaoImagemUpsertRequest $request, ProdutoVariacao $variacao): JsonResponse
     {
-        $imagem = DB::transaction(function () use ($request, $variacao) {
-            return ProdutoVariacaoImagem::query()->updateOrCreate(
-                ['id_variacao' => $variacao->id],
-                ['url' => $request->validated('url')]
-            );
-        });
+        [$imagem] = $this->service->upsertByUpload($variacao, $request->file('imagem'));
 
         return response()->json($this->toPayload($imagem), 200);
     }
 
     public function destroy(ProdutoVariacao $variacao): JsonResponse
     {
-        $imagem = $variacao->imagem()->first();
-
-        if (!$imagem) {
-            return response()->json(['message' => 'Imagem da variação não encontrada.'], 404);
+        if (!$this->service->remover($variacao)) {
+            return response()->json(['message' => 'Imagem da variacao nao encontrada.'], 404);
         }
-
-        $imagem->delete();
 
         return response()->json(null, 204);
     }
@@ -71,4 +58,3 @@ class ProdutoVariacaoImagemController extends Controller
         ];
     }
 }
-

@@ -9,18 +9,22 @@ use App\Http\Resources\ProdutoVariacaoResource;
 use App\Models\Produto;
 use App\Models\ProdutoVariacao;
 use App\Services\ProdutoVariacaoService;
+use App\Support\Audit\AuditLogger;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+use Illuminate\Support\Facades\DB;
 use Throwable;
 
 class ProdutoVariacaoController extends Controller
 {
     protected ProdutoVariacaoService $service;
+    protected AuditLogger $auditLogger;
 
-    public function __construct(ProdutoVariacaoService $service)
+    public function __construct(ProdutoVariacaoService $service, AuditLogger $auditLogger)
     {
         $this->service = $service;
+        $this->auditLogger = $auditLogger;
     }
 
     public function index(Produto $produto): AnonymousResourceCollection
@@ -55,20 +59,33 @@ class ProdutoVariacaoController extends Controller
             'atributos.*.valor' => 'required_with:atributos.*.atributo|string|max:255',
         ]);
 
-        $validated['produto_id'] = $produto->id;
-        $variacao = ProdutoVariacao::create($validated);
+        $variacao = DB::transaction(function () use ($validated, $produto) {
+            $validated['produto_id'] = $produto->id;
+            $variacao = ProdutoVariacao::create($validated);
 
-        $atributos = collect($validated['atributos'] ?? [])
-            ->filter(fn($attr) => trim((string)($attr['atributo'] ?? '')) !== '' && trim((string)($attr['valor'] ?? '')) !== '')
-            ->map(fn($attr) => [
-                'atributo' => $attr['atributo'],
-                'valor' => $attr['valor'],
-            ])
-            ->values();
+            $atributos = collect($validated['atributos'] ?? [])
+                ->filter(fn($attr) => trim((string)($attr['atributo'] ?? '')) !== '' && trim((string)($attr['valor'] ?? '')) !== '')
+                ->map(fn($attr) => [
+                    'atributo' => $attr['atributo'],
+                    'valor' => $attr['valor'],
+                ])
+                ->values();
 
-        if ($atributos->isNotEmpty()) {
-            $variacao->atributos()->createMany($atributos->all());
-        }
+            if ($atributos->isNotEmpty()) {
+                $variacao->atributos()->createMany($atributos->all());
+            }
+
+            $this->auditLogger->logCreate(
+                $variacao,
+                'catalogo',
+                "Variação criada: {$variacao->referencia}",
+                [
+                    'produto_id' => $produto->id,
+                ]
+            );
+
+            return $variacao;
+        });
 
         return response()->json($variacao, 201);
     }
@@ -140,6 +157,14 @@ class ProdutoVariacaoController extends Controller
             return response()->json(['error' => 'Variação não pertence a este produto'], 404);
         }
 
+        $this->auditLogger->logDelete(
+            $variacao,
+            'catalogo',
+            "Variação removida: {$variacao->referencia}",
+            [
+                'produto_id' => $produto->id,
+            ]
+        );
         $variacao->delete();
         return response()->json(null, 204);
     }

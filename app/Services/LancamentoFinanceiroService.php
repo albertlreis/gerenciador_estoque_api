@@ -7,6 +7,7 @@ use App\Enums\LancamentoStatus;
 use App\Enums\LancamentoTipo;
 use App\Models\LancamentoFinanceiro;
 use App\Repositories\LancamentoFinanceiroRepository;
+use App\Support\Audit\AuditLogger;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Carbon;
@@ -16,7 +17,8 @@ use Illuminate\Validation\ValidationException;
 class LancamentoFinanceiroService
 {
     public function __construct(
-        protected LancamentoFinanceiroRepository $repo
+        protected LancamentoFinanceiroRepository $repo,
+        protected AuditLogger $auditLogger
     ) {}
 
     public function listar(FiltroLancamentoFinanceiroDTO $f): LengthAwarePaginator
@@ -35,12 +37,17 @@ class LancamentoFinanceiroService
     public function criar(array $data): LancamentoFinanceiro
     {
         $payload = $this->prepararPayloadParaPersistencia($data);
-
         $payload['created_by'] = $payload['created_by'] ?? (Auth::id() ?: null);
 
         $model = $this->repo->create($payload);
 
-        return $model->fresh(['categoria','conta','criador','centroCusto']);
+        $this->auditLogger->logCreate(
+            $model,
+            'financeiro',
+            "Lancamento financeiro criado: #{$model->id}"
+        );
+
+        return $model->fresh(['categoria', 'conta', 'criador', 'centroCusto']);
     }
 
     private function isAutomatico(LancamentoFinanceiro $m): bool
@@ -51,32 +58,41 @@ class LancamentoFinanceiroService
 
     public function atualizar(LancamentoFinanceiro $model, array $data): LancamentoFinanceiro
     {
+        $before = $model->getAttributes();
+
         if ($this->isAutomatico($model)) {
-            // permitir só trocar status (ex.: cancelado) e observações, se quiser
             $allowed = array_intersect_key($data, array_flip(['status', 'observacoes']));
             $payload = $this->prepararPayloadParaPersistencia($allowed, $model);
             $updated = $this->repo->update($model, $payload);
-            return $updated->fresh(['categoria','conta','criador','centroCusto']);
+            $this->registrarAuditoriaUpdate($updated, $before);
+            return $updated->fresh(['categoria', 'conta', 'criador', 'centroCusto']);
         }
 
         $payload = $this->prepararPayloadParaPersistencia($data, $model);
         $updated = $this->repo->update($model, $payload);
-        return $updated->fresh(['categoria','conta','criador','centroCusto']);
+        $this->registrarAuditoriaUpdate($updated, $before);
+
+        return $updated->fresh(['categoria', 'conta', 'criador', 'centroCusto']);
     }
 
     public function remover(LancamentoFinanceiro $model): void
     {
         if ($this->isAutomatico($model)) {
             throw ValidationException::withMessages([
-                'lancamento' => 'Este lançamento foi gerado automaticamente e não pode ser removido. Cancele-o (status) ou estorne na origem.'
+                'lancamento' => 'Este lancamento foi gerado automaticamente e nao pode ser removido. Cancele-o (status) ou estorne na origem.',
             ]);
         }
+
+        $this->auditLogger->logDelete(
+            $model,
+            'financeiro',
+            "Lancamento financeiro removido: #{$model->id}"
+        );
+
         $this->repo->delete($model);
     }
 
     /**
-     * Totais do ledger respeitando os filtros informados.
-     *
      * @return array{
      *   receitas_confirmadas:string,
      *   despesas_confirmadas:string,
@@ -92,8 +108,7 @@ class LancamentoFinanceiroService
         $base = $this->repo->queryBase($f)->reorder();
 
         $stConfirmado = LancamentoStatus::CONFIRMADO->value;
-        $stCancelado  = LancamentoStatus::CANCELADO->value;
-
+        $stCancelado = LancamentoStatus::CANCELADO->value;
         $tpReceita = LancamentoTipo::RECEITA->value;
         $tpDespesa = LancamentoTipo::DESPESA->value;
 
@@ -111,61 +126,48 @@ class LancamentoFinanceiroService
             ->where('status', $stCancelado)
             ->sum('valor');
 
-        $saldo = (float)$receitasConfirmadas - (float)$despesasConfirmadas;
+        $saldo = (float) $receitasConfirmadas - (float) $despesasConfirmadas;
 
         $out = [
-            'receitas_confirmadas' => number_format((float)$receitasConfirmadas, 2, '.', ''),
-            'despesas_confirmadas' => number_format((float)$despesasConfirmadas, 2, '.', ''),
-            'saldo_confirmado'     => number_format((float)$saldo, 2, '.', ''),
-            'cancelados'           => number_format((float)$cancelados, 2, '.', ''),
+            'receitas_confirmadas' => number_format((float) $receitasConfirmadas, 2, '.', ''),
+            'despesas_confirmadas' => number_format((float) $despesasConfirmadas, 2, '.', ''),
+            'saldo_confirmado' => number_format((float) $saldo, 2, '.', ''),
+            'cancelados' => number_format((float) $cancelados, 2, '.', ''),
         ];
 
-        // Compatibilidade (se seu front ainda espera pago/pendente/atrasado)
-        $out['pago']     = $out['receitas_confirmadas']; // ou use total confirmado geral, se preferir
+        $out['pago'] = $out['receitas_confirmadas'];
         $out['pendente'] = number_format(0, 2, '.', '');
         $out['atrasado'] = number_format(0, 2, '.', '');
 
         return $out;
     }
 
-    /**
-     * Normaliza + valida payload para salvar.
-     * Se $current for informado, usa estado atual como fallback.
-     */
     private function prepararPayloadParaPersistencia(array $data, ?LancamentoFinanceiro $current = null): array
     {
         $p = $this->normalizarPayload($data);
 
-        // Defaults / fallback do model atual
         $tipo = $p['tipo'] ?? ($current?->tipo?->value ?? null);
         $status = $p['status'] ?? ($current?->status?->value ?? null);
 
-        // tipo obrigatório em criação
         if (!$tipo && !$current) {
-            throw ValidationException::withMessages(['tipo' => 'Tipo é obrigatório (receita|despesa).']);
+            throw ValidationException::withMessages(['tipo' => 'Tipo e obrigatorio (receita|despesa).']);
         }
 
-        // status default
         $status = $status ?: LancamentoStatus::CONFIRMADO->value;
 
-        // valida enums (aceita string do request)
-        $tipoEnum = $tipo ? LancamentoTipo::tryFrom((string)$tipo) : null;
+        $tipoEnum = $tipo ? LancamentoTipo::tryFrom((string) $tipo) : null;
         if ($tipo && !$tipoEnum) {
-            throw ValidationException::withMessages(['tipo' => 'Tipo inválido. Use receita ou despesa.']);
+            throw ValidationException::withMessages(['tipo' => 'Tipo invalido. Use receita ou despesa.']);
         }
 
-        $statusEnum = LancamentoStatus::tryFrom((string)$status);
+        $statusEnum = LancamentoStatus::tryFrom((string) $status);
         if (!$statusEnum) {
-            throw ValidationException::withMessages(['status' => 'Status inválido. Use confirmado ou cancelado.']);
+            throw ValidationException::withMessages(['status' => 'Status invalido. Use confirmado ou cancelado.']);
         }
 
         $p['tipo'] = $tipoEnum?->value;
         $p['status'] = $statusEnum->value;
 
-        // data_movimento: regra do ledger
-        // - se veio data_movimento, ok
-        // - senão, se veio data_pagamento, usa como data_movimento
-        // - senão, se não existe ainda, seta now()
         if (empty($p['data_movimento'])) {
             if (!empty($p['data_pagamento'])) {
                 $p['data_movimento'] = Carbon::parse($p['data_pagamento']);
@@ -174,9 +176,8 @@ class LancamentoFinanceiroService
             }
         }
 
-        // validações mínimas
         if (isset($p['descricao']) && $p['descricao'] === '') {
-            throw ValidationException::withMessages(['descricao' => 'Descrição não pode ser vazia.']);
+            throw ValidationException::withMessages(['descricao' => 'Descricao nao pode ser vazia.']);
         }
 
         if (array_key_exists('valor', $p)) {
@@ -186,18 +187,22 @@ class LancamentoFinanceiroService
             }
         }
 
-        // Se cancelado, não precisa “zerar datas”; mas você pode decidir:
-        // Ex.: manter data_movimento para histórico e relatórios (recomendado).
-
-        // Retorna apenas campos relevantes (evita “lixo” vindo do request)
         return Arr::only($p, [
-            'descricao','tipo','status',
-            'categoria_id','centro_custo_id','conta_id',
+            'descricao',
+            'tipo',
+            'status',
+            'categoria_id',
+            'centro_custo_id',
+            'conta_id',
             'valor',
-            'data_pagamento','data_movimento','competencia',
+            'data_pagamento',
+            'data_movimento',
+            'competencia',
             'observacoes',
-            'referencia_type','referencia_id',
-            'pagamento_type','pagamento_id',
+            'referencia_type',
+            'referencia_id',
+            'pagamento_type',
+            'pagamento_id',
             'created_by',
         ]);
     }
@@ -207,15 +212,15 @@ class LancamentoFinanceiroService
         $p = $data;
 
         if (array_key_exists('descricao', $p)) {
-            $p['descricao'] = trim((string)$p['descricao']);
+            $p['descricao'] = trim((string) $p['descricao']);
         }
 
         if (array_key_exists('tipo', $p) && $p['tipo'] !== null) {
-            $p['tipo'] = strtolower((string)$p['tipo']);
+            $p['tipo'] = strtolower((string) $p['tipo']);
         }
 
         if (array_key_exists('status', $p) && $p['status'] !== null) {
-            $p['status'] = strtolower((string)$p['status']);
+            $p['status'] = strtolower((string) $p['status']);
         }
 
         if (array_key_exists('data_pagamento', $p)) {
@@ -231,5 +236,55 @@ class LancamentoFinanceiroService
         }
 
         return $p;
+    }
+
+    private function registrarAuditoriaUpdate(LancamentoFinanceiro $model, array $before): void
+    {
+        $dirty = $this->diffDirty($before, $model->getAttributes());
+
+        $this->auditLogger->logUpdate(
+            $model,
+            'financeiro',
+            "Lancamento financeiro atualizado: #{$model->id}",
+            [
+                '__before' => $before,
+                '__dirty' => $dirty,
+            ]
+        );
+
+        if (!array_key_exists('status', $dirty)) {
+            return;
+        }
+
+        $statusNovo = $model->status?->value ?? $model->status;
+        $statusAntigo = Arr::get($before, 'status');
+        $acao = $statusNovo === 'cancelado' ? 'REVERSAL' : 'STATUS_CHANGE';
+
+        $this->auditLogger->logCustom(
+            'LancamentoFinanceiro',
+            $model->id,
+            'financeiro',
+            $acao,
+            "Status do lancamento #{$model->id} alterado para {$statusNovo}",
+            [
+                'status' => [
+                    'old' => $statusAntigo,
+                    'new' => $statusNovo,
+                ],
+            ]
+        );
+    }
+
+    private function diffDirty(array $before, array $after): array
+    {
+        $dirty = [];
+        foreach ($after as $field => $value) {
+            $anterior = Arr::get($before, $field);
+            if ((string) $anterior !== (string) $value) {
+                $dirty[$field] = $value;
+            }
+        }
+
+        return $dirty;
     }
 }

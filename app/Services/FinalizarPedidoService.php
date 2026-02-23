@@ -8,6 +8,7 @@ use App\Http\Requests\StorePedidoRequest;
 use App\Models\Carrinho;
 use App\Services\Movimentacao\MovimentarEstoqueStrategy;
 use App\Services\Movimentacao\ReservarEstoqueStrategy;
+use App\Support\Audit\AuditLogger;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Collection;
@@ -47,6 +48,7 @@ final class FinalizarPedidoService
         private readonly MovimentarEstoqueStrategy $movimentarStrategy,
         private readonly ReservarEstoqueStrategy $reservarStrategy,
         private readonly ContaReceberService $contaReceberService,
+        private readonly AuditLogger $auditLogger,
     ) {}
 
     /**
@@ -169,6 +171,19 @@ final class FinalizarPedidoService
             // Finaliza carrinho
             $carrinho->itens()->delete();
             $carrinho->update(['status' => 'finalizado']);
+
+            $this->auditLogger->logCreate(
+                $pedido,
+                'pedidos',
+                "Pedido criado: #{$pedido->id}",
+                [
+                    'numero_externo' => $pedido->numero_externo,
+                    'modo_consignacao' => $emConsignacao,
+                    'registrar_movimentacao' => $registrarMov,
+                    'itens' => $pedido->itens()->count(),
+                    'valor_total' => $pedido->valor_total,
+                ]
+            );
 
             return response()->json([
                 'message' => 'Pedido criado com sucesso.',

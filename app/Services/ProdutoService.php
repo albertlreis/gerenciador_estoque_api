@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Produto;
+use App\Support\Audit\AuditLogger;
 use Exception;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
@@ -10,6 +11,8 @@ use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -17,6 +20,8 @@ use Throwable;
 
 class ProdutoService
 {
+    public function __construct(private readonly AuditLogger $auditLogger) {}
+
     public function store(array $data): Produto
     {
         $manualPath = null;
@@ -25,45 +30,90 @@ class ProdutoService
             $manualPath = $this->armazenarManualConservacao($data['manual_conservacao']);
         }
 
-        return Produto::create([
-            'nome' => $data['nome'],
-            'descricao' => $data['descricao'] ?? null,
-            'id_categoria' => $data['id_categoria'],
-            'id_fornecedor' => $data['id_fornecedor'] ?? null,
-            'altura' => $data['altura'] ?? null,
-            'largura' => $data['largura'] ?? null,
-            'profundidade' => $data['profundidade'] ?? null,
-            'peso' => $data['peso'] ?? null,
-            'manual_conservacao' => $manualPath,
-            'ativo' => $data['ativo'] ?? true,
-            'motivo_desativacao' => $data['motivo_desativacao'] ?? null,
-            'estoque_minimo' => $data['estoque_minimo'] ?? null,
-        ]);
+        return DB::transaction(function () use ($data, $manualPath) {
+            $produto = Produto::create([
+                'nome' => $data['nome'],
+                'descricao' => $data['descricao'] ?? null,
+                'id_categoria' => $data['id_categoria'],
+                'id_fornecedor' => $data['id_fornecedor'] ?? null,
+                'altura' => $data['altura'] ?? null,
+                'largura' => $data['largura'] ?? null,
+                'profundidade' => $data['profundidade'] ?? null,
+                'peso' => $data['peso'] ?? null,
+                'manual_conservacao' => $manualPath,
+                'ativo' => $data['ativo'] ?? true,
+                'motivo_desativacao' => $data['motivo_desativacao'] ?? null,
+                'estoque_minimo' => $data['estoque_minimo'] ?? null,
+            ]);
+
+            $this->auditLogger->logCreate(
+                $produto,
+                'catalogo',
+                "Produto criado: {$produto->nome}"
+            );
+
+            return $produto;
+        });
     }
 
     public function update(Produto $produto, array $data): Produto
     {
-        $updateData = [
-            'nome' => $data['nome'],
-            'descricao' => $data['descricao'] ?? null,
-            'id_categoria' => $data['id_categoria'],
-            'id_fornecedor' => $data['id_fornecedor'] ?? null,
-            'altura' => $data['altura'] ?? null,
-            'largura' => $data['largura'] ?? null,
-            'profundidade' => $data['profundidade'] ?? null,
-            'peso' => $data['peso'] ?? null,
-            'ativo' => $data['ativo'] ?? true,
-            'motivo_desativacao' => $data['motivo_desativacao'] ?? null,
-            'estoque_minimo' => $data['estoque_minimo'] ?? null,
-        ];
+        return DB::transaction(function () use ($produto, $data) {
+            $before = $produto->getAttributes();
 
-        if (isset($data['manual_conservacao']) && $data['manual_conservacao'] instanceof UploadedFile) {
-            $this->salvarManualConservacao($produto, $data['manual_conservacao']);
-        }
+            $updateData = [
+                'nome' => $data['nome'],
+                'descricao' => $data['descricao'] ?? null,
+                'id_categoria' => $data['id_categoria'],
+                'id_fornecedor' => $data['id_fornecedor'] ?? null,
+                'altura' => $data['altura'] ?? null,
+                'largura' => $data['largura'] ?? null,
+                'profundidade' => $data['profundidade'] ?? null,
+                'peso' => $data['peso'] ?? null,
+                'ativo' => $data['ativo'] ?? true,
+                'motivo_desativacao' => $data['motivo_desativacao'] ?? null,
+                'estoque_minimo' => $data['estoque_minimo'] ?? null,
+            ];
 
-        $produto->update($updateData);
+            if (isset($data['manual_conservacao']) && $data['manual_conservacao'] instanceof UploadedFile) {
+                $this->salvarManualConservacao($produto, $data['manual_conservacao']);
+            }
 
-        return $produto->refresh();
+            $produto->update($updateData);
+            $produto = $produto->refresh();
+            $dirty = $this->diffDirty($before, $produto->getAttributes());
+
+            $this->auditLogger->logUpdate(
+                $produto,
+                'catalogo',
+                "Produto atualizado: {$produto->nome}",
+                [
+                    '__before' => $before,
+                    '__dirty' => $dirty,
+                ]
+            );
+
+            if (array_key_exists('ativo', $dirty)) {
+                $this->auditLogger->logCustom(
+                    'Produto',
+                    $produto->id,
+                    'catalogo',
+                    'STATUS_CHANGE',
+                    $produto->ativo ? 'Produto ativado' : 'Produto desativado',
+                    [
+                        'ativo' => [
+                            'old' => Arr::get($before, 'ativo'),
+                            'new' => $produto->ativo,
+                        ],
+                    ],
+                    [
+                        'motivo_desativacao' => $produto->motivo_desativacao,
+                    ]
+                );
+            }
+
+            return $produto;
+        });
     }
 
 
@@ -326,5 +376,18 @@ class ProdutoService
     private function escapeLike(string $value): string
     {
         return str_replace(['\\', '%', '_'], ['\\\\', '\%', '\_'], $value);
+    }
+
+    private function diffDirty(array $before, array $after): array
+    {
+        $dirty = [];
+        foreach ($after as $field => $value) {
+            $anterior = $before[$field] ?? null;
+            if ((string) $anterior !== (string) $value) {
+                $dirty[$field] = $value;
+            }
+        }
+
+        return $dirty;
     }
 }

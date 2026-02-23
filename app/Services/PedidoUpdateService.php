@@ -8,6 +8,7 @@ use App\Models\Pedido;
 use App\Models\PedidoItem;
 use App\Models\EstoqueReserva;
 use App\Models\ProdutoVariacao;
+use App\Support\Audit\AuditLogger;
 use Carbon\Carbon;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
@@ -19,6 +20,7 @@ class PedidoUpdateService
         private readonly PedidoPrazoService $prazoService,
         private readonly ReservaEstoqueService $reservaService,
         private readonly EstoqueMovimentacaoService $movimentacaoService,
+        private readonly AuditLogger $auditLogger,
     ) {}
 
     /**
@@ -31,6 +33,7 @@ class PedidoUpdateService
     public function atualizar(Pedido $pedido, array $data): Pedido
     {
         return DB::transaction(function () use ($pedido, $data) {
+            $beforePedido = $pedido->getAttributes();
             $itensInput = array_key_exists('itens', $data) ? (array) $data['itens'] : null;
             $itensAntigos = $pedido->itens()->get();
 
@@ -52,6 +55,21 @@ class PedidoUpdateService
                 $this->ajustarReservasSeNecessario($pedido, $itensNovos);
                 $this->ajustarMovimentacoesSeNecessario($pedido, $diffs);
             }
+
+            $pedido->refresh();
+            $dirtyPedido = $this->diffDirty($beforePedido, $pedido->getAttributes());
+
+            $this->auditLogger->logUpdate(
+                $pedido,
+                'pedidos',
+                "Pedido atualizado: #{$pedido->id}",
+                [
+                    '__before' => $beforePedido,
+                    '__dirty' => $dirtyPedido,
+                    'itens_alterados' => is_array($itensInput),
+                    'total_itens' => $pedido->itens()->count(),
+                ]
+            );
 
             return $pedido->fresh([
                 'cliente:id,nome,email,telefone',
@@ -362,5 +380,18 @@ class PedidoUpdateService
                 ]);
             }
         }
+    }
+
+    private function diffDirty(array $before, array $after): array
+    {
+        $dirty = [];
+        foreach ($after as $field => $value) {
+            $anterior = $before[$field] ?? null;
+            if ((string) $anterior !== (string) $value) {
+                $dirty[$field] = $value;
+            }
+        }
+
+        return $dirty;
     }
 }

@@ -4,11 +4,12 @@ namespace App\Services;
 
 use App\Enums\ContaStatus;
 use App\Enums\LancamentoTipo;
-use App\Http\Resources\ContaPagarResource;
 use App\Http\Resources\ContaPagarPagamentoResource;
+use App\Http\Resources\ContaPagarResource;
 use App\Models\ContaPagar;
 use App\Models\ContaPagarPagamento;
 use App\Repositories\Contracts\ContaPagarRepository;
+use App\Support\Audit\AuditLogger;
 use BackedEnum;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -20,6 +21,7 @@ class ContaPagarCommandService
         private readonly ContaStatusService $statusSvc,
         private readonly FinanceiroLedgerService $ledger,
         private readonly FinanceiroAuditoriaService $audit,
+        private readonly AuditLogger $auditLogger,
     ) {}
 
     public function criar(array $dados): ContaPagarResource
@@ -27,11 +29,11 @@ class ContaPagarCommandService
         $dados['status'] = $dados['status'] ?? ContaStatus::ABERTA->value;
 
         $conta = $this->repo->criar($dados);
-
         $this->statusSvc->syncPagar($conta->fresh());
 
         $fresh = $conta->fresh(['fornecedor', 'pagamentos.usuario']);
         $this->audit->log('created', $conta, null, $fresh->toArray());
+        $this->auditLogger->logCreate($conta, 'financeiro', "Conta a pagar criada: #{$conta->id}");
 
         return new ContaPagarResource($fresh);
     }
@@ -39,45 +41,59 @@ class ContaPagarCommandService
     public function atualizar(ContaPagar $conta, array $dados): ContaPagarResource
     {
         $antes = $conta->fresh(['fornecedor', 'pagamentos.usuario'])->toArray();
+        $beforeAttrs = $conta->getAttributes();
 
         $conta = $this->repo->atualizar($conta, $dados);
-
         $this->statusSvc->syncPagar($conta->fresh());
 
         $fresh = $conta->fresh(['fornecedor', 'pagamentos.usuario']);
         $this->audit->log('updated', $conta, $antes, $fresh->toArray());
+        $this->auditLogger->logUpdate(
+            $conta,
+            'financeiro',
+            "Conta a pagar atualizada: #{$conta->id}",
+            [
+                '__before' => $beforeAttrs,
+                '__dirty' => $this->diffDirty($beforeAttrs, $conta->getAttributes()),
+            ]
+        );
 
         return new ContaPagarResource($fresh);
     }
 
     public function deletar(ContaPagar $conta): void
     {
-        abort_if($this->statusValue($conta) === ContaStatus::PAGA->value, 422, 'Não é possível excluir uma conta já paga.');
+        abort_if($this->statusValue($conta) === ContaStatus::PAGA->value, 422, 'Nao e possivel excluir uma conta ja paga.');
 
         $antes = $conta->fresh(['fornecedor', 'pagamentos.usuario'])->toArray();
 
-        $this->repo->deletar($conta);
+        $this->auditLogger->logDelete(
+            $conta,
+            'financeiro',
+            "Conta a pagar removida: #{$conta->id}"
+        );
 
+        $this->repo->deletar($conta);
         $this->audit->log('deleted', $conta, $antes, null);
     }
 
     public function registrarPagamento(ContaPagar $conta, array $dados): ContaPagarPagamentoResource
     {
-        abort_if($this->statusValue($conta) === ContaStatus::CANCELADA->value, 422, 'Conta cancelada não pode receber pagamento.');
-        abort_if(empty($dados['forma_pagamento']), 422, 'Forma de pagamento é obrigatória no pagamento.');
-        abort_if(empty($dados['conta_financeira_id']), 422, 'Conta financeira é obrigatória no pagamento.');
+        abort_if($this->statusValue($conta) === ContaStatus::CANCELADA->value, 422, 'Conta cancelada nao pode receber pagamento.');
+        abort_if(empty($dados['forma_pagamento']), 422, 'Forma de pagamento e obrigatoria no pagamento.');
+        abort_if(empty($dados['conta_financeira_id']), 422, 'Conta financeira e obrigatoria no pagamento.');
 
         return DB::transaction(function () use ($conta, $dados) {
-
             $antesConta = $conta->fresh(['fornecedor', 'pagamentos.usuario'])->toArray();
+            $statusAntes = $this->statusValue($conta);
 
             $pagamento = new ContaPagarPagamento([
-                'conta_pagar_id'      => $conta->id,
-                'data_pagamento'      => $dados['data_pagamento'],
-                'valor'               => $dados['valor'],
-                'forma_pagamento'     => $dados['forma_pagamento'],
-                'observacoes'         => $dados['observacoes'] ?? null,
-                'usuario_id'          => auth()->id(),
+                'conta_pagar_id' => $conta->id,
+                'data_pagamento' => $dados['data_pagamento'],
+                'valor' => $dados['valor'],
+                'forma_pagamento' => $dados['forma_pagamento'],
+                'observacoes' => $dados['observacoes'] ?? null,
+                'usuario_id' => auth()->id(),
                 'conta_financeira_id' => $dados['conta_financeira_id'],
             ]);
 
@@ -87,7 +103,6 @@ class ContaPagarCommandService
 
             $pagamento->save();
 
-            // Ledger (Fase 2 - Caminho A): DESPESA confirmada vinculada ao pagamento (idempotente)
             $lancamento = $this->ledger->criarLancamentoPorPagamento(
                 tipo: LancamentoTipo::DESPESA->value,
                 descricao: "Pagamento Conta a Pagar #{$conta->id} - {$conta->descricao}",
@@ -101,11 +116,33 @@ class ContaPagarCommandService
             );
 
             $this->statusSvc->syncPagar($conta->fresh());
-
             $depoisConta = $conta->fresh(['fornecedor', 'pagamentos.usuario'])->toArray();
 
             $this->audit->log('paid', $conta, $antesConta, $depoisConta);
             $this->audit->log('ledger_created', $lancamento, null, $lancamento->fresh()->toArray());
+
+            $statusNovo = $this->statusValue($conta->fresh());
+            $this->auditLogger->logCustom(
+                'ContaPagar',
+                $conta->id,
+                'financeiro',
+                'STATUS_CHANGE',
+                "Baixa em conta a pagar #{$conta->id}",
+                [
+                    'status' => [
+                        'old' => $statusAntes,
+                        'new' => $statusNovo,
+                    ],
+                    'valor_pago' => [
+                        'old' => null,
+                        'new' => (float) $pagamento->valor,
+                    ],
+                ],
+                [
+                    'pagamento_id' => $pagamento->id,
+                    'forma_pagamento' => $pagamento->forma_pagamento?->value ?? $pagamento->forma_pagamento,
+                ]
+            );
 
             return new ContaPagarPagamentoResource($pagamento->fresh(['usuario', 'contaFinanceira']));
         });
@@ -114,13 +151,10 @@ class ContaPagarCommandService
     public function estornarPagamento(ContaPagar $conta, int $pagamentoId): ContaPagarResource
     {
         return DB::transaction(function () use ($conta, $pagamentoId) {
-
-            $antesConta  = $conta->fresh(['fornecedor', 'pagamentos.usuario'])->toArray();
+            $antesConta = $conta->fresh(['fornecedor', 'pagamentos.usuario'])->toArray();
             $statusAntes = $this->statusValue($conta);
 
             $pagamento = $conta->pagamentos()->findOrFail($pagamentoId);
-
-            // Ledger (Fase 2 - Caminho A): cancela lançamento vinculado ao pagamento
             $this->ledger->cancelarLancamentoPorPagamento($pagamento);
 
             if ($pagamento->comprovante_path) {
@@ -132,7 +166,6 @@ class ContaPagarCommandService
             $conta->refresh();
             $this->statusSvc->syncPagar($conta->fresh());
 
-            // Regra extra: CANCELADA não pode ser sobrescrita por sync
             if ($statusAntes === ContaStatus::CANCELADA->value && $this->statusValue($conta) !== ContaStatus::CANCELADA->value) {
                 $conta->status = ContaStatus::CANCELADA->value;
                 $conta->save();
@@ -146,6 +179,28 @@ class ContaPagarCommandService
                 'pagamento_type' => get_class($pagamento),
             ]);
 
+            $this->auditLogger->logCustom(
+                'ContaPagar',
+                $conta->id,
+                'financeiro',
+                'REVERSAL',
+                "Estorno em conta a pagar #{$conta->id}",
+                [
+                    'status' => [
+                        'old' => $statusAntes,
+                        'new' => $this->statusValue($fresh),
+                    ],
+                    'pagamento_estornado' => [
+                        'old' => (float) $pagamento->valor,
+                        'new' => null,
+                    ],
+                ],
+                [
+                    'pagamento_id' => $pagamentoId,
+                    'motivo' => 'estorno_pagamento',
+                ]
+            );
+
             return new ContaPagarResource($fresh);
         });
     }
@@ -153,7 +208,23 @@ class ContaPagarCommandService
     private function statusValue(ContaPagar $conta): string
     {
         $st = $conta->status;
-        if ($st instanceof BackedEnum) return $st->value;
+        if ($st instanceof BackedEnum) {
+            return $st->value;
+        }
+
         return (string) $st;
+    }
+
+    private function diffDirty(array $before, array $after): array
+    {
+        $dirty = [];
+        foreach ($after as $field => $value) {
+            $anterior = $before[$field] ?? null;
+            if ((string) $anterior !== (string) $value) {
+                $dirty[$field] = $value;
+            }
+        }
+
+        return $dirty;
     }
 }

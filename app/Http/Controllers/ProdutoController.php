@@ -13,6 +13,7 @@ use App\Http\Resources\ProdutoSimplificadoResource;
 use App\Services\LogService;
 use App\Services\OutletCatalogoPricingService;
 use App\Services\ProdutoSugestoesOutletService;
+use App\Support\Audit\AuditLogger;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
@@ -39,14 +40,20 @@ class ProdutoController extends Controller
 {
     private ProdutoService $produtoService;
     private readonly ImportacaoProdutosService $service;
+    private readonly AuditLogger $auditLogger;
 
     /**
      * Construtor com injeção de dependência do ProdutoService.
      */
-    public function __construct(ProdutoService $produtoService, ImportacaoProdutosService $service)
+    public function __construct(
+        ProdutoService $produtoService,
+        ImportacaoProdutosService $service,
+        AuditLogger $auditLogger
+    )
     {
         $this->produtoService = $produtoService;
         $this->service = $service;
+        $this->auditLogger = $auditLogger;
     }
 
     /**
@@ -383,10 +390,20 @@ class ProdutoController extends Controller
 
             // Excluir atributos e variações
             foreach ($produto->variacoes as $variacao) {
+                $this->auditLogger->logDelete(
+                    $variacao,
+                    'catalogo',
+                    "Variação removida: {$variacao->referencia}"
+                );
                 $variacao->atributos->each->delete();
                 $variacao->delete();
             }
 
+            $this->auditLogger->logDelete(
+                $produto,
+                'catalogo',
+                "Produto removido: {$produto->nome}"
+            );
             $produto->delete();
             DB::commit();
 

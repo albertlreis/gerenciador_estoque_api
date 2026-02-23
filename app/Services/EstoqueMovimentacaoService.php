@@ -10,6 +10,7 @@ use App\Models\EstoqueMovimentacao;
 use App\Models\EstoqueReserva;
 use App\Models\EstoqueTransferencia;
 use App\Models\EstoqueTransferenciaItem;
+use App\Support\Audit\AuditLogger;
 use Carbon\Carbon;
 use Carbon\CarbonInterface;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
@@ -25,6 +26,8 @@ use RuntimeException;
  */
 class EstoqueMovimentacaoService
 {
+    public function __construct(private readonly AuditLogger $auditLogger) {}
+
     /**
      * Busca movimentações de estoque com base nos filtros fornecidos.
      *
@@ -260,6 +263,25 @@ class EstoqueMovimentacaoService
                 'pedido_item_id' => $dados['pedido_item_id'] ?? null,
                 'reserva_id'     => $dados['reserva_id'] ?? null,
             ]);
+
+            if ($tipo !== EstoqueMovimentacaoTipo::ESTORNO->value) {
+                $this->auditLogger->logCreate(
+                    $mov,
+                    'estoque',
+                    "Movimentacao de estoque: {$tipo}",
+                    [
+                        'tipo' => $tipo,
+                        'id_variacao' => $variacaoId,
+                        'id_deposito_origem' => $origem,
+                        'id_deposito_destino' => $destino,
+                        'quantidade' => $qtd,
+                        'ref_type' => $dados['ref_type'] ?? null,
+                        'ref_id' => $dados['ref_id'] ?? null,
+                        'pedido_id' => $dados['pedido_id'] ?? null,
+                        'pedido_item_id' => $dados['pedido_item_id'] ?? null,
+                    ]
+                );
+            }
 
             return $mov->fresh(['variacao.produto', 'usuario', 'depositoOrigem', 'depositoDestino']);
         });
@@ -528,7 +550,7 @@ class EstoqueMovimentacaoService
             $estornoOrigem = $destino ?: null;
             $estornoDestino = $origem ?: null;
 
-            return $this->movimentar([
+            $estorno = $this->movimentar([
                 'id_variacao'         => (int) $mov->id_variacao,
                 'id_deposito_origem'  => $estornoOrigem,
                 'id_deposito_destino' => $estornoDestino,
@@ -542,6 +564,27 @@ class EstoqueMovimentacaoService
                 'ref_type'            => 'estorno',
                 'ref_id'              => $mov->id,
             ]);
+
+            $this->auditLogger->logCustom(
+                'EstoqueMovimentacao',
+                $estorno->id,
+                'estoque',
+                'REVERSAL',
+                "Estorno de movimentacao de estoque #{$mov->id}",
+                [
+                    'quantidade' => [
+                        'old' => null,
+                        'new' => $estorno->quantidade,
+                    ],
+                ],
+                [
+                    'movimentacao_original_id' => $mov->id,
+                    'tipo_original' => $mov->tipo,
+                    'observacao' => $observacao,
+                ]
+            );
+
+            return $estorno;
         });
     }
 

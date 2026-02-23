@@ -7,21 +7,23 @@ use App\Helpers\ConfiguracaoHelper;
 use App\Helpers\PedidoHelper;
 use App\Models\Pedido;
 use App\Models\PedidoStatusHistorico;
-use Illuminate\Http\Request;
+use App\Support\Audit\AuditLogger;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 
 class PedidoStatusHistoricoController extends Controller
 {
-    const STATUS_CRITICOS = [
+    private const STATUS_CRITICOS = [
         PedidoStatus::ENTREGA_CLIENTE,
         PedidoStatus::FINALIZADO,
     ];
 
+    public function __construct(private readonly AuditLogger $auditLogger) {}
 
     public function fluxoStatus(Pedido $pedido): JsonResponse
     {
         $fluxo = PedidoHelper::fluxoPorTipo($pedido);
-        return response()->json(array_map(fn($status) => $status->value, $fluxo));
+        return response()->json(array_map(fn ($status) => $status->value, $fluxo));
     }
 
     public function historico(Pedido $pedido): JsonResponse
@@ -33,18 +35,16 @@ class PedidoStatusHistoricoController extends Controller
             ->get();
 
         $fluxo = PedidoHelper::fluxoPorTipo($pedido);
-        $ordemMap = array_values(array_map(fn($s) => $s->value, $fluxo));
+        $ordemMap = array_values(array_map(fn ($s) => $s->value, $fluxo));
 
-        // Mapeia as datas dos status já registrados
-        $datas = $historico->mapWithKeys(fn($item) => [
+        $datas = $historico->mapWithKeys(fn ($item) => [
             $item->getRawOriginal('status') => $item->data_status,
         ])->toArray();
 
         $prazos = ConfiguracaoHelper::prazos();
         $previsoes = PedidoHelper::previsoes($datas, $prazos);
 
-        // Formata o histórico existente
-        $historicoFormatado = $historico->map(function ($item) use ($usuario) {
+        $historicoFormatado = $historico->map(function ($item) {
             $statusEnum = PedidoStatus::tryFrom($item->getRawOriginal('status'));
             $statusString = $statusEnum?->value ?? (string) $item->status;
 
@@ -61,32 +61,29 @@ class PedidoStatusHistoricoController extends Controller
             ];
         });
 
-        // Garante que previsões não se repitam com status reais
-        $statusRegistrados = $historico->map(fn($h) => (string) $h->getRawOriginal('status'))->unique();
+        $statusRegistrados = $historico->map(fn ($h) => (string) $h->getRawOriginal('status'))->unique();
 
         $previsoesFuturas = collect($previsoes)
-            ->filter(fn($data, $status) => $data && !$statusRegistrados->contains($status))
-            ->map(fn($data, $status) => [
+            ->filter(fn ($data, $status) => $data && !$statusRegistrados->contains($status))
+            ->map(fn ($data, $status) => [
                 'id' => null,
                 'status' => $status,
                 'label' => PedidoStatus::tryFrom($status)?->label() ?? ucfirst(str_replace('_', ' ', $status)),
                 'icone' => self::iconePorStatus($status),
                 'cor' => '#adb5bd',
                 'data_status' => $data,
-                'observacoes' => 'Previsão automática',
+                'observacoes' => 'Previsao automatica',
                 'usuario' => null,
                 'ehPrevisao' => true,
             ]);
 
-        // Junta tudo e ordena de forma decrescente pelo fluxo
         $todos = $historicoFormatado->merge($previsoesFuturas);
 
         $ordenado = $todos->sortByDesc(function ($item) use ($ordemMap) {
-            return array_search($item['status'], $ordemMap) ?? -1;
+            return array_search($item['status'], $ordemMap, true) ?? -1;
         })->values();
 
-        // Marca o primeiro item real como isUltimo e define podeRemover
-        $primeiroRealIndex = $ordenado->search(fn($item) => !$item['ehPrevisao']);
+        $primeiroRealIndex = $ordenado->search(fn ($item) => !$item['ehPrevisao']);
 
         $resultadoFinal = $ordenado->map(function ($item, $index) use ($usuario, $primeiroRealIndex) {
             $statusEnum = PedidoStatus::tryFrom($item['status']);
@@ -95,7 +92,7 @@ class PedidoStatusHistoricoController extends Controller
             return [
                 ...$item,
                 'isUltimo' => $isUltimo,
-                'podeRemover' => $isUltimo && (!in_array($statusEnum, self::STATUS_CRITICOS) || $usuario->can('remover-status-critico')),
+                'podeRemover' => $isUltimo && (!in_array($statusEnum, self::STATUS_CRITICOS, true) || $usuario->can('remover-status-critico')),
             ];
         });
 
@@ -106,30 +103,33 @@ class PedidoStatusHistoricoController extends Controller
     {
         $request->validate([
             'status' => 'required|string',
-            'observacoes' => 'nullable|string'
+            'observacoes' => 'nullable|string',
         ]);
 
-        $novoStatus = $request->status;
+        $novoStatus = (string) $request->status;
         $fluxo = PedidoHelper::fluxoPorTipo($pedido);
 
         if ($pedido->historicoStatus()->where('status', $novoStatus)->exists()) {
-            return response()->json(['message' => 'Este status já foi registrado para o pedido.'], 422);
+            return response()->json(['message' => 'Este status ja foi registrado para o pedido.'], 422);
         }
 
-        $posNovo = array_search($novoStatus, array_map(fn($s) => $s->value, $fluxo));
+        $statusFluxo = array_map(fn ($s) => $s->value, $fluxo);
+        $posNovo = array_search($novoStatus, $statusFluxo, true);
         if ($posNovo === false) {
-            return response()->json(['message' => 'Status inválido para esse pedido.'], 422);
+            return response()->json(['message' => 'Status invalido para esse pedido.'], 422);
         }
 
         $ultimoStatus = $pedido->historicoStatus()->latest('data_status')->first();
+        $statusAnterior = $ultimoStatus?->status?->value ?? $ultimoStatus?->status;
+
         if ($ultimoStatus) {
-            $posAtual = array_search($ultimoStatus->status, array_map(fn($s) => $s->value, $fluxo));
+            $statusAtual = $ultimoStatus->status?->value ?? $ultimoStatus->status;
+            $posAtual = array_search($statusAtual, $statusFluxo, true);
             if ($posAtual !== false && $posNovo < $posAtual) {
-                return response()->json(['message' => 'Não é permitido regredir o status.'], 422);
+                return response()->json(['message' => 'Nao e permitido regredir o status.'], 422);
             }
         }
 
-        // Salvar o novo status
         $pedido->historicoStatus()->create([
             'status' => $novoStatus,
             'observacoes' => $request->observacoes,
@@ -137,30 +137,66 @@ class PedidoStatusHistoricoController extends Controller
             'usuario_id' => auth()->id(),
         ]);
 
-        logAuditoria('pedido_status', "Status atualizado para '$novoStatus' no Pedido #$pedido->id.", [
+        logAuditoria('pedido_status', "Status atualizado para '{$novoStatus}' no Pedido #{$pedido->id}.", [
             'acao' => 'atualizacao',
             'nivel' => 'info',
             'status_novo' => $novoStatus,
         ], $pedido);
 
+        $this->auditLogger->logCustom(
+            'Pedido',
+            $pedido->id,
+            'pedidos',
+            'STATUS_CHANGE',
+            "Status do pedido atualizado para {$novoStatus}",
+            [
+                'status' => [
+                    'old' => $statusAnterior,
+                    'new' => $novoStatus,
+                ],
+            ],
+            [
+                'status_novo' => $novoStatus,
+            ]
+        );
+
         return response()->json(['message' => 'Status atualizado com sucesso.']);
     }
 
-    public function cancelarStatus(PedidoStatusHistorico $statusHistorico): JsonResponse
+    public function cancelarStatus(Request $request, Pedido $pedido, PedidoStatusHistorico $statusHistorico): JsonResponse
     {
-        $pedido = $statusHistorico->pedido;
-
-        $statusCancelado = $statusHistorico->status;
+        $pedido = $statusHistorico->pedido ?? $pedido;
+        $statusCancelado = $statusHistorico->status?->value ?? $statusHistorico->status;
         $dataStatus = $statusHistorico->data_status;
+        $motivo = $request->input('motivo');
 
         $statusHistorico->delete();
 
-        logAuditoria('pedido_status', "Status '$statusCancelado' removido do Pedido #$pedido->id.", [
+        logAuditoria('pedido_status', "Status '{$statusCancelado}' removido do Pedido #{$pedido->id}.", [
             'acao' => 'cancelamento',
             'nivel' => 'warn',
             'status_cancelado' => $statusCancelado,
             'data_status' => $dataStatus,
         ], $pedido);
+
+        $this->auditLogger->logCustom(
+            'Pedido',
+            $pedido->id,
+            'pedidos',
+            'CANCEL',
+            "Cancelamento de status do pedido: {$statusCancelado}",
+            [
+                'status' => [
+                    'old' => $statusCancelado,
+                    'new' => null,
+                ],
+            ],
+            [
+                'reason' => $motivo,
+                'status_cancelado' => $statusCancelado,
+                'data_status' => $dataStatus,
+            ]
+        );
 
         return response()->json(['message' => 'Status removido com sucesso.']);
     }

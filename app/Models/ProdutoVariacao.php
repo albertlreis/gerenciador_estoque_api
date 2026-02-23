@@ -51,6 +51,14 @@ class ProdutoVariacao extends Model
     }
 
     /**
+     * Estoque singular (compatibilidade com pontos legados).
+     */
+    public function estoque(): HasOne
+    {
+        return $this->hasOne(Estoque::class, 'id_variacao');
+    }
+
+    /**
      * Estoque total (somatório).
      *
      * Preferências:

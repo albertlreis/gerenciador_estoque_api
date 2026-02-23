@@ -18,7 +18,7 @@ class AuthHelper
             return false;
         }
 
-        $permissoes = Cache::get('permissoes_usuario_' . auth()->id(), []);
+        $permissoes = self::getPermissoes();
 
         return in_array($slug, $permissoes);
     }
@@ -108,7 +108,8 @@ class AuthHelper
      */
     public static function getPerfil(): ?string
     {
-        return auth()->check() ? auth()->user()->perfil : null;
+        $perfis = self::getPerfis();
+        return $perfis[0] ?? null;
     }
 
     /**

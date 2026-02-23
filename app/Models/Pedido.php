@@ -27,12 +27,18 @@ class Pedido extends Model
         'observacoes',
         'prazo_dias_uteis',
         'data_limite_entrega',
+        'nfe_xml_path',
+        'nfe_xml_nome',
+        'nfe_xml_hash',
+        'nfe_xml_uploaded_by',
+        'nfe_xml_uploaded_at',
     ];
 
     protected $casts = [
         'data_pedido' => 'datetime',
         'valor_total' => 'decimal:2',
         'data_limite_entrega' => 'date',
+        'nfe_xml_uploaded_at' => 'datetime',
     ];
 
     public function isVenda(): bool

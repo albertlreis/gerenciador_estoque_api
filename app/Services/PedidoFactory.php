@@ -38,6 +38,7 @@ final class PedidoFactory
                 'quantidade'     => $item->quantidade,
                 'preco_unitario' => $item->preco_unitario,
                 'subtotal'       => $item->subtotal,
+                'id_deposito'    => $item->id_deposito ?? null,
             ]);
         }
     }

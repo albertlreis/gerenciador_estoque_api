@@ -62,7 +62,7 @@ class FiltrarProdutosRequest extends FormRequest
             'deposito_id'       => ['nullable', 'integer', 'exists:depositos,id'],
             'com_estoque'       => ['nullable', 'boolean'],
             'incluir_estoque'   => ['nullable', 'boolean'],
-            'view'              => ['nullable', 'in:completa,simplificada,minima'],
+            'view'              => ['nullable', 'in:completa,simplificada,minima,lista'],
         ];
     }
 

@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Helpers\AuthHelper;
 use App\Http\Requests\StorePedidoRequest;
 use App\Http\Requests\UpdatePedidoRequest;
 use App\Http\Resources\PedidoCompletoResource;
@@ -35,6 +36,7 @@ class PedidoController extends Controller
     protected EstatisticaPedidoService $estatisticaService;
     protected PedidoExportService $exportService;
     protected ExtratorPedidoPythonService $service;
+    protected PedidoUpdateService $pedidoUpdateService;
 
     /**
      * Injeta as dependÃªncias necessÃ¡rias.
@@ -76,6 +78,40 @@ class PedidoController extends Controller
     public function store(StorePedidoRequest $request): JsonResponse
     {
         return $this->pedidoService->criarPedido($request);
+    }
+
+    /**
+     * Atualiza um pedido existente (cabeÃ§alho + itens).
+     */
+    public function update(UpdatePedidoRequest $request, Pedido $pedido): JsonResponse
+    {
+        if (!AuthHelper::hasPermissao('pedidos.editar')) {
+            return response()->json(['message' => 'Sem permissÃ£o para editar pedidos.'], 403);
+        }
+
+        $updated = $this->pedidoUpdateService->atualizar(
+            $pedido,
+            $request->validated(),
+            auth()->id()
+        );
+
+        $pedidoCompleto = $updated->load([
+            'cliente:id,nome,email,telefone',
+            'parceiro:id,nome',
+            'usuario:id,nome',
+            'statusAtual',
+            'itens.variacao.produto.imagens',
+            'itens.variacao.atributos',
+            'historicoStatus.usuario:id,nome',
+            'devolucoes.itens.pedidoItem.variacao.produto',
+            'devolucoes.itens.trocaItens.variacaoNova.produto',
+            'devolucoes.credito',
+        ]);
+
+        return response()->json([
+            'message' => 'Pedido atualizado com sucesso.',
+            'data' => new PedidoCompletoResource($pedidoCompleto),
+        ]);
     }
 
     /**

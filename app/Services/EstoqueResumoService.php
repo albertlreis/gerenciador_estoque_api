@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Helpers\AuthHelper;
 use App\DTOs\FiltroEstoqueDTO;
 use App\Repositories\EstoqueRepository;
 use Illuminate\Support\Facades\DB;
@@ -42,10 +43,19 @@ class EstoqueResumoService
             $depositosQuery->where('e.quantidade', '>', 0);
         }
 
-        return [
+        $resumo = [
             'totalProdutos'  => $totalProdutos,
             'totalPecas'     => $totalPecas,
             'totalDepositos' => (int) $depositosQuery->distinct()->count('e.id_deposito'),
         ];
+
+        if (AuthHelper::hasPermissao('pedidos.visualizar.todos')) {
+            $totalValorEstoque = (float) (
+                (clone $baseSub)->sum(DB::raw('COALESCE(quantidade_estoque, 0) * COALESCE(custo, 0)')) ?? 0
+            );
+            $resumo['totalValorEstoque'] = $totalValorEstoque;
+        }
+
+        return $resumo;
     }
 }

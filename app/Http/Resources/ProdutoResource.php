@@ -5,6 +5,7 @@ namespace App\Http\Resources;
 use App\Services\OutletCatalogoPricingService;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 
 class ProdutoResource extends JsonResource
 {
@@ -13,6 +14,7 @@ class ProdutoResource extends JsonResource
         $variacoes = $this->getRelationValue('variacoes') ?? collect();
         $outletCatalogo = app(OutletCatalogoPricingService::class)->build($variacoes);
 
+        $imagemPrincipal = $this->imagemPrincipal?->url ?? $this->imagemPrincipal?->url_completa;
         return [
             'id' => $this->id,
             'nome' => $this->nome,
@@ -27,9 +29,15 @@ class ProdutoResource extends JsonResource
             'ativo' => $this->ativo,
             'motivo_desativacao' => $this->motivo_desativacao,
             'estoque_minimo' => $this->estoque_minimo,
-            'is_outlet' => $variacoes->contains(fn ($v) =>
-                $v->relationLoaded('outlet') && $v->outlet?->quantidade_restante > 0
-            ),
+            'is_outlet' => $variacoes->contains(function ($v) {
+                if ($v->relationLoaded('outlets')) {
+                    return $v->outlets->sum('quantidade_restante') > 0;
+                }
+                if ($v->relationLoaded('outlet')) {
+                    return $v->outlet?->quantidade_restante > 0;
+                }
+                return false;
+            }),
             'estoque_total' => $this->getEstoqueTotalAttributeSafely(),
             'estoque_resumo' => $this->getEstoqueResumoAttributeSafely(),
             'estoque_outlet_total' => $this->getEstoqueOutletTotalAttributeSafely(),
@@ -45,22 +53,67 @@ class ProdutoResource extends JsonResource
             'outlet_catalogo' => $outletCatalogo,
             'imagem_principal' => $this->imagemPrincipal?->url_completa,
             'data_ultima_saida' => $this->data_ultima_saida,
-            'manual_conservacao' => $this->manual_conservacao
-                ? Storage::url($this->manual_conservacao)
-                : null,
+            'manual_conservacao' => $this->normalizarUrlManual($this->manual_conservacao),
             'created_at' => $this->created_at,
             'updated_at' => $this->updated_at,
             'fornecedor' => $this->fornecedor,
             'variacoes' => ProdutoVariacaoResource::collection($this->whenLoaded('variacoes')),
             'imagens' => $this->imagens->map(function ($imagem) {
+                $urlBase = $imagem->url ?? $imagem->url_completa;
                 return [
                     'id' => $imagem->id,
                     'url' => $imagem->url,
-                    'url_completa' => $imagem->url_completa,
+                    'url_completa' => $this->normalizarUrlImagem($urlBase),
                     'principal' => $imagem->principal,
                 ];
             }),
         ];
+    }
+
+    private function normalizarUrlImagem(?string $valor): ?string
+    {
+        if (!$valor) {
+            return null;
+        }
+
+        $valor = trim($valor);
+        if (Str::startsWith($valor, ['http://', 'https://'])) {
+            return $valor;
+        }
+
+        if (Str::startsWith($valor, ['/storage/', 'storage/', '/uploads/', 'uploads/'])) {
+            return $valor[0] === '/' ? $valor : '/' . $valor;
+        }
+
+        $valor = ltrim($valor, '/');
+        if (Str::startsWith($valor, ProdutoImagem::FOLDER . '/')) {
+            return Storage::disk(ProdutoImagem::DISK)->url($valor);
+        }
+
+        return Storage::disk(ProdutoImagem::DISK)->url(ProdutoImagem::FOLDER . '/' . $valor);
+    }
+
+    private function normalizarUrlManual(?string $valor): ?string
+    {
+        if (!$valor) {
+            return null;
+        }
+
+        $valor = trim($valor);
+        if (Str::startsWith($valor, ['http://', 'https://'])) {
+            return $valor;
+        }
+
+        if (Str::startsWith($valor, ['/storage/', 'storage/', '/uploads/', 'uploads/'])) {
+            return $valor[0] === '/' ? $valor : '/' . $valor;
+        }
+
+        $valor = ltrim($valor, '/');
+        if (Str::startsWith($valor, 'manuais/')) {
+            return Storage::disk('public')->url($valor);
+        }
+
+        return '/uploads/manuais/' . $valor;
     }
 
     private function getEstoqueTotalAttributeSafely(): int

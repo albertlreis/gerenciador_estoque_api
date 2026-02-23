@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Helpers\AuthHelper;
 use App\Http\Resources\ProdutoMiniResource;
 use App\Http\Resources\ProdutoSimplificadoResource;
 use App\Http\Resources\ProdutoVariacaoResource;
@@ -25,7 +26,13 @@ class ProdutoVariacaoController extends Controller
     public function index(Produto $produto): AnonymousResourceCollection
     {
         $variacoes = $produto->variacoes()
-            ->with(['atributos', 'produto'])
+            ->with([
+                'atributos',
+                'produto',
+                'estoques',
+                'outlets.motivo',
+                'outlets.formasPagamento.formaPagamento',
+            ])
             ->get();
 
         return ProdutoVariacaoResource::collection($variacoes);
@@ -33,15 +40,34 @@ class ProdutoVariacaoController extends Controller
 
     public function store(Request $request, Produto $produto): JsonResponse
     {
+        if ($resposta = $this->autorizarVariacao('criar')) {
+            return $resposta;
+        }
+
         $validated = $request->validate([
             'referencia' => 'required|string|max:100|unique:produto_variacoes,referencia',
             'preco' => 'required|numeric',
             'custo' => 'required|numeric',
             'codigo_barras' => 'nullable|string|max:100',
+            'atributos' => 'nullable|array',
+            'atributos.*.atributo' => 'required_with:atributos.*.valor|string|max:255',
+            'atributos.*.valor' => 'required_with:atributos.*.atributo|string|max:255',
         ]);
 
         $validated['produto_id'] = $produto->id;
         $variacao = ProdutoVariacao::create($validated);
+
+        $atributos = collect($validated['atributos'] ?? [])
+            ->filter(fn($attr) => trim((string)($attr['atributo'] ?? '')) !== '' && trim((string)($attr['valor'] ?? '')) !== '')
+            ->map(fn($attr) => [
+                'atributo' => $attr['atributo'],
+                'valor' => $attr['valor'],
+            ])
+            ->values();
+
+        if ($atributos->isNotEmpty()) {
+            $variacao->atributos()->createMany($atributos->all());
+        }
 
         return response()->json($variacao, 201);
     }
@@ -62,25 +88,53 @@ class ProdutoVariacaoController extends Controller
         };
     }
 
-    public function update(Request $request, int $produtoId, ProdutoVariacaoService $service): JsonResponse
+
+    public function update(Request $request, Produto $produto, ProdutoVariacaoService $service, ProdutoVariacao $variacao = null): JsonResponse
     {
+        if ($resposta = $this->autorizarVariacao('editar')) {
+            return $resposta;
+        }
+
         $dados = $request->all();
 
         if (!is_array($dados)) {
-            return response()->json(['message' => 'Formato inválido.'], 400);
+            return response()->json(['message' => 'Formato inv??lido.'], 400);
         }
 
+        $isList = array_is_list($dados);
+
         try {
-            $service->atualizarLote($produtoId, $dados);
-            return response()->json(['message' => 'Variações atualizadas com sucesso.']);
+            if ($isList) {
+                $service->atualizarLote($produto->id, $dados);
+                return response()->json(['message' => 'Varia????es atualizadas com sucesso.']);
+            }
+
+            if (!$variacao) {
+                return response()->json(['message' => 'Formato inv??lido.'], 400);
+            }
+
+            if ($variacao->produto_id !== $produto->id) {
+                return response()->json(['error' => 'Varia????o n??o pertence a este produto'], 404);
+            }
+
+            $variacaoAtualizada = $service->atualizarIndividual($variacao, $dados);
+
+            return response()->json($variacaoAtualizada);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            throw $e;
         } catch (Throwable $e) {
             report($e);
             return response()->json(['message' => 'Erro inesperado.'], 500);
         }
     }
 
+
     public function destroy(Produto $produto, ProdutoVariacao $variacao)
     {
+        if ($resposta = $this->autorizarVariacao('excluir')) {
+            return $resposta;
+        }
+
         if ($variacao->produto_id !== $produto->id) {
             return response()->json(['error' => 'Variação não pertence a este produto'], 404);
         }
@@ -113,10 +167,34 @@ class ProdutoVariacaoController extends Controller
             $variacoes->map(function ($v) {
                 return [
                     'id' => $v->id,
-                    'nome_completo' => $v->nome_completo
+                    'nome_completo' => $v->nome_completo,
+                    'referencia' => $v->referencia,
+                    'produto_id' => $v->produto_id,
+                    'produto_nome' => $v->produto?->nome,
+                    'preco' => (float) ($v->preco ?? 0),
                 ];
             })
         );
+    }
+
+
+    private function autorizarVariacao(string $acao): ?JsonResponse
+    {
+        $mapa = [
+            'criar' => ['produto_variacoes.criar', 'produtos.editar', 'produtos.gerenciar'],
+            'editar' => ['produto_variacoes.editar', 'produtos.editar', 'produtos.gerenciar'],
+            'excluir' => ['produto_variacoes.excluir', 'produtos.excluir', 'produtos.gerenciar'],
+        ];
+
+        $permissoes = $mapa[$acao] ?? [];
+
+        foreach ($permissoes as $permissao) {
+            if (AuthHelper::hasPermissao($permissao)) {
+                return null;
+            }
+        }
+
+        return response()->json(['message' => 'Sem permiss??o para esta a????o.'], 403);
     }
 
 }

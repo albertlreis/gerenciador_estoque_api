@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources;
 
+use App\Services\BusinessDayService;
 use App\Traits\PedidoStatusTrait;
 use Carbon\Carbon;
 use Illuminate\Http\Resources\Json\JsonResource;
@@ -14,6 +15,21 @@ class PedidoCompletoResource extends JsonResource
     {
         $agoraBelem = Carbon::now('America/Belem');
         $dataLimite = $this->data_limite_entrega ? Carbon::parse($this->data_limite_entrega) : null;
+        $dataLimiteCalculada = null;
+
+        if (!$dataLimite && $this->data_pedido) {
+            $prazo = (int) ($this->prazo_dias_uteis ?? config('orders.prazo_padrao_dias_uteis', 60));
+            $dataPedido = $this->data_pedido instanceof Carbon
+                ? $this->data_pedido
+                : Carbon::parse($this->data_pedido);
+
+            $dataLimite = app(BusinessDayService::class)->addBusinessDays(
+                $dataPedido->copy()->timezone('America/Belem'),
+                max(0, $prazo),
+                config('holidays.default_uf', 'PA')
+            );
+            $dataLimiteCalculada = $dataLimite->toDateString();
+        }
 
         $statusAtualEnum = optional($this->statusAtual)->status;
 
@@ -56,8 +72,14 @@ class PedidoCompletoResource extends JsonResource
             'valor_total' => $this->valor_total,
             'observacoes' => $this->observacoes,
 
+            'nfe_xml_vinculado'   => !empty($this->nfe_xml_path),
+            'nfe_xml_nome'        => $this->nfe_xml_nome,
+            'nfe_xml_uploaded_at' => $this->nfe_xml_uploaded_at,
+            'nfe_xml_uploaded_by' => $this->nfe_xml_uploaded_by,
+
             'prazo_dias_uteis'     => $this->prazo_dias_uteis,
             'data_limite_entrega'  => $dataLimite?->toDateString(),
+            'data_limite_entrega_calculada' => $dataLimiteCalculada,
             'dias_uteis_restantes' => $diasUteisRestantes, // null quando não se aplica
             'atrasado_entrega'     => $atrasadoEntrega,
 

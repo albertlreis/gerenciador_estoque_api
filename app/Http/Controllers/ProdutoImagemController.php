@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Helpers\AuthHelper;
 use App\Models\Produto;
 use App\Models\ProdutoImagem;
 use Illuminate\Http\JsonResponse;
@@ -35,6 +36,15 @@ class ProdutoImagemController extends Controller
      */
     public function store(Request $request, Produto $produto): JsonResponse
     {
+        if (!$this->podeGerenciarImagens()) {
+            return response()->json(['message' => 'Sem permiss??o para esta a????o.'], 403);
+        }
+
+        $validated = $request->validate([
+            'image' => 'required|image|mimes:jpg,jpeg,png,webp|max:5120',
+            'principal' => 'sometimes|boolean',
+        ]);
+
         try {
             /** @var UploadedFile $file */
             $file = $request->file('image');
@@ -50,7 +60,7 @@ class ProdutoImagemController extends Controller
             $imagem = ProdutoImagem::create([
                 'id_produto' => $produto->id,
                 'url'        => $filename, // <- somente nome do arquivo
-                'principal'  => $request->boolean('principal'),
+                'principal'  => (bool) ($validated['principal'] ?? false),
             ]);
 
             $imagem->append('url_completa');
@@ -68,7 +78,7 @@ class ProdutoImagemController extends Controller
             ]);
 
             return response()->json([
-                'error' => "Erro interno ao salvar imagem. Detalhes: {$e->getMessage()}",
+                'error' => 'Erro interno ao salvar imagem.',
             ], 500);
         }
     }
@@ -100,6 +110,10 @@ class ProdutoImagemController extends Controller
      */
     public function update(Request $request, Produto $produto, ProdutoImagem $imagem): JsonResponse
     {
+        if (!$this->podeGerenciarImagens()) {
+            return response()->json(['message' => 'Sem permiss??o para esta a????o.'], 403);
+        }
+
         if ($imagem->id_produto !== $produto->id) {
             return response()->json(['error' => 'Imagem não pertence a este produto'], 404);
         }
@@ -123,6 +137,10 @@ class ProdutoImagemController extends Controller
      */
     public function destroy(Produto $produto, ProdutoImagem $imagem): JsonResponse
     {
+        if (!$this->podeGerenciarImagens()) {
+            return response()->json(['message' => 'Sem permiss??o para esta a????o.'], 403);
+        }
+
         $imagemId   = $imagem->getKey();
         $imagemFound = $produto->imagens()->find($imagemId);
 
@@ -154,6 +172,10 @@ class ProdutoImagemController extends Controller
      */
     public function definirPrincipal(int $produto, int $imagem): JsonResponse
     {
+        if (!$this->podeGerenciarImagens()) {
+            return response()->json(['message' => 'Sem permiss??o para esta a????o.'], 403);
+        }
+
         $produto = Produto::findOrFail($produto);
 
         $imagemSelecionada = $produto->imagens()->where('id', $imagem)->firstOrFail();
@@ -173,4 +195,14 @@ class ProdutoImagemController extends Controller
             'imagem'  => $imagemSelecionada,
         ]);
     }
+
+    private function podeGerenciarImagens(): bool
+    {
+        if (AuthHelper::hasPermissao('produtos.gerenciar') || AuthHelper::hasPermissao('produtos.editar')) {
+            return true;
+        }
+
+        return AuthHelper::hasPerfil(['Administrador', 'Estoquista', 'Vendedor']);
+    }
+
 }

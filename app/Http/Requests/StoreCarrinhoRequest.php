@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\Helpers\AuthHelper;
 use Illuminate\Foundation\Http\FormRequest;
 
 class StoreCarrinhoRequest extends FormRequest
@@ -13,9 +14,15 @@ class StoreCarrinhoRequest extends FormRequest
 
     public function rules(): array
     {
-        return [
+        $rules = [
             'id_cliente' => 'required|exists:clientes,id',
         ];
+
+        if (AuthHelper::podeSelecionarVendedorPedido()) {
+            $rules['id_usuario'] = 'nullable|exists:acesso_usuarios,id';
+        }
+
+        return $rules;
     }
 
     public function messages(): array

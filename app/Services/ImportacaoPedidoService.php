@@ -10,6 +10,7 @@ use App\Models\Produto;
 use App\Models\ProdutoVariacao;
 use App\Models\ProdutoVariacaoAtributo;
 use App\Models\PedidoImportacao;
+use App\Models\Categoria;
 use App\Enums\PedidoStatus;
 use App\Helpers\StringHelper;
 use App\Support\Dates\DateNormalizer;
@@ -27,6 +28,8 @@ use Illuminate\Validation\ValidationException;
  */
 class ImportacaoPedidoService
 {
+    private ?int $categoriaPadraoId = null;
+
     /**
      * Confirma os dados da importação de um pedido, salvando no banco.
      *
@@ -45,6 +48,7 @@ class ImportacaoPedidoService
         $validator = Validator::make($request->all(), [
             'pedido.tipo'          => 'required|in:venda,reposicao',
             'importacao_id'        => 'nullable|integer|exists:pedido_importacoes,id',
+            'tipo_importacao'      => 'nullable|in:PRODUTOS_PDF_SIERRA,PRODUTOS_PDF_AVANTI,PRODUTOS_PDF_QUAKER,ADORNOS_XML_NFE',
 
             'cliente.id'           => 'nullable|numeric|min:1',
 
@@ -555,6 +559,9 @@ class ImportacaoPedidoService
                     array_filter($fixosDb, fn($v) => !is_null($v))
                 );
 
+                $categoriaId = $produto?->id_categoria ?? $this->categoriaPadraoImportacaoId();
+                $categoriaNome = $produto?->categoria?->nome ?? $this->categoriaPadraoNome($categoriaId);
+
                 return array_merge($item, [
                     "ref"           => $ref,
                     "nome"          => $produto?->nome ?? $variacao->nome,
@@ -562,25 +569,50 @@ class ImportacaoPedidoService
                     "id_variacao"   => $variacao->id,
                     "variacao_nome" => $variacao->nome,
                     "nome_completo" => $variacao->nome_completo,
-                    "id_categoria"  => $produto?->id_categoria,
-                    "categoria"     => $produto?->categoria?->nome,
+                    "id_categoria"  => $categoriaId,
+                    "categoria"     => $categoriaNome,
                     "atributos"     => $atributosFinal,
                     "fixos"         => $fixosFinal,
                 ]);
             }
 
             // Produto não encontrado → usar dados do PDF
+            $categoriaId = $item['id_categoria'] ?? $this->categoriaPadraoImportacaoId();
+
             return array_merge($item, [
                 "ref"           => $ref,
                 "produto_id"    => null,
                 "id_variacao"   => null,
                 "variacao_nome" => null,
-                "id_categoria"  => $item['id_categoria'] ?? null,
-                "categoria"  => $item['categoria'] ?? null,
+                "id_categoria"  => $categoriaId,
+                "categoria"  => $item['categoria'] ?? $this->categoriaPadraoNome($categoriaId),
                 "atributos"     => $item['atributos'] ?? [],
                 "fixos"         => $item['fixos'] ?? [],
             ]);
         })->toArray();
+    }
+
+    private function categoriaPadraoImportacaoId(): int
+    {
+        if ($this->categoriaPadraoId) {
+            return $this->categoriaPadraoId;
+        }
+
+        $categoria = Categoria::query()->where('nome', 'Importacao PDF - Sem categoria')->first();
+
+        if (!$categoria) {
+            $categoria = Categoria::query()->create([
+                'nome' => 'Importacao PDF - Sem categoria',
+            ]);
+        }
+
+        $this->categoriaPadraoId = (int) $categoria->id;
+        return $this->categoriaPadraoId;
+    }
+
+    private function categoriaPadraoNome(int $categoriaId): ?string
+    {
+        return Categoria::query()->whereKey($categoriaId)->value('nome');
     }
 }
 

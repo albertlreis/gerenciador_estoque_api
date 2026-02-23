@@ -10,6 +10,7 @@ use App\Models\Carrinho;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Validation\ValidationException;
 
 /**
  * Controller responsável por gerenciar os carrinhos de compra dos usuários.
@@ -23,12 +24,13 @@ class CarrinhoController extends Controller
     {
         $carrinho = Carrinho::where('status', 'rascunho');
 
-        if (!AuthHelper::hasPermissao('carrinhos.visualizar.todos')) {
+        if (!AuthHelper::podeVisualizarCarrinhosDeTodos()) {
             $carrinho->where('id_usuario', Auth::id());
         }
 
         return CarrinhoResource::collection(
             $carrinho->with([
+                'usuario:id,nome',
                 'cliente',
                 'itens.variacao.outlet',
                 'itens.variacao.outlets',
@@ -51,6 +53,7 @@ class CarrinhoController extends Controller
     public function show(int $id): CarrinhoResource
     {
         $query = Carrinho::with([
+            'usuario:id,nome',
             'cliente',
             'itens.variacao.produto.imagemPrincipal',
             'itens.variacao.estoques' => function ($q) {
@@ -59,7 +62,7 @@ class CarrinhoController extends Controller
             'itens.variacao.atributos',
         ])->where('id', $id);
 
-        if (!AuthHelper::hasPermissao('carrinhos.visualizar.todos')) {
+        if (!AuthHelper::podeVisualizarCarrinhosDeTodos()) {
             $query->where('id_usuario', Auth::id());
         }
 
@@ -73,17 +76,26 @@ class CarrinhoController extends Controller
      */
     public function store(StoreCarrinhoRequest $request): JsonResponse
     {
-        $request->validate([
-            'id_cliente' => 'required|exists:clientes,id'
-        ]);
+        $idUsuarioSelecionado = $request->input('id_usuario');
+        $idUsuarioFinal = (int) Auth::id();
+
+        if ($idUsuarioSelecionado !== null) {
+            if (!AuthHelper::podeSelecionarVendedorPedido()) {
+                throw ValidationException::withMessages([
+                    'id_usuario' => ['Sem permissao para selecionar vendedor do carrinho.'],
+                ]);
+            }
+
+            $idUsuarioFinal = (int) $idUsuarioSelecionado;
+        }
 
         $carrinho = Carrinho::create([
-            'id_usuario' => Auth::id(),
+            'id_usuario' => $idUsuarioFinal,
             'id_cliente' => $request->id_cliente,
             'status' => 'rascunho'
         ]);
 
-        return response()->json($carrinho, 201);
+        return response()->json(new CarrinhoResource($carrinho->load(['usuario:id,nome', 'cliente'])), 201);
     }
 
     /**
@@ -98,7 +110,7 @@ class CarrinhoController extends Controller
 
         $query = Carrinho::where('id', $id);
 
-        if (!AuthHelper::hasPermissao('carrinhos.visualizar.todos')) {
+        if (!AuthHelper::podeVisualizarCarrinhosDeTodos()) {
             $query->where('id_usuario', Auth::id());
         }
 
@@ -116,7 +128,7 @@ class CarrinhoController extends Controller
     {
         $query = Carrinho::where('id', $id);
 
-        if (!AuthHelper::hasPermissao('carrinhos.visualizar.todos')) {
+        if (!AuthHelper::podeVisualizarCarrinhosDeTodos()) {
             $query->where('id_usuario', Auth::id());
         }
 

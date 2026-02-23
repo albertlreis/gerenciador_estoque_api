@@ -26,11 +26,16 @@ class CarrinhoResource extends JsonResource
         return [
             'id'           => $this->id,
             'id_usuario'   => $this->id_usuario,
+            'vendedor_nome' => $this->whenLoaded('usuario', fn () => $this->usuario?->nome),
             'id_cliente'   => $this->id_cliente,
             'id_parceiro'  => $this->id_parceiro,
             'status'       => $this->status,
             'created_at'   => optional($this->created_at)->toIso8601String(),
             'updated_at'   => optional($this->updated_at)->toIso8601String(),
+            'usuario'      => $this->whenLoaded('usuario', fn () => [
+                'id' => $this->usuario?->id,
+                'nome' => $this->usuario?->nome,
+            ]),
             'cliente'      => new ClienteResource($this->whenLoaded('cliente')),
             'itens'        => CarrinhoItemResource::collection($this->whenLoaded('itens')),
         ];

@@ -47,6 +47,55 @@ class AuthHelper
     }
 
     /**
+     * Regra central para permitir seleção de vendedor no fluxo de pedidos/carrinhos.
+     * Mantem compatibilidade via permissao e libera por perfil para vendedor/admin.
+     */
+    public static function podeSelecionarVendedorPedido(): bool
+    {
+        if (self::hasPermissao('pedidos.selecionar_vendedor')) {
+            return true;
+        }
+
+        if (self::hasPermissao('pedidos.visualizar') && self::hasPermissao('carrinhos.finalizar')) {
+            return true;
+        }
+
+        return self::isPerfilAdministradorOuVendedor();
+    }
+
+    /**
+     * Regra central para listar pedidos de todos os vendedores.
+     */
+    public static function podeVisualizarPedidosDeTodos(): bool
+    {
+        if (self::hasPermissao('pedidos.visualizar.todos')) {
+            return true;
+        }
+
+        if (self::hasPermissao('pedidos.visualizar') && self::hasPermissao('carrinhos.finalizar')) {
+            return true;
+        }
+
+        return self::isPerfilAdministradorOuVendedor();
+    }
+
+    /**
+     * Regra central para listar carrinhos de todos os vendedores.
+     */
+    public static function podeVisualizarCarrinhosDeTodos(): bool
+    {
+        if (self::hasPermissao('carrinhos.visualizar.todos')) {
+            return true;
+        }
+
+        if (self::hasPermissao('pedidos.visualizar') && self::hasPermissao('carrinhos.finalizar')) {
+            return true;
+        }
+
+        return self::isPerfilAdministradorOuVendedor();
+    }
+
+    /**
      * Retorna o ID do usuário logado.
      */
     public static function getUsuarioId(): ?int
@@ -98,6 +147,41 @@ class AuthHelper
                 ->value('p.nome');
 
             return is_string($perfil) && Str::lower($perfil) === Str::lower('Desenvolvedor');
+        });
+    }
+
+    /**
+     * Identifica perfil administrador/vendedor sem depender de outro servico.
+     * Usa cache e protege cenarios de teste onde tabelas de acesso nao existem.
+     */
+    private static function isPerfilAdministradorOuVendedor(): bool
+    {
+        if (!auth()->check()) {
+            return false;
+        }
+
+        if (!Schema::hasTable('acesso_usuario_perfil') || !Schema::hasTable('acesso_perfis')) {
+            return false;
+        }
+
+        $usuarioId = (int) auth()->id();
+        $cacheKey = "usuario_{$usuarioId}_perfil_admin_ou_vendedor";
+
+        return Cache::remember($cacheKey, now()->addMinutes(30), function () use ($usuarioId) {
+            $perfis = DB::table('acesso_usuario_perfil as up')
+                ->join('acesso_perfis as p', 'p.id', '=', 'up.id_perfil')
+                ->where('up.id_usuario', $usuarioId)
+                ->pluck('p.nome')
+                ->filter(fn ($nome) => is_string($nome))
+                ->map(fn ($nome) => Str::lower(trim($nome)))
+                ->values();
+
+            if ($perfis->isEmpty()) {
+                return false;
+            }
+
+            return $perfis->contains(Str::lower('Administrador'))
+                || $perfis->contains(Str::lower('Vendedor'));
         });
     }
 }

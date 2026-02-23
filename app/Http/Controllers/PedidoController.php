@@ -36,7 +36,6 @@ class PedidoController extends Controller
     protected EstatisticaPedidoService $estatisticaService;
     protected PedidoExportService $exportService;
     protected ExtratorPedidoPythonService $service;
-    protected PedidoUpdateService $pedidoUpdateService;
 
     /**
      * Injeta as dependÃªncias necessÃ¡rias.
@@ -123,20 +122,6 @@ class PedidoController extends Controller
     public function completo(int $pedidoId): PedidoCompletoResource
     {
         return $this->pedidoService->obterPedidoCompleto($pedidoId);
-    }
-
-    /**
-     * Atualiza um pedido e seus itens.
-     *
-     * @param UpdatePedidoRequest $request
-     * @param Pedido $pedido
-     * @return JsonResponse
-     */
-    public function update(UpdatePedidoRequest $request, Pedido $pedido): JsonResponse
-    {
-        $pedidoAtualizado = $this->pedidoUpdateService->atualizar($pedido, $request->validated());
-
-        return response()->json(new PedidoCompletoResource($pedidoAtualizado));
     }
 
     /**

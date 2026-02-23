@@ -121,6 +121,94 @@ class AuthHelper
     }
 
     /**
+     * Retorna lista de permissões do usuário (cache + fallback em banco).
+     */
+    public static function getPermissoes(): array
+    {
+        if (!auth()->check()) {
+            return [];
+        }
+
+        if (!Schema::hasTable('acesso_usuario_perfil')
+            || !Schema::hasTable('acesso_perfil_permissao')
+            || !Schema::hasTable('acesso_permissoes')) {
+            return [];
+        }
+
+        $userId = auth()->id();
+        $cacheKey = 'permissoes_usuario_' . $userId;
+
+        if (Cache::has($cacheKey)) {
+            $cached = Cache::get($cacheKey, []);
+            return is_array($cached) ? $cached : [];
+        }
+
+        $permissoes = DB::table('acesso_usuario_perfil')
+            ->join('acesso_perfil_permissao', 'acesso_usuario_perfil.id_perfil', '=', 'acesso_perfil_permissao.id_perfil')
+            ->join('acesso_permissoes', 'acesso_perfil_permissao.id_permissao', '=', 'acesso_permissoes.id')
+            ->where('acesso_usuario_perfil.id_usuario', $userId)
+            ->pluck('acesso_permissoes.slug')
+            ->unique()
+            ->values()
+            ->all();
+
+        Cache::put($cacheKey, $permissoes, now()->addHours(6));
+
+        return $permissoes;
+    }
+
+    /**
+     * Retorna lista de perfis do usuário (cache + fallback em banco).
+     */
+    public static function getPerfis(): array
+    {
+        if (!auth()->check()) {
+            return [];
+        }
+
+        if (!Schema::hasTable('acesso_usuario_perfil') || !Schema::hasTable('acesso_perfis')) {
+            return [];
+        }
+
+        $userId = auth()->id();
+        $cacheKey = 'perfis_usuario_' . $userId;
+
+        if (Cache::has($cacheKey)) {
+            $cached = Cache::get($cacheKey, []);
+            return is_array($cached) ? $cached : [];
+        }
+
+        $perfis = DB::table('acesso_usuario_perfil')
+            ->join('acesso_perfis', 'acesso_usuario_perfil.id_perfil', '=', 'acesso_perfis.id')
+            ->where('acesso_usuario_perfil.id_usuario', $userId)
+            ->pluck('acesso_perfis.nome')
+            ->unique()
+            ->values()
+            ->all();
+
+        Cache::put($cacheKey, $perfis, now()->addHours(6));
+
+        return $perfis;
+    }
+
+    /**
+     * Verifica se o usuário possui algum dos perfis informados.
+     */
+    public static function hasPerfil(string|array $perfis): bool
+    {
+        $lista = self::getPerfis();
+        $perfis = is_array($perfis) ? $perfis : [$perfis];
+
+        foreach ($perfis as $perfil) {
+            if (in_array($perfil, $lista, true)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * Regra central para acesso DEV na importacao de estoque por planilha.
      * Permite via permissao explicita ou via perfil Desenvolvedor.
      */

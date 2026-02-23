@@ -3,6 +3,7 @@
 namespace App\Http;
 
 use App\Http\Middleware\Authenticate;
+use App\Http\Middleware\AuditContextMiddleware;
 use App\Http\Middleware\EncryptCookies;
 use App\Http\Middleware\LogRequests;
 use App\Http\Middleware\PreventRequestsDuringMaintenance;
@@ -40,6 +41,7 @@ class Kernel extends HttpKernel
     protected $middleware = [
         TrustProxies::class,
         HandleCors::class,
+        AuditContextMiddleware::class,
         PreventRequestsDuringMaintenance::class,
         ValidatePostSize::class,
         TrimStrings::class,

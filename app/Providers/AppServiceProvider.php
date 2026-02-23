@@ -4,6 +4,7 @@ namespace App\Providers;
 
 use App\Repositories\Contracts\ContaPagarRepository;
 use App\Repositories\Eloquent\ContaPagarRepositoryEloquent;
+use App\Support\Audit\AuditContext;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\ServiceProvider;
@@ -18,6 +19,7 @@ class AppServiceProvider extends ServiceProvider
     public function register()
     {
         $this->app->bind(ContaPagarRepository::class, ContaPagarRepositoryEloquent::class);
+        $this->app->singleton(AuditContext::class, fn () => new AuditContext());
     }
 
     /**

@@ -39,6 +39,8 @@ return [
 
     'extrator_pedido' => [
         'url' => env('SERVICES_EXTRATOR_PEDIDO_URL', 'http://127.0.0.1:8010/extrair-pedido'),
+        'file_field' => env('SERVICES_EXTRATOR_PEDIDO_FILE_FIELD', 'pdf'),
+        'force_local_url' => (bool) env('SERVICES_EXTRATOR_PEDIDO_FORCE_LOCAL_URL', true),
         'timeout' => (int) env('SERVICES_EXTRATOR_PEDIDO_TIMEOUT', 120),
         'retry_times' => (int) env('SERVICES_EXTRATOR_PEDIDO_RETRY_TIMES', 2),
         'retry_sleep_ms' => (int) env('SERVICES_EXTRATOR_PEDIDO_RETRY_SLEEP_MS', 500),

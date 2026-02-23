@@ -25,7 +25,7 @@ use Illuminate\Support\Str;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 /**
- * Controlador responsável por operações relacionadas a pedidos.
+ * Controlador responsÃ¡vel por operaÃ§Ãµes relacionadas a pedidos.
  */
 class PedidoController extends Controller
 {
@@ -37,7 +37,7 @@ class PedidoController extends Controller
     protected ExtratorPedidoPythonService $service;
 
     /**
-     * Injeta as dependências necessárias.
+     * Injeta as dependÃªncias necessÃ¡rias.
      */
     public function __construct(
         PedidoService $pedidoService,
@@ -56,7 +56,7 @@ class PedidoController extends Controller
     }
 
     /**
-     * Lista pedidos com filtros, paginação e indicadores adicionais.
+     * Lista pedidos com filtros, paginaÃ§Ã£o e indicadores adicionais.
      *
      * @param Request $request
      * @return JsonResponse
@@ -115,7 +115,7 @@ class PedidoController extends Controller
     }
 
     /**
-     * Retorna estatísticas de pedidos por mês.
+     * Retorna estatÃ­sticas de pedidos por mÃªs.
      *
      * @param Request $request
      * @return JsonResponse
@@ -126,7 +126,7 @@ class PedidoController extends Controller
     }
 
     /**
-     * Confirma a importação de um pedido previamente lido do PDF.
+     * Confirma a importaÃ§Ã£o de um pedido previamente lido do PDF.
      *
      * @param Request $request
      * @return JsonResponse
@@ -157,10 +157,10 @@ class PedidoController extends Controller
         if (!in_array($tipoImportacao, $tiposPermitidos, true)) {
             return response()->json([
                 'sucesso' => false,
-                'mensagem' => 'Tipo de importação inválido.',
+                'mensagem' => 'Tipo de importaÃ§Ã£o invÃ¡lido.',
                 'errors' => [
                     'tipo_importacao' => [
-                        'Informe um tipo válido: PRODUTOS_PDF_SIERRA, PRODUTOS_PDF_AVANTI, PRODUTOS_PDF_QUAKER ou ADORNOS_XML_NFE.',
+                        'Informe um tipo vÃ¡lido: PRODUTOS_PDF_SIERRA, PRODUTOS_PDF_AVANTI, PRODUTOS_PDF_QUAKER ou ADORNOS_XML_NFE.',
                     ],
                 ],
             ], 422);
@@ -178,8 +178,8 @@ class PedidoController extends Controller
             'tipo_importacao' => 'nullable|string',
         ], [
             'arquivo.mimes' => $isXml
-                ? 'Para ADORNOS_XML_NFE, envie um arquivo XML válido.'
-                : 'Para importação de produtos, envie um arquivo PDF válido.',
+                ? 'Para ADORNOS_XML_NFE, envie um arquivo XML vÃ¡lido.'
+                : 'Para importaÃ§Ã£o de produtos, envie um arquivo PDF vÃ¡lido.',
         ]);
 
         try {
@@ -187,7 +187,7 @@ class PedidoController extends Controller
             $hashArquivo = hash_file('sha256', $arquivo->getRealPath());
             $hash = hash('sha256', $hashArquivo . '|' . $tipoImportacao);
 
-            Log::info('Importação de pedido - início', [
+            Log::info('ImportaÃ§Ã£o de pedido - inÃ­cio', [
                 'request_id' => $requestId,
                 'etapa' => 'upload',
                 'usuario_id' => auth()->id(),
@@ -204,13 +204,38 @@ class PedidoController extends Controller
             if ($importExistente && $importExistente->status === 'confirmado') {
                 return response()->json([
                     'sucesso' => false,
-                    'mensagem' => 'Este arquivo já foi importado anteriormente para este tipo de importação.',
+                    'mensagem' => 'Este arquivo jÃ¡ foi importado anteriormente para este tipo de importaÃ§Ã£o.',
                     'pedido_id' => $importExistente->pedido_id,
                 ], 409);
             }
 
             if ($importExistente && $importExistente->status === 'extraido' && $importExistente->dados_json) {
-                Log::info('Importação de pedido - preview reutilizado', [
+                $preview = is_array($importExistente->dados_json)
+                    ? $importExistente->dados_json
+                    : (array) $importExistente->dados_json;
+                $itensPreview = data_get($preview, 'itens', []);
+                $previewValido = is_array($itensPreview) && count($itensPreview) > 0;
+
+                if ($previewValido) {
+                    Log::info('Importação de pedido - preview reutilizado', [
+                        'request_id' => $requestId,
+                        'etapa' => 'staging',
+                        'usuario_id' => auth()->id(),
+                        'importacao_id' => $importExistente->id,
+                        'tipo_importacao' => $tipoImportacao,
+                        'itens_preview' => count($itensPreview),
+                        'tempo_ms' => (int) ((microtime(true) - $inicioImportacao) * 1000),
+                    ]);
+
+                    return response()->json([
+                        'sucesso' => true,
+                        'mensagem' => 'Arquivo já processado. Usando dados existentes.',
+                        'importacao_id' => $importExistente->id,
+                        'dados' => $importExistente->dados_json,
+                    ]);
+                }
+
+                Log::warning('Importação de pedido - preview vazio, reprocessando arquivo', [
                     'request_id' => $requestId,
                     'etapa' => 'staging',
                     'usuario_id' => auth()->id(),
@@ -218,15 +243,7 @@ class PedidoController extends Controller
                     'tipo_importacao' => $tipoImportacao,
                     'tempo_ms' => (int) ((microtime(true) - $inicioImportacao) * 1000),
                 ]);
-
-                return response()->json([
-                    'sucesso' => true,
-                    'mensagem' => 'Arquivo já processado. Usando dados existentes.',
-                    'importacao_id' => $importExistente->id,
-                    'dados' => $importExistente->dados_json,
-                ]);
             }
-
             $dados = $this->service->processar($arquivo, $tipoImportacao, $requestId);
 
             $pedido = $dados['pedido'] ?? [];
@@ -273,7 +290,7 @@ class PedidoController extends Controller
                 ]
             );
 
-            Log::info('Importação de pedido - extração concluída', [
+            Log::info('ImportaÃ§Ã£o de pedido - extraÃ§Ã£o concluÃ­da', [
                 'request_id' => $requestId,
                 'etapa' => 'staging',
                 'usuario_id' => auth()->id(),
@@ -305,7 +322,7 @@ class PedidoController extends Controller
                 ]
             );
 
-            Log::error('Importação de pedido - erro ao processar', [
+            Log::error('ImportaÃ§Ã£o de pedido - erro ao processar', [
                 'request_id' => $requestId,
                 'etapa' => 'importar',
                 'usuario_id' => auth()->id(),
@@ -328,28 +345,28 @@ class PedidoController extends Controller
      */
     public function roteiroPdf(int $pedidoId): Response
     {
-        // 1) Carrega o básico + statusAtual para decidir o tipo sem puxar consignações/itens
+        // 1) Carrega o bÃ¡sico + statusAtual para decidir o tipo sem puxar consignaÃ§Ãµes/itens
         $pedidoBase = Pedido::with([
-            'cliente.enderecoPrincipal', // opcional, mas útil p/ PDF (se quiser)
+            'cliente.enderecoPrincipal', // opcional, mas Ãºtil p/ PDF (se quiser)
             'usuario',
             'parceiro',
             'statusAtual',
         ])->findOrFail($pedidoId);
 
-        // Regra de negócio:
-        // - Pedido consignado = status atual consignado (e/ou existe consignação)
-        // Eu priorizo statusAtual por ser determinístico e mais barato.
+        // Regra de negÃ³cio:
+        // - Pedido consignado = status atual consignado (e/ou existe consignaÃ§Ã£o)
+        // Eu priorizo statusAtual por ser determinÃ­stico e mais barato.
         $status = $pedidoBase->statusAtual?->status;
         $isConsignado = ($status === 'consignado');
 
-        // Caso queira ser "à prova de inconsistência" (status divergente),
-        // você pode habilitar esse fallback (roda 1 exists()):
+        // Caso queira ser "Ã  prova de inconsistÃªncia" (status divergente),
+        // vocÃª pode habilitar esse fallback (roda 1 exists()):
         // if (!$isConsignado) $isConsignado = $pedidoBase->isConsignado();
 
         $baseFsDir = public_path('storage' . DIRECTORY_SEPARATOR . ProdutoImagem::FOLDER);
         Pdf::setOptions(['isRemoteEnabled' => true]);
 
-        // 2) Se for consignado: carrega APENAS consignações e gera o mesmo PDF existente
+        // 2) Se for consignado: carrega APENAS consignaÃ§Ãµes e gera o mesmo PDF existente
         if ($isConsignado) {
             $pedido = Pedido::with([
                 'cliente.enderecoPrincipal',
@@ -361,13 +378,13 @@ class PedidoController extends Controller
                 'consignacoes.produtoVariacao.produto',
                 'consignacoes.produtoVariacao.atributos',
 
-                // localização
+                // localizaÃ§Ã£o
                 'consignacoes.produtoVariacao.estoquesComLocalizacao.localizacao.area',
             ])->findOrFail($pedidoId);
 
-            $grupos = $pedido->consignacoes->groupBy(fn($c) => $c->deposito->nome ?? 'Sem depósito');
+            $grupos = $pedido->consignacoes->groupBy(fn($c) => $c->deposito->nome ?? 'Sem depÃ³sito');
 
-            logAuditoria('pedido_pdf', 'Geração de PDF (roteiro consignação via pedidos)', [
+            logAuditoria('pedido_pdf', 'GeraÃ§Ã£o de PDF (roteiro consignaÃ§Ã£o via pedidos)', [
                 'acao' => 'roteiro_pdf',
                 'pedido_id' => $pedidoId,
                 'tipo' => 'consignacao',
@@ -383,7 +400,7 @@ class PedidoController extends Controller
             return $pdf->download("roteiro_consignacao_{$pedidoId}.pdf");
         }
 
-        // 3) Caso contrário: carrega APENAS itens do pedido e gera o template novo
+        // 3) Caso contrÃ¡rio: carrega APENAS itens do pedido e gera o template novo
         $pedido = Pedido::with([
             'cliente.enderecoPrincipal',
             'usuario',
@@ -393,11 +410,11 @@ class PedidoController extends Controller
             'itens.variacao.produto',
             'itens.variacao.atributos',
 
-            // localização
+            // localizaÃ§Ã£o
             'itens.variacao.estoquesComLocalizacao.localizacao.area',
         ])->findOrFail($pedidoId);
 
-        // Depósitos: temos id_deposito no item, e model Deposito existe.
+        // DepÃ³sitos: temos id_deposito no item, e model Deposito existe.
         $depositoIds = $pedido->itens
             ->pluck('id_deposito')
             ->filter(fn($id) => !is_null($id) && (int)$id > 0)
@@ -410,11 +427,11 @@ class PedidoController extends Controller
 
         $grupos = $pedido->itens->groupBy(function ($item) use ($depositosMap) {
             $id = (int)($item->id_deposito ?? 0);
-            if ($id <= 0) return 'Sem depósito';
-            return $depositosMap[$id] ?? ("Depósito #{$id}");
+            if ($id <= 0) return 'Sem depÃ³sito';
+            return $depositosMap[$id] ?? ("DepÃ³sito #{$id}");
         });
 
-        logAuditoria('pedido_pdf', 'Geração de PDF (roteiro pedido)', [
+        logAuditoria('pedido_pdf', 'GeraÃ§Ã£o de PDF (roteiro pedido)', [
             'acao' => 'roteiro_pdf',
             'pedido_id' => $pedidoId,
             'tipo' => 'pedido',

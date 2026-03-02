@@ -6,6 +6,8 @@ use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
+use PDO;
+use RuntimeException;
 use Tests\Concerns\CreatesTestDatabase;
 
 abstract class TestCase extends BaseTestCase
@@ -37,13 +39,40 @@ abstract class TestCase extends BaseTestCase
             ]);
         }
 
-        Artisan::call('db:wipe', ['--force' => true]);
+        $this->recreateTestingDatabase();
 
         $externalPath = base_path('..' . DIRECTORY_SEPARATOR . 'autenticacao_api' . DIRECTORY_SEPARATOR . 'database' . DIRECTORY_SEPARATOR . 'migrations');
         $relativePrefix = '..' . DIRECTORY_SEPARATOR . 'autenticacao_api' . DIRECTORY_SEPARATOR . 'database' . DIRECTORY_SEPARATOR . 'migrations';
         $this->runExternalMigrations($externalPath, $relativePrefix);
 
         Artisan::call('migrate', ['--force' => true]);
+    }
+
+    protected function recreateTestingDatabase(): void
+    {
+        if (env('APP_ENV') !== 'testing') {
+            return;
+        }
+
+        $dbName = (string) env('DB_DATABASE');
+        if ($dbName === '' || !str_ends_with($dbName, '_test')) {
+            throw new RuntimeException("DB de teste inválido para reset seguro: {$dbName}");
+        }
+
+        $host = (string) env('DB_HOST', '127.0.0.1');
+        $port = (string) env('DB_PORT', '3306');
+        $user = (string) env('DB_USERNAME', 'root');
+        $pass = (string) env('DB_PASSWORD', '');
+
+        $pdo = new PDO("mysql:host={$host};port={$port};charset=utf8mb4", $user, $pass, [
+            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+        ]);
+
+        $pdo->exec("DROP DATABASE IF EXISTS `{$dbName}`");
+        $pdo->exec("CREATE DATABASE `{$dbName}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
+
+        DB::purge();
+        DB::reconnect();
     }
 
     protected function runExternalMigrations(string $path, string $relativePrefix): void

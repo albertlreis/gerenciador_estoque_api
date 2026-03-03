@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 
 /**
  * @property int $id
@@ -53,8 +54,60 @@ class ProdutoImagem extends Model
      *
      * @return string
      */
-    public function getUrlCompletaAttribute(): string
+    public function getUrlCompletaAttribute(): ?string
     {
-        return Storage::disk(self::DISK)->url(self::FOLDER . '/' . $this->url);
+        return self::normalizarUrlPublica($this->url);
+    }
+
+    public static function normalizarUrlPublica(?string $valor): ?string
+    {
+        if ($valor === null) {
+            return null;
+        }
+
+        $valor = trim($valor);
+        if ($valor === '') {
+            return null;
+        }
+
+        if (Str::startsWith($valor, ['http://', 'https://'])) {
+            return $valor;
+        }
+
+        $path = '/' . ltrim($valor, '/');
+
+        if (Str::startsWith($path, '/uploads/produtos/')) {
+            $path = '/storage/produtos/' . ltrim(substr($path, strlen('/uploads/produtos/')), '/');
+            return self::toAbsoluteUrl($path);
+        }
+
+        if (Str::startsWith($path, '/storage/')) {
+            $path = preg_replace('#^/storage/(?:produtos/)+#', '/storage/produtos/', $path) ?? $path;
+            if (!Str::startsWith($path, '/storage/produtos/')) {
+                $path = '/storage/produtos/' . ltrim(substr($path, strlen('/storage/')), '/');
+            }
+
+            return self::toAbsoluteUrl($path);
+        }
+
+        $relative = ltrim($path, '/');
+        $relative = preg_replace('#^(?:' . preg_quote(self::FOLDER, '#') . '/)+#', self::FOLDER . '/', $relative) ?? $relative;
+        if (!Str::startsWith($relative, self::FOLDER . '/')) {
+            $relative = self::FOLDER . '/' . $relative;
+        }
+
+        return self::toAbsoluteUrl(Storage::disk(self::DISK)->url($relative));
+    }
+
+    private static function toAbsoluteUrl(string $path): string
+    {
+        if (Str::startsWith($path, ['http://', 'https://'])) {
+            return $path;
+        }
+
+        $path = '/' . ltrim($path, '/');
+        $base = rtrim((string) config('app.url'), '/');
+
+        return $base !== '' ? $base . $path : $path;
     }
 }

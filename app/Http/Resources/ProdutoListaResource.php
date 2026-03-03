@@ -4,8 +4,6 @@ namespace App\Http\Resources;
 
 use App\Models\ProdutoImagem;
 use Illuminate\Http\Resources\Json\JsonResource;
-use Illuminate\Support\Facades\Storage;
-use Illuminate\Support\Str;
 
 class ProdutoListaResource extends JsonResource
 {
@@ -44,24 +42,6 @@ class ProdutoListaResource extends JsonResource
 
     private function normalizarUrlImagem(?string $valor): ?string
     {
-        if (!$valor) {
-            return null;
-        }
-
-        $valor = trim($valor);
-        if (Str::startsWith($valor, ['http://', 'https://'])) {
-            return $valor;
-        }
-
-        if (Str::startsWith($valor, ['/storage/', 'storage/', '/uploads/', 'uploads/'])) {
-            return $valor[0] === '/' ? $valor : '/' . $valor;
-        }
-
-        $valor = ltrim($valor, '/');
-        if (Str::startsWith($valor, ProdutoImagem::FOLDER . '/')) {
-            return Storage::disk(ProdutoImagem::DISK)->url($valor);
-        }
-
-        return Storage::disk(ProdutoImagem::DISK)->url(ProdutoImagem::FOLDER . '/' . $valor);
+        return ProdutoImagem::normalizarUrlPublica($valor);
     }
 }

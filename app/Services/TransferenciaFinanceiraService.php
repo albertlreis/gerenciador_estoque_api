@@ -227,6 +227,12 @@ class TransferenciaFinanceiraService
     private function normalizar(array $data, ?TransferenciaFinanceira $current = null): array
     {
         $p = $data;
+        if (!array_key_exists('data_movimento', $p) && array_key_exists('data', $p)) {
+            $p['data_movimento'] = $p['data'];
+        }
+        if (!array_key_exists('observacoes', $p) && array_key_exists('descricao', $p)) {
+            $p['observacoes'] = $p['descricao'];
+        }
 
         $p['conta_origem_id'] = $p['conta_origem_id'] ?? $current?->conta_origem_id ?? null;
         $p['conta_destino_id'] = $p['conta_destino_id'] ?? $current?->conta_destino_id ?? null;

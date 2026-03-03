@@ -10,9 +10,13 @@ class TransferenciaFinanceiraStoreRequest extends FormRequest
 
     protected function prepareForValidation(): void
     {
+        $dataMovimento = $this->input('data_movimento', $this->input('data'));
+        $observacoes = $this->input('observacoes', $this->input('descricao'));
+
         $this->merge([
             'status' => $this->input('status') ? strtolower((string) $this->input('status')) : null,
-            'observacoes' => $this->input('observacoes') !== null ? trim((string) $this->input('observacoes')) : null,
+            'data_movimento' => $dataMovimento,
+            'observacoes' => $observacoes !== null ? trim((string) $observacoes) : null,
         ]);
     }
 

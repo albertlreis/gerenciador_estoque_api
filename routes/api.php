@@ -60,6 +60,11 @@ use App\Http\Controllers\Assistencia\{
 
 use App\Http\Controllers\AssistenciaRelatorioController;
 
+Route::get('v1/health', fn () => response()->json([
+    'status' => 'ok',
+    'service' => 'gerenciador-estoque-api',
+]));
+
 Route::middleware('auth:sanctum')
     ->prefix('v1')
     ->group(function () {

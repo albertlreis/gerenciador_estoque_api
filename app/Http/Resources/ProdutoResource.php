@@ -52,7 +52,7 @@ class ProdutoResource extends JsonResource
             'pagamento_detalhes' => $outletCatalogo['pagamento_detalhes'],
             'pagamento_condicoes' => $outletCatalogo['pagamento_condicoes'],
             'outlet_catalogo' => $outletCatalogo,
-            'imagem_principal' => $this->imagemPrincipal?->url_completa,
+            'imagem_principal' => $this->normalizarUrlImagem($imagemPrincipal),
             'data_ultima_saida' => $this->data_ultima_saida,
             'manual_conservacao' => $this->normalizarUrlManual($this->manual_conservacao),
             'created_at' => $this->created_at,
@@ -73,25 +73,7 @@ class ProdutoResource extends JsonResource
 
     private function normalizarUrlImagem(?string $valor): ?string
     {
-        if (!$valor) {
-            return null;
-        }
-
-        $valor = trim($valor);
-        if (Str::startsWith($valor, ['http://', 'https://'])) {
-            return $valor;
-        }
-
-        if (Str::startsWith($valor, ['/storage/', 'storage/', '/uploads/', 'uploads/'])) {
-            return $valor[0] === '/' ? $valor : '/' . $valor;
-        }
-
-        $valor = ltrim($valor, '/');
-        if (Str::startsWith($valor, ProdutoImagem::FOLDER . '/')) {
-            return Storage::disk(ProdutoImagem::DISK)->url($valor);
-        }
-
-        return Storage::disk(ProdutoImagem::DISK)->url(ProdutoImagem::FOLDER . '/' . $valor);
+        return ProdutoImagem::normalizarUrlPublica($valor);
     }
 
     private function normalizarUrlManual(?string $valor): ?string

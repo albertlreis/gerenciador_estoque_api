@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Parceiro extends Model
@@ -17,6 +18,8 @@ class Parceiro extends Model
         'documento',
         'email',
         'telefone',
+        'consultor_nome',
+        'nivel_fidelidade',
         'endereco',
         'status',
         'observacoes',
@@ -31,5 +34,10 @@ class Parceiro extends Model
     {
         $digits = $value ? preg_replace('/\D+/', '', $value) : null;
         $this->attributes['documento'] = $digits ?: null;
+    }
+
+    public function contatos(): HasMany
+    {
+        return $this->hasMany(ParceiroContato::class, 'parceiro_id');
     }
 }

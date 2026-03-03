@@ -28,7 +28,7 @@ class ParceiroIndexRequest extends FormRequest
         return [
             'q' => ['nullable', 'string', 'max:255'],
             'status' => ['nullable', 'integer', 'in:0,1'],
-            'order_by' => ['nullable', 'in:nome,created_at,updated_at'],
+            'order_by' => ['nullable', 'in:nome,consultor_nome,nivel_fidelidade,created_at,updated_at'],
             'order_dir' => ['nullable', 'in:asc,desc'],
             'per_page' => ['nullable', 'integer', 'min:1', 'max:200'],
             'page' => ['nullable', 'integer', 'min:1'],

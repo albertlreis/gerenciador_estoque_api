@@ -45,7 +45,10 @@ abstract class TestCase extends BaseTestCase
         $relativePrefix = '..' . DIRECTORY_SEPARATOR . 'autenticacao_api' . DIRECTORY_SEPARATOR . 'database' . DIRECTORY_SEPARATOR . 'migrations';
         $this->runExternalMigrations($externalPath, $relativePrefix);
 
-        Artisan::call('migrate', ['--force' => true]);
+        Artisan::call('migrate', [
+            '--env' => 'testing',
+            '--force' => true,
+        ]);
     }
 
     protected function recreateTestingDatabase(): void
@@ -96,6 +99,7 @@ abstract class TestCase extends BaseTestCase
 
             Artisan::call('migrate', [
                 '--path' => $relativePrefix . DIRECTORY_SEPARATOR . basename($file),
+                '--env' => 'testing',
                 '--force' => true,
             ]);
 

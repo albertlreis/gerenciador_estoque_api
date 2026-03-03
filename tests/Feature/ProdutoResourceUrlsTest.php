@@ -112,4 +112,26 @@ class ProdutoResourceUrlsTest extends TestCase
                 'manual_conservacao' => $baseUrl . '/storage/manuais/manual.pdf',
             ]);
     }
+
+    public function test_show_produto_normaliza_url_com_prefixo_produtos_sem_duplicar(): void
+    {
+        $usuario = $this->criarUsuario();
+        Sanctum::actingAs($usuario);
+
+        $produtoId = $this->criarProdutoBase('manual.pdf');
+        $this->criarImagemPrincipal($produtoId, 'produtos/foto3.jpg');
+
+        $baseUrl = rtrim((string) config('app.url'), '/');
+
+        $response = $this->getJson("/api/v1/produtos/{$produtoId}");
+
+        $response
+            ->assertOk()
+            ->assertJsonFragment([
+                'imagem_principal' => $baseUrl . '/storage/produtos/foto3.jpg',
+            ])
+            ->assertJsonMissing([
+                'imagem_principal' => $baseUrl . '/storage/produtos/produtos/foto3.jpg',
+            ]);
+    }
 }

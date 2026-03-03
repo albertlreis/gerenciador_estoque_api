@@ -17,6 +17,7 @@ class TransferenciaFinanceira extends Model
         'conta_origem_id',
         'conta_destino_id',
         'valor',
+        'data_movimento',
         'data',
         'observacoes',
         'status',
@@ -25,8 +26,19 @@ class TransferenciaFinanceira extends Model
 
     protected $casts = [
         'valor' => 'decimal:2',
+        'data_movimento' => 'datetime',
         'data' => 'datetime',
     ];
+
+    public function getDataAttribute()
+    {
+        return $this->attributes['data'] ?? $this->attributes['data_movimento'] ?? null;
+    }
+
+    public function setDataAttribute($value): void
+    {
+        $this->attributes['data_movimento'] = $value;
+    }
 
     public function contaOrigem(): BelongsTo
     {

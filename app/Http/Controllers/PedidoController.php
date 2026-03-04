@@ -288,6 +288,22 @@ class PedidoController extends Controller
             $itens = $dados['itens'] ?? [];
             $totais = $dados['totais'] ?? [];
 
+            if ($tipoImportacao !== 'ADORNOS_XML_NFE' && count($itens) === 0) {
+                $nomeArquivo = $arquivo->getClientOriginalName();
+                $debugTexto = $dados['debug_texto_extraido'] ?? null;
+                Log::warning('Importação de pedido - PDF sem itens identificados', [
+                    'request_id' => $requestId,
+                    'tipo_importacao' => $tipoImportacao,
+                    'arquivo_nome' => $nomeArquivo,
+                    'debug_texto_preview' => $debugTexto ? mb_substr($debugTexto, 0, 2000) : null,
+                ]);
+                return response()->json([
+                    'sucesso' => false,
+                    'mensagem' => "Nenhum item foi identificado no PDF. Arquivo: {$nomeArquivo}",
+                    'erro' => "Nenhum item foi identificado no PDF. Arquivo: {$nomeArquivo}",
+                ], 422);
+            }
+
             $itens = app(ImportacaoPedidoService::class)
                 ->mesclarItensComVariacoes($itens);
 

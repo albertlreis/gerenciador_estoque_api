@@ -4,6 +4,7 @@ namespace App\Services;
 
 use Exception;
 use Illuminate\Http\UploadedFile;
+use InvalidArgumentException;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
@@ -85,17 +86,24 @@ class ExtratorPedidoPythonService
             }
 
             if (!$response->successful()) {
+                $status = $response->status();
+                $body = $response->json();
+                $mensagem = $body['mensagem'] ?? $body['erro_original'] ?? 'Erro ao processar arquivo na API Python';
+
                 Log::error('importacao_pdf_python_http_error', [
                     'request_id' => $requestId,
                     'etapa' => 'parse',
                     'url' => $url,
-                    'status' => $response->status(),
+                    'status' => $status,
                     'body_preview' => mb_substr((string) $response->body(), 0, 1200),
                     'tipo_importacao' => $tipo,
                     'file_field' => $fileField,
                 ]);
 
-                throw new Exception('Erro ao processar arquivo na API Python');
+                if ($status === 422) {
+                    throw new InvalidArgumentException($mensagem);
+                }
+                throw new Exception($mensagem);
             }
 
             $json = $response->json();

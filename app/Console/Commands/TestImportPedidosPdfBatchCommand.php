@@ -48,8 +48,13 @@ class TestImportPedidosPdfBatchCommand extends Command
             return self::FAILURE;
         }
 
+        $url = config('services.extrator_pedido.url');
+        if (!$url) {
+            $url = 'http://fabio-leitor-pdf-sierra:8000/extrair-pedido';
+        }
+
         config([
-            'services.extrator_pedido.url' => 'http://localhost:8010/extrair-pedido',
+            'services.extrator_pedido.url' => $url,
             'services.extrator_pedido.timeout' => $timeout,
         ]);
 

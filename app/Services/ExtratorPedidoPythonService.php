@@ -162,28 +162,6 @@ class ExtratorPedidoPythonService
 
     private function resolverUrlLocal(?string $url): ?string
     {
-        if (!$url) {
-            return $url;
-        }
-
-        $forcarLocal = app()->environment(['local', 'testing'])
-            && (bool) config('services.extrator_pedido.force_local_url', true);
-
-        if (!$forcarLocal) {
-            return $url;
-        }
-
-        $host = mb_strtolower((string) parse_url($url, PHP_URL_HOST));
-        if (in_array($host, ['localhost', '127.0.0.1'], true)) {
-            return $url;
-        }
-
-        $localUrl = 'http://127.0.0.1:8010/extrair-pedido';
-        Log::warning('importacao_pdf_python_force_local_url', [
-            'url_configurada' => $url,
-            'url_utilizada' => $localUrl,
-        ]);
-
-        return $localUrl;
+        return $url;
     }
 }

@@ -38,7 +38,7 @@ return [
     ],
 
     'extrator_pedido' => [
-        'url' => env('SERVICES_EXTRATOR_PEDIDO_URL', 'http://167.99.51.172:8010/extrair-pedido'),
+        'url' => env('SERVICES_EXTRATOR_PEDIDO_URL', 'http://fabio-leitor-pdf-sierra:8000/extrair-pedido'),
         'file_field' => env('SERVICES_EXTRATOR_PEDIDO_FILE_FIELD', 'pdf'),
         'force_local_url' => (bool) env('SERVICES_EXTRATOR_PEDIDO_FORCE_LOCAL_URL', true),
         'timeout' => (int) env('SERVICES_EXTRATOR_PEDIDO_TIMEOUT', 120),

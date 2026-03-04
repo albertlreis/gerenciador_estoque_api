@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Enums\PedidoStatus;
 use App\Helpers\ConfiguracaoHelper;
 use App\Helpers\PedidoHelper;
+use App\Services\Comunicacao\ComunicacaoApiClient;
 use App\Models\Pedido;
 use App\Models\PedidoStatusHistorico;
 use Illuminate\Http\Request;
@@ -102,7 +103,7 @@ class PedidoStatusHistoricoController extends Controller
         return response()->json($resultadoFinal);
     }
 
-    public function atualizarStatus(Request $request, Pedido $pedido): JsonResponse
+    public function atualizarStatus(Request $request, Pedido $pedido, ComunicacaoApiClient $comms): JsonResponse
     {
         $request->validate([
             'status' => 'required|string',
@@ -142,6 +143,17 @@ class PedidoStatusHistoricoController extends Controller
             'nivel' => 'info',
             'status_novo' => $novoStatus,
         ], $pedido);
+
+        try {
+            $comms->enviarStatusPedido($pedido->fresh(['cliente']), $novoStatus);
+        } catch (\Throwable $e) {
+            // Não quebra fluxo principal; apenas registra em log
+            logger()->warning('[Comunicacao] Falha ao enviar status de pedido', [
+                'pedido_id' => $pedido->id,
+                'status' => $novoStatus,
+                'error' => $e->getMessage(),
+            ]);
+        }
 
         return response()->json(['message' => 'Status atualizado com sucesso.']);
     }

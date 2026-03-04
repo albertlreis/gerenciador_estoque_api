@@ -9,6 +9,7 @@ use App\Models\ContaReceberPagamento;
 use BackedEnum;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
+use App\Services\Comunicacao\ComunicacaoApiClient;
 
 class ContaReceberCommandService
 {
@@ -16,6 +17,7 @@ class ContaReceberCommandService
         private readonly ContaStatusService $statusSvc,
         private readonly FinanceiroLedgerService $ledger,
         private readonly FinanceiroAuditoriaService $audit,
+        private readonly ComunicacaoApiClient $comms,
     ) {}
 
     public function criar(array $dados): ContaReceber
@@ -30,8 +32,17 @@ class ContaReceberCommandService
             $this->syncValores($conta);
             $this->statusSvc->syncReceber($conta->fresh());
 
-            $fresh = $conta->fresh();
+            $fresh = $conta->fresh(['pedido.cliente']);
             $this->audit->log('created', $conta, null, $fresh->toArray());
+
+            try {
+                $this->comms->enviarCobranca($fresh);
+            } catch (\Throwable $e) {
+                logger()->warning('[Comunicacao] Falha ao enfileirar cobrança', [
+                    'conta_id' => $fresh->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
 
             return $fresh;
         });

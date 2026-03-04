@@ -12,6 +12,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 use InvalidArgumentException;
+use Illuminate\Validation\ValidationException;
 
 /**
  * Controlador responsável por gerenciar movimentações de estoque.
@@ -123,10 +124,28 @@ class EstoqueMovimentacaoController extends Controller
             'itens.*.quantidade' => ['required', 'integer', 'min:1'],
         ]);
 
-        $usuarioId = auth()->id();
+        // Transferência: origem e destino devem ser diferentes
+        if (($dados['tipo'] ?? '') === 'transferencia') {
+            $origem = (int) ($dados['deposito_origem_id'] ?? 0);
+            $destino = (int) ($dados['deposito_destino_id'] ?? 0);
+            if ($origem === $destino) {
+                throw ValidationException::withMessages([
+                    'deposito_origem_id' => ['O depósito de origem e destino não podem ser iguais.'],
+                ]);
+            }
+        }
 
-        $result = $this->service->registrarMovimentacaoLote($dados, $usuarioId);
-        return response()->json($result);
+        $usuarioId = auth()->id();
+        if ($usuarioId === null) {
+            return response()->json(['error' => 'Usuário não autenticado.'], 401);
+        }
+
+        try {
+            $result = $this->service->registrarMovimentacaoLote($dados, $usuarioId);
+            return response()->json($result);
+        } catch (InvalidArgumentException $e) {
+            return response()->json(['error' => $e->getMessage()], 422);
+        }
     }
 
     /**

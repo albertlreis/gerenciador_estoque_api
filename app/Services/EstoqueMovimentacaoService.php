@@ -266,6 +266,32 @@ class EstoqueMovimentacaoService
     }
 
     /**
+     * Valida saldo disponível no depósito de origem para transferência (com lock).
+     * Deve ser chamado dentro de DB::transaction antes de criar o documento de transferência.
+     */
+    private function validarSaldoOrigemParaTransferencia(int $variacaoId, int $depositoId, int $qtd): void
+    {
+        $row = DB::table('estoque')
+            ->where('id_variacao', $variacaoId)
+            ->where('id_deposito', $depositoId)
+            ->lockForUpdate()
+            ->first();
+
+        if (!$row) {
+            throw new InvalidArgumentException("Saldo inexistente no depósito de origem para a variação {$variacaoId}.");
+        }
+
+        $quantidadeAtual = (int) $row->quantidade;
+        $reservas = app(ReservaEstoqueService::class)
+            ->reservasEmAbertoPorDeposito($variacaoId, $depositoId);
+        $disponivel = $quantidadeAtual - (int) $reservas;
+
+        if ($disponivel < $qtd) {
+            throw new InvalidArgumentException("Saldo insuficiente no depósito de origem. Disponível: {$disponivel}, solicitado: {$qtd}.");
+        }
+    }
+
+    /**
      * Debita (–) saldo do depósito. Valida disponível (quantidade - reservas).
      */
     private function debitarEstoque(
@@ -556,6 +582,21 @@ class EstoqueMovimentacaoService
             ->groupBy('variacao_id')
             ->map(fn($g) => (int) $g->sum('quantidade'));
 
+        // Validações antes da transação (fail fast)
+        if ($tipo === 'transferencia') {
+            if ($origem === null || $destino === null) {
+                throw new InvalidArgumentException('Transferência exige depósito de origem e destino.');
+            }
+            if ((int) $origem === (int) $destino) {
+                throw new InvalidArgumentException('Depósito de origem e destino não podem ser iguais.');
+            }
+            foreach ($consolidados as $variacaoId => $qtd) {
+                if ((int) $qtd <= 0) {
+                    throw new InvalidArgumentException('Quantidade deve ser maior que zero.');
+                }
+            }
+        }
+
         $movs = [];
         $transferencia = null;
 
@@ -567,6 +608,13 @@ class EstoqueMovimentacaoService
             $tipo, $origem, $destino, $observacao, $usuarioId,
             $consolidados, $loteId
         ) {
+            // 0) Transferência: validar saldo em origem para todos os itens antes de criar documento (evita meio-termo)
+            if ($tipo === 'transferencia') {
+                foreach ($consolidados as $variacaoId => $qtd) {
+                    $this->validarSaldoOrigemParaTransferencia((int) $variacaoId, (int) $origem, (int) $qtd);
+                }
+            }
+
             // 1) Se for transferência, cria o "documento"
             if ($tipo === 'transferencia') {
                 $transferencia = EstoqueTransferencia::create([
@@ -581,11 +629,12 @@ class EstoqueMovimentacaoService
                     'concluida_em' => now(),
                 ]);
 
-                // cria itens com snapshot de localização no depósito de origem
+                // cria itens com snapshot de localização no depósito de origem (já validado e lockado acima)
                 foreach ($consolidados as $variacaoId => $qtd) {
                     $row = Estoque::query()
-                        ->where('id_variacao', (int)$variacaoId)
-                        ->where('id_deposito', (int)$origem)
+                        ->where('id_variacao', (int) $variacaoId)
+                        ->where('id_deposito', (int) $origem)
+                        ->lockForUpdate()
                         ->first();
 
                     EstoqueTransferenciaItem::create([

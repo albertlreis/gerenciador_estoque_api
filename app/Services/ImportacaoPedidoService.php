@@ -12,6 +12,7 @@ use App\Models\ProdutoVariacaoAtributo;
 use App\Models\PedidoImportacao;
 use App\Models\Categoria;
 use App\Enums\PedidoStatus;
+use App\Enums\TipoImportacao;
 use App\Helpers\StringHelper;
 use App\Support\Dates\DateNormalizer;
 use Carbon\CarbonImmutable;
@@ -48,7 +49,7 @@ class ImportacaoPedidoService
         $validator = Validator::make($request->all(), [
             'pedido.tipo'          => 'required|in:venda,reposicao',
             'importacao_id'        => 'nullable|integer|exists:pedido_importacoes,id',
-            'tipo_importacao'      => 'nullable|in:PRODUTOS_PDF_SIERRA,PRODUTOS_PDF_AVANTI,PRODUTOS_PDF_QUAKER,ADORNOS_XML_NFE',
+            'tipo_importacao'      => 'nullable|in:' . implode(',', TipoImportacao::valores()),
 
             'cliente.id'           => 'nullable|numeric|min:1',
 
@@ -79,6 +80,9 @@ class ImportacaoPedidoService
             'itens.*.custo_unitario' => 'nullable|numeric|min:0',
             'itens.*.id_categoria' => 'required|integer',
             'itens.*.id_deposito'  => 'nullable|integer|exists:depositos,id',
+        ], [
+            'itens.required' => 'Adicione ao menos um item ao pedido antes de confirmar.',
+            'itens.min' => 'Adicione ao menos um item ao pedido (inserção manual) antes de confirmar.',
         ]);
 
         // Condicional: se for venda, cliente.id é obrigatório

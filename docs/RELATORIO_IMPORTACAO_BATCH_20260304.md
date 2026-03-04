@@ -49,3 +49,26 @@ php artisan sierra:test-import-pedidos-xml --dir="/var/www/storage/leitor_pdf_ex
 
 **Repositório `leitor_pdf_sierra`:**
 1. `fix: fallback pypdf para Invalid octal e debug texto quando itens=0`
+
+---
+
+## Validação final após ETAPA 2 (leitor)
+
+**Execução:** `php artisan sierra:test-import-pedidos-pdf --dir="/var/www/storage/leitor_pdf_examples" --commit=0 --confirm=1 --timeout=60`  
+**Consolidado:** `/var/www/storage/logs/import-pdf-tests/20260304_153555/consolidado.json`
+
+| Arquivo | Status | Itens | Observação |
+|--------|--------|-------|------------|
+| 039823 - QUAKER.pdf | **WARN** | 0 | Sem itens; fluxo manual habilitado. |
+| 16552 - SIERRA.pdf | **OK** | 1 | Confirmação executada com rollback. |
+| 16839 - SIERRA.pdf | **OK** | 36 | Confirmação executada com rollback. |
+| 17829 - SIERRA.pdf | **OK** | 18 | Confirmação executada com rollback. |
+| 18002 - SIERRA.pdf | **WARN** | 0 | Sem itens (scan/texto vazio), não confirma. |
+| 18335 - SIERRA.pdf | **OK** | 33 | Confirmação executada com rollback. |
+| 19105 - SIERRA.pdf | **OK** | 12 | Confirmação executada com rollback. |
+| 19166 - SIERRA.pdf | **OK** | 1 | Confirmação passou após ajuste de mapeamento do payload. |
+| 60958 - AVANTI.pdf | **OK** | 5 | Confirmação executada com rollback. |
+
+**Resumo final:** OK = 7, WARN = 2, FAIL = 0.  
+O `19166` deixou de falhar na confirmação; o `18002` permanece em WARN com inserção manual, como esperado para PDF sem itens extraíveis.
+

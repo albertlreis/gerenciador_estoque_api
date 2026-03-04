@@ -270,7 +270,7 @@ class ImportacaoPedidoService
             }
 
             foreach ($itens as $index => $item) {
-                $item['nome'] = trim((string) ($item['nome'] ?? ''));
+                $item['nome'] = $this->normalizarNomeItem($item['nome'] ?? '');
                 $item['ref'] = isset($item['ref']) ? trim((string) $item['ref']) : null;
                 $item['id_deposito'] = $item['id_deposito'] ?? null;
 
@@ -408,6 +408,19 @@ class ImportacaoPedidoService
                 'importacao_id' => $request->input('importacao_id'),
             ]);
         }
+    }
+
+    private function normalizarNomeItem(mixed $nome): string
+    {
+        $valor = trim(preg_replace('/\s+/u', ' ', (string) $nome));
+
+        // Evita erro de persistência (Data too long for column `nome`) quando o extrator
+        // devolve uma descrição acidentalmente concatenada em um único item.
+        if ($valor === '') {
+            return 'ITEM IMPORTADO';
+        }
+
+        return mb_substr($valor, 0, 255);
     }
 
     private function toDecimal(mixed $v): float

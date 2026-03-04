@@ -38,6 +38,8 @@ class ImportacaoPedidoNfeXmlTest extends TestCase
         $response->assertStatus(200);
         $response->assertJsonPath('sucesso', true);
         $response->assertJsonPath('dados.pedido.numero_externo', '45055');
+        $response->assertJsonPath('dados.itens_extraidos', true);
+        $response->assertJsonPath('dados.requer_insercao_manual', false);
         $this->assertGreaterThan(0, count($response->json('dados.itens') ?? []));
     }
 

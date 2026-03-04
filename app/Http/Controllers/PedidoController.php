@@ -6,6 +6,7 @@ use App\Helpers\AuthHelper;
 use App\Http\Requests\StorePedidoRequest;
 use App\Http\Requests\UpdatePedidoRequest;
 use App\Http\Resources\PedidoCompletoResource;
+use App\Enums\TipoImportacao;
 use App\Models\Deposito;
 use App\Models\Pedido;
 use App\Models\PedidoImportacao;
@@ -167,14 +168,8 @@ class PedidoController extends Controller
         $requestId = (string) ($request->header('X-Request-Id') ?: Str::uuid());
         $inicioImportacao = microtime(true);
 
-        $tiposPermitidos = [
-            'PRODUTOS_PDF_SIERRA',
-            'PRODUTOS_PDF_AVANTI',
-            'PRODUTOS_PDF_QUAKER',
-            'ADORNOS_XML_NFE',
-        ];
-
-        $tipoImportacao = strtoupper((string) $request->input('tipo_importacao', 'PRODUTOS_PDF_SIERRA'));
+        $tiposPermitidos = TipoImportacao::valores();
+        $tipoImportacao = strtoupper((string) $request->input('tipo_importacao', TipoImportacao::PRODUTOS_PDF_SIERRA->value));
 
         if (!in_array($tipoImportacao, $tiposPermitidos, true)) {
             return response()->json([
@@ -249,7 +244,7 @@ class PedidoController extends Controller
                 $itensPreview = data_get($preview, 'itens', []);
                 $previewValido = is_array($itensPreview) && count($itensPreview) > 0;
 
-                if ($previewValido) {
+                if ($previewValido || $this->previewTemDadosMinimos($preview)) {
                     Log::info('Importação de pedido - preview reutilizado', [
                         'request_id' => $requestId,
                         'etapa' => 'staging',
@@ -260,11 +255,12 @@ class PedidoController extends Controller
                         'tempo_ms' => (int) ((microtime(true) - $inicioImportacao) * 1000),
                     ]);
 
+                    $dadosCached = $this->garantirContratoPreview($preview);
                     return response()->json([
                         'sucesso' => true,
                         'mensagem' => 'Arquivo já processado. Usando dados existentes.',
                         'importacao_id' => $importExistente->id,
-                        'dados' => $importExistente->dados_json,
+                        'dados' => $dadosCached,
                     ]);
                 }
 
@@ -288,20 +284,32 @@ class PedidoController extends Controller
             $itens = $dados['itens'] ?? [];
             $totais = $dados['totais'] ?? [];
 
-            if ($tipoImportacao !== 'ADORNOS_XML_NFE' && count($itens) === 0) {
+            $temItens = is_array($itens) && count($itens) > 0;
+            $isPdf = $tipoImportacao !== 'ADORNOS_XML_NFE';
+
+            if ($isPdf && !$temItens) {
+                $temPedidoMinimo = $this->temPedidoMinimo($pedido, $totais);
+                if (!$temPedidoMinimo) {
+                    $nomeArquivo = $arquivo->getClientOriginalName();
+                    Log::warning('Importação de pedido - sem dados mínimos do pedido', [
+                        'request_id' => $requestId,
+                        'tipo_importacao' => $tipoImportacao,
+                        'arquivo_nome' => $nomeArquivo,
+                    ]);
+                    return response()->json([
+                        'sucesso' => false,
+                        'mensagem' => "Não foi possível extrair os dados mínimos do pedido (cabeçalho/totais). Arquivo: {$nomeArquivo}",
+                        'erro' => "Dados mínimos do pedido não identificados.",
+                    ], 422);
+                }
                 $nomeArquivo = $arquivo->getClientOriginalName();
                 $debugTexto = $dados['debug_texto_extraido'] ?? null;
-                Log::warning('Importação de pedido - PDF sem itens identificados', [
+                Log::warning('Importação de pedido - PDF sem itens identificados (preview ok, requer inserção manual)', [
                     'request_id' => $requestId,
                     'tipo_importacao' => $tipoImportacao,
                     'arquivo_nome' => $nomeArquivo,
                     'debug_texto_preview' => $debugTexto ? mb_substr($debugTexto, 0, 2000) : null,
                 ]);
-                return response()->json([
-                    'sucesso' => false,
-                    'mensagem' => "Nenhum item foi identificado no PDF. Arquivo: {$nomeArquivo}",
-                    'erro' => "Nenhum item foi identificado no PDF. Arquivo: {$nomeArquivo}",
-                ], 422);
             }
 
             $itens = app(ImportacaoPedidoService::class)
@@ -324,12 +332,22 @@ class PedidoController extends Controller
                 'observacoes' => $pedido['observacoes'] ?? '',
             ];
 
+            $itensExtraidos = $temItens;
+            $requerInsercaoManual = !$itensExtraidos;
+            $avisos = [];
+            if ($requerInsercaoManual && $isPdf) {
+                $avisos[] = 'Itens não puderam ser extraídos automaticamente. Insira manualmente.';
+            }
+
             $payload = [
                 'tipo_importacao' => $tipoImportacao,
                 'cliente' => $cliente,
                 'pedido' => $pedidoFormatado,
                 'itens' => $itens,
                 'totais' => $totais,
+                'itens_extraidos' => $itensExtraidos,
+                'requer_insercao_manual' => $requerInsercaoManual,
+                'avisos' => $avisos,
             ];
 
             $importacao = PedidoImportacao::updateOrCreate(
@@ -510,5 +528,46 @@ class PedidoController extends Controller
         ])->setPaper('a4');
 
         return $pdf->download("roteiro_pedido_{$pedidoId}.pdf");
+    }
+
+    /**
+     * Verifica se há dados mínimos do pedido (cabeçalho/totais) para aceitar preview sem itens.
+     */
+    private function temPedidoMinimo(array $pedido, array $totais): bool
+    {
+        $temNumero = !empty(trim((string) ($pedido['numero_pedido'] ?? '')));
+        $temData = !empty(trim((string) ($pedido['data_pedido'] ?? '')));
+        $temTotal = isset($totais['total_liquido']) && trim((string) $totais['total_liquido']) !== ''
+            || isset($totais['total_bruto']) && trim((string) $totais['total_bruto']) !== '';
+        return $temNumero || $temData || $temTotal;
+    }
+
+    /**
+     * Verifica se o preview em cache tem dados mínimos (para reutilizar mesmo com itens vazios).
+     */
+    private function previewTemDadosMinimos(array $preview): bool
+    {
+        $pedido = $preview['pedido'] ?? [];
+        $totais = $preview['totais'] ?? [];
+        return $this->temPedidoMinimo($pedido, $totais);
+    }
+
+    /**
+     * Garante que o payload de preview contenha os campos do contrato (retrocompatibilidade).
+     */
+    private function garantirContratoPreview(array $preview): array
+    {
+        $itens = $preview['itens'] ?? [];
+        $temItens = is_array($itens) && count($itens) > 0;
+        if (!array_key_exists('itens_extraidos', $preview)) {
+            $preview['itens_extraidos'] = $temItens;
+        }
+        if (!array_key_exists('requer_insercao_manual', $preview)) {
+            $preview['requer_insercao_manual'] = !$temItens;
+        }
+        if (!array_key_exists('avisos', $preview)) {
+            $preview['avisos'] = $temItens ? [] : ['Itens não puderam ser extraídos automaticamente. Insira manualmente.'];
+        }
+        return $preview;
     }
 }

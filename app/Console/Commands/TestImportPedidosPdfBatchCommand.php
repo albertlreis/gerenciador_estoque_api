@@ -148,7 +148,11 @@ class TestImportPedidosPdfBatchCommand extends Command
                 ];
                 $resultado['resumo'] = $resumo;
 
-                if ($shouldConfirm) {
+                $requerInsercaoManual = (bool) ($dados['requer_insercao_manual'] ?? false);
+                $temItens = count($itensDados) > 0;
+                $previewOkSemItens = !$temItens && $requerInsercaoManual;
+
+                if ($shouldConfirm && $temItens) {
                     $confirmPayload = $dados;
                     $confirmPayload['request_id'] = $requestId;
                     $confirmPayload['importacao_id'] = $importPayload['importacao_id'] ?? null;
@@ -186,7 +190,10 @@ class TestImportPedidosPdfBatchCommand extends Command
                     DB::rollBack();
                 }
 
-                $resultado['status'] = 'OK';
+                $resultado['status'] = $previewOkSemItens ? 'WARN' : 'OK';
+                if ($previewOkSemItens) {
+                    $resultado['aviso'] = 'Preview OK; itens não extraídos — requer inserção manual.';
+                }
             } catch (Throwable $e) {
                 if (!$shouldCommit && DB::transactionLevel() > 0) {
                     DB::rollBack();
@@ -233,6 +240,7 @@ class TestImportPedidosPdfBatchCommand extends Command
         );
 
         $ok = collect($results)->where('status', 'OK')->count();
+        $warn = collect($results)->where('status', 'WARN')->count();
         $fail = collect($results)->where('status', 'FAIL')->count();
 
         $consolidado = [
@@ -241,6 +249,7 @@ class TestImportPedidosPdfBatchCommand extends Command
             'duracao_ms' => (int) ((microtime(true) - $inicioBatch) * 1000),
             'total_arquivos' => count($results),
             'ok' => $ok,
+            'warn' => $warn,
             'fail' => $fail,
             'resultados' => $results,
         ];
@@ -250,7 +259,7 @@ class TestImportPedidosPdfBatchCommand extends Command
             json_encode($consolidado, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE)
         );
 
-        $this->line("Resumo: OK={$ok}, FAIL={$fail}");
+        $this->line("Resumo: OK={$ok}, WARN={$warn}, FAIL={$fail}");
         $this->line("Consolidado: {$reportDir}" . DIRECTORY_SEPARATOR . 'consolidado.json');
 
         return $fail > 0 ? self::FAILURE : self::SUCCESS;

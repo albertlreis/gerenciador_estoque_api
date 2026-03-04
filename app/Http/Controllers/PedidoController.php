@@ -11,9 +11,10 @@ use App\Models\Pedido;
 use App\Models\PedidoImportacao;
 use App\Models\ProdutoImagem;
 use App\Services\ExtratorPedidoPythonService;
+use App\Services\ImportacaoPedidoService;
+use App\Services\NfeXmlParserService;
 use App\Services\PedidoService;
 use App\Services\PedidoUpdateService;
-use App\Services\ImportacaoPedidoService;
 use App\Services\EstatisticaPedidoService;
 use App\Services\PedidoExportService;
 use Barryvdh\DomPDF\Facade\Pdf;
@@ -189,19 +190,30 @@ class PedidoController extends Controller
 
         $isXml = $tipoImportacao === 'ADORNOS_XML_NFE';
 
+        $arquivoRules = [
+            'required',
+            'file',
+            $isXml ? 'mimes:xml' : 'mimes:pdf',
+            'max:10240',
+        ];
+        if ($isXml) {
+            $arquivoRules[] = 'mimetypes:application/xml,text/xml';
+        }
         $request->validate([
-            'arquivo' => [
-                'required',
-                'file',
-                $isXml ? 'mimes:xml' : 'mimes:pdf',
-                'max:10240',
-            ],
+            'arquivo' => $arquivoRules,
             'tipo_importacao' => 'nullable|string',
         ], [
             'arquivo.mimes' => $isXml
                 ? 'Para ADORNOS_XML_NFE, envie um arquivo XML vÃ¡lido.'
                 : 'Para importaÃ§Ã£o de produtos, envie um arquivo PDF vÃ¡lido.',
         ]);
+
+        if ($isXml && str_ends_with(strtolower($request->file('arquivo')->getClientOriginalName()), ':zone.identifier')) {
+            return response()->json([
+                'sucesso' => false,
+                'mensagem' => 'Arquivo de metadados (Zone.Identifier) não é aceito.',
+            ], 422);
+        }
 
         try {
             $arquivo = $request->file('arquivo');
@@ -265,7 +277,12 @@ class PedidoController extends Controller
                     'tempo_ms' => (int) ((microtime(true) - $inicioImportacao) * 1000),
                 ]);
             }
-            $dados = $this->service->processar($arquivo, $tipoImportacao, $requestId);
+
+            if ($tipoImportacao === 'ADORNOS_XML_NFE') {
+                $dados = app(NfeXmlParserService::class)->extrair($arquivo);
+            } else {
+                $dados = $this->service->processar($arquivo, $tipoImportacao, $requestId);
+            }
 
             $pedido = $dados['pedido'] ?? [];
             $itens = $dados['itens'] ?? [];
@@ -328,6 +345,17 @@ class PedidoController extends Controller
                 'importacao_id' => $importacao->id,
                 'dados' => $payload,
             ]);
+        } catch (\InvalidArgumentException $e) {
+            Log::warning('Importação de pedido - validação/parse', [
+                'request_id' => $requestId,
+                'tipo_importacao' => $tipoImportacao,
+                'mensagem' => $e->getMessage(),
+            ]);
+            return response()->json([
+                'sucesso' => false,
+                'mensagem' => $e->getMessage(),
+                'erro' => $e->getMessage(),
+            ], 422);
         } catch (Exception $e) {
             $hashErro = isset($hash)
                 ? $hash

@@ -18,7 +18,6 @@ class CategoriaFinanceira extends Model
         'slug',
         'tipo',
         'categoria_pai_id',
-        'ordem',
         'ativo',
         'padrao',
         'meta_json',
@@ -27,7 +26,6 @@ class CategoriaFinanceira extends Model
     protected $casts = [
         'ativo'     => 'boolean',
         'padrao'    => 'boolean',
-        'ordem'     => 'integer',
         'meta_json' => 'array',
     ];
 
@@ -45,7 +43,6 @@ class CategoriaFinanceira extends Model
     public function filhas(): HasMany
     {
         return $this->hasMany(self::class, 'categoria_pai_id')
-            ->orderBy('ordem')
             ->orderBy('nome');
     }
 

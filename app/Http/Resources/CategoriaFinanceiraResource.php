@@ -16,7 +16,6 @@ class CategoriaFinanceiraResource extends JsonResource
             'ativo' => (bool) $this->ativo,
             'padrao' => (bool) $this->padrao,
             'categoria_pai_id' => $this->categoria_pai_id ? (int)$this->categoria_pai_id : null,
-            'ordem' => $this->ordem !== null ? (int)$this->ordem : null,
             'meta_json' => $this->meta_json,
         ];
     }

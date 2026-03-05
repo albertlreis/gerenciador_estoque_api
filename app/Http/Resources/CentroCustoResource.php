@@ -13,7 +13,6 @@ class CentroCustoResource extends JsonResource
             'nome' => (string) $this->nome,
             'slug' => (string) $this->slug,
             'centro_custo_pai_id' => $this->centro_custo_pai_id ? (int)$this->centro_custo_pai_id : null,
-            'ordem' => $this->ordem !== null ? (int)$this->ordem : null,
             'ativo' => (bool) $this->ativo,
             'padrao' => (bool) $this->padrao,
             'meta_json' => $this->meta_json,

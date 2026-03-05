@@ -11,8 +11,7 @@ class CategoriaFinanceiraRepository
     public function listar(array $filtros): Collection
     {
         $q = CategoriaFinanceira::query()
-            ->select(['id','nome','slug','tipo','ativo','padrao','categoria_pai_id','ordem'])
-            ->orderBy('ordem')
+            ->select(['id','nome','slug','tipo','ativo','padrao','categoria_pai_id'])
             ->orderBy('nome');
 
         if (!empty($filtros['tipo'])) {

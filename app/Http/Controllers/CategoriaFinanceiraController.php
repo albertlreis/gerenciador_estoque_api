@@ -26,15 +26,13 @@ class CategoriaFinanceiraController extends Controller
         // Flat
         if (!$tree) {
             $items = CategoriaFinanceira::query()
-                ->select(['id','nome','slug','tipo','ativo','padrao','categoria_pai_id','ordem','meta_json'])
+                ->select(['id','nome','slug','tipo','ativo','padrao','categoria_pai_id','meta_json'])
                 ->when(!empty($f['tipo']), fn($q) => $q->where('tipo', $f['tipo']))
                 ->when(array_key_exists('ativo', $f) && $f['ativo'] !== null, fn($q) => $q->where('ativo', (bool)$f['ativo']))
                 ->when(!empty($f['q']), function ($q) use ($f) {
                     $term = trim((string)$f['q']);
                     $q->where(fn($w) => $w->where('nome','like',"%{$term}%")->orWhere('slug','like',"%{$term}%"));
                 })
-                ->orderByRaw('ordem IS NULL')
-                ->orderBy('ordem')
                 ->orderBy('nome')
                 ->get();
 

@@ -19,14 +19,12 @@ class CentroCustoController extends Controller
         $tree = (bool)($f['tree'] ?? false);
 
         $q = CentroCusto::query()
-            ->select(['id','nome','slug','centro_custo_pai_id','ordem','ativo','padrao','meta_json'])
+            ->select(['id','nome','slug','centro_custo_pai_id','ativo','padrao','meta_json'])
             ->when(array_key_exists('ativo', $f) && $f['ativo'] !== null, fn($qq) => $qq->where('ativo', (bool)$f['ativo']))
             ->when(!empty($f['q']), function ($qq) use ($f) {
                 $term = trim((string)$f['q']);
                 $qq->where(fn($w) => $w->where('nome','like',"%{$term}%")->orWhere('slug','like',"%{$term}%"));
             })
-            ->orderByRaw('ordem IS NULL')
-            ->orderBy('ordem')
             ->orderBy('nome');
 
         $items = $q->get();

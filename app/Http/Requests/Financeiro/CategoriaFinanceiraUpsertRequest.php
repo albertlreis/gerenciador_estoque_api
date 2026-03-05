@@ -14,7 +14,6 @@ class CategoriaFinanceiraUpsertRequest extends FormRequest
             'nome' => $this->input('nome') ? trim((string)$this->input('nome')) : null,
             'slug' => $this->input('slug') ? trim((string)$this->input('slug')) : null,
             'tipo' => $this->input('tipo') ? strtolower(trim((string)$this->input('tipo'))) : null,
-            'ordem' => $this->input('ordem') !== null && $this->input('ordem') !== '' ? (int)$this->input('ordem') : null,
             'ativo' => $this->toBoolOrNull($this->input('ativo')) ?? true,
             'padrao' => $this->toBoolOrNull($this->input('padrao')) ?? false,
         ]);
@@ -33,7 +32,6 @@ class CategoriaFinanceiraUpsertRequest extends FormRequest
             'slug' => ['nullable', 'string', 'max:255'],
             'tipo' => ['required', 'in:receita,despesa'],
             'categoria_pai_id' => ['nullable', 'integer', 'exists:categorias_financeiras,id'],
-            'ordem' => ['nullable', 'integer', 'min:0'],
             'ativo' => ['nullable', 'boolean'],
             'padrao' => ['nullable', 'boolean'],
             'meta_json' => ['nullable', 'array'],

@@ -11,13 +11,12 @@ class CentroCusto extends Model
     protected $table = 'centros_custo';
 
     protected $fillable = [
-        'nome','slug','centro_custo_pai_id','ordem','ativo','padrao','meta_json'
+        'nome','slug','centro_custo_pai_id','ativo','padrao','meta_json'
     ];
 
     protected $casts = [
         'ativo' => 'boolean',
         'padrao' => 'boolean',
-        'ordem' => 'integer',
         'meta_json' => 'array',
     ];
 
@@ -29,7 +28,7 @@ class CentroCusto extends Model
     public function filhas(): HasMany
     {
         return $this->hasMany(self::class, 'centro_custo_pai_id')
-            ->orderBy('ordem')->orderBy('nome');
+            ->orderBy('nome');
     }
 
     public function scopeAtivos($q)

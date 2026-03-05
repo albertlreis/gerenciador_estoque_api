@@ -1,0 +1,122 @@
+{
+  "version": 1,
+  "files": [
+    {
+      "file": "Pdf/039823 - QUAKER.pdf",
+      "type": "pdf",
+      "tipo_importacao": "PRODUTOS_PDF_QUAKER",
+      "vendor": "QUAKER",
+      "expected_items": 31,
+      "requires_ocr": false,
+      "notes": "Layout QUAKER com tabela e descricoes multiline"
+    },
+    {
+      "file": "Pdf/16552 - SIERRA.pdf",
+      "type": "pdf",
+      "tipo_importacao": "PRODUTOS_PDF_SIERRA",
+      "vendor": "SIERRA",
+      "expected_items": 1,
+      "requires_ocr": false,
+      "notes": "Caso simples de 1 item"
+    },
+    {
+      "file": "Pdf/16839 - SIERRA.pdf",
+      "type": "pdf",
+      "tipo_importacao": "PRODUTOS_PDF_SIERRA",
+      "vendor": "SIERRA",
+      "expected_items": 36,
+      "requires_ocr": false,
+      "notes": "Tabela Sierra com multiplas linhas"
+    },
+    {
+      "file": "Pdf/17829 - SIERRA.pdf",
+      "type": "pdf",
+      "tipo_importacao": "PRODUTOS_PDF_SIERRA",
+      "vendor": "SIERRA",
+      "expected_items": 18,
+      "requires_ocr": false,
+      "notes": "Layout Sierra padrao"
+    },
+    {
+      "file": "Pdf/18002 - SIERRA.pdf",
+      "type": "pdf",
+      "tipo_importacao": "PRODUTOS_PDF_SIERRA",
+      "vendor": "SIERRA",
+      "expected_items": 39,
+      "requires_ocr": true,
+      "notes": "PDF escaneado, depende de OCR"
+    },
+    {
+      "file": "Pdf/18335 - SIERRA.pdf",
+      "type": "pdf",
+      "tipo_importacao": "PRODUTOS_PDF_SIERRA",
+      "vendor": "SIERRA",
+      "expected_items": 33,
+      "requires_ocr": false,
+      "notes": "Layout Sierra com muitos itens"
+    },
+    {
+      "file": "Pdf/19105 - SIERRA.pdf",
+      "type": "pdf",
+      "tipo_importacao": "PRODUTOS_PDF_SIERRA",
+      "vendor": "SIERRA",
+      "expected_items": 12,
+      "requires_ocr": false,
+      "notes": "Layout Sierra com itens intermediarios"
+    },
+    {
+      "file": "Pdf/19166 - SIERRA.pdf",
+      "type": "pdf",
+      "tipo_importacao": "PRODUTOS_PDF_SIERRA",
+      "vendor": "SIERRA",
+      "expected_items": 1,
+      "requires_ocr": false,
+      "notes": "Sierra com um item"
+    },
+    {
+      "file": "Pdf/60958 - AVANTI.pdf",
+      "type": "pdf",
+      "tipo_importacao": "PRODUTOS_PDF_AVANTI",
+      "vendor": "AVANTI",
+      "expected_items": 2,
+      "requires_ocr": false,
+      "notes": "Layout Avanti validado com 2 itens"
+    },
+    {
+      "file": "Xml/35250207266606000112550020000450551000623840-nfe.xml",
+      "type": "xml",
+      "tipo_importacao": "ADORNOS_XML_NFE",
+      "vendor": "NFE",
+      "expected_items": 14,
+      "requires_ocr": false,
+      "notes": "NFe fixture completa"
+    },
+    {
+      "file": "Xml/35260201368233000104550030000450951891771400-nfe.xml",
+      "type": "xml",
+      "tipo_importacao": "ADORNOS_XML_NFE",
+      "vendor": "NFE",
+      "expected_items": 44,
+      "requires_ocr": false,
+      "notes": "NFe fixture completa"
+    },
+    {
+      "file": "Xml/nfe-35250207.xml",
+      "type": "xml",
+      "tipo_importacao": "ADORNOS_XML_NFE",
+      "vendor": "NFE",
+      "expected_items": 14,
+      "requires_ocr": false,
+      "notes": "Alias curto da fixture 352502..."
+    },
+    {
+      "file": "Xml/nfe-35260201.xml",
+      "type": "xml",
+      "tipo_importacao": "ADORNOS_XML_NFE",
+      "vendor": "NFE",
+      "expected_items": 44,
+      "requires_ocr": false,
+      "notes": "Alias curto da fixture 352602..."
+    }
+  ]
+}

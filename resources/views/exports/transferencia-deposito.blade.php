@@ -18,6 +18,15 @@
         .table { width:100%; border-collapse: collapse; }
         .table th, .table td { border: 1px solid #ccc; padding: 4px; font-size: 10px; }
         .table th { background: #f3c000; text-transform: uppercase; font-weight: bold; }
+        .thumb-cell { text-align: center; vertical-align: middle; }
+        .thumb {
+            width: 60px;
+            height: 60px;
+            object-fit: contain;
+            display: inline-block;
+            border: 1px solid #e5e7eb;
+            background: #fff;
+        }
         .sign { margin-top: 10px; }
         .sign td { border: none; padding-top: 18px; }
         .line { border-top: 1px solid #000; width:100%; height: 1px; }
@@ -52,6 +61,7 @@
 <table class="table">
     <thead>
     <tr>
+        <th style="width: 80px;">Imagem</th>
         <th style="width: 70px;">Qtd</th>
         <th>Produto / Variação</th>
         <th style="width: 120px;">Ref.</th>
@@ -69,6 +79,13 @@
             $loc = count($locParts) ? implode(' / ', $locParts) : '-';
         @endphp
         <tr>
+            <td class="thumb-cell">
+                <img
+                    src="{{ $item->pdf_imagem_data_uri }}"
+                    alt="Imagem do item"
+                    class="thumb"
+                />
+            </td>
             <td style="text-align:center;"><b>{{ $item->quantidade }}</b></td>
             <td>{{ $nome }}</td>
             <td>{{ $ref }}</td>

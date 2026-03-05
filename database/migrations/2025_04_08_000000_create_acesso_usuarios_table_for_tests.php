@@ -1,7 +1,7 @@
 <?php
 
 use Illuminate\Database\Migrations\Migration;
-use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
@@ -12,22 +12,29 @@ return new class extends Migration
             return;
         }
 
-        Schema::create('acesso_usuarios', function (Blueprint $table) {
-            $table->id();
-            $table->string('nome');
-            $table->string('email')->nullable();
-            $table->string('senha')->nullable();
-            $table->boolean('ativo')->default(true);
-            $table->timestamps();
-        });
+        // Estoque não é dono da tabela acesso_usuarios.
+        // Quando necessário, executamos explicitamente a migration da API de autenticação.
+        $relativePrefix = '..' . DIRECTORY_SEPARATOR . 'autenticacao_api' . DIRECTORY_SEPARATOR . 'database' . DIRECTORY_SEPARATOR . 'migrations';
+        $migrationFile = '2025_04_14_000001_create_acesso_usuarios_table.php';
+        $externalMigration = base_path($relativePrefix . DIRECTORY_SEPARATOR . $migrationFile);
+
+        if (!is_file($externalMigration)) {
+            throw new \RuntimeException("Migration de autenticação não encontrada: {$externalMigration}");
+        }
+
+        Artisan::call('migrate', [
+            '--path' => $relativePrefix . DIRECTORY_SEPARATOR . $migrationFile,
+            '--env' => app()->environment(),
+            '--force' => true,
+        ]);
+
+        if (!Schema::hasTable('acesso_usuarios')) {
+            throw new \RuntimeException('Falha ao preparar tabela acesso_usuarios via migration da autenticação.');
+        }
     }
 
     public function down(): void
     {
-        // Em ambiente com banco compartilhado (ex.: API de autenticação),
-        // não removemos a tabela para evitar impacto entre serviços.
-        if (!Schema::hasTable('acesso_usuarios')) {
-            return;
-        }
+        // Tabela pertence à API de autenticação; estoque não remove.
     }
 };

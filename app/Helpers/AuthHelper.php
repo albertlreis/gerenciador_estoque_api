@@ -129,18 +129,18 @@ class AuthHelper
             return [];
         }
 
-        if (!Schema::hasTable('acesso_usuario_perfil')
-            || !Schema::hasTable('acesso_perfil_permissao')
-            || !Schema::hasTable('acesso_permissoes')) {
-            return [];
-        }
-
         $userId = auth()->id();
         $cacheKey = 'permissoes_usuario_' . $userId;
 
         if (Cache::has($cacheKey)) {
             $cached = Cache::get($cacheKey, []);
             return is_array($cached) ? $cached : [];
+        }
+
+        if (!Schema::hasTable('acesso_usuario_perfil')
+            || !Schema::hasTable('acesso_perfil_permissao')
+            || !Schema::hasTable('acesso_permissoes')) {
+            return [];
         }
 
         $permissoes = DB::table('acesso_usuario_perfil')
@@ -166,16 +166,16 @@ class AuthHelper
             return [];
         }
 
-        if (!Schema::hasTable('acesso_usuario_perfil') || !Schema::hasTable('acesso_perfis')) {
-            return [];
-        }
-
         $userId = auth()->id();
         $cacheKey = 'perfis_usuario_' . $userId;
 
         if (Cache::has($cacheKey)) {
             $cached = Cache::get($cacheKey, []);
             return is_array($cached) ? $cached : [];
+        }
+
+        if (!Schema::hasTable('acesso_usuario_perfil') || !Schema::hasTable('acesso_perfis')) {
+            return [];
         }
 
         $perfis = DB::table('acesso_usuario_perfil')
@@ -222,21 +222,7 @@ class AuthHelper
             return true;
         }
 
-        $usuarioId = (int) auth()->id();
-        $cacheKey = "usuario_{$usuarioId}_is_dev";
-
-        return Cache::remember($cacheKey, now()->addMinutes(30), function () use ($usuarioId) {
-            if (!Schema::hasTable('acesso_usuario_perfil') || !Schema::hasTable('acesso_perfis')) {
-                return false;
-            }
-
-            $perfil = DB::table('acesso_usuario_perfil as up')
-                ->join('acesso_perfis as p', 'p.id', '=', 'up.id_perfil')
-                ->where('up.id_usuario', $usuarioId)
-                ->value('p.nome');
-
-            return is_string($perfil) && Str::lower($perfil) === Str::lower('Desenvolvedor');
-        });
+        return self::hasPerfil('Desenvolvedor');
     }
 
     /**
@@ -249,28 +235,16 @@ class AuthHelper
             return false;
         }
 
-        if (!Schema::hasTable('acesso_usuario_perfil') || !Schema::hasTable('acesso_perfis')) {
+        $perfisNormalizados = collect(self::getPerfis())
+            ->filter(fn ($nome) => is_string($nome))
+            ->map(fn ($nome) => Str::lower(trim($nome)))
+            ->values();
+
+        if ($perfisNormalizados->isEmpty()) {
             return false;
         }
 
-        $usuarioId = (int) auth()->id();
-        $cacheKey = "usuario_{$usuarioId}_perfil_admin_ou_vendedor";
-
-        return Cache::remember($cacheKey, now()->addMinutes(30), function () use ($usuarioId) {
-            $perfis = DB::table('acesso_usuario_perfil as up')
-                ->join('acesso_perfis as p', 'p.id', '=', 'up.id_perfil')
-                ->where('up.id_usuario', $usuarioId)
-                ->pluck('p.nome')
-                ->filter(fn ($nome) => is_string($nome))
-                ->map(fn ($nome) => Str::lower(trim($nome)))
-                ->values();
-
-            if ($perfis->isEmpty()) {
-                return false;
-            }
-
-            return $perfis->contains(Str::lower('Administrador'))
-                || $perfis->contains(Str::lower('Vendedor'));
-        });
+        return $perfisNormalizados->contains(Str::lower('Administrador'))
+            || $perfisNormalizados->contains(Str::lower('Vendedor'));
     }
 }

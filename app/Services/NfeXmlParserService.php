@@ -106,6 +106,7 @@ class NfeXmlParserService
             $qCom = $this->nodeText($prod, 'qCom');
             $vUnCom = $this->nodeText($prod, 'vUnCom');
             $vProd = $this->nodeText($prod, 'vProd');
+            $cEan = $this->nodeText($prod, 'cEAN') ?: $this->nodeText($prod, 'cEANTrib');
 
             if ($cProd === null && $xProd === null) {
                 continue;
@@ -118,6 +119,7 @@ class NfeXmlParserService
             $itens[] = [
                 'codigo' => $cProd ?: ('ITEM-' . (count($itens) + 1)),
                 'ref' => $cProd,
+                'codigo_barras' => $cEan,
                 'nome' => $xProd ?: $cProd,
                 'descricao' => $xProd,
                 'quantidade' => (string) $qtd,

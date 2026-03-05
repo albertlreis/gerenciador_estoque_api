@@ -315,6 +315,15 @@ class ImportacaoPedidoService
                         ->first();
                 }
 
+                if (
+                    !$variacao
+                    && !empty($item['codigo_barras'])
+                ) {
+                    $variacao = ProdutoVariacao::with('atributos')
+                        ->where('codigo_barras', trim((string) $item['codigo_barras']))
+                        ->first();
+                }
+
                 if (!$variacao) {
                     $produto = Produto::firstOrCreate([
                         'nome'         => $item['nome'],
@@ -539,13 +548,27 @@ class ImportacaoPedidoService
         return collect($itens)->map(function ($item) {
 
             $ref = $item['codigo'] ?? $item['ref'] ?? null;
-            if (!$ref) {
+            $codigoBarras = isset($item['codigo_barras']) ? trim((string) $item['codigo_barras']) : null;
+
+            if (!$ref && !$codigoBarras) {
                 return $item;
             }
 
             /** @var ProdutoVariacao|null $variacao */
-            $variacao = ProdutoVariacao::with(['produto.categoria', 'atributos'])
-                ->where('referencia', $ref)
+            $variacaoQuery = ProdutoVariacao::with(['produto.categoria', 'atributos']);
+            $variacao = $variacaoQuery
+                ->where(function ($q) use ($ref, $codigoBarras) {
+                    if ($ref) {
+                        $q->where('referencia', $ref);
+                    }
+                    if ($codigoBarras) {
+                        if ($ref) {
+                            $q->orWhere('codigo_barras', $codigoBarras);
+                        } else {
+                            $q->where('codigo_barras', $codigoBarras);
+                        }
+                    }
+                })
                 ->first();
 
             if ($variacao) {

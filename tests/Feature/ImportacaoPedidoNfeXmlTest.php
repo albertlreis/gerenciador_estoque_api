@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\PedidoImportacao;
 use App\Models\Usuario;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
@@ -87,5 +88,38 @@ class ImportacaoPedidoNfeXmlTest extends TestCase
 
         $response->assertStatus(422);
         $response->assertJsonPath('mensagem', 'Arquivo de metadados (Zone.Identifier) não é aceito.');
+    }
+
+    public function test_retorna_409_quando_arquivo_xml_ja_foi_confirmado(): void
+    {
+        $usuario = Usuario::create([
+            'nome' => 'Usuario NFe Duplicado',
+            'email' => 'nfe-duplicado@example.com',
+            'senha' => 'teste',
+            'ativo' => 1,
+        ]);
+
+        $path = $this->fixturePath('nfe-35250207.xml');
+        $hashArquivo = hash_file('sha256', $path);
+        $hash = hash('sha256', $hashArquivo . '|ADORNOS_XML_NFE');
+
+        PedidoImportacao::create([
+            'arquivo_nome' => 'nfe-35250207.xml',
+            'arquivo_hash' => $hash,
+            'usuario_id' => $usuario->id,
+            'status' => 'confirmado',
+            'pedido_id' => 123,
+        ]);
+
+        $file = new UploadedFile($path, 'nfe-35250207.xml', 'application/xml', null, true);
+        $response = $this->actingAs($usuario, 'sanctum')
+            ->post('/api/v1/pedidos/import', [
+                'tipo_importacao' => 'ADORNOS_XML_NFE',
+                'arquivo' => $file,
+            ]);
+
+        $response->assertStatus(409);
+        $response->assertJsonPath('sucesso', false);
+        $response->assertJsonPath('pedido_id', 123);
     }
 }

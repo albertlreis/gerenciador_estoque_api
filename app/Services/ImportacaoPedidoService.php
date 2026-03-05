@@ -309,18 +309,18 @@ class ImportacaoPedidoService
                     $variacao = ProdutoVariacao::with('atributos')->find($item['id_variacao']);
                 }
 
-                if (!$variacao && !empty($item['ref'])) {
-                    $variacao = ProdutoVariacao::with('atributos')
-                        ->where('referencia', $item['ref'])
-                        ->first();
-                }
-
                 if (
                     !$variacao
                     && !empty($item['codigo_barras'])
                 ) {
                     $variacao = ProdutoVariacao::with('atributos')
                         ->where('codigo_barras', trim((string) $item['codigo_barras']))
+                        ->first();
+                }
+
+                if (!$variacao && !empty($item['ref'])) {
+                    $variacao = ProdutoVariacao::with('atributos')
+                        ->where('referencia', $item['ref'])
                         ->first();
                 }
 
@@ -547,7 +547,9 @@ class ImportacaoPedidoService
     {
         return collect($itens)->map(function ($item) {
 
-            $ref = $item['codigo'] ?? $item['ref'] ?? null;
+            $ref = isset($item['codigo']) && trim((string) $item['codigo']) !== ''
+                ? trim((string) $item['codigo'])
+                : (isset($item['ref']) ? trim((string) $item['ref']) : null);
             $codigoBarras = isset($item['codigo_barras']) ? trim((string) $item['codigo_barras']) : null;
 
             if (!$ref && !$codigoBarras) {
@@ -558,14 +560,14 @@ class ImportacaoPedidoService
             $variacaoQuery = ProdutoVariacao::with(['produto.categoria', 'atributos']);
             $variacao = $variacaoQuery
                 ->where(function ($q) use ($ref, $codigoBarras) {
-                    if ($ref) {
-                        $q->where('referencia', $ref);
-                    }
                     if ($codigoBarras) {
-                        if ($ref) {
-                            $q->orWhere('codigo_barras', $codigoBarras);
+                        $q->where('codigo_barras', $codigoBarras);
+                    }
+                    if ($ref) {
+                        if ($codigoBarras) {
+                            $q->orWhere('referencia', $ref);
                         } else {
-                            $q->where('codigo_barras', $codigoBarras);
+                            $q->where('referencia', $ref);
                         }
                     }
                 })
@@ -655,4 +657,3 @@ class ImportacaoPedidoService
         return Categoria::query()->whereKey($categoriaId)->value('nome');
     }
 }
-

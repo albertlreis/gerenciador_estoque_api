@@ -28,7 +28,7 @@ use Illuminate\Support\Str;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 /**
- * Controlador responsÃ¡vel por operaÃ§Ãµes relacionadas a pedidos.
+ * Controlador responsável por operações relacionadas a pedidos.
  */
 class PedidoController extends Controller
 {
@@ -40,7 +40,7 @@ class PedidoController extends Controller
     protected ExtratorPedidoPythonService $service;
 
     /**
-     * Injeta as dependÃªncias necessÃ¡rias.
+     * Injeta as dependências necessárias.
      */
     public function __construct(
         PedidoService $pedidoService,
@@ -59,7 +59,7 @@ class PedidoController extends Controller
     }
 
     /**
-     * Lista pedidos com filtros, paginaÃ§Ã£o e indicadores adicionais.
+     * Lista pedidos com filtros, paginação e indicadores adicionais.
      *
      * @param Request $request
      * @return JsonResponse
@@ -82,12 +82,12 @@ class PedidoController extends Controller
     }
 
     /**
-     * Atualiza um pedido existente (cabeÃ§alho + itens).
+     * Atualiza um pedido existente (cabeçalho + itens).
      */
     public function update(UpdatePedidoRequest $request, Pedido $pedido): JsonResponse
     {
         if (!AuthHelper::hasPermissao('pedidos.editar')) {
-            return response()->json(['message' => 'Sem permissÃ£o para editar pedidos.'], 403);
+            return response()->json(['message' => 'Sem permissão para editar pedidos.'], 403);
         }
 
         $updated = $this->pedidoUpdateService->atualizar(
@@ -138,7 +138,7 @@ class PedidoController extends Controller
     }
 
     /**
-     * Retorna estatÃ­sticas de pedidos por mÃªs.
+     * Retorna estatísticas de pedidos por mês.
      *
      * @param Request $request
      * @return JsonResponse
@@ -149,7 +149,7 @@ class PedidoController extends Controller
     }
 
     /**
-     * Confirma a importaÃ§Ã£o de um pedido previamente lido do PDF.
+     * Confirma a importação de um pedido previamente lido do PDF.
      *
      * @param Request $request
      * @return JsonResponse
@@ -174,10 +174,10 @@ class PedidoController extends Controller
         if (!in_array($tipoImportacao, $tiposPermitidos, true)) {
             return response()->json([
                 'sucesso' => false,
-                'mensagem' => 'Tipo de importaÃ§Ã£o invÃ¡lido.',
+                'mensagem' => 'Tipo de importação inválido.',
                 'errors' => [
                     'tipo_importacao' => [
-                        'Informe um tipo vÃ¡lido: PRODUTOS_PDF_SIERRA, PRODUTOS_PDF_AVANTI, PRODUTOS_PDF_QUAKER ou ADORNOS_XML_NFE.',
+                        'Informe um tipo válido: PRODUTOS_PDF_SIERRA, PRODUTOS_PDF_AVANTI, PRODUTOS_PDF_QUAKER ou ADORNOS_XML_NFE.',
                     ],
                 ],
             ], 422);
@@ -199,8 +199,8 @@ class PedidoController extends Controller
             'tipo_importacao' => 'nullable|string',
         ], [
             'arquivo.mimes' => $isXml
-                ? 'Para ADORNOS_XML_NFE, envie um arquivo XML vÃ¡lido.'
-                : 'Para importaÃ§Ã£o de produtos, envie um arquivo PDF vÃ¡lido.',
+                ? 'Para ADORNOS_XML_NFE, envie um arquivo XML válido.'
+                : 'Para importação de produtos, envie um arquivo PDF válido.',
         ]);
 
         if ($isXml && str_ends_with(strtolower($request->file('arquivo')->getClientOriginalName()), ':zone.identifier')) {
@@ -215,7 +215,7 @@ class PedidoController extends Controller
             $hashArquivo = hash_file('sha256', $arquivo->getRealPath());
             $hash = hash('sha256', $hashArquivo . '|' . $tipoImportacao);
 
-            Log::info('ImportaÃ§Ã£o de pedido - inÃ­cio', [
+            Log::info('Importação de pedido - início', [
                 'request_id' => $requestId,
                 'etapa' => 'upload',
                 'usuario_id' => auth()->id(),
@@ -232,7 +232,7 @@ class PedidoController extends Controller
             if ($importExistente && $importExistente->status === 'confirmado') {
                 return response()->json([
                     'sucesso' => false,
-                    'mensagem' => 'Este arquivo jÃ¡ foi importado anteriormente para este tipo de importaÃ§Ã£o.',
+                    'mensagem' => 'Este arquivo já foi importado anteriormente para este tipo de importação.',
                     'pedido_id' => $importExistente->pedido_id,
                 ], 409);
             }
@@ -364,7 +364,7 @@ class PedidoController extends Controller
                 ]
             );
 
-            Log::info('ImportaÃ§Ã£o de pedido - extraÃ§Ã£o concluÃ­da', [
+            Log::info('Importação de pedido - extração concluída', [
                 'request_id' => $requestId,
                 'etapa' => 'staging',
                 'usuario_id' => auth()->id(),
@@ -407,7 +407,7 @@ class PedidoController extends Controller
                 ]
             );
 
-            Log::error('ImportaÃ§Ã£o de pedido - erro ao processar', [
+            Log::error('Importação de pedido - erro ao processar', [
                 'request_id' => $requestId,
                 'etapa' => 'importar',
                 'usuario_id' => auth()->id(),
@@ -430,28 +430,28 @@ class PedidoController extends Controller
      */
     public function roteiroPdf(int $pedidoId): Response
     {
-        // 1) Carrega o bÃ¡sico + statusAtual para decidir o tipo sem puxar consignaÃ§Ãµes/itens
+        // 1) Carrega o básico + statusAtual para decidir o tipo sem puxar consignações/itens
         $pedidoBase = Pedido::with([
-            'cliente.enderecoPrincipal', // opcional, mas Ãºtil p/ PDF (se quiser)
+            'cliente.enderecoPrincipal', // opcional, mas útil p/ PDF (se quiser)
             'usuario',
             'parceiro',
             'statusAtual',
         ])->findOrFail($pedidoId);
 
-        // Regra de negÃ³cio:
-        // - Pedido consignado = status atual consignado (e/ou existe consignaÃ§Ã£o)
-        // Eu priorizo statusAtual por ser determinÃ­stico e mais barato.
+        // Regra de negócio:
+        // - Pedido consignado = status atual consignado (e/ou existe consignação)
+        // Eu priorizo statusAtual por ser determinístico e mais barato.
         $status = $pedidoBase->statusAtual?->status;
         $isConsignado = ($status === 'consignado');
 
-        // Caso queira ser "Ã  prova de inconsistÃªncia" (status divergente),
-        // vocÃª pode habilitar esse fallback (roda 1 exists()):
+        // Caso queira ser "à prova de inconsistência" (status divergente),
+        // você pode habilitar esse fallback (roda 1 exists()):
         // if (!$isConsignado) $isConsignado = $pedidoBase->isConsignado();
 
         $baseFsDir = public_path('storage' . DIRECTORY_SEPARATOR . ProdutoImagem::FOLDER);
         Pdf::setOptions(['isRemoteEnabled' => true]);
 
-        // 2) Se for consignado: carrega APENAS consignaÃ§Ãµes e gera o mesmo PDF existente
+        // 2) Se for consignado: carrega APENAS consignações e gera o mesmo PDF existente
         if ($isConsignado) {
             $pedido = Pedido::with([
                 'cliente.enderecoPrincipal',
@@ -463,13 +463,13 @@ class PedidoController extends Controller
                 'consignacoes.produtoVariacao.produto',
                 'consignacoes.produtoVariacao.atributos',
 
-                // localizaÃ§Ã£o
+                // localização
                 'consignacoes.produtoVariacao.estoquesComLocalizacao.localizacao.area',
             ])->findOrFail($pedidoId);
 
-            $grupos = $pedido->consignacoes->groupBy(fn($c) => $c->deposito->nome ?? 'Sem depÃ³sito');
+            $grupos = $pedido->consignacoes->groupBy(fn($c) => $c->deposito->nome ?? 'Sem depósito');
 
-            logAuditoria('pedido_pdf', 'GeraÃ§Ã£o de PDF (roteiro consignaÃ§Ã£o via pedidos)', [
+            logAuditoria('pedido_pdf', 'Geração de PDF (roteiro consignação via pedidos)', [
                 'acao' => 'roteiro_pdf',
                 'pedido_id' => $pedidoId,
                 'tipo' => 'consignacao',
@@ -485,7 +485,7 @@ class PedidoController extends Controller
             return $pdf->download("roteiro_consignacao_{$pedidoId}.pdf");
         }
 
-        // 3) Caso contrÃ¡rio: carrega APENAS itens do pedido e gera o template novo
+        // 3) Caso contrário: carrega APENAS itens do pedido e gera o template novo
         $pedido = Pedido::with([
             'cliente.enderecoPrincipal',
             'usuario',
@@ -495,11 +495,11 @@ class PedidoController extends Controller
             'itens.variacao.produto',
             'itens.variacao.atributos',
 
-            // localizaÃ§Ã£o
+            // localização
             'itens.variacao.estoquesComLocalizacao.localizacao.area',
         ])->findOrFail($pedidoId);
 
-        // DepÃ³sitos: temos id_deposito no item, e model Deposito existe.
+        // Depósitos: temos id_deposito no item, e model Deposito existe.
         $depositoIds = $pedido->itens
             ->pluck('id_deposito')
             ->filter(fn($id) => !is_null($id) && (int)$id > 0)
@@ -512,11 +512,11 @@ class PedidoController extends Controller
 
         $grupos = $pedido->itens->groupBy(function ($item) use ($depositosMap) {
             $id = (int)($item->id_deposito ?? 0);
-            if ($id <= 0) return 'Sem depÃ³sito';
-            return $depositosMap[$id] ?? ("DepÃ³sito #{$id}");
+            if ($id <= 0) return 'Sem depósito';
+            return $depositosMap[$id] ?? ("Depósito #{$id}");
         });
 
-        logAuditoria('pedido_pdf', 'GeraÃ§Ã£o de PDF (roteiro pedido)', [
+        logAuditoria('pedido_pdf', 'Geração de PDF (roteiro pedido)', [
             'acao' => 'roteiro_pdf',
             'pedido_id' => $pedidoId,
             'tipo' => 'pedido',

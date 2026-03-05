@@ -161,6 +161,7 @@ class ParceiroService
             'documento',
             'email',
             'telefone',
+            'data_nascimento',
             'consultor_nome',
             'nivel_fidelidade',
             'endereco',

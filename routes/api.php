@@ -3,6 +3,7 @@
 use Illuminate\Support\Facades\Route;
 
 use App\Http\Controllers\{AreaEstoqueController,
+    AniversarioController,
     AvisoController,
     CarrinhoController,
     CarrinhoItemController,
@@ -246,6 +247,8 @@ Route::middleware('auth:sanctum')
             ->parameters(['parceiros' => 'parceiro'])
             ->whereNumber('parceiro')
             ->except(['create', 'edit']);
+
+        Route::get('aniversarios', [AniversarioController::class, 'index']);
 
         Route::patch('parceiros/{parceiro}/restaurar', [ParceiroController::class, 'restore'])
             ->whereNumber('parceiro');

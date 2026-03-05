@@ -33,6 +33,7 @@ class ParceiroUpdateRequest extends FormRequest
             'documento' => ['sometimes', 'required', 'string', 'max:50', Rule::unique('parceiros', 'documento')->ignore($parceiroId)],
             'email' => ['sometimes', 'nullable', 'email', 'max:100'],
             'telefone' => ['sometimes', 'nullable', 'string', 'max:50'],
+            'data_nascimento' => ['sometimes', 'nullable', 'date'],
             'consultor_nome' => ['sometimes', 'nullable', 'string', 'max:255'],
             'nivel_fidelidade' => ['sometimes', 'nullable', 'string', 'max:50'],
             'endereco' => ['sometimes', 'nullable', 'string'],

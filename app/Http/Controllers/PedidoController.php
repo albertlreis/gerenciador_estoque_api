@@ -348,6 +348,8 @@ class PedidoController extends Controller
                 'itens_extraidos' => $itensExtraidos,
                 'requer_insercao_manual' => $requerInsercaoManual,
                 'avisos' => $avisos,
+                'debug' => $dados['debug'] ?? null,
+                'debug_motivo_itens_zero' => $dados['debug_motivo_itens_zero'] ?? null,
             ];
 
             $importacao = PedidoImportacao::updateOrCreate(

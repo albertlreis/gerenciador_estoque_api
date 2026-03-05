@@ -92,6 +92,8 @@ Route::middleware('auth:sanctum')
 
         // Variações (busca/listagem global)
         Route::get('variacoes', [ProdutoVariacaoController::class, 'buscar']);
+        Route::patch('produto-variacoes/{variacao}', [ProdutoVariacaoController::class, 'patchGlobal'])
+            ->whereNumber('variacao');
 
         Route::prefix('variacoes/{variacao}')->whereNumber('variacao')->group(function () {
             Route::get('imagem', [ProdutoVariacaoImagemController::class, 'show']);

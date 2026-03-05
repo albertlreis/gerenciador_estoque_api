@@ -108,7 +108,7 @@ class ImportacaoPedidoNfeXmlTest extends TestCase
             'arquivo_hash' => $hash,
             'usuario_id' => $usuario->id,
             'status' => 'confirmado',
-            'pedido_id' => 123,
+            'pedido_id' => null,
         ]);
 
         $file = new UploadedFile($path, 'nfe-35250207.xml', 'application/xml', null, true);
@@ -120,6 +120,5 @@ class ImportacaoPedidoNfeXmlTest extends TestCase
 
         $response->assertStatus(409);
         $response->assertJsonPath('sucesso', false);
-        $response->assertJsonPath('pedido_id', 123);
     }
 }

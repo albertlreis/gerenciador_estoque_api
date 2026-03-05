@@ -28,6 +28,7 @@ use App\Http\Controllers\{AreaEstoqueController,
     FeriadoController,
     FinanceiroDashboardController,
     FornecedorController,
+    FormaPagamentoController,
     ImportEstoqueController,
     LancamentoFinanceiroController,
     LocalizacaoDimensaoController,
@@ -451,6 +452,11 @@ Route::middleware('auth:sanctum')
 
             Route::apiResource('transferencias', TransferenciaFinanceiraController::class)
                 ->parameters(['transferencias' => 'transferencia'])
+                ->except(['create', 'edit']);
+
+            Route::apiResource('formas-pagamento', FormaPagamentoController::class)
+                ->parameters(['formas-pagamento' => 'forma_pagamento'])
+                ->only(['index', 'store'])
                 ->except(['create', 'edit']);
 
             Route::get('lancamentos/totais', [LancamentoFinanceiroController::class, 'totais']);

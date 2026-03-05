@@ -21,7 +21,6 @@ class DatabaseSeeder extends Seeder
 
         $this->call([
             // P0: referências e pré-requisitos de FK
-            AcessoUsuariosSeeder::class,
             ConfiguracoesSeeder::class,
             FeriadosSeeder::class,
             FormasPagamentoSeeder::class,

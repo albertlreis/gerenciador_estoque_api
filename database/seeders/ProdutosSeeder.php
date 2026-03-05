@@ -16,63 +16,57 @@ class ProdutosSeeder extends Seeder
     {
         $now = Carbon::now();
 
-        $categorias = DB::table('categorias')->pluck('id', 'nome');
-        if ($categorias->isEmpty()) {
+        $categorias = DB::table('categorias')->pluck('id', 'nome')->all();
+        if (empty($categorias)) {
             throw new Exception('Nenhuma categoria encontrada.');
         }
 
-        $fornecedores = DB::table('fornecedores')->pluck('id')->toArray();
+        $fornecedores = DB::table('fornecedores')->orderBy('id')->pluck('id')->toArray();
         if (empty($fornecedores)) {
             throw new Exception('Nenhum fornecedor encontrado.');
         }
 
         $produtosBase = [
-            'Sofá Retrátil 2 Lugares'       => 'Sofá Retrátil',
-            'Sofá Modular em L'             => 'Sofá de Canto Modular',
-            'Mesa Redonda de Madeira'       => 'Mesa Redonda',
-            'Mesa Escritório Compacta'      => 'Mesa de Escritório',
-            'Cadeira Gamer Reclinável'      => 'Cadeira Gamer',
-            'Cama Casal com Cabeceira'      => 'Cama de Casal',
-            'Poltrona de Veludo'            => 'Poltrona',
-            'Beliche Madeira Maciça'        => 'Beliche',
-            'Nichos Decorativos Hexagonais' => 'Nichos Decorativos',
-            'Aparador com Espelho'          => 'Aparador',
+            ['nome' => 'Sofá Retrátil 2 Lugares - Linha Conforto', 'categoria' => 'Sofá Retrátil'],
+            ['nome' => 'Sofá Modular em L - Linha Design', 'categoria' => 'Sofá de Canto Modular'],
+            ['nome' => 'Mesa Redonda de Madeira - Linha Design', 'categoria' => 'Mesa Redonda'],
+            ['nome' => 'Mesa Escritório Compacta - Linha Moderna', 'categoria' => 'Mesa de Escritório'],
+            ['nome' => 'Cadeira Gamer Reclinável - Linha Conforto', 'categoria' => 'Cadeira Gamer'],
+            ['nome' => 'Cama Casal com Cabeceira - Linha Luxo', 'categoria' => 'Cama de Casal'],
+            ['nome' => 'Poltrona de Veludo - Linha Design', 'categoria' => 'Poltrona'],
+            ['nome' => 'Beliche Madeira Maciça - Linha Moderna', 'categoria' => 'Beliche'],
+            ['nome' => 'Nichos Decorativos Hexagonais - Linha Design', 'categoria' => 'Nichos Decorativos'],
+            ['nome' => 'Aparador com Espelho - Linha Luxo', 'categoria' => 'Aparador'],
         ];
 
-        $linhas = ['Linha Conforto', 'Linha Luxo', 'Linha Design', 'Linha Moderna'];
-        $nomes = array_keys($produtosBase);
-        $total = 50;
-
-        for ($i = 0; $i < $total; $i++) {
-            $baseIndex = $i % count($nomes);
-            $nomeBase = $nomes[$baseIndex];
-            $categoriaNome = $produtosBase[$nomeBase];
-            $linha = $linhas[$i % count($linhas)];
-            $nomeFinal = "$nomeBase – $linha";
-
-            $categoriaId = $categorias[$categoriaNome] ?? null;
+        $rows = [];
+        foreach ($produtosBase as $index => $produtoBase) {
+            $categoriaId = $categorias[$produtoBase['categoria']] ?? null;
             if (!$categoriaId) {
                 continue;
             }
 
-            $ativo = rand(1, 100) > 10;
-            $motivo = $ativo ? null : 'Produto fora de linha';
-
-            DB::table('produtos')->insert([
-                'nome' => $nomeFinal,
-                'descricao' => "O produto $nomeBase da $linha combina funcionalidade e design elegante para sua casa.",
+            $rows[] = [
+                'nome' => $produtoBase['nome'],
+                'descricao' => "Produto de referência para fluxos principais de estoque: {$produtoBase['nome']}.",
                 'id_categoria' => $categoriaId,
-                'id_fornecedor' => $fornecedores[array_rand($fornecedores)],
-                'altura' => rand(50, 200),
-                'largura' => rand(80, 220),
-                'profundidade' => rand(50, 150),
-                'peso' => rand(10, 100),
-                'ativo' => $ativo,
-                'motivo_desativacao' => $motivo,
-                'estoque_minimo' => rand(1, 10),
+                'id_fornecedor' => $fornecedores[$index % count($fornecedores)],
+                'altura' => 80 + $index,
+                'largura' => 100 + $index,
+                'profundidade' => 60 + $index,
+                'peso' => 25 + $index,
+                'ativo' => true,
+                'motivo_desativacao' => null,
+                'estoque_minimo' => 5,
                 'created_at' => $now,
                 'updated_at' => $now,
-            ]);
+            ];
         }
+
+        DB::table('produtos')->upsert(
+            $rows,
+            ['nome'],
+            ['descricao', 'id_categoria', 'id_fornecedor', 'altura', 'largura', 'profundidade', 'peso', 'ativo', 'motivo_desativacao', 'estoque_minimo', 'updated_at']
+        );
     }
 }

@@ -5,7 +5,6 @@ namespace Database\Seeders;
 use Exception;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Str;
 use Carbon\Carbon;
 
 class ProdutoVariacoesSeeder extends Seeder
@@ -23,34 +22,44 @@ class ProdutoVariacoesSeeder extends Seeder
         }
 
         foreach ($produtos as $produto) {
-            $quantidadeVariacoes = rand(1, 3);
+            for ($i = 1; $i <= 2; $i++) {
+                $referencia = sprintf('PV-%04d-%02d', $produto->id, $i);
+                $preco = 1000 + ($produto->id * 10) + ($i * 100);
+                $custo = $preco - 250;
 
-            for ($i = 1; $i <= $quantidadeVariacoes; $i++) {
-                $preco = rand(800, 3000);
-                $custo = rand(500, $preco - 100);
+                DB::table('produto_variacoes')->updateOrInsert(
+                    ['referencia' => $referencia],
+                    [
+                        'produto_id' => $produto->id,
+                        'nome' => 'Variação ' . $i,
+                        'preco' => $preco,
+                        'custo' => $custo,
+                        'codigo_barras' => sprintf('789%09d', ($produto->id * 10) + $i),
+                        'created_at' => $now,
+                        'updated_at' => $now,
+                    ]
+                );
 
-                $variacaoId = DB::table('produto_variacoes')->insertGetId([
-                    'produto_id' => $produto->id,
-                    'referencia' => strtoupper(Str::random(6)) . '-' . $produto->id . $i,
-                    'nome' => 'Variação ' . $i,
-                    'preco' => $preco,
-                    'custo' => $custo,
-                    'codigo_barras' => '789' . rand(100000000, 999999999),
-                    'created_at' => $now,
-                    'updated_at' => $now,
-                ]);
+                $variacaoId = (int) DB::table('produto_variacoes')
+                    ->where('referencia', $referencia)
+                    ->value('id');
 
                 // Atributos com base na categoria
                 $atributos = $this->atributosPorCategoria($produto->id_categoria);
 
                 foreach ($atributos as $atributo => $valores) {
-                    DB::table('produto_variacao_atributos')->insert([
-                        'id_variacao' => $variacaoId,
-                        'atributo' => $atributo,
-                        'valor' => $valores[array_rand($valores)],
-                        'created_at' => $now,
-                        'updated_at' => $now,
-                    ]);
+                    $valor = $valores[($produto->id + $i) % count($valores)];
+                    DB::table('produto_variacao_atributos')->updateOrInsert(
+                        [
+                            'id_variacao' => $variacaoId,
+                            'atributo' => $atributo,
+                        ],
+                        [
+                            'valor' => $valor,
+                            'created_at' => $now,
+                            'updated_at' => $now,
+                        ]
+                    );
                 }
             }
         }

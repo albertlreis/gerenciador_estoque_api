@@ -51,10 +51,15 @@ class FornecedoresSeeder extends Seeder
         ];
 
         foreach ($fornecedores as &$f) {
+            $f['cnpj'] = trim((string) $f['cnpj']);
             $f['created_at'] = $now;
             $f['updated_at'] = $now;
         }
 
-        DB::table('fornecedores')->insert($fornecedores);
+        DB::table('fornecedores')->upsert(
+            $fornecedores,
+            ['cnpj'],
+            ['nome', 'email', 'telefone', 'endereco', 'updated_at']
+        );
     }
 }

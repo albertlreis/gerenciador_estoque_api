@@ -27,38 +27,13 @@ class EstoqueSeeder extends Seeder
             throw new Exception('Variações não encontradas.');
         }
 
-        // Variações em outlet ativo
-        $variacoesOutlet = DB::table('produto_variacao_outlets')
-            ->where('quantidade_restante', '>', 0)
-            ->pluck('produto_variacao_id')
-            ->unique()
-            ->toArray();
-
-        // Variações normais (não estão em outlet ativo)
-        $variacoesNormais = array_diff($variacoes, $variacoesOutlet);
-
-        // 15% sem estoque
-        $percentualSemEstoque = 15;
-        $quantidadeSemEstoque = intval(count($variacoesNormais) * $percentualSemEstoque / 100);
-
-        $variacoesSemEstoque = collect($variacoesNormais)->shuffle()->take($quantidadeSemEstoque)->toArray();
-
-        $variacoesComEstoque = collect($variacoes)
-            ->filter(fn($id) => !in_array($id, $variacoesSemEstoque));
-
-        foreach ($variacoesComEstoque as $idVariacao) {
-            $quantidadeDepositos = rand(1, min(2, count($depositos)));
-            $depositosSelecionados = collect($depositos)->shuffle()->take($quantidadeDepositos);
-
-            foreach ($depositosSelecionados as $idDeposito) {
+        foreach ($variacoes as $indiceVariacao => $idVariacao) {
+            foreach (array_slice($depositos, 0, min(2, count($depositos))) as $indiceDeposito => $idDeposito) {
                 DB::table('estoque')->updateOrInsert([
                     'id_variacao' => $idVariacao,
                     'id_deposito' => $idDeposito,
                 ], [
-                    'quantidade' => rand(5, 100),
-                    'corredor' => chr(rand(65, 70)), // A-F
-                    'prateleira' => (string) rand(1, 5),
-                    'nivel' => (string) rand(1, 3),
+                    'quantidade' => 10 + (($indiceVariacao + 1) * 2) + $indiceDeposito,
                     'created_at' => $now,
                     'updated_at' => $now,
                 ]);

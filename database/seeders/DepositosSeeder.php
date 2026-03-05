@@ -32,10 +32,15 @@ class DepositosSeeder extends Seeder
         ];
 
         foreach ($depositos as &$d) {
+            $d['nome'] = trim((string) $d['nome']);
             $d['created_at'] = $now;
             $d['updated_at'] = $now;
         }
 
-        DB::table('depositos')->insert($depositos);
+        DB::table('depositos')->upsert(
+            $depositos,
+            ['nome'],
+            ['endereco', 'updated_at']
+        );
     }
 }

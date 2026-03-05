@@ -101,10 +101,15 @@ class ConfiguracoesSeeder extends Seeder
         ];
 
         foreach ($configuracoes as &$config) {
+            $config['chave'] = trim((string) $config['chave']);
             $config['created_at'] = $now;
             $config['updated_at'] = $now;
         }
 
-        DB::table('configuracoes')->insert($configuracoes);
+        DB::table('configuracoes')->upsert(
+            $configuracoes,
+            ['chave'],
+            ['label', 'tipo', 'valor', 'descricao', 'updated_at']
+        );
     }
 }

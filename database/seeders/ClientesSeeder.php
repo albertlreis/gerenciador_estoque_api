@@ -5,48 +5,39 @@ namespace Database\Seeders;
 use App\Models\Cliente;
 use App\Models\ClienteEndereco;
 use Illuminate\Database\Seeder;
-use Faker\Factory as Faker;
 use Carbon\Carbon;
-use Illuminate\Support\Str;
 
 class ClientesSeeder extends Seeder
 {
     public function run(): void
     {
-        $faker = Faker::create('pt_BR');
         $now = Carbon::now();
 
-        for ($i = 0; $i < 20; $i++) {
-            $isPJ = $faker->boolean(30); // 30% PJ
+        $clientes = [
+            ['nome' => 'João Silva', 'nome_fantasia' => null, 'documento' => '11111111111', 'inscricao_estadual' => null, 'email' => 'joao.silva@cliente.local', 'telefone' => '91920000001', 'whatsapp' => '91920000001', 'tipo' => 'pf'],
+            ['nome' => 'Maria Souza', 'nome_fantasia' => null, 'documento' => '22222222222', 'inscricao_estadual' => null, 'email' => 'maria.souza@cliente.local', 'telefone' => '91920000002', 'whatsapp' => '91920000002', 'tipo' => 'pf'],
+            ['nome' => 'Empresa Exemplo LTDA', 'nome_fantasia' => 'Empresa Exemplo', 'documento' => '12345678000199', 'inscricao_estadual' => '123456789', 'email' => 'financeiro@empresaexemplo.local', 'telefone' => '91920000003', 'whatsapp' => '91920000003', 'tipo' => 'pj'],
+        ];
 
+        foreach ($clientes as $clienteData) {
             /** @var Cliente $cliente */
-            $cliente = Cliente::create([
-                'nome'              => $isPJ ? $faker->company : $faker->name,
-                'nome_fantasia'     => $isPJ ? $faker->companySuffix . ' ' . $faker->word : null,
-                'documento'         => $isPJ ? $faker->cnpj(false) : $faker->cpf(false),
-                'inscricao_estadual'=> $isPJ ? $faker->numerify('###########') : null,
-                'email'             => $faker->unique()->safeEmail,
-                'telefone'          => $faker->phoneNumber,
-                'whatsapp'          => $faker->phoneNumber,
-                'tipo'              => $isPJ ? 'pj' : 'pf',
-                'created_at'        => $now,
-                'updated_at'        => $now,
-            ]);
+            $cliente = Cliente::query()->updateOrCreate(
+                ['documento' => $clienteData['documento']],
+                array_merge($clienteData, ['created_at' => $now, 'updated_at' => $now])
+            );
 
-            // Endereço principal
-            ClienteEndereco::create([
+            ClienteEndereco::query()->updateOrCreate([
                 'cliente_id'  => $cliente->id,
-                'cep'         => $faker->postcode,
-                'endereco'    => $faker->streetName,
-                'numero'      => $faker->buildingNumber,
-                'complemento' => $faker->optional()->secondaryAddress,
-                'bairro'      => $faker->randomElement([
-                    'Marco', 'Umarizal', 'Pedreira', 'Batista Campos', 'Nazaré'
-                ]),
+                'fingerprint' => hash('sha256', $clienteData['documento'] . '|principal'),
+            ], [
+                'cep'         => '66000000',
+                'endereco'    => 'Endereço principal',
+                'numero'      => 'S/N',
+                'complemento' => null,
+                'bairro'      => 'Centro',
                 'cidade'      => 'Belém',
                 'estado'      => 'PA',
                 'principal'   => true,
-                'fingerprint' => Str::uuid(),
                 'created_at'  => $now,
                 'updated_at'  => $now,
             ]);

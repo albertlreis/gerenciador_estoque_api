@@ -59,8 +59,25 @@ class PdfImageService
         $path = preg_replace('#/+#', '/', $path) ?? $path;
         $path = ltrim($path, '/');
 
+        // Caminhos absolutos comuns em container/produção:
+        // - /var/www/html/public/storage/produtos/...
+        // - /var/www/html/storage/app/public/produtos/...
+        if (str_contains($path, '/public/storage/')) {
+            $path = (string) Str::after($path, '/public/storage/');
+        } elseif (str_contains($path, '/storage/app/public/')) {
+            $path = (string) Str::after($path, '/storage/app/public/');
+        }
+
         if (Str::startsWith($path, 'storage/')) {
             return ltrim(substr($path, strlen('storage/')), '/');
+        }
+
+        if (Str::startsWith($path, 'app/public/')) {
+            return ltrim(substr($path, strlen('app/public/')), '/');
+        }
+
+        if (Str::startsWith($path, 'public/storage/')) {
+            return ltrim(substr($path, strlen('public/storage/')), '/');
         }
 
         if (Str::startsWith($path, 'uploads/produtos/')) {

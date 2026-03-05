@@ -80,8 +80,9 @@
         @endphp
         <tr>
             <td class="thumb-cell">
+                @php($imageSrc = $item->pdf_imagem_data_uri ?: 'data:image/svg+xml;base64,' . base64_encode('<svg xmlns="http://www.w3.org/2000/svg" width="60" height="60" viewBox="0 0 60 60"><rect width="60" height="60" fill="#f1f5f9"/><rect x="1" y="1" width="58" height="58" fill="none" stroke="#cbd5e1"/><text x="30" y="33" text-anchor="middle" font-size="8" fill="#64748b" font-family="Arial">SEM IMG</text></svg>'))
                 <img
-                    src="{{ $item->pdf_imagem_data_uri }}"
+                    src="{{ $imageSrc }}"
                     alt="Imagem do item"
                     class="thumb"
                 />

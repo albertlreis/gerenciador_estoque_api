@@ -69,9 +69,9 @@
       "type": "pdf",
       "tipo_importacao": "PRODUTOS_PDF_SIERRA",
       "vendor": "SIERRA",
-      "expected_items": 1,
+      "expected_items": 16,
       "requires_ocr": false,
-      "notes": "Sierra com um item"
+      "notes": "Layout Sierra em colunas com 16 itens"
     },
     {
       "file": "Pdf/60958 - AVANTI.pdf",

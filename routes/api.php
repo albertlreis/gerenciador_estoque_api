@@ -3,6 +3,7 @@
 use Illuminate\Support\Facades\Route;
 
 use App\Http\Controllers\{AreaEstoqueController,
+    AvisoController,
     CarrinhoController,
     CarrinhoItemController,
     CategoriaController,
@@ -248,6 +249,14 @@ Route::middleware('auth:sanctum')
 
         Route::patch('parceiros/{parceiro}/restaurar', [ParceiroController::class, 'restore'])
             ->whereNumber('parceiro');
+
+        Route::apiResource('avisos', AvisoController::class)
+            ->parameters(['avisos' => 'aviso'])
+            ->whereNumber('aviso')
+            ->except(['create', 'edit']);
+
+        Route::post('avisos/{aviso}/ler', [AvisoController::class, 'marcarComoLido'])
+            ->whereNumber('aviso');
 
         /* ============================================================
          * PEDIDOS / ITENS / STATUS / ESTOQUE DO PEDIDO

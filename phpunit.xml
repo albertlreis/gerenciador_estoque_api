@@ -25,8 +25,8 @@
         <env name="DB_HOST" value="shared-mysql"/>
         <env name="DB_PORT" value="3306"/>
         <env name="DB_DATABASE" value="estoque_test"/>
-        <env name="DB_USERNAME" value="test_user"/>
-        <env name="DB_PASSWORD" value="test_password"/>
+        <env name="DB_USERNAME" value="dev"/>
+        <env name="DB_PASSWORD" value="troque-esta-senha-dev"/>
         <env name="DB_COLLATION" value="utf8mb4_0900_ai_ci"/>
         <env name="MAIL_MAILER" value="array"/>
         <env name="QUEUE_CONNECTION" value="sync"/>

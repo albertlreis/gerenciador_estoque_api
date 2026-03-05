@@ -8,6 +8,10 @@ return new class extends Migration
 {
     public function up(): void
     {
+        if (!app()->environment('testing')) {
+            return;
+        }
+
         if (Schema::hasTable('acesso_usuarios')) {
             return;
         }
@@ -24,10 +28,15 @@ return new class extends Migration
 
     public function down(): void
     {
-        if (!Schema::hasTable('acesso_usuarios')) {
+        // Segurança: nunca tocar em tabela compartilhada fora de testes.
+        if (!app()->environment('testing')) {
             return;
         }
 
-        Schema::drop('acesso_usuarios');
+        // Evita risco no banco compartilhado; tabela de teste pode permanecer.
+        $database = (string) config('database.connections.mysql.database');
+        if ($database !== 'estoque_test') {
+            return;
+        }
     }
 };

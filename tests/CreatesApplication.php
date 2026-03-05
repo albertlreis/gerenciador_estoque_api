@@ -32,6 +32,8 @@ trait CreatesApplication
         }
 
         $vars = $this->parseEnvFile($envPath);
+        $this->hydrateTestingEnv($vars);
+
         $dbName = $vars['DB_DATABASE'] ?? null;
         if (!$dbName) {
             return;
@@ -53,6 +55,22 @@ trait CreatesApplication
         } catch (PDOException $e) {
             fwrite(STDERR, "[test-db] Não foi possível criar o banco '{$dbName}'. Crie manualmente. Erro: {$e->getMessage()}\n");
         }
+    }
+
+    private function hydrateTestingEnv(array $vars): void
+    {
+        $vars['APP_ENV'] = $vars['APP_ENV'] ?? 'testing';
+
+        foreach ($vars as $key => $value) {
+            $this->setEnvVar($key, (string) $value);
+        }
+    }
+
+    private function setEnvVar(string $key, string $value): void
+    {
+        putenv("{$key}={$value}");
+        $_ENV[$key] = $value;
+        $_SERVER[$key] = $value;
     }
 
     private function parseEnvFile(string $path): array

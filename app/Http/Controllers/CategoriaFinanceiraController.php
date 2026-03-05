@@ -33,7 +33,9 @@ class CategoriaFinanceiraController extends Controller
                     $term = trim((string)$f['q']);
                     $q->where(fn($w) => $w->where('nome','like',"%{$term}%")->orWhere('slug','like',"%{$term}%"));
                 })
-                ->orderBy('ordem')->orderBy('nome')
+                ->orderByRaw('ordem IS NULL')
+                ->orderBy('ordem')
+                ->orderBy('nome')
                 ->get();
 
             return response()->json([

@@ -25,6 +25,7 @@ class CentroCustoController extends Controller
                 $term = trim((string)$f['q']);
                 $qq->where(fn($w) => $w->where('nome','like',"%{$term}%")->orWhere('slug','like',"%{$term}%"));
             })
+            ->orderByRaw('ordem IS NULL')
             ->orderBy('ordem')
             ->orderBy('nome');
 

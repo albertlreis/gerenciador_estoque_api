@@ -170,6 +170,31 @@ class ExtratorPedidoPythonService
 
     private function resolverUrlLocal(?string $url): ?string
     {
-        return $url;
+        if (!$url) {
+            return $url;
+        }
+
+        $forceLocalUrl = (bool) config('services.extrator_pedido.force_local_url', false);
+        $appEnv = (string) config('app.env', '');
+        if (!$forceLocalUrl || !in_array($appEnv, ['local', 'testing'], true)) {
+            return $url;
+        }
+
+        $parsed = parse_url($url);
+        if (!is_array($parsed) || empty($parsed['host'])) {
+            return $url;
+        }
+
+        $host = (string) $parsed['host'];
+        if (in_array($host, ['127.0.0.1', 'localhost', '::1'], true)) {
+            return $url;
+        }
+
+        $scheme = (string) ($parsed['scheme'] ?? 'http');
+        $port = isset($parsed['port']) ? ':' . $parsed['port'] : '';
+        $path = (string) ($parsed['path'] ?? '');
+        $query = isset($parsed['query']) ? '?' . $parsed['query'] : '';
+
+        return "{$scheme}://127.0.0.1{$port}{$path}{$query}";
     }
 }

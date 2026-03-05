@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\Usuario;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Laravel\Sanctum\Sanctum;
@@ -10,6 +11,8 @@ use Tests\TestCase;
 
 class ProdutoListaViewTest extends TestCase
 {
+    use RefreshDatabase;
+
     private function criarUsuario(): Usuario
     {
         return Usuario::create([

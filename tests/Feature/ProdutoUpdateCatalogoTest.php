@@ -7,6 +7,7 @@ use App\Models\Fornecedor;
 use App\Models\Produto;
 use App\Models\Usuario;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
@@ -24,6 +25,7 @@ class ProdutoUpdateCatalogoTest extends TestCase
         ]);
 
         Sanctum::actingAs($usuario);
+        Cache::put('permissoes_usuario_' . $usuario->id, ['produtos.editar']);
 
         $categoria = Categoria::create([
             'nome' => 'Categoria Teste',

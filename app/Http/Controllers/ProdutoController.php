@@ -60,7 +60,7 @@ class ProdutoController extends Controller
     public function index(FiltrarProdutosRequest $request): JsonResponse
     {
         $view = $request->get('view', 'completa');
-        $incluirEstoque = in_array($view, ['completa', 'simplificada']);
+        $incluirEstoque = in_array($view, ['completa', 'simplificada', 'lista']);
         $request->merge(['incluir_estoque' => $incluirEstoque]);
 
         $produtos = $this->produtoService->listarProdutosFiltrados($request);

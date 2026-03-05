@@ -7,6 +7,7 @@ use App\Models\Cliente;
 use App\Models\Pedido;
 use App\Models\AcessoUsuario;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
@@ -19,12 +20,20 @@ class ComunicacaoSierraTest extends TestCase
         Http::fake();
 
         $user = AcessoUsuario::factory()->create();
-        $cliente = Cliente::factory()->create([
+        Cache::put('permissoes_usuario_' . $user->id, ['pedidos.editar', 'contas_receber.criar'], now()->addHour());
+        $cliente = Cliente::create([
+            'nome' => 'Cliente Comunicacao',
             'email' => 'cliente@example.test',
         ]);
 
-        $pedido = Pedido::factory()->create([
-            'cliente_id' => $cliente->id,
+        $pedido = Pedido::create([
+            'id_cliente' => $cliente->id,
+            'id_usuario' => $user->id,
+            'tipo' => 'venda',
+            'numero_externo' => 'PED-COMM-1',
+            'data_pedido' => now(),
+            'valor_total' => 100.0,
+            'prazo_dias_uteis' => 10,
         ]);
 
         $this->actingAs($user, 'sanctum');
@@ -61,13 +70,20 @@ class ComunicacaoSierraTest extends TestCase
         Http::fake();
 
         $user = AcessoUsuario::factory()->create();
-        $cliente = Cliente::factory()->create([
+        Cache::put('permissoes_usuario_' . $user->id, ['contas_receber.criar'], now()->addHour());
+        $cliente = Cliente::create([
+            'nome' => 'Cliente Cobranca',
             'whatsapp' => '91989413333',
         ]);
 
-        $pedido = Pedido::factory()->create([
-            'cliente_id' => $cliente->id,
+        $pedido = Pedido::create([
+            'id_cliente' => $cliente->id,
+            'id_usuario' => $user->id,
+            'tipo' => 'venda',
+            'numero_externo' => 'PED-COMM-2',
+            'data_pedido' => now(),
             'valor_total' => 100.0,
+            'prazo_dias_uteis' => 10,
         ]);
 
         $this->actingAs($user, 'sanctum');
@@ -80,7 +96,7 @@ class ComunicacaoSierraTest extends TestCase
             'comunicacao.templates.cobranca_whatsapp' => 'sierra_cobranca_whatsapp',
         ]);
 
-        $this->postJson('/api/v1/contas-receber', [
+        $this->postJson('/api/v1/financeiro/contas-receber', [
             'descricao' => 'Teste',
             'numero_documento' => 'DOC-1',
             'data_emissao' => now()->toDateString(),

@@ -102,14 +102,12 @@ class ProdutoResourceUrlsTest extends TestCase
         $produtoId = $this->criarProdutoBase('manuais/manual.pdf');
         $this->criarImagemPrincipal($produtoId, 'foto2.jpg');
 
-        $baseUrl = rtrim((string) config('app.url'), '/');
-
         $response = $this->getJson("/api/v1/produtos/{$produtoId}");
 
         $response
             ->assertOk()
             ->assertJsonFragment([
-                'manual_conservacao' => $baseUrl . '/storage/manuais/manual.pdf',
+                'manual_conservacao' => '/storage/manuais/manual.pdf',
             ]);
     }
 

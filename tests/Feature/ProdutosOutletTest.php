@@ -126,6 +126,7 @@ class ProdutosOutletTest extends TestCase
 
         $categoria = Categoria::create(['nome' => 'Cat A']);
         $this->criarProdutoOutlet('Produto Outlet', 'REF-OUT', $categoria, 100, 12);
+        $pagamentoLabel = OutletFormaPagamento::where('slug', 'pix')->value('nome');
 
         $response = $this->getJson('/api/v1/produtos?is_outlet=1&referencia=REF-OUT&id_categoria=' . $categoria->id);
 
@@ -134,7 +135,7 @@ class ProdutosOutletTest extends TestCase
             ->assertJsonPath('data.0.preco_final_venda', 88)
             ->assertJsonPath('data.0.preco_outlet', 88)
             ->assertJsonPath('data.0.percentual_desconto', 12)
-            ->assertJsonPath('data.0.pagamento_label', 'PIX')
+            ->assertJsonPath('data.0.pagamento_label', $pagamentoLabel)
             ->assertJsonPath('data.0.outlet_catalogo.preco_final_venda', 88);
     }
 

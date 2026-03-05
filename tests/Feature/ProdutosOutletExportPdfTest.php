@@ -59,13 +59,15 @@ class ProdutosOutletExportPdfTest extends TestCase
             'usuario_id' => $usuario->id,
         ]);
 
-        $forma = OutletFormaPagamento::create([
-            'slug' => 'pix',
-            'nome' => 'PIX',
-            'max_parcelas_default' => 1,
-            'percentual_desconto_default' => 10,
-            'ativo' => true,
-        ]);
+        $forma = OutletFormaPagamento::firstOrCreate(
+            ['slug' => 'pix'],
+            [
+                'nome' => 'PIX',
+                'max_parcelas_default' => 1,
+                'percentual_desconto_default' => 10,
+                'ativo' => true,
+            ]
+        );
 
         ProdutoVariacaoOutletPagamento::create([
             'produto_variacao_outlet_id' => $outlet->id,

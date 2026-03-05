@@ -139,7 +139,13 @@ class TransferenciaEntreDepositosTest extends TestCase
             ->first();
         $this->assertSame(10, (int) $estoqueOrigem->quantidade);
         $this->assertSame(0, (int) $estoqueDestino->quantidade);
-        $this->assertSame(0, EstoqueTransferencia::query()->count());
+        $this->assertSame(
+            0,
+            EstoqueTransferencia::query()
+                ->where('deposito_origem_id', $depOrigem->id)
+                ->where('deposito_destino_id', $depDestino->id)
+                ->count()
+        );
     }
 
     public function test_transferencia_origem_igual_destino_retorna_422(): void

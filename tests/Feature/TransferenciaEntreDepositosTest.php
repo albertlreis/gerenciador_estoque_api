@@ -216,6 +216,85 @@ class TransferenciaEntreDepositosTest extends TestCase
         );
     }
 
+    public function test_transferencia_lote_e_atomica_quando_um_item_falha(): void
+    {
+        [$usuario, $variacaoA, $depOrigem, $depDestino] = $this->criarCenarioTransferencia();
+        Sanctum::actingAs($usuario);
+
+        $categoria = Categoria::create(['nome' => 'Cat Transferencia 2']);
+        $produto = Produto::create([
+            'nome' => 'Produto Transferencia 2',
+            'descricao' => 'Teste',
+            'id_categoria' => $categoria->id,
+            'ativo' => true,
+        ]);
+        $variacaoB = ProdutoVariacao::create([
+            'produto_id' => $produto->id,
+            'referencia' => 'TRF-2',
+            'nome' => 'Variacao TRF 2',
+            'preco' => 80,
+            'custo' => 40,
+        ]);
+
+        Estoque::updateOrCreate(
+            ['id_variacao' => $variacaoB->id, 'id_deposito' => $depOrigem->id],
+            ['quantidade' => 1]
+        );
+        Estoque::updateOrCreate(
+            ['id_variacao' => $variacaoB->id, 'id_deposito' => $depDestino->id],
+            ['quantidade' => 0]
+        );
+
+        $payload = [
+            'tipo' => 'transferencia',
+            'deposito_origem_id' => $depOrigem->id,
+            'deposito_destino_id' => $depDestino->id,
+            'itens' => [
+                ['variacao_id' => $variacaoA->id, 'quantidade' => 2],
+                ['variacao_id' => $variacaoB->id, 'quantidade' => 5],
+            ],
+        ];
+
+        $response = $this->postJson('/api/v1/estoque/movimentacoes/lote', $payload);
+        $response->assertStatus(422);
+        $this->assertStringContainsString(
+            'Não foi possível concluir a transferência entre depósitos',
+            (string) $response->json('error')
+        );
+
+        $this->assertSame(
+            10,
+            (int) Estoque::query()
+                ->where('id_variacao', $variacaoA->id)
+                ->where('id_deposito', $depOrigem->id)
+                ->value('quantidade')
+        );
+        $this->assertSame(
+            0,
+            (int) Estoque::query()
+                ->where('id_variacao', $variacaoA->id)
+                ->where('id_deposito', $depDestino->id)
+                ->value('quantidade')
+        );
+        $this->assertSame(
+            1,
+            (int) Estoque::query()
+                ->where('id_variacao', $variacaoB->id)
+                ->where('id_deposito', $depOrigem->id)
+                ->value('quantidade')
+        );
+        $this->assertSame(
+            0,
+            (int) Estoque::query()
+                ->where('id_variacao', $variacaoB->id)
+                ->where('id_deposito', $depDestino->id)
+                ->value('quantidade')
+        );
+
+        $this->assertSame(0, EstoqueTransferencia::query()->count());
+        $this->assertSame(0, EstoqueMovimentacao::query()->where('tipo', 'transferencia')->count());
+    }
+
     public function test_service_registrar_transferencia_lote_origem_destino_iguais_lanca_excecao(): void
     {
         [$usuario, $variacao, $depOrigem, $depDestino] = $this->criarCenarioTransferencia();

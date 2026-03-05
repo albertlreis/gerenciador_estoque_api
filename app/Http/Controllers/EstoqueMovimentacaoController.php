@@ -144,7 +144,12 @@ class EstoqueMovimentacaoController extends Controller
             $result = $this->service->registrarMovimentacaoLote($dados, $usuarioId);
             return response()->json($result);
         } catch (InvalidArgumentException $e) {
-            return response()->json(['error' => $e->getMessage()], 422);
+            $isTransferencia = ($dados['tipo'] ?? null) === 'transferencia';
+            $friendly = $isTransferencia
+                ? 'Não foi possível concluir a transferência entre depósitos. ' . $e->getMessage()
+                : $e->getMessage();
+
+            return response()->json(['error' => $friendly], 422);
         }
     }
 

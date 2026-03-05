@@ -6,12 +6,18 @@ use App\Models\CategoriaFinanceira;
 use App\Models\CentroCusto;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Carbon\Carbon;
 
 class DespesasRecorrentesSeeder extends Seeder
 {
     public function run(): void
     {
+        if (!Schema::hasTable('acesso_usuarios')) {
+            $this->command?->warn('Tabela acesso_usuarios não encontrada. Pulei DespesasRecorrentesSeeder.');
+            return;
+        }
+
         $usuarioId = DB::table('acesso_usuarios')->orderBy('id')->value('id');
         if (!$usuarioId) {
             $this->command?->warn('Nenhum acesso_usuario encontrado. Pulei DespesasRecorrentesSeeder.');

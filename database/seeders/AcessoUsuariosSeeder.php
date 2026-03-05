@@ -4,11 +4,17 @@ namespace Database\Seeders;
 
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 class AcessoUsuariosSeeder extends Seeder
 {
     public function run(): void
     {
+        if (!Schema::hasTable('acesso_usuarios')) {
+            $this->command?->warn('Tabela acesso_usuarios não encontrada. Pulei AcessoUsuariosSeeder.');
+            return;
+        }
+
         $now = now();
 
         $rows = [

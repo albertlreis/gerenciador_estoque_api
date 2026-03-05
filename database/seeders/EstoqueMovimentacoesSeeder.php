@@ -4,6 +4,7 @@ namespace Database\Seeders;
 
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Carbon\Carbon;
 
 class EstoqueMovimentacoesSeeder extends Seeder
@@ -13,6 +14,11 @@ class EstoqueMovimentacoesSeeder extends Seeder
      */
     public function run(): void
     {
+        if (!Schema::hasTable('acesso_usuarios')) {
+            $this->command?->warn('Tabela acesso_usuarios não encontrada. Pulei EstoqueMovimentacoesSeeder.');
+            return;
+        }
+
         $now = Carbon::now();
 
         // Lê dias limite da tabela de configuracoes (fallback 120)
@@ -26,6 +32,10 @@ class EstoqueMovimentacoesSeeder extends Seeder
 
         // Usuário "qualquer" para vincular às movimentações
         $usuarioId = DB::table('acesso_usuarios')->value('id');
+        if (!$usuarioId) {
+            $this->command?->warn('Nenhum usuário em acesso_usuarios. Pulei EstoqueMovimentacoesSeeder.');
+            return;
+        }
 
         // Vamos buscar o estoque e agrupar por variação para ter visão dos depósitos
         $estoquePorVariacao = DB::table('estoque')

@@ -24,6 +24,10 @@ return new class extends Migration
 
     public function down(): void
     {
-        Schema::dropIfExists('acesso_usuarios');
+        // Em ambiente com banco compartilhado (ex.: API de autenticação),
+        // não removemos a tabela para evitar impacto entre serviços.
+        if (!Schema::hasTable('acesso_usuarios')) {
+            return;
+        }
     }
 };

@@ -9,11 +9,17 @@ use App\Enums\PedidoStatus;
 use App\Helpers\PedidoHelper;
 use App\Models\Pedido;
 use App\Services\PedidoPrazoService;
+use Illuminate\Support\Facades\Schema;
 
 class PedidosSeeder extends Seeder
 {
     public function run(): void
     {
+        if (!Schema::hasTable('acesso_usuarios')) {
+            $this->command?->warn('Tabela acesso_usuarios não encontrada. Pulei PedidosSeeder.');
+            return;
+        }
+
         $clientes   = DB::table('clientes')->pluck('id')->toArray();
         $vendedores = DB::table('acesso_usuarios')
             ->whereIn('email', ['vendedor1@teste.com', 'vendedor2@teste.com', 'vendedor3@teste.com'])
@@ -23,6 +29,17 @@ class PedidosSeeder extends Seeder
             ->pluck('id')->toArray();
         $parceiros  = DB::table('parceiros')->pluck('id')->toArray();
         $variacoes  = DB::table('produto_variacoes')->pluck('id')->toArray();
+
+        if (empty($vendedores)) {
+            $vendedores = DB::table('acesso_usuarios')->pluck('id')->toArray();
+        }
+        if (empty($admins)) {
+            $admins = DB::table('acesso_usuarios')->pluck('id')->toArray();
+        }
+        if (empty($clientes) || empty($vendedores) || empty($variacoes)) {
+            $this->command?->warn('Dados mínimos ausentes para PedidosSeeder. Seeder ignorado.');
+            return;
+        }
 
         $now = CarbonImmutable::now('America/Belem');
         $itens = [];

@@ -10,11 +10,17 @@ use App\Models\ProdutoVariacaoOutletPagamento;
 use Carbon\Carbon;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 class ProdutoVariacaoOutletSeeder extends Seeder
 {
     public function run(): void
     {
+        if (!Schema::hasTable('acesso_usuarios')) {
+            $this->command?->warn('Tabela acesso_usuarios não encontrada. Pulei ProdutoVariacaoOutletSeeder.');
+            return;
+        }
+
         $adminId = DB::table('acesso_usuarios')
             ->where('email', 'admin@teste.com')
             ->value('id');

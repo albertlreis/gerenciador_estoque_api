@@ -4,12 +4,18 @@ namespace Database\Seeders;
 
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Carbon\Carbon;
 
 class ConsignacoesSeeder extends Seeder
 {
     public function run(): void
     {
+        if (!Schema::hasTable('acesso_usuarios')) {
+            $this->command?->warn('Tabela acesso_usuarios não encontrada. Pulei ConsignacoesSeeder.');
+            return;
+        }
+
         $now = Carbon::now();
 
         // Buscar os pedidos cujo último status registrado foi 'consignado'

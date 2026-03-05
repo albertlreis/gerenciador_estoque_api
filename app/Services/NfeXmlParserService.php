@@ -106,22 +106,22 @@ class NfeXmlParserService
             $qCom = $this->nodeText($prod, 'qCom');
             $vUnCom = $this->nodeText($prod, 'vUnCom');
             $vProd = $this->nodeText($prod, 'vProd');
-            $cEan = $this->nodeText($prod, 'cEAN') ?: $this->nodeText($prod, 'cEANTrib');
+            $cEan = $this->normalizarCodigoBarras(
+                $this->nodeText($prod, 'cEAN') ?: $this->nodeText($prod, 'cEANTrib')
+            );
 
-            if ($cProd === null && $xProd === null) {
-                continue;
-            }
-
-            $qtd = $qCom !== null && $qCom !== '' ? (float) str_replace(',', '.', $qCom) : 1.0;
-            $vUn = $vUnCom !== null && $vUnCom !== '' ? (float) str_replace(',', '.', $vUnCom) : 0.0;
-            $vTot = $vProd !== null && $vProd !== '' ? (float) str_replace(',', '.', $vProd) : ($qtd * $vUn);
+            $codigo = $cProd ?: ('ITEM-' . (count($itens) + 1));
+            $descricao = $xProd ?: $codigo;
+            $qtd = $this->toFloat($qCom, 1.0);
+            $vUn = $this->toFloat($vUnCom, 0.0);
+            $vTot = $this->toFloat($vProd, $qtd * $vUn);
 
             $itens[] = [
-                'codigo' => $cProd ?: ('ITEM-' . (count($itens) + 1)),
+                'codigo' => $codigo,
                 'ref' => $cProd,
                 'codigo_barras' => $cEan,
-                'nome' => $xProd ?: $cProd,
-                'descricao' => $xProd,
+                'nome' => $descricao,
+                'descricao' => $descricao,
                 'quantidade' => (string) $qtd,
                 'unidade' => $this->nodeText($prod, 'uCom') ?: 'UN',
                 'preco_unitario' => (string) $vUn,
@@ -175,5 +175,28 @@ class NfeXmlParserService
         }
         $v = trim((string) $child->nodeValue);
         return $v === '' ? null : $v;
+    }
+
+    private function toFloat(?string $value, float $default = 0.0): float
+    {
+        if ($value === null || trim($value) === '') {
+            return $default;
+        }
+
+        return (float) str_replace(',', '.', $value);
+    }
+
+    private function normalizarCodigoBarras(?string $value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        $codigo = trim($value);
+        if ($codigo === '' || strtoupper($codigo) === 'SEM GTIN') {
+            return null;
+        }
+
+        return $codigo;
     }
 }

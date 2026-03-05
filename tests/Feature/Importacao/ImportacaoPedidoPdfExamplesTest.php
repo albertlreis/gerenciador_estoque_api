@@ -64,6 +64,10 @@ class ImportacaoPedidoPdfExamplesTest extends TestCase
         $itens = $response->json('dados.itens') ?? [];
         $this->assertCount((int) $entry['expected_items'], $itens, 'Contagem de itens divergente para ' . $entry['file']);
 
+        $linhas = array_map(static fn (array $item) => (int) ($item['linha'] ?? 0), $itens);
+        $this->assertCount(count($linhas), array_filter($linhas, static fn (int $linha) => $linha > 0), 'Linha inválida no preview para ' . $entry['file']);
+        $this->assertCount(count($linhas), array_unique($linhas), 'Linha duplicada no preview para ' . $entry['file']);
+
         foreach ($itens as $idx => $item) {
             $descricao = trim((string) ($item['descricao'] ?? ''));
             $quantidade = (float) ($item['quantidade'] ?? 0);
@@ -164,5 +168,7 @@ class ImportacaoPedidoPdfExamplesTest extends TestCase
 
         $response->assertStatus(409);
         $response->assertJsonPath('sucesso', false);
+        $response->assertJsonPath('mensagem', 'Este arquivo já foi importado anteriormente para este tipo de importação.');
+        $this->assertStringNotContainsString('Ã', (string) $response->json('mensagem'));
     }
 }

@@ -545,7 +545,8 @@ class ImportacaoPedidoService
      */
     public function mesclarItensComVariacoes(array $itens): array
     {
-        return collect($itens)->map(function ($item) {
+        return collect($itens)->values()->map(function ($item, int $index) {
+            $linha = $this->normalizarLinhaItem($item['linha'] ?? null, $index + 1);
 
             $ref = isset($item['codigo']) && trim((string) $item['codigo']) !== ''
                 ? trim((string) $item['codigo'])
@@ -553,6 +554,7 @@ class ImportacaoPedidoService
             $codigoBarras = isset($item['codigo_barras']) ? trim((string) $item['codigo_barras']) : null;
 
             if (!$ref && !$codigoBarras) {
+                $item['linha'] = $linha;
                 return $item;
             }
 
@@ -605,6 +607,7 @@ class ImportacaoPedidoService
                 $categoriaNome = $produto?->categoria?->nome ?? $this->categoriaPadraoNome($categoriaId);
 
                 return array_merge($item, [
+                    "linha"         => $linha,
                     "ref"           => $ref,
                     "nome"          => $produto?->nome ?? $variacao->nome,
                     "produto_id"    => $variacao->produto_id,
@@ -622,6 +625,7 @@ class ImportacaoPedidoService
             $categoriaId = $item['id_categoria'] ?? $this->categoriaPadraoImportacaoId();
 
             return array_merge($item, [
+                "linha"         => $linha,
                 "ref"           => $ref,
                 "produto_id"    => null,
                 "id_variacao"   => null,
@@ -632,6 +636,19 @@ class ImportacaoPedidoService
                 "fixos"         => $item['fixos'] ?? [],
             ]);
         })->toArray();
+    }
+
+    private function normalizarLinhaItem(mixed $linha, int $fallback): int
+    {
+        if (is_int($linha) && $linha > 0) {
+            return $linha;
+        }
+
+        if (is_string($linha) && ctype_digit($linha) && (int) $linha > 0) {
+            return (int) $linha;
+        }
+
+        return $fallback;
     }
 
     private function categoriaPadraoImportacaoId(): int

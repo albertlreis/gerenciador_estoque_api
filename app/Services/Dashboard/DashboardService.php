@@ -265,11 +265,12 @@ class DashboardService
     private function seriesCacheKey(int $usuarioId, array $resolved): string
     {
         return sprintf(
-            'dashboard:series:comercial:%d:%s:%s:%s:%d',
+            'dashboard:series:comercial:%d:%s:%s:%s:%s:%d',
             $usuarioId,
             $resolved['period'],
             $resolved['inicio']->toDateString(),
             $resolved['fim']->toDateString(),
+            $resolved['deposito_id'] ?? 'null',
             $resolved['compare'] ? 1 : 0,
         );
     }

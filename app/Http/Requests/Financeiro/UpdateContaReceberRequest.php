@@ -24,6 +24,8 @@ class UpdateContaReceberRequest extends FormRequest
     public function rules(): array
     {
         return [
+            'pedido_id' => ['sometimes','nullable','integer','exists:pedidos,id'],
+            'cliente_id' => ['sometimes','nullable','integer','exists:clientes,id'],
             'descricao' => ['sometimes','string','max:255'],
             'numero_documento' => ['sometimes','string','max:255'],
             'data_emissao' => ['sometimes','date'],
@@ -54,6 +56,14 @@ class UpdateContaReceberRequest extends FormRequest
                 } catch (\Throwable $e) {
                     // deixa o validator padrão lidar com formato inválido
                 }
+            }
+
+            $conta = $this->route('conta');
+            $pedidoId = $this->input('pedido_id', $conta?->pedido_id);
+            $clienteId = $this->input('cliente_id', $conta?->cliente_id);
+
+            if (!$pedidoId && !$clienteId) {
+                $v->errors()->add('cliente_id', 'Cliente é obrigatório quando nenhum pedido for informado.');
             }
         });
     }

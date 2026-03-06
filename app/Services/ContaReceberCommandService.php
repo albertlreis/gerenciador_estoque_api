@@ -6,6 +6,7 @@ use App\Enums\ContaStatus;
 use App\Enums\LancamentoTipo;
 use App\Models\ContaReceber;
 use App\Models\ContaReceberPagamento;
+use App\Models\Pedido;
 use BackedEnum;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -213,6 +214,23 @@ class ContaReceberCommandService
             $out['forma_recebimento'] = $out['forma_recebimento'] !== null
                 ? trim((string)$out['forma_recebimento'])
                 : null;
+        }
+
+        $pedidoId = $out['pedido_id'] ?? $conta?->pedido_id;
+        if ($pedidoId) {
+            $pedido = Pedido::query()->findOrFail((int) $pedidoId);
+            $out['pedido_id'] = (int) $pedido->id;
+            $out['cliente_id'] = (int) $pedido->id_cliente;
+        } elseif (array_key_exists('cliente_id', $out)) {
+            $out['cliente_id'] = $out['cliente_id'] ? (int) $out['cliente_id'] : null;
+        } elseif ($conta?->cliente_id) {
+            $out['cliente_id'] = (int) $conta->cliente_id;
+        }
+
+        if (empty($out['pedido_id']) && empty($out['cliente_id'])) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'cliente_id' => 'Cliente é obrigatório quando nenhum pedido for informado.',
+            ]);
         }
 
         foreach (['valor_bruto','desconto','juros','multa','valor_recebido'] as $field) {

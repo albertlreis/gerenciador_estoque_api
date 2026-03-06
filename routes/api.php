@@ -459,6 +459,8 @@ Route::middleware('auth:sanctum')
                 ->only(['index', 'store'])
                 ->except(['create', 'edit']);
 
+            Route::get('extrato/totais', [LancamentoFinanceiroController::class, 'totais']);
+            Route::get('extrato', [LancamentoFinanceiroController::class, 'index']);
             Route::get('lancamentos/totais', [LancamentoFinanceiroController::class, 'totais']);
             Route::apiResource('lancamentos', LancamentoFinanceiroController::class)->except(['create', 'edit']);
 

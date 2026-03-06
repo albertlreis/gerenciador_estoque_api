@@ -25,6 +25,7 @@ class StoreContaReceberRequest extends FormRequest
     {
         return [
             'pedido_id' => ['nullable','integer','exists:pedidos,id'],
+            'cliente_id' => ['nullable','integer','exists:clientes,id'],
             'descricao' => ['required','string','max:255'],
             'numero_documento' => ['nullable','string','max:255'],
             'data_emissao' => ['nullable','date'],
@@ -55,6 +56,10 @@ class StoreContaReceberRequest extends FormRequest
                 } catch (\Throwable $e) {
                     // deixa o validator padrão lidar com formato inválido
                 }
+            }
+
+            if (!$this->filled('pedido_id') && !$this->filled('cliente_id')) {
+                $v->errors()->add('cliente_id', 'Cliente é obrigatório quando nenhum pedido for informado.');
             }
         });
     }

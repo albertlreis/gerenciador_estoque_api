@@ -11,6 +11,7 @@ class ContaReceberResource extends JsonResource
         return [
             'id'                => $this->id,
             'pedido_id'         => $this->pedido_id ? (int) $this->pedido_id : null,
+            'cliente_id'        => $this->cliente_id ? (int) $this->cliente_id : null,
             'descricao'         => $this->descricao,
             'numero_documento'  => $this->numero_documento,
             'data_emissao'      => optional($this->data_emissao)->format('Y-m-d'),
@@ -34,6 +35,11 @@ class ContaReceberResource extends JsonResource
             'centro_custo' => $this->whenLoaded('centroCusto', fn() => [
                 'id' => $this->centroCusto?->id,
                 'nome' => $this->centroCusto?->nome,
+            ]),
+            'cliente' => $this->whenLoaded('cliente', fn() => [
+                'id' => $this->cliente?->id,
+                'nome' => $this->cliente?->nome,
+                'documento' => $this->cliente?->documento,
             ]),
             'observacoes'       => $this->observacoes,
 

@@ -15,7 +15,7 @@ class ContaReceber extends Model
     protected $table = 'contas_receber';
 
     protected $fillable = [
-        'pedido_id','descricao','numero_documento','data_emissao','data_vencimento',
+        'pedido_id','cliente_id','descricao','numero_documento','data_emissao','data_vencimento',
         'valor_bruto','desconto','juros','multa',
         'valor_liquido','valor_recebido','saldo_aberto',
         'status','forma_recebimento',
@@ -48,6 +48,11 @@ class ContaReceber extends Model
     public function pedido(): BelongsTo
     {
         return $this->belongsTo(Pedido::class)->withDefault();
+    }
+
+    public function cliente(): BelongsTo
+    {
+        return $this->belongsTo(Cliente::class)->withDefault();
     }
 
     public function pagamentos(): HasMany

@@ -6,6 +6,7 @@ use App\Http\Controllers\{AreaEstoqueController,
     AniversarioController,
     CarrinhoController,
     CarrinhoItemController,
+    AvisoController,
     CategoriaController,
     CategoriaFinanceiraController,
     CentroCustoController,
@@ -80,6 +81,11 @@ Route::middleware('auth:sanctum')
 
         Route::get('dashboard/resumo', [DashboardController::class, 'resumo']);
         Route::get('aniversarios', [AniversarioController::class, 'index']);
+        Route::get('avisos/ativos', [AvisoController::class, 'ativos']);
+        Route::apiResource('avisos', AvisoController::class)
+            ->parameters(['avisos' => 'aviso'])
+            ->whereNumber('aviso')
+            ->except(['create', 'edit']);
 
         /* ============================================================
          * CATÁLOGO (CATEGORIAS / ATRIBUTOS / PRODUTOS / VARIAÇÕES / OUTLET)

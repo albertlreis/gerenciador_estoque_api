@@ -101,6 +101,39 @@ class AuthHelper
         return false;
     }
 
+    public static function podeVisualizarAvisos(): bool
+    {
+        $slugs = [
+            'avisos.visualizar',
+            'configuracoes.visualizar',
+            'home.visualizar',
+        ];
+
+        foreach ($slugs as $slug) {
+            if (self::hasPermissao($slug)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public static function podeGerenciarAvisos(): bool
+    {
+        $slugs = [
+            'avisos.gerenciar',
+            'configuracoes.editar',
+        ];
+
+        foreach ($slugs as $slug) {
+            if (self::hasPermissao($slug)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     /**
      * Regra central para listar pedidos de todos os vendedores.
      */

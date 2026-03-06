@@ -3,6 +3,7 @@
 use Spatie\Activitylog\Models\Activity;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Auth;
+use App\Services\AuditLogger;
 
 if (!function_exists('logAuditoria')) {
     /**
@@ -17,6 +18,19 @@ if (!function_exists('logAuditoria')) {
     function logAuditoria(string $logName, string $descricao, array $properties = [], ?Model $model = null): ?Activity
     {
         $usuario = Auth::user();
+
+        app(AuditLogger::class)->log(
+            action: (string) ($properties['acao'] ?? 'custom'),
+            auditable: $model ?? $logName,
+            auditableId: $model?->getKey(),
+            oldValues: null,
+            newValues: [
+                'descricao' => $descricao,
+                'log_name' => $logName,
+                'properties' => $properties,
+            ],
+            userId: $usuario?->id,
+        );
 
         $activity = activity($logName)
             ->causedBy($usuario)

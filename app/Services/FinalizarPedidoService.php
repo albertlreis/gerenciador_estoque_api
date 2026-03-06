@@ -47,6 +47,7 @@ final class FinalizarPedidoService
         private readonly MovimentarEstoqueStrategy $movimentarStrategy,
         private readonly ReservarEstoqueStrategy $reservarStrategy,
         private readonly ContaReceberService $contaReceberService,
+        private readonly AuditLogger $auditLogger,
     ) {}
 
     /**
@@ -110,7 +111,7 @@ final class FinalizarPedidoService
             $this->validator->validarAntesDeMovimentar($carrinho->itens, $depositosResolvidos);
         }
 
-        return DB::transaction(function () use ($request, $carrinho, $idUsuarioFinal, $depositosResolvidos, $registrarMov, $emConsignacao) {
+        return DB::transaction(function () use ($request, $carrinho, $usuarioId, $idUsuarioFinal, $depositosResolvidos, $registrarMov, $emConsignacao) {
             $total        = $carrinho->itens->sum('subtotal');
             $dataPedido   = Carbon::now('America/Belem');
             $prazoPadrao  = (int) config('orders.prazo_padrao_dias_uteis', 60);
@@ -132,6 +133,8 @@ final class FinalizarPedidoService
                 'observacoes'      => $request->observacoes,
                 'prazo_dias_uteis' => $prazoUteis,
             ]);
+
+            $this->auditLogger->logModel('created', $pedido, null, $pedido->fresh()->toArray(), $usuarioId);
 
             $this->pedidoFactory->criarItens($pedido, $carrinho->itens);
             $this->pedidoFactory->registrarStatus($pedido, PedidoStatus::PEDIDO_CRIADO, $idUsuarioFinal);
@@ -169,6 +172,14 @@ final class FinalizarPedidoService
             // Finaliza carrinho
             $carrinho->itens()->delete();
             $carrinho->update(['status' => 'finalizado']);
+
+            $pedidoFresh = $pedido->fresh(['itens.variacao', 'statusAtual']);
+            $this->auditLogger->logModel('finalized', $pedido, null, [
+                'status' => $pedidoFresh?->statusAtual?->status,
+                'modo_consignacao' => $emConsignacao,
+                'registrar_movimentacao' => $registrarMov,
+                'itens' => $pedidoFresh?->itens?->toArray() ?? [],
+            ], $usuarioId);
 
             return response()->json([
                 'message' => 'Pedido criado com sucesso.',

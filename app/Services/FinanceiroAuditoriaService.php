@@ -7,6 +7,8 @@ use Illuminate\Database\Eloquent\Model;
 
 class FinanceiroAuditoriaService
 {
+    public function __construct(private readonly AuditLogger $auditLogger) {}
+
     public function log(string $acao, Model $entidade, ?array $antes = null, ?array $depois = null): void
     {
         $usuarioId = auth()->id();
@@ -30,6 +32,8 @@ class FinanceiroAuditoriaService
             'ip'            => $ip,
             'user_agent'    => $ua ? substr($ua, 0, 2000) : null,
         ]);
+
+        $this->auditLogger->logModel($acao, $entidade, $antes, $depois, $usuarioId);
     }
 
     private function truncateJson(?array $data, int $max = 20000): ?array

@@ -13,6 +13,8 @@ use Illuminate\Validation\ValidationException;
 
 class ProdutoVariacaoService
 {
+    public function __construct(private readonly AuditLogger $auditLogger) {}
+
     /**
      * Retorna uma variação completa, com relações necessárias para exibição detalhada.
      */
@@ -86,6 +88,8 @@ class ProdutoVariacaoService
      */
     public function atualizarIndividual(ProdutoVariacao $variacao, array $data): ProdutoVariacao
     {
+        $antes = $variacao->fresh()->load('atributos')->toArray();
+
         Validator::make($data, [
             'preco' => 'sometimes|numeric|min:0',
             'custo' => 'sometimes|nullable|numeric|min:0',
@@ -127,7 +131,11 @@ class ProdutoVariacaoService
             $this->sincronizarAtributos($variacao, $data['atributos'] ?? []);
         }
 
-        return $variacao->refresh()->load('atributos', 'imagem');
+        $atualizada = $variacao->refresh()->load('atributos', 'imagem');
+
+        $this->auditLogger->logModel('updated', $atualizada, $antes, $atualizada->toArray());
+
+        return $atualizada;
     }
 
     /**

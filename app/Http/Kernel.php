@@ -3,6 +3,7 @@
 namespace App\Http;
 
 use App\Http\Middleware\Authenticate;
+use App\Http\Middleware\CaptureAuditContext;
 use App\Http\Middleware\EncryptCookies;
 use App\Http\Middleware\LogRequests;
 use App\Http\Middleware\PreventRequestsDuringMaintenance;
@@ -64,6 +65,7 @@ class Kernel extends HttpKernel
         'api' => [
             'throttle:api',
             SubstituteBindings::class,
+            CaptureAuditContext::class,
             LogRequests::class,
             SincronizarPermissoes::class,
         ],

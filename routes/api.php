@@ -45,6 +45,7 @@ use App\Http\Controllers\{AreaEstoqueController,
     PedidosRelatorioController,
     PedidoStatusHistoricoController,
     ProdutoController,
+    ProdutoConjuntoController,
     ProdutoImagemController,
     ProdutoVariacaoController,
     ProdutoVariacaoImagemController,
@@ -115,6 +116,13 @@ Route::middleware('auth:sanctum')
             Route::get('motivos', [OutletCatalogoController::class, 'motivos']);
             Route::get('formas-pagamento', [OutletCatalogoController::class, 'formas']);
         });
+
+        Route::apiResource('produto-conjuntos', ProdutoConjuntoController::class)
+            ->parameters(['produto-conjuntos' => 'produtoConjunto'])
+            ->whereNumber('produtoConjunto')
+            ->except(['create', 'edit']);
+        Route::post('produto-conjuntos/{produtoConjunto}/hero', [ProdutoConjuntoController::class, 'uploadHero'])
+            ->whereNumber('produtoConjunto');
 
         // Outlet por variação (plural + padrão)
         Route::prefix('variacoes/{variacao}/outlets')->whereNumber('variacao')->group(function () {

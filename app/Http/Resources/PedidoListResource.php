@@ -76,6 +76,7 @@ class PedidoListResource extends JsonResource
 
             'status'                 => $statusAtualValue,
             'status_label'           => $statusAtualEnum?->label(),
+            'separacao_status'       => $this->separacao_status,
             'proximo_status'         => $proximoStatus?->value,
             'proximo_status_label'   => $proximoStatus?->label(),
             'previsao'               => $previsao?->toDateString(),

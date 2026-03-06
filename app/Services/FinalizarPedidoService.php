@@ -8,7 +8,6 @@ use App\Http\Requests\StorePedidoRequest;
 use App\Models\Carrinho;
 use App\Models\CarrinhoItem;
 use App\Models\PedidoItem;
-use App\Services\Movimentacao\MovimentarEstoqueStrategy;
 use App\Services\Movimentacao\ReservarEstoqueStrategy;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
@@ -22,10 +21,10 @@ use Throwable;
  * Caso de uso de finalização de pedido.
  *
  * Orquestra:
- * - Validação de depósitos/estoque (quando registrar movimentação);
+ * - Validação de depósitos/estoque para reserva;
  * - Criação do Pedido + Itens + Status;
  * - Criação de registros de Consignação (quando aplicável);
- * - Movimentação OU Reserva de estoque (ambos os modos: normal e consignado);
+ * - Reserva automática de estoque;
  * - Definição de data limite;
  * - Finalização do carrinho.
  */
@@ -37,7 +36,6 @@ final class FinalizarPedidoService
      * @param PedidoPrazoService           $prazoService          Cálculo/definição de data limite.
      * @param PedidoFinalizacaoValidator   $validator             Regras de validação antes de movimentar.
      * @param DepositoResolver             $resolver              Resolve depósito por item (mapa > item).
-     * @param MovimentarEstoqueStrategy    $movimentarStrategy    Strategy para registrar saídas (estoque).
      * @param ReservarEstoqueStrategy      $reservarStrategy      Strategy para criar reservas.
      */
     public function __construct(
@@ -46,7 +44,6 @@ final class FinalizarPedidoService
         private readonly PedidoPrazoService $prazoService,
         private readonly PedidoFinalizacaoValidator $validator,
         private readonly DepositoResolver $resolver,
-        private readonly MovimentarEstoqueStrategy $movimentarStrategy,
         private readonly ReservarEstoqueStrategy $reservarStrategy,
         private readonly ContaReceberService $contaReceberService,
         private readonly AuditLogger $auditLogger,
@@ -106,17 +103,12 @@ final class FinalizarPedidoService
         // 2) Mapa RESOLVIDO usando o service (mapa > item.id_deposito > null)
         $depositosResolvidos = $this->resolverDepositosPorItem($carrinho->itens, $depositosMapBruto);
 
-        $registrarMov  = $request->boolean('registrar_movimentacao');
         $emConsignacao = $request->boolean('modo_consignacao');
 
-        // Validação quando for movimentar (aplica a normal e consignado)
-        if ($registrarMov) {
-            $this->validator->validarAntesDeMovimentar($carrinho->itens, $depositosResolvidos);
-        }
-
+        $this->validator->validarAntesDeMovimentar($carrinho->itens, $depositosResolvidos);
         $this->validarPrecosEditados($carrinho->itens);
 
-        return DB::transaction(function () use ($request, $carrinho, $usuarioId, $idUsuarioFinal, $depositosResolvidos, $registrarMov, $emConsignacao) {
+        return DB::transaction(function () use ($request, $carrinho, $usuarioId, $idUsuarioFinal, $depositosResolvidos, $emConsignacao) {
             $total        = $this->calcularTotalItens($carrinho->itens);
             $dataPedido   = Carbon::now('America/Belem');
             $prazoPadrao  = (int) config('orders.prazo_padrao_dias_uteis', 60);
@@ -155,12 +147,8 @@ final class FinalizarPedidoService
                 $this->pedidoFactory->registrarStatus($pedido, PedidoStatus::CONSIGNADO, $idUsuarioFinal);
             }
 
-            // Movimentação OU Reserva (ambos usam o mapa resolvido)
-            if ($registrarMov) {
-                $this->movimentarStrategy->processar($pedido, $carrinho->itens, $depositosResolvidos, $idUsuarioFinal);
-            } else {
-                $this->reservarStrategy->processar($pedido, $carrinho->itens, $depositosResolvidos, $idUsuarioFinal);
-            }
+            $this->reservarStrategy->processar($pedido, $carrinho->itens, $depositosResolvidos, $idUsuarioFinal);
+            $pedido->forceFill(['separacao_status' => 'pendente'])->save();
 
             // Data limite
             $this->prazoService->definirDataLimite($pedido, $prazoUteis);
@@ -182,14 +170,16 @@ final class FinalizarPedidoService
             $pedidoFresh = $pedido->fresh(['itens.variacao', 'statusAtual']);
             $this->auditLogger->logModel('finalized', $pedido, null, [
                 'status' => $pedidoFresh?->statusAtual?->status,
+                'separacao_status' => $pedidoFresh?->separacao_status,
                 'modo_consignacao' => $emConsignacao,
-                'registrar_movimentacao' => $registrarMov,
+                'registrar_movimentacao' => false,
                 'itens' => $pedidoFresh?->itens?->toArray() ?? [],
             ], $usuarioId);
 
             return response()->json([
                 'message' => 'Pedido criado com sucesso.',
                 'pedido'  => $pedido->load('itens.variacao'),
+                'is_consignacao' => $emConsignacao,
             ], 201);
         });
     }

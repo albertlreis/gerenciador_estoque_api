@@ -6,6 +6,8 @@ use App\Models\Carrinho;
 use App\Models\CarrinhoItem;
 use App\Models\Categoria;
 use App\Models\Cliente;
+use App\Models\Deposito;
+use App\Models\Estoque;
 use App\Models\Pedido;
 use App\Models\Produto;
 use App\Models\ProdutoVariacao;
@@ -64,6 +66,14 @@ class FinalizarPedidoSelecionandoVendedorTest extends TestCase
             'custo' => 80,
         ]);
 
+        $deposito = Deposito::create(['nome' => 'Deposito Finalizacao']);
+        Estoque::updateOrCreate([
+            'id_variacao' => $variacao->id,
+            'id_deposito' => $deposito->id,
+        ], [
+            'quantidade' => 5,
+        ]);
+
         $carrinho = Carrinho::create([
             'id_usuario' => $usuarioLogado->id,
             'id_cliente' => $cliente->id,
@@ -74,6 +84,7 @@ class FinalizarPedidoSelecionandoVendedorTest extends TestCase
             'id_carrinho' => $carrinho->id,
             'id_variacao' => $variacao->id,
             'quantidade' => 1,
+            'id_deposito' => $deposito->id,
             'preco_unitario' => 120,
             'subtotal' => 120,
         ]);
@@ -96,9 +107,9 @@ class FinalizarPedidoSelecionandoVendedorTest extends TestCase
 
         $pedido = Pedido::findOrFail((int) $pedidoId);
         $this->assertSame((int) $vendedorSelecionado->id, (int) $pedido->id_usuario);
+        $this->assertSame('pendente', $pedido->separacao_status);
 
         $carrinho->refresh();
         $this->assertSame('finalizado', $carrinho->status);
     }
 }
-

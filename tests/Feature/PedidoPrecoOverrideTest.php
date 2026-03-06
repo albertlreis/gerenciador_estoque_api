@@ -6,6 +6,8 @@ use App\Models\Carrinho;
 use App\Models\CarrinhoItem;
 use App\Models\Categoria;
 use App\Models\Cliente;
+use App\Models\Deposito;
+use App\Models\Estoque;
 use App\Models\Pedido;
 use App\Models\Produto;
 use App\Models\ProdutoVariacao;
@@ -21,7 +23,7 @@ class PedidoPrecoOverrideTest extends TestCase
 
     public function test_bloqueia_override_de_preco_sem_permissao(): void
     {
-        [$usuario, $cliente, $carrinho, $variacao] = $this->criarCenario();
+        [$usuario, $cliente, $carrinho, $variacao, $deposito] = $this->criarCenario();
 
         Sanctum::actingAs($usuario);
         Cache::put('permissoes_usuario_' . $usuario->id, ['carrinhos.finalizar']);
@@ -30,6 +32,7 @@ class PedidoPrecoOverrideTest extends TestCase
             'id_carrinho' => $carrinho->id,
             'id_variacao' => $variacao->id,
             'quantidade' => 1,
+            'id_deposito' => $deposito->id,
             'preco_unitario' => 90,
             'subtotal' => 90,
         ]);
@@ -47,7 +50,7 @@ class PedidoPrecoOverrideTest extends TestCase
 
     public function test_persiste_preco_original_e_preco_editado_quando_usuario_tem_permissao(): void
     {
-        [$usuario, $cliente, $carrinho, $variacao] = $this->criarCenario('pedido-preco-com-permissao@test.com');
+        [$usuario, $cliente, $carrinho, $variacao, $deposito] = $this->criarCenario('pedido-preco-com-permissao@test.com');
 
         Sanctum::actingAs($usuario);
         Cache::put('permissoes_usuario_' . $usuario->id, [
@@ -59,6 +62,7 @@ class PedidoPrecoOverrideTest extends TestCase
             'id_carrinho' => $carrinho->id,
             'id_variacao' => $variacao->id,
             'quantidade' => 2,
+            'id_deposito' => $deposito->id,
             'preco_unitario' => 95,
             'subtotal' => 190,
         ]);
@@ -121,6 +125,14 @@ class PedidoPrecoOverrideTest extends TestCase
             'status' => 'rascunho',
         ]);
 
-        return [$usuario, $cliente, $carrinho, $variacao];
+        $deposito = Deposito::create(['nome' => 'Deposito Preco']);
+        Estoque::updateOrCreate([
+            'id_variacao' => $variacao->id,
+            'id_deposito' => $deposito->id,
+        ], [
+            'quantidade' => 10,
+        ]);
+
+        return [$usuario, $cliente, $carrinho, $variacao, $deposito];
     }
 }

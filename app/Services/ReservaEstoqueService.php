@@ -20,6 +20,25 @@ class ReservaEstoqueService
         return DB::transaction(function () use (
             $variacaoId, $depositoId, $quantidade, $pedidoId, $pedidoItemId, $usuarioId, $motivo
         ) {
+            $reserva = EstoqueReserva::query()
+                ->where('id_variacao', $variacaoId)
+                ->where('id_deposito', $depositoId)
+                ->where('pedido_id', $pedidoId)
+                ->where('pedido_item_id', $pedidoItemId)
+                ->where('status', 'ativa')
+                ->lockForUpdate()
+                ->first();
+
+            if ($reserva) {
+                $reserva->fill([
+                    'id_usuario' => $usuarioId,
+                    'quantidade' => $quantidade,
+                    'motivo' => $motivo ?? $reserva->motivo ?? 'pedido_sem_movimentacao',
+                ])->save();
+
+                return $reserva->fresh();
+            }
+
             return EstoqueReserva::create([
                 'id_variacao' => $variacaoId,
                 'id_deposito' => $depositoId,

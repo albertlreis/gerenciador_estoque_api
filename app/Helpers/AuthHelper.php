@@ -84,6 +84,23 @@ class AuthHelper
         return false;
     }
 
+    public static function podeGerenciarSeparacaoPedido(): bool
+    {
+        $slugs = [
+            'estoque.movimentar',
+            'estoque.movimentacao',
+            'pedidos.editar',
+        ];
+
+        foreach ($slugs as $slug) {
+            if (self::hasPermissao($slug)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     /**
      * Regra central para listar pedidos de todos os vendedores.
      */

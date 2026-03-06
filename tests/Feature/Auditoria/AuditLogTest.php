@@ -6,6 +6,8 @@ use App\Models\Carrinho;
 use App\Models\CarrinhoItem;
 use App\Models\Categoria;
 use App\Models\Cliente;
+use App\Models\Deposito;
+use App\Models\Estoque;
 use App\Models\Pedido;
 use App\Models\Produto;
 use App\Models\ProdutoVariacao;
@@ -113,6 +115,14 @@ class AuditLogTest extends TestCase
             'custo' => 150,
         ]);
 
+        $deposito = Deposito::create(['nome' => 'Deposito Auditoria']);
+        Estoque::updateOrCreate([
+            'id_variacao' => $variacao->id,
+            'id_deposito' => $deposito->id,
+        ], [
+            'quantidade' => 3,
+        ]);
+
         $carrinho = Carrinho::create([
             'id_usuario' => $usuario->id,
             'id_cliente' => $cliente->id,
@@ -123,6 +133,7 @@ class AuditLogTest extends TestCase
             'id_carrinho' => $carrinho->id,
             'id_variacao' => $variacao->id,
             'quantidade' => 1,
+            'id_deposito' => $deposito->id,
             'preco_unitario' => 220,
             'subtotal' => 220,
         ]);
@@ -166,6 +177,7 @@ class AuditLogTest extends TestCase
 
         $this->assertFalse($newValues['modo_consignacao']);
         $this->assertFalse($newValues['registrar_movimentacao']);
+        $this->assertSame('pendente', $newValues['separacao_status']);
         $this->assertCount(1, $newValues['itens']);
         $this->assertStringContainsString('pedidos', (string) $finalizedLog->route);
     }

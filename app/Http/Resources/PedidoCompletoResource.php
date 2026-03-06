@@ -82,6 +82,9 @@ class PedidoCompletoResource extends JsonResource
             'data_limite_entrega_calculada' => $dataLimiteCalculada,
             'dias_uteis_restantes' => $diasUteisRestantes, // null quando não se aplica
             'atrasado_entrega'     => $atrasadoEntrega,
+            'separacao_status'     => $this->separacao_status,
+            'separado_em'          => optional($this->separado_em)->toIso8601String(),
+            'entregue_em'          => optional($this->entregue_em)->toIso8601String(),
 
             'itens'      => PedidoItemResource::collection($this->itens),
             'historico'  => PedidoStatusResource::collection(

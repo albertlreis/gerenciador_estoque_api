@@ -27,6 +27,11 @@ class Pedido extends Model
         'observacoes',
         'prazo_dias_uteis',
         'data_limite_entrega',
+        'separacao_status',
+        'separado_em',
+        'separado_por',
+        'entregue_em',
+        'entregue_por',
         'nfe_xml_path',
         'nfe_xml_nome',
         'nfe_xml_hash',
@@ -38,6 +43,8 @@ class Pedido extends Model
         'data_pedido' => 'datetime',
         'valor_total' => 'decimal:2',
         'data_limite_entrega' => 'date',
+        'separado_em' => 'datetime',
+        'entregue_em' => 'datetime',
         'nfe_xml_uploaded_at' => 'datetime',
     ];
 
@@ -117,5 +124,15 @@ class Pedido extends Model
             'id',
             'pedido_fabrica_id'
         );
+    }
+
+    public function separadoPor(): BelongsTo
+    {
+        return $this->belongsTo(AcessoUsuario::class, 'separado_por');
+    }
+
+    public function entreguePor(): BelongsTo
+    {
+        return $this->belongsTo(AcessoUsuario::class, 'entregue_por');
     }
 }

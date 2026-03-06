@@ -22,6 +22,7 @@ use App\Http\Controllers\{AreaEstoqueController,
     DevolucaoController,
     DepositoController,
     EstoqueController,
+    EstoqueSeparacaoController,
     EstoqueMovimentacaoController,
     EstoqueRelatorioController,
     EstoqueTransferenciaController,
@@ -154,6 +155,11 @@ Route::middleware('auth:sanctum')
         Route::prefix('estoque')->group(function () {
             Route::get('atual', [EstoqueController::class, 'listarEstoqueAtual']);
             Route::get('resumo', [EstoqueController::class, 'resumoEstoque']);
+            Route::get('separacoes', [EstoqueSeparacaoController::class, 'index']);
+            Route::post('separacoes/{pedido}/marcar-separado', [EstoqueSeparacaoController::class, 'marcarSeparado'])
+                ->whereNumber('pedido');
+            Route::post('separacoes/{pedido}/marcar-entregue', [EstoqueSeparacaoController::class, 'marcarEntregue'])
+                ->whereNumber('pedido');
 
             // padroniza rota "por variação"
             Route::get('variacoes/{variacao}', [EstoqueController::class, 'porVariacao'])

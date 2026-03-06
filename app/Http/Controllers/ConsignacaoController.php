@@ -285,6 +285,7 @@ class ConsignacaoController extends Controller
             'cliente',
             'usuario',
             'parceiro',
+            'statusAtual',
             'consignacoes.deposito',
             'consignacoes.produtoVariacao.produto.imagemPrincipal',
             'consignacoes.produtoVariacao.produto',
@@ -293,10 +294,16 @@ class ConsignacaoController extends Controller
         ])->findOrFail($id);
 
         $grupos = $pedido->consignacoes->groupBy(fn($item) => $item->deposito->nome ?? 'Sem depósito');
+        $isDevolucao = $this->isRoteiroDeDevolucao($pedido);
+        $tituloRoteiro = $isDevolucao ? 'Roteiro de devolução' : 'Roteiro de consignação';
+        $filename = $isDevolucao
+            ? "roteiro-de-devolucao-{$id}.pdf"
+            : "roteiro-de-consignacao-{$id}.pdf";
 
         logAuditoria('consignacao_pdf', 'Geração de PDF de roteiro de consignação', [
             'acao' => 'gerar_pdf',
             'pedido_id' => $id,
+            'documento' => $tituloRoteiro,
         ]);
 
         // Mesmo padrão do relatório de estoque para caminho de imagens:
@@ -310,9 +317,27 @@ class ConsignacaoController extends Controller
             'grupos'     => $grupos,
             'baseFsDir'  => $baseFsDir,  // <-- usado na blade para montar caminho absoluto
             'geradoEm'   => now('America/Belem')->format('d/m/Y H:i'),
+            'tituloRoteiro' => $tituloRoteiro,
         ])->setPaper('a4');
 
-        return $pdf->download("roteiro_consignacao_{$id}.pdf");
+        return $pdf->download($filename);
+    }
+
+    private function isRoteiroDeDevolucao(Pedido $pedido): bool
+    {
+        $statusAtual = $pedido->statusAtual?->status?->value ?? $pedido->statusAtual?->status;
+        if ($statusAtual === 'devolucao_consignacao') {
+            return true;
+        }
+
+        if ($pedido->consignacoes->isEmpty()) {
+            return false;
+        }
+
+        return $pedido->consignacoes->every(function ($item) {
+            $status = strtolower((string) ($item->status ?? ''));
+            return in_array($status, ['devolvido', 'comprado', 'finalizado'], true);
+        });
     }
 
 

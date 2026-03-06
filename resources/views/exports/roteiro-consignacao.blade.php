@@ -3,7 +3,7 @@
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
-    <title>Roteiro de Consignação</title>
+    <title>{{ $tituloRoteiro ?? 'Roteiro de consignação' }}</title>
     <style>
         body { font-family: Arial, sans-serif; font-size: 11px; color: #000; }
         .header, .footer { text-align: center; margin-bottom: 10px; }
@@ -35,7 +35,7 @@
 <body>
 <div class="header">
     <img src="{{ public_path('logo.png') }}" width="120" alt="Logo"/>
-    <h3>ROTEIRO DE CONSIGNAÇÃO</h3>
+    <h3>{{ mb_strtoupper($tituloRoteiro ?? 'Roteiro de consignação') }}</h3>
 </div>
 
 @php
@@ -53,8 +53,8 @@
 
 <table width="100%" style="margin-bottom: 10px;">
     <tr>
-        <td class="nowrap"><strong>DATA:</strong> {{ $pedido->data_pedido ? Carbon::parse($pedido->data_pedido)->format('d/m/Y') : '-' }}</td>
         <td class="nowrap"><strong>VENDEDOR(A):</strong> {{ $pedido->usuario->nome ?? '-' }}</td>
+        <td class="wrap"><strong>PARCEIRO:</strong> {{ $pedido->parceiro->nome ?? '—' }}</td>
     </tr>
     <tr>
         <td class="wrap"><strong>CLIENTE:</strong> {{ $pedido->cliente->nome ?? '-' }}</td>
@@ -62,7 +62,7 @@
     </tr>
     <tr>
         <td class="nowrap"><strong>TEL:</strong> {{ $pedido->cliente->telefone ?? '-' }}</td>
-        <td class="wrap"><strong>PARCEIRO:</strong> {{ $pedido->parceiro->nome ?? '—' }}</td>
+        <td class="nowrap"><strong>PEDIDO:</strong> {{ $pedido->numero_externo ?? $pedido->id ?? '-' }}</td>
     </tr>
 </table>
 
@@ -78,7 +78,6 @@
                     <th style="width: 80px;">REF</th>
                     <th>DESCRIÇÃO</th>
                     <th style="width: 100px;">LOCALIZAÇÃO</th>
-                    <th style="width: 75px;">DATA ENVIO</th>
                 </tr>
                 </thead>
                 <tbody>
@@ -88,7 +87,6 @@
                         $produto    = $variacao?->produto;
                         $referencia = $variacao?->referencia ?? '-';
                         $descricao  = $variacao?->nome_completo ?? '-';
-                        $dataEnvio  = $item->data_envio ? Carbon::parse($item->data_envio)->format('d/m/Y') : '-';
 
                         $imgRel = optional($produto?->imagemPrincipal)->url ?? '';
                         $imgAbs = ($imgRel && !empty($baseFsDir ?? null))
@@ -131,7 +129,6 @@
                         <td class="nowrap">{{ $referencia }}</td>
                         <td class="wrap">{{ $descricao }}</td>
                         <td class="wrap">{{ $locTexto }}</td>
-                        <td class="nowrap">{{ $dataEnvio }}</td>
                     </tr>
                 @endforeach
                 </tbody>

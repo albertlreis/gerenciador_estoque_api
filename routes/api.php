@@ -4,6 +4,7 @@ use Illuminate\Support\Facades\Route;
 
 use App\Http\Controllers\{AreaEstoqueController,
     AniversarioController,
+    EventoController,
     CarrinhoController,
     CarrinhoItemController,
     AvisoController,
@@ -85,6 +86,15 @@ Route::middleware('auth:sanctum')
         Route::apiResource('avisos', AvisoController::class)
             ->parameters(['avisos' => 'aviso'])
             ->whereNumber('aviso')
+            ->except(['create', 'edit']);
+        Route::get('eventos/usuarios', [EventoController::class, 'usuarios']);
+        Route::post('eventos/{evento}/participantes', [EventoController::class, 'adicionarParticipante'])
+            ->whereNumber('evento');
+        Route::delete('eventos/{evento}/participantes/{usuario}', [EventoController::class, 'removerParticipante'])
+            ->whereNumber(['evento', 'usuario']);
+        Route::apiResource('eventos', EventoController::class)
+            ->parameters(['eventos' => 'evento'])
+            ->whereNumber('evento')
             ->except(['create', 'edit']);
 
         /* ============================================================

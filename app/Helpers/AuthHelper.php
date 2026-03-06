@@ -2,6 +2,7 @@
 
 namespace App\Helpers;
 
+use App\Models\Evento;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -132,6 +133,38 @@ class AuthHelper
         }
 
         return false;
+    }
+
+    public static function podeVisualizarEventos(): bool
+    {
+        $slugs = [
+            'eventos.visualizar',
+            'home.visualizar',
+        ];
+
+        foreach ($slugs as $slug) {
+            if (self::hasPermissao($slug)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public static function podeGerenciarEventos(?Evento $evento = null): bool
+    {
+        if (self::hasPermissao('eventos.gerenciar') || self::hasPermissao('configuracoes.editar')) {
+            return true;
+        }
+
+        if ($evento === null) {
+            return self::hasPermissao('home.visualizar');
+        }
+
+        return $evento !== null
+            && auth()->check()
+            && (int) $evento->criado_por === (int) auth()->id()
+            && self::hasPermissao('home.visualizar');
     }
 
     /**

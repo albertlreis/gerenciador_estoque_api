@@ -17,6 +17,11 @@ class Cliente extends Model
         'telefone',
         'tipo',
         'whatsapp',
+        'data_nascimento',
+    ];
+
+    protected $casts = [
+        'data_nascimento' => 'date:Y-m-d',
     ];
 
     public function enderecos(): HasMany

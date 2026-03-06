@@ -33,6 +33,7 @@ class ClienteResource extends JsonResource
             'nome'         => $this->nome,
             'email'        => $this->email,
             'telefone'     => $this->telefone,
+            'data_nascimento' => optional($this->data_nascimento)->toDateString(),
             'cpf_cnpj'     => $this->cpf_cnpj,
 
             'cep'          => $this->cep,

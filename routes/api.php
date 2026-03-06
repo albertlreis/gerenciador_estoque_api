@@ -3,6 +3,7 @@
 use Illuminate\Support\Facades\Route;
 
 use App\Http\Controllers\{AreaEstoqueController,
+    AniversarioController,
     CarrinhoController,
     CarrinhoItemController,
     CategoriaController,
@@ -78,6 +79,7 @@ Route::middleware('auth:sanctum')
         Route::put('configuracoes/{chave}', [ConfiguracaoController::class, 'atualizar']);
 
         Route::get('dashboard/resumo', [DashboardController::class, 'resumo']);
+        Route::get('aniversarios', [AniversarioController::class, 'index']);
 
         /* ============================================================
          * CATÁLOGO (CATEGORIAS / ATRIBUTOS / PRODUTOS / VARIAÇÕES / OUTLET)

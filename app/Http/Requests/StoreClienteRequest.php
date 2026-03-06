@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\Support\Dates\BirthdayDateNormalizer;
 use Illuminate\Foundation\Http\FormRequest;
 
 class StoreClienteRequest extends FormRequest
@@ -9,6 +10,13 @@ class StoreClienteRequest extends FormRequest
     public function authorize(): bool
     {
         return true;
+    }
+
+    protected function prepareForValidation(): void
+    {
+        $this->merge([
+            'data_nascimento' => BirthdayDateNormalizer::normalize($this->input('data_nascimento')),
+        ]);
     }
 
     public function rules(): array
@@ -22,6 +30,7 @@ class StoreClienteRequest extends FormRequest
             'email' => ['nullable', 'email', 'max:255'],
             'telefone' => ['nullable', 'string', 'max:30'],
             'whatsapp' => ['nullable', 'string', 'max:30'],
+            'data_nascimento' => ['nullable', 'date_format:Y-m-d'],
 
             'enderecos' => ['nullable', 'array', 'min:1'],
             'enderecos.*.cep' => ['nullable', 'string', 'max:10'],

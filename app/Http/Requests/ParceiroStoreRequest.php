@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\Support\Dates\BirthdayDateNormalizer;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -18,6 +19,7 @@ class ParceiroStoreRequest extends FormRequest
 
         $this->merge([
             'documento' => is_string($documento) ? preg_replace('/\D+/', '', $documento) : $documento,
+            'data_nascimento' => BirthdayDateNormalizer::normalize($this->input('data_nascimento')),
         ]);
     }
 
@@ -29,6 +31,7 @@ class ParceiroStoreRequest extends FormRequest
             'documento' => ['required', 'string', 'max:50', Rule::unique('parceiros', 'documento')],
             'email' => ['nullable', 'email', 'max:100'],
             'telefone' => ['nullable', 'string', 'max:50'],
+            'data_nascimento' => ['nullable', 'date_format:Y-m-d'],
             'consultor_nome' => ['nullable', 'string', 'max:255'],
             'nivel_fidelidade' => ['nullable', 'string', 'max:50'],
             'endereco' => ['nullable', 'string'],

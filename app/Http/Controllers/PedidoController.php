@@ -441,8 +441,8 @@ class PedidoController extends Controller
         // Regra de negócio:
         // - Pedido consignado = status atual consignado (e/ou existe consignação)
         // Eu priorizo statusAtual por ser determinístico e mais barato.
-        $status = $pedidoBase->statusAtual?->status;
-        $isConsignado = ($status === 'consignado');
+        $status = $pedidoBase->statusAtual?->status?->value ?? $pedidoBase->statusAtual?->status;
+        $isConsignado = in_array($status, ['consignado', 'devolucao_consignacao'], true);
 
         // Caso queira ser "à prova de inconsistência" (status divergente),
         // você pode habilitar esse fallback (roda 1 exists()):
@@ -457,6 +457,7 @@ class PedidoController extends Controller
                 'cliente.enderecoPrincipal',
                 'usuario',
                 'parceiro',
+                'statusAtual',
 
                 'consignacoes.deposito',
                 'consignacoes.produtoVariacao.produto.imagemPrincipal',
@@ -468,11 +469,17 @@ class PedidoController extends Controller
             ])->findOrFail($pedidoId);
 
             $grupos = $pedido->consignacoes->groupBy(fn($c) => $c->deposito->nome ?? 'Sem depósito');
+            $isDevolucao = $this->isRoteiroConsignacaoDevolucao($pedido);
+            $tituloRoteiro = $isDevolucao ? 'Roteiro de devolução' : 'Roteiro de consignação';
+            $filename = $isDevolucao
+                ? "roteiro-de-devolucao-{$pedidoId}.pdf"
+                : "roteiro-de-consignacao-{$pedidoId}.pdf";
 
             logAuditoria('pedido_pdf', 'Geração de PDF (roteiro consignação via pedidos)', [
                 'acao' => 'roteiro_pdf',
                 'pedido_id' => $pedidoId,
                 'tipo' => 'consignacao',
+                'documento' => $tituloRoteiro,
             ]);
 
             $pdf = Pdf::loadView('exports.roteiro-consignacao', [
@@ -480,9 +487,10 @@ class PedidoController extends Controller
                 'grupos'     => $grupos,
                 'baseFsDir'  => $baseFsDir,
                 'geradoEm'   => now('America/Belem')->format('d/m/Y H:i'),
+                'tituloRoteiro' => $tituloRoteiro,
             ])->setPaper('a4');
 
-            return $pdf->download("roteiro_consignacao_{$pedidoId}.pdf");
+            return $pdf->download($filename);
         }
 
         // 3) Caso contrário: carrega APENAS itens do pedido e gera o template novo
@@ -571,5 +579,22 @@ class PedidoController extends Controller
             $preview['avisos'] = $temItens ? [] : ['Itens não puderam ser extraídos automaticamente. Insira manualmente.'];
         }
         return $preview;
+    }
+
+    private function isRoteiroConsignacaoDevolucao(Pedido $pedido): bool
+    {
+        $statusAtual = $pedido->statusAtual?->status?->value ?? $pedido->statusAtual?->status;
+        if ($statusAtual === 'devolucao_consignacao') {
+            return true;
+        }
+
+        if ($pedido->consignacoes->isEmpty()) {
+            return false;
+        }
+
+        return $pedido->consignacoes->every(function ($item) {
+            $status = strtolower((string) ($item->status ?? ''));
+            return in_array($status, ['devolvido', 'comprado', 'finalizado'], true);
+        });
     }
 }

@@ -1,6 +1,7 @@
 <?php
 
 use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\Api\V1\DashboardController as DashboardV1Controller;
 
 use App\Http\Controllers\{AreaEstoqueController,
     AniversarioController,
@@ -79,6 +80,13 @@ Route::middleware('auth:sanctum')
         Route::put('configuracoes/{chave}', [ConfiguracaoController::class, 'atualizar']);
 
         Route::get('dashboard/resumo', [DashboardController::class, 'resumo']);
+        Route::prefix('dashboard')->group(function () {
+            Route::get('admin', [DashboardV1Controller::class, 'admin']);
+            Route::get('financeiro', [DashboardV1Controller::class, 'financeiro']);
+            Route::get('estoque', [DashboardV1Controller::class, 'estoque']);
+            Route::get('vendedor', [DashboardV1Controller::class, 'vendedor']);
+            Route::get('series/comercial', [DashboardV1Controller::class, 'seriesComercial']);
+        });
 
         /* ============================================================
          * CATÁLOGO (CATEGORIAS / ATRIBUTOS / PRODUTOS / VARIAÇÕES / OUTLET)

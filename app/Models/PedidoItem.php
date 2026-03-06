@@ -36,6 +36,15 @@ class PedidoItem extends Model
         'data_liberacao_entrega' => 'datetime',
     ];
 
+    protected static function booted(): void
+    {
+        static::creating(function (PedidoItem $item) {
+            if ($item->preco_original === null && $item->preco_unitario !== null) {
+                $item->preco_original = $item->preco_unitario;
+            }
+        });
+    }
+
     public function pedido(): BelongsTo
     {
         return $this->belongsTo(Pedido::class, 'id_pedido');

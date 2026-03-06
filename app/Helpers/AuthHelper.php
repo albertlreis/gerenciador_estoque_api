@@ -64,6 +64,27 @@ class AuthHelper
     }
 
     /**
+     * Regra central para permitir override de preco no checkout.
+     * TODO: substituir por permissao dedicada quando o modulo de acessos expor esse slug.
+     */
+    public static function podeEditarPrecoPedido(): bool
+    {
+        $slugs = [
+            'pedidos.editar',
+            'pedidos.ver_custo',
+            'financeiro.lancamentos.editar',
+        ];
+
+        foreach ($slugs as $slug) {
+            if (self::hasPermissao($slug)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * Regra central para listar pedidos de todos os vendedores.
      */
     public static function podeVisualizarPedidosDeTodos(): bool

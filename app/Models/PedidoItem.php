@@ -19,6 +19,7 @@ class PedidoItem extends Model
         'id_carrinho_item',
         'id_variacao',
         'quantidade',
+        'preco_original',
         'preco_unitario',
         'custo_unitario',
         'subtotal',
@@ -27,6 +28,7 @@ class PedidoItem extends Model
     ];
 
     protected $casts = [
+        'preco_original' => 'decimal:2',
         'preco_unitario' => 'decimal:2',
         'custo_unitario' => 'decimal:2',
         'subtotal' => 'decimal:2',

@@ -6,6 +6,8 @@ use App\Enums\PedidoStatus;
 use App\Helpers\AuthHelper;
 use App\Http\Requests\StorePedidoRequest;
 use App\Models\Carrinho;
+use App\Models\CarrinhoItem;
+use App\Models\PedidoItem;
 use App\Services\Movimentacao\MovimentarEstoqueStrategy;
 use App\Services\Movimentacao\ReservarEstoqueStrategy;
 use Carbon\Carbon;
@@ -74,6 +76,7 @@ final class FinalizarPedidoService
 
         $query = Carrinho::with(['itens.variacao.produto'])
             ->where('id', $request->id_carrinho);
+        $query->with('itens.outlet.formasPagamento');
 
         if (!AuthHelper::podeVisualizarCarrinhosDeTodos()) {
             $query->where('id_usuario', $usuarioId);
@@ -111,8 +114,10 @@ final class FinalizarPedidoService
             $this->validator->validarAntesDeMovimentar($carrinho->itens, $depositosResolvidos);
         }
 
+        $this->validarPrecosEditados($carrinho->itens);
+
         return DB::transaction(function () use ($request, $carrinho, $usuarioId, $idUsuarioFinal, $depositosResolvidos, $registrarMov, $emConsignacao) {
-            $total        = $carrinho->itens->sum('subtotal');
+            $total        = $this->calcularTotalItens($carrinho->itens);
             $dataPedido   = Carbon::now('America/Belem');
             $prazoPadrao  = (int) config('orders.prazo_padrao_dias_uteis', 60);
             $prazoUteis   = (int) ($request->input('prazo_dias_uteis') ?? $prazoPadrao);
@@ -136,8 +141,9 @@ final class FinalizarPedidoService
 
             $this->auditLogger->logModel('created', $pedido, null, $pedido->fresh()->toArray(), $usuarioId);
 
-            $this->pedidoFactory->criarItens($pedido, $carrinho->itens);
+            $itensPedido = $this->pedidoFactory->criarItens($pedido, $carrinho->itens);
             $this->pedidoFactory->registrarStatus($pedido, PedidoStatus::PEDIDO_CRIADO, $idUsuarioFinal);
+            $this->registrarAuditoriaPrecoEditado($itensPedido, $usuarioId);
 
             // Consignação (registros + status)
             if ($emConsignacao) {
@@ -203,5 +209,62 @@ final class FinalizarPedidoService
             $resolvido[$item->id] = $this->resolver->resolverParaItem($item, $depositosMapBruto);
         }
         return $resolvido;
+    }
+
+    private function validarPrecosEditados(Collection $itensCarrinho): void
+    {
+        $erros = [];
+
+        foreach ($itensCarrinho as $index => $item) {
+            $precoOriginal = $this->resolverPrecoOriginal($item);
+            $precoFinal = round((float) $item->preco_unitario, 2);
+
+            if (abs($precoFinal - $precoOriginal) < 0.01) {
+                continue;
+            }
+
+            if (!AuthHelper::podeEditarPrecoPedido()) {
+                $erros["itens.{$index}.preco_unitario"] = 'Sem permissão para editar o preço do item na finalização.';
+            }
+        }
+
+        if ($erros !== []) {
+            throw ValidationException::withMessages($erros);
+        }
+    }
+
+    private function calcularTotalItens(Collection $itensCarrinho): float
+    {
+        return round($itensCarrinho->sum(function (CarrinhoItem $item) {
+            return round((float) $item->preco_unitario, 2) * (int) $item->quantidade;
+        }), 2);
+    }
+
+    private function registrarAuditoriaPrecoEditado(Collection $itensPedido, ?int $usuarioId): void
+    {
+        $itensPedido
+            ->filter(fn (PedidoItem $item) => round((float) $item->preco_original, 2) !== round((float) $item->preco_unitario, 2))
+            ->each(function (PedidoItem $item) use ($usuarioId) {
+                $this->auditLogger->logModel('price_overridden', $item, [
+                    'preco_original' => (float) $item->preco_original,
+                ], [
+                    'preco_original' => (float) $item->preco_original,
+                    'preco_unitario' => (float) $item->preco_unitario,
+                    'quantidade' => (int) $item->quantidade,
+                    'subtotal' => (float) $item->subtotal,
+                ], $usuarioId);
+            });
+    }
+
+    private function resolverPrecoOriginal(CarrinhoItem $item): float
+    {
+        $precoBase = round((float) ($item->variacao?->preco ?? 0), 2);
+        $percentualOutlet = round((float) ($item->outlet?->formasPagamento?->max('percentual_desconto') ?? 0), 2);
+
+        if ($item->outlet_id && $percentualOutlet > 0) {
+            return round($precoBase * (1 - ($percentualOutlet / 100)), 2);
+        }
+
+        return $precoBase;
     }
 }

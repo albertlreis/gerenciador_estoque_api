@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Enums\PedidoStatus;
+use App\Models\CarrinhoItem;
 use App\Models\Pedido;
 use App\Models\PedidoItem;
 use App\Models\PedidoStatusHistorico;
@@ -28,19 +29,23 @@ final class PedidoFactory
      * @param  Collection $itensCarrinho
      * @return void
      */
-    public function criarItens(Pedido $pedido, Collection $itensCarrinho): void
+    public function criarItens(Pedido $pedido, Collection $itensCarrinho): Collection
     {
-        foreach ($itensCarrinho as $item) {
-            PedidoItem::create([
+        return $itensCarrinho->map(function (CarrinhoItem $item) use ($pedido) {
+            $precoOriginal = $this->resolverPrecoOriginal($item);
+            $precoFinal = round((float) $item->preco_unitario, 2);
+
+            return PedidoItem::create([
                 'id_pedido'      => $pedido->id,
                 'id_carrinho_item' => $item->id,
                 'id_variacao'    => $item->id_variacao,
                 'quantidade'     => $item->quantidade,
-                'preco_unitario' => $item->preco_unitario,
-                'subtotal'       => $item->subtotal,
+                'preco_original' => $precoOriginal,
+                'preco_unitario' => $precoFinal,
+                'subtotal'       => round($precoFinal * (int) $item->quantidade, 2),
                 'id_deposito'    => $item->id_deposito ?? null,
             ]);
-        }
+        });
     }
 
     /**
@@ -59,5 +64,17 @@ final class PedidoFactory
             'data_status' => now('America/Belem'),
             'usuario_id'  => $usuarioId,
         ]);
+    }
+
+    private function resolverPrecoOriginal(CarrinhoItem $item): float
+    {
+        $precoBase = round((float) ($item->variacao?->preco ?? 0), 2);
+        $percentualOutlet = round((float) ($item->outlet?->formasPagamento?->max('percentual_desconto') ?? 0), 2);
+
+        if ($item->outlet_id && $percentualOutlet > 0) {
+            return round($precoBase * (1 - ($percentualOutlet / 100)), 2);
+        }
+
+        return $precoBase;
     }
 }

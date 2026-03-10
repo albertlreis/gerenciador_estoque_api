@@ -34,6 +34,7 @@ return new class extends Migration
 
     public function down(): void
     {
+        DB::statement('SET FOREIGN_KEY_CHECKS = 0;');
         $this->dropIndexIfExists('pedidos', 'idx_pedidos_data_pedido');
         $this->dropIndexIfExists('pedidos', 'idx_pedidos_usuario_data');
         $this->dropIndexIfExists('pedido_status_historico', 'idx_psh_pedido_id_id');
@@ -43,6 +44,7 @@ return new class extends Migration
         $this->dropIndexIfExists('estoque_movimentacoes', 'ix_em_data_id');
         $this->dropIndexIfExists('estoque_movimentacoes', 'ix_em_dep_orig_data');
         $this->dropIndexIfExists('estoque_movimentacoes', 'ix_em_dep_dest_data');
+        DB::statement('SET FOREIGN_KEY_CHECKS = 1;');
     }
 
     private function addIndexIfMissing(string $table, array $columns, string $indexName): void

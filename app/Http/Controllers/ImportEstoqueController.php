@@ -22,15 +22,25 @@ class ImportEstoqueController extends Controller
         );
     }
 
+    private function prepararAmbienteImportacao(): void
+    {
+        ignore_user_abort(true);
+
+        @ini_set('memory_limit', '2048M');
+        @ini_set('max_execution_time', '0');
+        @ini_set('max_input_time', '0');
+
+        @set_time_limit(0);
+    }
+
     /** POST /imports/estoque (upload + staging) */
     public function store(ImportEstoqueUploadRequest $request): JsonResponse
     {
         $this->autorizarSomenteDev();
-
-        set_time_limit(600);
-        ini_set('memory_limit', '1G');
+        $this->prepararAmbienteImportacao();
 
         $import = $this->service->criarStaging($request->file('arquivo'), auth()->id());
+
         $linhasComErro = $import->rows()
             ->where('valido', false)
             ->orderBy('linha_planilha')
@@ -64,8 +74,7 @@ class ImportEstoqueController extends Controller
     public function processar(Request $request, int $id): JsonResponse
     {
         $this->autorizarSomenteDev();
-
-        set_time_limit(600);
+        $this->prepararAmbienteImportacao();
 
         $import = EstoqueImport::findOrFail($id);
         $dry = $request->boolean('dry_run', false);

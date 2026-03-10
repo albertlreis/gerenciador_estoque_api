@@ -101,7 +101,7 @@ class DashboardController extends Controller
             'estoque.movimentacao',
             'estoque.movimentar',
             'estoque.historico',
-        ]) || $this->hasAnyPerfil(['estoquista']) || $this->canAccessAdmin();
+        ]) || $this->hasAnyPerfil(['estoque', 'estoquista']) || $this->canAccessAdmin();
     }
 
     private function canAccessVendedor(): bool

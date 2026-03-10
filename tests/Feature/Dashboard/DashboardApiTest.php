@@ -290,6 +290,17 @@ class DashboardApiTest extends TestCase
         $this->assertSame(1, (int) $response->json('kpis.estoque_baixo_qtd.value'));
     }
 
+    public function test_dashboard_estoque_permite_acesso_por_alias_de_perfil(): void
+    {
+        $usuario = $this->criarUsuario('Usuario Perfil Estoque');
+        Sanctum::actingAs($usuario);
+        Cache::put('perfis_usuario_' . $usuario->id, ['Estoque'], now()->addHours(2));
+
+        $response = $this->getJson('/api/v1/dashboard/estoque?period=7d');
+
+        $response->assertOk();
+    }
+
     public function test_dashboard_series_comercial_retorna_series_e_compare(): void
     {
         $vendedor = $this->autenticar(['dashboard.vendedor', 'pedidos.visualizar']);

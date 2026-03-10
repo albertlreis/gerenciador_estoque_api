@@ -1,8 +1,11 @@
 <?php
 
 use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\Api\V1\DashboardController as DashboardV1Controller;
 
 use App\Http\Controllers\{AreaEstoqueController,
+    AniversarioController,
+    AvisoController,
     CarrinhoController,
     CarrinhoItemController,
     CategoriaController,
@@ -42,6 +45,7 @@ use App\Http\Controllers\{AreaEstoqueController,
     PedidosRelatorioController,
     PedidoStatusHistoricoController,
     ProdutoController,
+    ProdutoConjuntoController,
     ProdutoImagemController,
     ProdutoVariacaoController,
     ProdutoVariacaoImagemController,
@@ -77,6 +81,13 @@ Route::middleware('auth:sanctum')
         Route::put('configuracoes/{chave}', [ConfiguracaoController::class, 'atualizar']);
 
         Route::get('dashboard/resumo', [DashboardController::class, 'resumo']);
+        Route::prefix('dashboard')->group(function () {
+            Route::get('admin', [DashboardV1Controller::class, 'admin']);
+            Route::get('financeiro', [DashboardV1Controller::class, 'financeiro']);
+            Route::get('estoque', [DashboardV1Controller::class, 'estoque']);
+            Route::get('vendedor', [DashboardV1Controller::class, 'vendedor']);
+            Route::get('series/comercial', [DashboardV1Controller::class, 'seriesComercial']);
+        });
 
         /* ============================================================
          * CATÁLOGO (CATEGORIAS / ATRIBUTOS / PRODUTOS / VARIAÇÕES / OUTLET)
@@ -90,6 +101,8 @@ Route::middleware('auth:sanctum')
 
         // Variações (busca/listagem global)
         Route::get('variacoes', [ProdutoVariacaoController::class, 'buscar']);
+        Route::patch('produto-variacoes/{variacao}', [ProdutoVariacaoController::class, 'patchGlobal'])
+            ->whereNumber('variacao');
 
         Route::prefix('variacoes/{variacao}')->whereNumber('variacao')->group(function () {
             Route::get('imagem', [ProdutoVariacaoImagemController::class, 'show']);
@@ -103,6 +116,13 @@ Route::middleware('auth:sanctum')
             Route::get('motivos', [OutletCatalogoController::class, 'motivos']);
             Route::get('formas-pagamento', [OutletCatalogoController::class, 'formas']);
         });
+
+        Route::apiResource('produto-conjuntos', ProdutoConjuntoController::class)
+            ->parameters(['produto-conjuntos' => 'produtoConjunto'])
+            ->whereNumber('produtoConjunto')
+            ->except(['create', 'edit']);
+        Route::post('produto-conjuntos/{produtoConjunto}/hero', [ProdutoConjuntoController::class, 'uploadHero'])
+            ->whereNumber('produtoConjunto');
 
         // Outlet por variação (plural + padrão)
         Route::prefix('variacoes/{variacao}/outlets')->whereNumber('variacao')->group(function () {
@@ -246,8 +266,18 @@ Route::middleware('auth:sanctum')
             ->whereNumber('parceiro')
             ->except(['create', 'edit']);
 
+        Route::get('aniversarios', [AniversarioController::class, 'index']);
+
         Route::patch('parceiros/{parceiro}/restaurar', [ParceiroController::class, 'restore'])
             ->whereNumber('parceiro');
+
+        Route::apiResource('avisos', AvisoController::class)
+            ->parameters(['avisos' => 'aviso'])
+            ->whereNumber('aviso')
+            ->except(['create', 'edit']);
+
+        Route::post('avisos/{aviso}/ler', [AvisoController::class, 'marcarComoLido'])
+            ->whereNumber('aviso');
 
         /* ============================================================
          * PEDIDOS / ITENS / STATUS / ESTOQUE DO PEDIDO

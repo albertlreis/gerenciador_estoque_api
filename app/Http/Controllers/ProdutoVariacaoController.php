@@ -8,17 +8,23 @@ use App\Http\Resources\ProdutoSimplificadoResource;
 use App\Http\Resources\ProdutoVariacaoResource;
 use App\Models\Produto;
 use App\Models\ProdutoVariacao;
+use App\Services\AuditoriaEventoService;
 use App\Services\ProdutoVariacaoService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Validator;
 use Throwable;
 
 class ProdutoVariacaoController extends Controller
 {
     protected ProdutoVariacaoService $service;
 
-    public function __construct(ProdutoVariacaoService $service)
+    public function __construct(
+        ProdutoVariacaoService $service,
+        private readonly AuditoriaEventoService $auditoria
+    )
     {
         $this->service = $service;
     }
@@ -179,6 +185,125 @@ class ProdutoVariacaoController extends Controller
         );
     }
 
+    public function patchGlobal(Request $request, ProdutoVariacao $variacao): JsonResponse
+    {
+        if ($resposta = $this->autorizarVariacao('editar')) {
+            return $resposta;
+        }
+
+        $payload = $request->all();
+        if (!is_array($payload)) {
+            return response()->json(['message' => 'Formato inválido.'], 400);
+        }
+
+        $camposPermitidos = ['referencia', 'nome', 'preco', 'custo', 'codigo_barras'];
+        $camposRecebidos = array_keys(array_diff_key($payload, ['audit' => true]));
+        $naoPermitidos = array_values(array_diff($camposRecebidos, $camposPermitidos));
+        if (!empty($naoPermitidos)) {
+            return response()->json([
+                'message' => 'Campos não permitidos no PATCH.',
+                'fields' => $naoPermitidos,
+            ], 422);
+        }
+
+        $validator = Validator::make($payload, [
+            'referencia' => 'sometimes|string|max:100|unique:produto_variacoes,referencia,' . $variacao->id,
+            'nome' => 'sometimes|nullable|string|max:255',
+            'preco' => 'sometimes|numeric|min:0',
+            'custo' => 'sometimes|nullable|numeric|min:0',
+            'codigo_barras' => 'sometimes|nullable|string|max:100',
+            'audit' => 'sometimes|array',
+            'audit.label' => 'sometimes|nullable|string|max:255',
+            'audit.motivo' => 'sometimes|nullable|string|max:500',
+            'audit.origin' => 'sometimes|nullable|in:checkout,cadastro,importacao',
+            'audit.metadata' => 'sometimes|array',
+            'audit.metadata.carrinho_id' => 'sometimes|nullable|integer|min:1',
+        ]);
+
+        $validator->after(function ($validator) use ($payload): void {
+            if (array_key_exists('preco', $payload)) {
+                $motivo = trim((string) data_get($payload, 'audit.motivo', ''));
+                if ($motivo === '') {
+                    $validator->errors()->add('audit.motivo', 'O motivo é obrigatório para alteração de preço.');
+                }
+            }
+        });
+
+        if ($validator->fails()) {
+            return response()->json([
+                'message' => 'Dados inválidos.',
+                'errors' => $validator->errors(),
+            ], 422);
+        }
+
+        $auditInput = (array) ($payload['audit'] ?? []);
+        $updates = collect($camposPermitidos)
+            ->filter(fn (string $campo) => array_key_exists($campo, $payload))
+            ->mapWithKeys(fn (string $campo) => [$campo => $payload[$campo]])
+            ->all();
+
+        if (empty($updates)) {
+            return response()->json($variacao->fresh());
+        }
+
+        $before = $variacao->only($camposPermitidos);
+        $variacao->fill($updates);
+
+        if (!$variacao->isDirty()) {
+            return response()->json($variacao->fresh());
+        }
+
+        DB::transaction(function () use ($variacao, $camposPermitidos, $before, $auditInput): void {
+            $variacao->save();
+
+            if ($variacao->wasChanged('preco')) {
+                $novoPreco = (float) $variacao->preco;
+
+                DB::table('carrinho_itens as ci')
+                    ->join('carrinhos as c', 'c.id', '=', 'ci.id_carrinho')
+                    ->where('ci.id_variacao', $variacao->id)
+                    ->whereNull('ci.outlet_id')
+                    ->where('c.status', 'rascunho')
+                    ->update([
+                        'ci.preco_unitario' => $novoPreco,
+                        'ci.subtotal' => DB::raw("ci.quantidade * {$novoPreco}"),
+                        'ci.updated_at' => now(),
+                    ]);
+            }
+
+            $mudancas = [];
+            foreach ($camposPermitidos as $campo) {
+                if (!$variacao->wasChanged($campo)) {
+                    continue;
+                }
+
+                $mudancas[] = [
+                    'campo' => $campo,
+                    'old' => $before[$campo] ?? null,
+                    'new' => $variacao->{$campo},
+                ];
+            }
+
+            $metadataExtra = (array) ($auditInput['metadata'] ?? []);
+            $metadata = array_filter([
+                'motivo' => $auditInput['motivo'] ?? null,
+                'origin' => $auditInput['origin'] ?? null,
+                'carrinho_id' => $metadataExtra['carrinho_id'] ?? null,
+            ], fn ($v) => $v !== null && $v !== '');
+
+            $this->auditoria->registrar(
+                module: 'produto_variacoes',
+                action: 'update',
+                label: (string) ($auditInput['label'] ?? 'Atualização de variação'),
+                auditable: $variacao,
+                mudancas: $mudancas,
+                metadata: $metadata
+            );
+        });
+
+        return response()->json($variacao->fresh());
+    }
+
 
     private function autorizarVariacao(string $acao): ?JsonResponse
     {
@@ -196,7 +321,7 @@ class ProdutoVariacaoController extends Controller
             }
         }
 
-        return response()->json(['message' => 'Sem permiss??o para esta a????o.'], 403);
+        return response()->json(['message' => 'Sem permissão para esta ação.'], 403);
     }
 
 }

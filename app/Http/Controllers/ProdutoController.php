@@ -12,6 +12,7 @@ use App\Http\Resources\ProdutoListaResource;
 use App\Http\Resources\ProdutoSimplificadoResource;
 use App\Services\LogService;
 use App\Services\OutletCatalogoPricingService;
+use App\Services\OutletCatalogoPdfService;
 use App\Services\ProdutoSugestoesOutletService;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Support\Facades\Cache;
@@ -82,7 +83,6 @@ class ProdutoController extends Controller
         $ids = $request->validated()['ids'] ?? [];
         $format = strtolower((string) $request->input('format', 'csv'));
         $format = in_array($format, ['csv', 'pdf'], true) ? $format : 'csv';
-        $pricingService = app(OutletCatalogoPricingService::class);
 
         $produtos = Produto::query()
             ->whereIn('id', $ids)
@@ -91,6 +91,7 @@ class ProdutoController extends Controller
                 'categoria',
                 'imagemPrincipal',
                 'variacoes.atributos',
+                'variacoes.imagem',
                 'variacoes.outlets.formasPagamento.formaPagamento',
             ])
             ->get();
@@ -101,6 +102,47 @@ class ProdutoController extends Controller
             ], 422);
         }
 
+        if ($format === 'pdf') {
+            $catalogoPdf = app(OutletCatalogoPdfService::class)->build($produtos);
+            $cards = collect($catalogoPdf['conjuntos'])
+                ->concat($catalogoPdf['itens_avulsos'])
+                ->values();
+
+            if (app()->environment('local')) {
+                Log::info('Exportacao de catalogo outlet iniciada', [
+                    'total_cards' => $cards->count(),
+                    'total_conjuntos' => count($catalogoPdf['conjuntos']),
+                    'total_avulsos' => count($catalogoPdf['itens_avulsos']),
+                    'ids' => array_values($ids),
+                ]);
+            }
+
+            Pdf::setOptions(['isRemoteEnabled' => true]);
+            $viewData = [
+                'cards' => $cards,
+                'conjuntos' => $catalogoPdf['conjuntos'],
+                'itensAvulsos' => $catalogoPdf['itens_avulsos'],
+            ];
+
+            if (app()->environment('local')) {
+                $html = view('exports.outlet-catalogo', $viewData)->render();
+                Storage::disk('local')->put('debug/outlet.html', $html);
+                $pdf = Pdf::loadHTML($html)->setPaper('a4', 'landscape');
+            } else {
+                $pdf = Pdf::loadView('exports.outlet-catalogo', $viewData)->setPaper('a4', 'landscape');
+            }
+
+            $dateRef = now('America/Belem')->format('Y-m-d');
+            if (app()->environment('local')) {
+                Log::info('Exportacao de catalogo outlet em PDF finalizada', [
+                    'total_cards' => $cards->count(),
+                    'tempo_ms' => (int) ((microtime(true) - $start) * 1000),
+                ]);
+            }
+            return $pdf->download("catalogo_outlet_{$dateRef}.pdf");
+        }
+
+        $pricingService = app(OutletCatalogoPricingService::class);
         $baseFsDir = public_path('storage' . DIRECTORY_SEPARATOR . ProdutoImagem::FOLDER);
         $itensExportacao = $produtos
             ->map(fn ($produto) => $this->mapearProdutoParaExportacaoOutlet($produto, $pricingService, $baseFsDir))
@@ -119,30 +161,6 @@ class ProdutoController extends Controller
                     'pagamento_label' => $item['pagamento_label'],
                 ])->all(),
             ]);
-        }
-
-        if ($format === 'pdf') {
-            Pdf::setOptions(['isRemoteEnabled' => true]);
-            $viewData = [
-                'itens' => $itensExportacao,
-            ];
-
-            if (app()->environment('local')) {
-                $html = view('exports.outlet-catalogo', $viewData)->render();
-                Storage::disk('local')->put('debug/outlet.html', $html);
-                $pdf = Pdf::loadHTML($html)->setPaper('a4', 'landscape');
-            } else {
-                $pdf = Pdf::loadView('exports.outlet-catalogo', $viewData)->setPaper('a4', 'landscape');
-            }
-
-            $dateRef = now('America/Belem')->format('Y-m-d');
-            if (app()->environment('local')) {
-                Log::info('Exportacao de catalogo outlet em PDF finalizada', [
-                    'total_produtos' => $itensExportacao->count(),
-                    'tempo_ms' => (int) ((microtime(true) - $start) * 1000),
-                ]);
-            }
-            return $pdf->download("catalogo_outlet_{$dateRef}.pdf");
         }
 
         $filename = 'catalogo_outlet.csv';

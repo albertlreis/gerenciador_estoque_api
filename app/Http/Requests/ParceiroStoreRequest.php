@@ -29,6 +29,7 @@ class ParceiroStoreRequest extends FormRequest
             'documento' => ['required', 'string', 'max:50', Rule::unique('parceiros', 'documento')],
             'email' => ['nullable', 'email', 'max:100'],
             'telefone' => ['nullable', 'string', 'max:50'],
+            'data_nascimento' => ['nullable', 'date'],
             'consultor_nome' => ['nullable', 'string', 'max:255'],
             'nivel_fidelidade' => ['nullable', 'string', 'max:50'],
             'endereco' => ['nullable', 'string'],

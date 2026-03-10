@@ -161,6 +161,11 @@ class ProdutoVariacao extends Model
             ->latest();
     }
 
+    public function conjuntoItens(): HasMany
+    {
+        return $this->hasMany(ProdutoConjuntoItem::class, 'produto_variacao_id');
+    }
+
     /**
      * Total de quantidade em outlets.
      *

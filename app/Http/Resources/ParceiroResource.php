@@ -18,6 +18,7 @@ class ParceiroResource extends JsonResource
             'nome' => $this->nome,
             'tipo' => $this->tipo,
             'documento' => $this->documento,
+            'data_nascimento' => optional($this->data_nascimento)->format('Y-m-d'),
             'email' => $this->resolveContatoRoot($contatos, 'email') ?? $this->email,
             'telefone' => $this->resolveContatoRoot($contatos, 'telefone') ?? $this->telefone,
             'consultor_nome' => $this->consultor_nome,

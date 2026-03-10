@@ -34,7 +34,14 @@ return new class extends Migration
 
     public function down(): void
     {
-        DB::statement('SET FOREIGN_KEY_CHECKS = 0;');
+        if (Schema::hasTable('pedidos') && $this->hasIndexByName('pedidos', 'idx_pedidos_usuario_data')) {
+            // Se não houver outro índice começando por id_usuario,
+            // cria um índice simples para não quebrar a FK ao remover o composto.
+            if (!$this->hasIndexByColumnPrefix('pedidos', ['id_usuario'], ['idx_pedidos_usuario_data'])) {
+                $this->addIndexByNameIfMissing('pedidos', ['id_usuario'], 'idx_pedidos_id_usuario_fk_support');
+            }
+        }
+
         $this->dropIndexIfExists('pedidos', 'idx_pedidos_data_pedido');
         $this->dropIndexIfExists('pedidos', 'idx_pedidos_usuario_data');
         $this->dropIndexIfExists('pedido_status_historico', 'idx_psh_pedido_id_id');
@@ -44,12 +51,22 @@ return new class extends Migration
         $this->dropIndexIfExists('estoque_movimentacoes', 'ix_em_data_id');
         $this->dropIndexIfExists('estoque_movimentacoes', 'ix_em_dep_orig_data');
         $this->dropIndexIfExists('estoque_movimentacoes', 'ix_em_dep_dest_data');
-        DB::statement('SET FOREIGN_KEY_CHECKS = 1;');
     }
 
     private function addIndexIfMissing(string $table, array $columns, string $indexName): void
     {
         if (!Schema::hasTable($table) || $this->hasIndexByColumnPrefix($table, $columns)) {
+            return;
+        }
+
+        Schema::table($table, function (Blueprint $blueprint) use ($columns, $indexName) {
+            $blueprint->index($columns, $indexName);
+        });
+    }
+
+    private function addIndexByNameIfMissing(string $table, array $columns, string $indexName): void
+    {
+        if (!Schema::hasTable($table) || $this->hasIndexByName($table, $indexName)) {
             return;
         }
 
@@ -78,9 +95,10 @@ return new class extends Migration
             ->exists();
     }
 
-    private function hasIndexByColumnPrefix(string $table, array $columns): bool
+    private function hasIndexByColumnPrefix(string $table, array $columns, array $ignoreIndexNames = []): bool
     {
         $target = array_values(array_map('strtolower', $columns));
+        $ignore = array_map('strtolower', $ignoreIndexNames);
 
         $rows = DB::table('information_schema.statistics')
             ->select(['INDEX_NAME', 'SEQ_IN_INDEX', 'COLUMN_NAME'])
@@ -94,7 +112,9 @@ return new class extends Migration
             return false;
         }
 
-        $grouped = $rows->groupBy('INDEX_NAME');
+        $grouped = $rows
+            ->reject(fn ($row) => in_array(strtolower((string) $row->INDEX_NAME), $ignore, true))
+            ->groupBy('INDEX_NAME');
 
         foreach ($grouped as $indexRows) {
             $indexColumns = $indexRows

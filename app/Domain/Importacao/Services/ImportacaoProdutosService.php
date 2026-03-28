@@ -8,6 +8,7 @@ use App\Domain\Importacao\DTO\AtributoDTO;
 use App\Models\Produto;
 use App\Models\ProdutoVariacao;
 use App\Models\ProdutoVariacaoAtributo;
+use App\Models\ProdutoVariacaoCodigoHistorico;
 use App\Services\EstoqueMovimentacaoService;
 use App\Support\RefHelpers;
 use Illuminate\Http\UploadedFile;
@@ -77,7 +78,15 @@ final class ImportacaoProdutosService
 
             $variacao = $ref
                 ? ProdutoVariacao::query()
-                    ->where('referencia', $ref)
+                    ->where(function ($query) use ($ref) {
+                        $query->where('sku_interno', $ref)
+                            ->orWhere('referencia', $ref)
+                            ->orWhereHas('codigosHistoricos', function ($codigoQuery) use ($ref) {
+                                $codigoQuery->where('codigo', $ref)
+                                    ->orWhere('codigo_origem', $ref)
+                                    ->orWhere('codigo_modelo', $ref);
+                            });
+                    })
                     ->with(['produto', 'atributos'])
                     ->first()
                 : null;
@@ -165,11 +174,13 @@ final class ImportacaoProdutosService
                         ]);
                     }
 
+                    $this->registrarCodigoHistoricoXml($variacao, $dto->referencia);
+
                     $variacaoId = $variacao->id;
                 } else {
                     $variacao = ProdutoVariacao::with('produto')->findOrFail($variacaoId);
 
-                    if ($dto->referencia && $dto->referencia !== $variacao->referencia) {
+                    if ($dto->referencia && blank($variacao->referencia)) {
                         $variacao->referencia = $dto->referencia;
                     }
 
@@ -186,6 +197,7 @@ final class ImportacaoProdutosService
                     }
 
                     $variacao->save();
+                    $this->registrarCodigoHistoricoXml($variacao, $dto->referencia);
 
                     if (!empty($dto->atributos)) {
                         $variacao->atributos()->delete();
@@ -210,6 +222,34 @@ final class ImportacaoProdutosService
                 ], Auth::id());
             }
         });
+    }
+
+    private function registrarCodigoHistoricoXml(ProdutoVariacao $variacao, ?string $codigo): void
+    {
+        $codigo = trim((string) $codigo);
+        if ($codigo === '') {
+            return;
+        }
+
+        ProdutoVariacaoCodigoHistorico::updateOrCreate(
+            [
+                'produto_variacao_id' => $variacao->id,
+                'hash_conteudo' => sha1(json_encode([
+                    'codigo' => $codigo,
+                    'codigo_origem' => $codigo,
+                    'fonte' => 'xml_nfe',
+                ], JSON_UNESCAPED_UNICODE)),
+            ],
+            [
+                'codigo' => $codigo,
+                'codigo_origem' => $codigo,
+                'codigo_modelo' => null,
+                'fonte' => 'xml_nfe',
+                'aba_origem' => null,
+                'observacoes' => 'Importacao XML NF-e',
+                'principal' => false,
+            ]
+        );
     }
 
     /** Faz o parsing da descrição (nome + atributos) */

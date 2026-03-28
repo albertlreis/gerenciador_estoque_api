@@ -15,6 +15,7 @@ class ProdutoListaResource extends JsonResource
         return [
             'id' => $this->id,
             'nome' => $this->nome,
+            'codigo_produto' => $this->codigo_produto,
             'id_categoria' => $this->id_categoria,
             'id_fornecedor' => $this->id_fornecedor,
             'altura' => $this->altura,
@@ -30,6 +31,8 @@ class ProdutoListaResource extends JsonResource
                         'id' => $v->id,
                         'produto_id' => $v->produto_id,
                         'referencia' => $v->referencia,
+                        'sku_interno' => $v->sku_interno,
+                        'chave_variacao' => $v->chave_variacao,
                         'preco' => (float) ($v->preco ?? 0),
                         'estoque_total' => (int) ($v->estoque_total ?? 0),
                         'outlet_restante_total' => (int) ($v->outlet_restante_total ?? 0),

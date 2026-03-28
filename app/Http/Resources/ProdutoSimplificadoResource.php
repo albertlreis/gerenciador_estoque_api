@@ -11,12 +11,15 @@ class ProdutoSimplificadoResource extends JsonResource
         return [
             'id'          => $this->id,
             'nome'        => $this->nome,
+            'codigo_produto' => $this->codigo_produto,
             'categoria'   => $this->categoria?->nome,
             'imagem'      => $this->imagemPrincipal?->url_completa,
             'ativo'       => (bool) $this->ativo,
             'variacoes'   => $this->variacoes->map(fn($v) => [
                 'id'            => $v->id,
                 'referencia'    => $v->referencia,
+                'sku_interno'   => $v->sku_interno,
+                'chave_variacao' => $v->chave_variacao,
                 'codigo_barras' => $v->codigo_barras,
                 'imagem_url'    => $v->imagem_url,
                 'atributos'     => $v->relationLoaded('atributos')

@@ -22,7 +22,7 @@ use Illuminate\Support\Facades\DB;
  *     estoque_total: int,
  *     valor_total: float,
  *     estoque_por_deposito: [ {id, nome, quantidade, valor}, ... ],
- *     variacoes: [ {variacao_id, referencia, valor_item, estoque_total, valor_total}, ... ],
+ *     variacoes: [ {variacao_id, sku_interno, referencia, identificador_variacao, valor_item, estoque_total, valor_total}, ... ],
  *     categoria?: string,
  *     imagem_principal?: string|null,
  *     produto: string,
@@ -106,10 +106,12 @@ class EstoqueRelatorioService
             })
             ->select([
                 'pv.id as variacao_id',
+                'pv.sku_interno',
                 'pv.referencia',
                 'pv.preco as valor_item',
                 'p.id as produto_id',
                 'p.nome as produto',
+                'p.codigo_produto',
                 'c.nome as categoria_nome',
                 'pi.url as imagem_principal',
             ]);
@@ -144,14 +146,14 @@ class EstoqueRelatorioService
             )
             ->select([
                 'elig.produto_id','elig.produto','elig.categoria_nome',
-                'elig.variacao_id','elig.referencia','elig.valor_item','elig.imagem_principal',
+                'elig.codigo_produto','elig.variacao_id','elig.sku_interno','elig.referencia','elig.valor_item','elig.imagem_principal',
                 'e.id_deposito','d.nome as deposito_nome',
                 DB::raw('SUM(e.quantidade) as estoque_total_fisico'),
                 DB::raw('SUM(e.quantidade * elig.valor_item) as valor_total_fisico'),
             ])
             ->groupBy(
                 'elig.produto_id','elig.produto','elig.categoria_nome',
-                'elig.variacao_id','elig.referencia','elig.valor_item','elig.imagem_principal',
+                'elig.codigo_produto','elig.variacao_id','elig.sku_interno','elig.referencia','elig.valor_item','elig.imagem_principal',
                 'e.id_deposito','d.nome'
             );
     }
@@ -268,7 +270,9 @@ class EstoqueRelatorioService
                 $f = $g->first();
                 return [
                     'variacao_id'   => (int) $f->variacao_id,
+                    'sku_interno'   => $f->sku_interno ? (string) $f->sku_interno : null,
                     'referencia'    => (string) $f->referencia,
+                    'identificador_variacao' => $f->sku_interno ?: $f->referencia,
                     'valor_item'    => (float) $f->valor_item,
                     'estoque_total' => (int) $g->sum('estoque_total_fisico'),
                     'valor_total'   => (float) $g->sum('valor_total_fisico'),
@@ -294,6 +298,7 @@ class EstoqueRelatorioService
                 'imagem_principal'     => request()->query('formato') === 'excel' ? null : ($first->imagem_principal ?? null),
                 'produto'              => (string) ($first->produto ?? ''),
                 'produto_id'           => (int) ($first->produto_id ?? 0),
+                'codigo_produto'       => $first->codigo_produto ?? null,
             ];
         })->toArray();
     }
@@ -322,14 +327,16 @@ class EstoqueRelatorioService
         return $porDeposito;
     }
 
-    /** @return array<int,array{variacao_id:int,referencia:string,valor_item:float,estoque_total:int,valor_total:float}> */
+    /** @return array<int,array{variacao_id:int,sku_interno:?string,referencia:string,identificador_variacao:?string,valor_item:float,estoque_total:int,valor_total:float}> */
     protected function buildVariacaoTotals(Collection $group): array
     {
         return $group->groupBy('variacao_id')->map(function (Collection $g) {
             $f = $g->first();
             return [
                 'variacao_id'   => (int) $f->variacao_id,
+                'sku_interno'   => $f->sku_interno ? (string) $f->sku_interno : null,
                 'referencia'    => (string) $f->referencia,
+                'identificador_variacao' => $f->sku_interno ?: $f->referencia,
                 'valor_item'    => (float) $f->valor_item,
                 'estoque_total' => (int) $g->sum('estoque_total_fisico'),
                 'valor_total'   => (float) $g->sum('valor_total_fisico'),

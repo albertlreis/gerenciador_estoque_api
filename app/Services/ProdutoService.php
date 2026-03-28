@@ -30,6 +30,7 @@ class ProdutoService
             'descricao' => $data['descricao'] ?? null,
             'id_categoria' => $data['id_categoria'],
             'id_fornecedor' => $data['id_fornecedor'] ?? null,
+            'codigo_produto' => $data['codigo_produto'] ?? null,
             'altura' => $data['altura'] ?? null,
             'largura' => $data['largura'] ?? null,
             'profundidade' => $data['profundidade'] ?? null,
@@ -48,6 +49,7 @@ class ProdutoService
             'descricao' => $data['descricao'] ?? null,
             'id_categoria' => $data['id_categoria'],
             'id_fornecedor' => $data['id_fornecedor'] ?? null,
+            'codigo_produto' => $data['codigo_produto'] ?? null,
             'altura' => $data['altura'] ?? null,
             'largura' => $data['largura'] ?? null,
             'profundidade' => $data['profundidade'] ?? null,
@@ -186,6 +188,7 @@ class ProdutoService
                 // ✅ evita N+1 e mantém coerência do catálogo
                 $q->with([
                     'atributos',
+                    'codigosHistoricos',
                     'imagem',
                     'outlets', // se você precisa do outlet no catálogo
                     'outlets.motivo',
@@ -228,12 +231,20 @@ class ProdutoService
                         $q->where(function ($qq) use ($like) {
                             $qq->whereRaw("LOWER(nome) COLLATE utf8mb4_0900_ai_ci LIKE ? ESCAPE '\\\\'", [$like])
                                 ->orWhereRaw("LOWER(descricao) COLLATE utf8mb4_0900_ai_ci LIKE ? ESCAPE '\\\\'", [$like])
+                                ->orWhereRaw("LOWER(codigo_produto) COLLATE utf8mb4_0900_ai_ci LIKE ? ESCAPE '\\\\'", [$like])
                                 ->orWhereHas('categoria', fn ($qc) =>
                                 $qc->whereRaw("LOWER(nome) COLLATE utf8mb4_0900_ai_ci LIKE ? ESCAPE '\\\\'", [$like])
                                 )
                                 ->orWhereHas('variacoes', function ($qv) use ($like) {
                                     $qv->whereRaw("LOWER(referencia) COLLATE utf8mb4_0900_ai_ci LIKE ? ESCAPE '\\\\'", [$like])
+                                        ->orWhereRaw("LOWER(sku_interno) COLLATE utf8mb4_0900_ai_ci LIKE ? ESCAPE '\\\\'", [$like])
+                                        ->orWhereRaw("LOWER(chave_variacao) COLLATE utf8mb4_0900_ai_ci LIKE ? ESCAPE '\\\\'", [$like])
                                         ->orWhereRaw("LOWER(codigo_barras) COLLATE utf8mb4_0900_ai_ci LIKE ? ESCAPE '\\\\'", [$like])
+                                        ->orWhereHas('codigosHistoricos', function ($qc) use ($like) {
+                                            $qc->whereRaw("LOWER(codigo) COLLATE utf8mb4_0900_ai_ci LIKE ? ESCAPE '\\\\'", [$like])
+                                                ->orWhereRaw("LOWER(codigo_origem) COLLATE utf8mb4_0900_ai_ci LIKE ? ESCAPE '\\\\'", [$like])
+                                                ->orWhereRaw("LOWER(codigo_modelo) COLLATE utf8mb4_0900_ai_ci LIKE ? ESCAPE '\\\\'", [$like]);
+                                        })
                                         ->orWhereHas('atributos', function ($qa) use ($like) {
                                             $qa->whereRaw("LOWER(atributo) COLLATE utf8mb4_0900_ai_ci LIKE ? ESCAPE '\\\\'", [$like])
                                                 ->orWhereRaw("LOWER(valor) COLLATE utf8mb4_0900_ai_ci LIKE ? ESCAPE '\\\\'", [$like]);
@@ -250,7 +261,9 @@ class ProdutoService
             if ($ref !== '') {
                 $likeRef = '%' . $this->escapeLike(mb_strtolower($ref)) . '%';
                 $query->whereHas('variacoes', function ($q) use ($likeRef) {
-                    $q->whereRaw("LOWER(referencia) COLLATE utf8mb4_0900_ai_ci LIKE ? ESCAPE '\\\\'", [$likeRef]);
+                    $q->whereRaw("LOWER(referencia) COLLATE utf8mb4_0900_ai_ci LIKE ? ESCAPE '\\\\'", [$likeRef])
+                        ->orWhereRaw("LOWER(sku_interno) COLLATE utf8mb4_0900_ai_ci LIKE ? ESCAPE '\\\\'", [$likeRef])
+                        ->orWhereRaw("LOWER(chave_variacao) COLLATE utf8mb4_0900_ai_ci LIKE ? ESCAPE '\\\\'", [$likeRef]);
                 });
             }
         }
@@ -305,6 +318,7 @@ class ProdutoService
             'variacoes' => function ($q) use ($depositoId) {
                 $q->with([
                     'atributos',
+                    'codigosHistoricos',
                     'imagem',
                     'outlets',
                     'outlets.motivo',

@@ -104,7 +104,9 @@ class EstoqueService
                 $direction
             ),
 
-            'referencia' => $query->orderBy('produto_variacoes.referencia', $direction),
+            'sku_interno', 'referencia' => $query->orderByRaw(
+                'COALESCE(NULLIF(produto_variacoes.sku_interno, \'\'), NULLIF(produto_variacoes.referencia, \'\'), NULLIF(produto_variacoes.chave_variacao, \'\')) ' . $direction
+            ),
 
             'quantidade_estoque' => $query->orderBy('quantidade_estoque', $direction),
             'custo_unitario' => $query->orderBy('produto_variacoes.custo', $direction),

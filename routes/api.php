@@ -33,6 +33,7 @@ use App\Http\Controllers\{AreaEstoqueController,
     FornecedorController,
     FormaPagamentoController,
     ImportEstoqueController,
+    ImportacaoNormalizadaController,
     LancamentoFinanceiroController,
     LocalizacaoDimensaoController,
     LocalizacaoEstoqueController,
@@ -64,11 +65,15 @@ use App\Http\Controllers\Assistencia\{
 };
 
 use App\Http\Controllers\AssistenciaRelatorioController;
+use App\Http\Controllers\Integrations\ContaAzulIntegracaoController;
+use App\Http\Controllers\Integrations\ContaAzulOAuthController;
 
 Route::get('v1/health', fn () => response()->json([
     'status' => 'ok',
     'service' => 'gerenciador-estoque-api',
 ]));
+
+Route::get('v1/integrations/conta-azul/callback', [ContaAzulOAuthController::class, 'callback']);
 
 Route::middleware('auth:sanctum')
     ->prefix('v1')
@@ -236,6 +241,22 @@ Route::middleware('auth:sanctum')
             Route::post('/', [ImportEstoqueController::class, 'store']);
             Route::post('{importacao}/processar', [ImportEstoqueController::class, 'processar'])->whereNumber('importacao');
             Route::get('{importacao}', [ImportEstoqueController::class, 'show'])->whereNumber('importacao');
+        });
+
+        Route::prefix('importacoes/normalizadas')->group(function () {
+            Route::post('/', [ImportacaoNormalizadaController::class, 'store']);
+            Route::get('{importacao}', [ImportacaoNormalizadaController::class, 'show'])->whereNumber('importacao');
+            Route::get('{importacao}/preview', [ImportacaoNormalizadaController::class, 'preview'])->whereNumber('importacao');
+            Route::get('{importacao}/linhas', [ImportacaoNormalizadaController::class, 'linhas'])->whereNumber('importacao');
+            Route::get('{importacao}/conflitos', [ImportacaoNormalizadaController::class, 'conflitos'])->whereNumber('importacao');
+            Route::get('{importacao}/pendencias', [ImportacaoNormalizadaController::class, 'pendencias'])->whereNumber('importacao');
+            Route::post('{importacao}/confirmar', [ImportacaoNormalizadaController::class, 'confirmar'])->whereNumber('importacao');
+            Route::post('{importacao}/efetivar', [ImportacaoNormalizadaController::class, 'efetivar'])->whereNumber('importacao');
+            Route::get('{importacao}/relatorio', [ImportacaoNormalizadaController::class, 'relatorio'])->whereNumber('importacao');
+            Route::patch('linhas/{linha}/revisao', [ImportacaoNormalizadaController::class, 'revisarLinha'])
+                ->whereNumber('linha');
+            Route::patch('conflitos/{conflito}/revisao', [ImportacaoNormalizadaController::class, 'revisarConflito'])
+                ->whereNumber('conflito');
         });
 
         /* ============================================================
@@ -537,6 +558,20 @@ Route::middleware('auth:sanctum')
         /* ============================================================
          * COMUNICAÇÃO
          * ============================================================ */
+        Route::prefix('integrations/conta-azul')->group(function () {
+            Route::get('oauth/authorize', [ContaAzulOAuthController::class, 'redirect']);
+            Route::get('status', [ContaAzulIntegracaoController::class, 'status']);
+            Route::get('pendencias', [ContaAzulIntegracaoController::class, 'pendencias']);
+            Route::post('test-connection', [ContaAzulIntegracaoController::class, 'testarConexao']);
+            Route::get('batches', [ContaAzulIntegracaoController::class, 'batches']);
+            Route::get('sync-logs', [ContaAzulIntegracaoController::class, 'syncLogs']);
+            Route::post('import/{entidade}', [ContaAzulIntegracaoController::class, 'importar']);
+            Route::post('conciliar', [ContaAzulIntegracaoController::class, 'conciliar']);
+            Route::post('conciliar/{entidade}', [ContaAzulIntegracaoController::class, 'conciliarEntidade']);
+            Route::post('reconciliar', [ContaAzulIntegracaoController::class, 'reconciliar']);
+            Route::post('reconciliar-todos', [ContaAzulIntegracaoController::class, 'reconciliarTodos']);
+        });
+
         Route::prefix('comunicacao')->group(function () {
             Route::get('templates', [CommsProxyController::class, 'templatesIndex']);
             Route::get('templates/{id}', [CommsProxyController::class, 'templatesShow']);

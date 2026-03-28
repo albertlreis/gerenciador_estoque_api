@@ -2,13 +2,12 @@
 
 namespace Database\Seeders;
 
-use App\Models\AreaEstoque;
 use App\Models\Estoque;
 use App\Models\LocalizacaoDimensao;
 use App\Models\LocalizacaoEstoque;
 use App\Models\LocalizacaoValor;
+use App\Support\InitialData\InventoryInitialDataService;
 use Illuminate\Database\Seeder;
-use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -26,7 +25,7 @@ use Illuminate\Support\Facades\DB;
  *
  * Observações:
  * - Idempotente (pode rodar repetidas vezes).
- * - Dados gerados são pseudo-aleatórios para teste; ajuste se quiser refletir casos reais.
+ * - Dados gerados são determinísticos por `estoque_id`, mantendo idempotência sem alterar registros a cada execução.
  */
 class LocalizacaoEstoqueSeeder extends Seeder
 {
@@ -62,7 +61,7 @@ class LocalizacaoEstoqueSeeder extends Seeder
      * Gera ou atualiza uma localização para um determinado estoque_id.
      *
      * Regras:
-     * - 50/50 (aprox.) entre criar como Área OU Localização física;
+     * - Alterna de forma determinística entre criar como Área OU Localização física;
      * - Se criar como Área: setor/coluna/nivel e codigo_composto ficam NULL e as dimensões são limpas;
      * - Se criar como Localização física: área_id = NULL e os campos podem ser parciais, mas ao menos um é obrigatório.
      *
@@ -70,12 +69,11 @@ class LocalizacaoEstoqueSeeder extends Seeder
      * @param array<int> $areasIds
      * @param array<\App\Models\LocalizacaoDimensao> $dimensoes
      * @return void
-     * @throws \Random\RandomException
      */
     protected function criarOuAtualizarLocalizacao(int $estoqueId, array $areasIds, array $dimensoes): void
     {
-        // Decide se será Área ou Localização física
-        $usarArea = (random_int(1, 100) <= 50) && !empty($areasIds);
+        // Decide se será Área ou Localização física de forma determinística.
+        $usarArea = !empty($areasIds) && $estoqueId % 2 === 0;
 
         $setor  = null;
         $coluna = null;
@@ -83,16 +81,23 @@ class LocalizacaoEstoqueSeeder extends Seeder
         $areaId = null;
 
         if ($usarArea) {
-            // Escolhe uma área aleatória e zera os físicos
-            $areaId = Arr::random($areasIds);
+            $areaId = $areasIds[$estoqueId % count($areasIds)];
         } else {
-            // Gera localização física PARCIAL (cada campo pode ou não vir)
-            // Garante que pelo menos um campo seja preenchido
-            do {
-                $setor  = (random_int(1, 100) <= 70) ? (string) random_int(1, 10) : null; // 70% chance
-                $coluna = (random_int(1, 100) <= 60) ? Arr::random(['A','B','C','D','E','F']) : null; // 60%
-                $nivel  = (random_int(1, 100) <= 55) ? (string) random_int(1, 4) : null; // 55%
-            } while ($setor === null && $coluna === null && $nivel === null);
+            $setor = (string) (($estoqueId % 10) + 1);
+            $coluna = ['A', 'B', 'C', 'D', 'E', 'F'][$estoqueId % 6];
+            $nivel = (string) (($estoqueId % 4) + 1);
+
+            if ($estoqueId % 3 === 0) {
+                $nivel = null;
+            }
+
+            if ($estoqueId % 5 === 0) {
+                $coluna = null;
+            }
+
+            if ($setor === null && $coluna === null && $nivel === null) {
+                $setor = '1';
+            }
         }
 
         $codigo = $usarArea
@@ -161,7 +166,6 @@ class LocalizacaoEstoqueSeeder extends Seeder
      * @param array<\App\Models\LocalizacaoDimensao> $dimensoes
      * @param bool $habilitar
      * @return void
-     * @throws \Random\RandomException
      */
     protected function sincronizarDimensoes(LocalizacaoEstoque $localizacao, array $dimensoes, bool $habilitar = true): void
     {
@@ -185,7 +189,7 @@ class LocalizacaoEstoqueSeeder extends Seeder
 
         // Para cada dimensão ativa, grava/atualiza um valor "exemplo" coerente
         foreach ($dimensoes as $dim) {
-            $valor = $this->gerarValorExemploParaDimensao($dim->nome);
+            $valor = $this->gerarValorExemploParaDimensao($dim->nome, (int) $localizacao->estoque_id);
 
             LocalizacaoValor::query()->updateOrCreate(
                 [
@@ -203,29 +207,28 @@ class LocalizacaoEstoqueSeeder extends Seeder
      *
      * @param string $nomeDimensao
      * @return string|null
-     * @throws \Random\RandomException
      */
-    protected function gerarValorExemploParaDimensao(string $nomeDimensao): ?string
+    protected function gerarValorExemploParaDimensao(string $nomeDimensao, int $semente): ?string
     {
         $nome = mb_strtolower($nomeDimensao);
 
         if (str_contains($nome, 'corredor')) {
-            return (string) random_int(1, 5); // "1".."5"
+            return (string) (($semente % 5) + 1);
         }
         if (str_contains($nome, 'prateleira')) {
             $letras = ['A', 'B', 'C', 'D'];
-            return Arr::random($letras);
+            return $letras[$semente % count($letras)];
         }
         if (str_contains($nome, 'rua') || str_contains($nome, 'modulo') || str_contains($nome, 'módulo')) {
             $prefix = str_contains($nome, 'rua') ? 'R' : 'M';
-            return $prefix . random_int(1, 9);
+            return $prefix . (($semente % 9) + 1);
         }
 
-        // Fallback genérico curto (3~4 chars), ex.: "X3", "B12"
-        $letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-        $l = $letters[random_int(0, 25)];
-        $n = random_int(1, 12);
-        return $l . $n;
+        $letters = str_split('ABCDEFGHIJKLMNOPQRSTUVWXYZ');
+        $letter = $letters[$semente % count($letters)];
+        $number = ($semente % 12) + 1;
+
+        return $letter . $number;
     }
 
     /**
@@ -235,21 +238,7 @@ class LocalizacaoEstoqueSeeder extends Seeder
      */
     protected function seedAreasPadrao(): array
     {
-        $nomes = [
-            'Assistência',
-            'Devolução',
-            'Tampos Avariados',
-            'Tampos Clientes',
-            'Avarias',
-        ];
-
-        $ids = [];
-        foreach ($nomes as $nome) {
-            $area = AreaEstoque::query()->firstOrCreate(['nome' => $nome], ['descricao' => null]);
-            $ids[] = (int) $area->id;
-        }
-
-        return $ids;
+        return app(InventoryInitialDataService::class)->seedAreasEstoque();
     }
 
     /**

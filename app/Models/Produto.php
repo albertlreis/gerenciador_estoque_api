@@ -19,9 +19,14 @@ class Produto extends Model
         'nome', 'descricao', 'id_categoria', 'id_fornecedor',
         'altura', 'largura', 'profundidade', 'peso',
         'ativo', 'manual_conservacao', 'motivo_desativacao', 'estoque_minimo',
+        'codigo_produto',
     ];
 
     protected $appends = ['estoque_outlet_total'];
+
+    protected $casts = [
+        'ativo' => 'boolean',
+    ];
 
     /**
      * @return BelongsTo<Categoria, Produto>
@@ -82,5 +87,10 @@ class Produto extends Model
         return $variacoes->reduce(function ($acc, $variacao) {
             return $acc + ($variacao->relationLoaded('outlets') ? $variacao->outlets->sum('quantidade') : 0);
         }, 0);
+    }
+
+    public function importacaoNormalizadaLinhas(): HasMany
+    {
+        return $this->hasMany(ImportacaoNormalizadaLinha::class, 'produto_id_vinculado');
     }
 }

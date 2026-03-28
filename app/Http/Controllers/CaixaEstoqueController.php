@@ -71,8 +71,12 @@ class CaixaEstoqueController extends Controller
             'data' => [
                 'variacao_id'   => $variacao->id,
                 'produto_id'    => $variacao->produto_id,
+                'codigo_produto' => $variacao->produto?->codigo_produto,
                 'codigo_barras' => $variacao->codigo_barras,
                 'referencia'    => $variacao->referencia,
+                'sku_interno'   => $variacao->sku_interno,
+                'chave_variacao' => $variacao->chave_variacao,
+                'identificador_variacao' => $variacao->sku_interno ?: ($variacao->referencia ?: $variacao->chave_variacao),
                 'nome'          => $nomeCompleto ?: ($variacao->nome ?? '-'),
                 'estoque_atual' => $estoqueAtual,
                 'preco'         => $variacao->preco,

@@ -61,12 +61,36 @@ class EstoqueMovimentacaoService
                 $query->where(function (Builder $q) use ($idPossivel, $produtoLike) {
                     $q->whereHas('variacao.produto', fn (Builder $sub) => $sub->where('produtos.id', $idPossivel))
                         ->orWhere('id_variacao', $idPossivel)
-                        ->orWhereHas('variacao', fn (Builder $sub) => $sub->whereRaw("referencia LIKE ? ESCAPE '\\\\'", [$produtoLike]));
+                        ->orWhereHas('variacao', function (Builder $sub) use ($produtoLike) {
+                            $sub->whereRaw("sku_interno LIKE ? ESCAPE '\\\\'", [$produtoLike])
+                                ->orWhereRaw("referencia LIKE ? ESCAPE '\\\\'", [$produtoLike])
+                                ->orWhereRaw("chave_variacao LIKE ? ESCAPE '\\\\'", [$produtoLike])
+                                ->orWhereRaw("codigo_barras LIKE ? ESCAPE '\\\\'", [$produtoLike])
+                                ->orWhereHas('codigosHistoricos', function (Builder $codigoQuery) use ($produtoLike) {
+                                    $codigoQuery->whereRaw("codigo LIKE ? ESCAPE '\\\\'", [$produtoLike])
+                                        ->orWhereRaw("codigo_origem LIKE ? ESCAPE '\\\\'", [$produtoLike])
+                                        ->orWhereRaw("codigo_modelo LIKE ? ESCAPE '\\\\'", [$produtoLike]);
+                                });
+                        });
                 });
             } else {
                 $query->where(function (Builder $q) use ($produtoLike) {
-                    $q->whereHas('variacao.produto', fn (Builder $sub) => $sub->whereRaw("nome LIKE ? ESCAPE '\\\\'", [$produtoLike]))
-                        ->orWhereHas('variacao', fn (Builder $sub) => $sub->whereRaw("referencia LIKE ? ESCAPE '\\\\'", [$produtoLike]));
+                    $q->whereHas('variacao.produto', function (Builder $sub) use ($produtoLike) {
+                        $sub->whereRaw("nome LIKE ? ESCAPE '\\\\'", [$produtoLike])
+                            ->orWhereRaw("codigo_produto LIKE ? ESCAPE '\\\\'", [$produtoLike]);
+                    })
+                        ->orWhereHas('variacao', function (Builder $sub) use ($produtoLike) {
+                            $sub->whereRaw("sku_interno LIKE ? ESCAPE '\\\\'", [$produtoLike])
+                                ->orWhereRaw("referencia LIKE ? ESCAPE '\\\\'", [$produtoLike])
+                                ->orWhereRaw("chave_variacao LIKE ? ESCAPE '\\\\'", [$produtoLike])
+                                ->orWhereRaw("codigo_barras LIKE ? ESCAPE '\\\\'", [$produtoLike])
+                                ->orWhereRaw("nome LIKE ? ESCAPE '\\\\'", [$produtoLike])
+                                ->orWhereHas('codigosHistoricos', function (Builder $codigoQuery) use ($produtoLike) {
+                                    $codigoQuery->whereRaw("codigo LIKE ? ESCAPE '\\\\'", [$produtoLike])
+                                        ->orWhereRaw("codigo_origem LIKE ? ESCAPE '\\\\'", [$produtoLike])
+                                        ->orWhereRaw("codigo_modelo LIKE ? ESCAPE '\\\\'", [$produtoLike]);
+                                });
+                        });
                 });
             }
         }

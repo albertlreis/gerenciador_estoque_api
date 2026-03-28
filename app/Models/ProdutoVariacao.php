@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\StatusRevisaoCadastro;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -17,7 +18,11 @@ class ProdutoVariacao extends Model
     protected $table = 'produto_variacoes';
 
     protected $fillable = [
-        'produto_id', 'referencia', 'nome', 'preco', 'custo', 'codigo_barras'
+        'produto_id', 'referencia', 'nome', 'preco', 'custo', 'codigo_barras',
+        'sku_interno', 'chave_variacao',
+        'dimensao_1', 'dimensao_2', 'dimensao_3',
+        'cor', 'lado', 'material_oficial', 'acabamento_oficial',
+        'conflito_codigo', 'status_revisao',
     ];
 
     protected $appends = [
@@ -31,6 +36,11 @@ class ProdutoVariacao extends Model
     protected $casts = [
         'preco' => 'float',
         'custo' => 'float',
+        'dimensao_1' => 'float',
+        'dimensao_2' => 'float',
+        'dimensao_3' => 'float',
+        'conflito_codigo' => 'boolean',
+        'status_revisao' => StatusRevisaoCadastro::class,
     ];
 
     public function produto(): BelongsTo
@@ -41,6 +51,11 @@ class ProdutoVariacao extends Model
     public function atributos(): HasMany
     {
         return $this->hasMany(ProdutoVariacaoAtributo::class, 'id_variacao');
+    }
+
+    public function codigosHistoricos(): HasMany
+    {
+        return $this->hasMany(ProdutoVariacaoCodigoHistorico::class, 'produto_variacao_id');
     }
 
     public function imagem(): HasOne
@@ -226,5 +241,15 @@ class ProdutoVariacao extends Model
     public function estoquesComLocalizacao(): HasMany
     {
         return $this->hasMany(Estoque::class, 'id_variacao');
+    }
+
+    public function importacaoNormalizadaLinhas(): HasMany
+    {
+        return $this->hasMany(ImportacaoNormalizadaLinha::class, 'variacao_id_vinculada');
+    }
+
+    public function revisoesImportacaoNormalizada(): HasMany
+    {
+        return $this->hasMany(ImportacaoNormalizadaRevisao::class, 'variacao_id');
     }
 }

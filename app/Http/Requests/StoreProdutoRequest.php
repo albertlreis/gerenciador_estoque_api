@@ -28,6 +28,7 @@ class StoreProdutoRequest extends FormRequest
             'descricao' => 'nullable|string|max:1000',
             'id_categoria' => 'required|integer|exists:categorias,id',
             'id_fornecedor' => 'nullable|integer|exists:fornecedores,id',
+            'codigo_produto' => ['nullable', 'string', 'max:120'],
             'altura' => 'nullable|numeric|min:0',
             'largura' => 'nullable|numeric|min:0',
             'profundidade' => 'nullable|numeric|min:0',
@@ -49,7 +50,7 @@ class StoreProdutoRequest extends FormRequest
             }
         }
 
-        foreach (['id_categoria', 'id_fornecedor', 'estoque_minimo'] as $field) {
+        foreach (['id_categoria', 'id_fornecedor', 'estoque_minimo', 'codigo_produto'] as $field) {
             if (array_key_exists($field, $data)) {
                 $data[$field] = $this->normalizeNullable($data[$field]);
             }

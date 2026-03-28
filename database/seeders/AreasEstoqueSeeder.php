@@ -2,8 +2,8 @@
 
 namespace Database\Seeders;
 
-use App\Models\AreaEstoque;
 use Illuminate\Database\Seeder;
+use App\Support\InitialData\InventoryInitialDataService;
 
 /**
  * Semeia as áreas padrão solicitadas:
@@ -13,16 +13,6 @@ class AreasEstoqueSeeder extends Seeder
 {
     public function run(): void
     {
-        $areas = [
-            ['nome' => 'Assistência'],
-            ['nome' => 'Devolução'],
-            ['nome' => 'Tampos Avariados'],
-            ['nome' => 'Tampos Clientes'],
-            ['nome' => 'Avarias'],
-        ];
-
-        foreach ($areas as $a) {
-            AreaEstoque::firstOrCreate(['nome' => $a['nome']], $a);
-        }
+        app(InventoryInitialDataService::class)->seedAreasEstoque();
     }
 }

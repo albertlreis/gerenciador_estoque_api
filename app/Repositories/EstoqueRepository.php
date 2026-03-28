@@ -93,41 +93,45 @@ class EstoqueRepository
             $termLikePrefix = $this->escapeLike($term) . '%';
 
             $query->where(function (Builder $q) use ($term, $termLikeAny, $termLikePrefix) {
-                // 1) FULLTEXT (quando termo for "minimamente" útil)
-                // MySQL FULLTEXT ignora termos muito curtos dependendo da config, então evitamos forçar.
                 if (mb_strlen($term) >= 3) {
                     $boolean = $this->toBooleanFullText($term);
 
-                    $q->whereHas('produto', function ($sub) use ($boolean) {
-                        // MATCH em produtos.nome
-                        $sub->whereRaw('MATCH(nome) AGAINST (? IN BOOLEAN MODE)', [$boolean]);
+                    $q->whereHas('produto', function (Builder $sub) use ($boolean, $termLikeAny) {
+                        $sub->where(function (Builder $produtoQuery) use ($boolean, $termLikeAny) {
+                            $produtoQuery->whereRaw('MATCH(nome) AGAINST (? IN BOOLEAN MODE)', [$boolean])
+                                ->orWhereRaw("codigo_produto LIKE ? ESCAPE '\\\\'", [$termLikeAny]);
+                        });
                     });
 
-                    // OU MATCH em produto_variacoes (referencia e nome)
                     $q->orWhereRaw(
                         'MATCH(produto_variacoes.referencia, produto_variacoes.nome) AGAINST (? IN BOOLEAN MODE)',
                         [$boolean]
                     );
-
-                    // 2) Reforço para referência "prefixo" quando parece referência
-                    if ($this->looksLikeReference($term)) {
-                        $q->orWhereRaw("produto_variacoes.referencia LIKE ? ESCAPE '\\\\'", [$termLikePrefix]);
-                    }
-
-                    // 3) Fallback LIKE (garante "qualquer pedaço" mesmo se FT falhar)
-                    $q->orWhereHas('produto', fn ($sub) =>
-                    $sub->whereRaw("nome LIKE ? ESCAPE '\\\\'", [$termLikeAny]))
-                        ->orWhereRaw("produto_variacoes.referencia LIKE ? ESCAPE '\\\\'", [$termLikeAny]);
-                } else {
-                    // Termo muito curto: vai só de LIKE + prefixo (se for referência)
-                    if ($this->looksLikeReference($term)) {
-                        $q->whereRaw("produto_variacoes.referencia LIKE ? ESCAPE '\\\\'", [$termLikePrefix]);
-                    }
-
-                    $q->orWhereHas('produto', fn ($sub) =>
-                    $sub->whereRaw("nome LIKE ? ESCAPE '\\\\'", [$termLikeAny]))
-                        ->orWhereRaw("produto_variacoes.referencia LIKE ? ESCAPE '\\\\'", [$termLikeAny]);
                 }
+
+                if ($this->looksLikeReference($term)) {
+                    $q->orWhere(function (Builder $variationQuery) use ($termLikePrefix) {
+                        $variationQuery->whereRaw("produto_variacoes.sku_interno LIKE ? ESCAPE '\\\\'", [$termLikePrefix])
+                            ->orWhereRaw("produto_variacoes.referencia LIKE ? ESCAPE '\\\\'", [$termLikePrefix])
+                            ->orWhereRaw("produto_variacoes.chave_variacao LIKE ? ESCAPE '\\\\'", [$termLikePrefix])
+                            ->orWhereRaw("produto_variacoes.codigo_barras LIKE ? ESCAPE '\\\\'", [$termLikePrefix]);
+                    });
+                }
+
+                $q->orWhereHas('produto', function (Builder $sub) use ($termLikeAny) {
+                    $sub->whereRaw("nome LIKE ? ESCAPE '\\\\'", [$termLikeAny])
+                        ->orWhereRaw("codigo_produto LIKE ? ESCAPE '\\\\'", [$termLikeAny]);
+                })->orWhere(function (Builder $variationQuery) use ($termLikeAny) {
+                    $variationQuery->whereRaw("produto_variacoes.sku_interno LIKE ? ESCAPE '\\\\'", [$termLikeAny])
+                        ->orWhereRaw("produto_variacoes.referencia LIKE ? ESCAPE '\\\\'", [$termLikeAny])
+                        ->orWhereRaw("produto_variacoes.chave_variacao LIKE ? ESCAPE '\\\\'", [$termLikeAny])
+                        ->orWhereRaw("produto_variacoes.codigo_barras LIKE ? ESCAPE '\\\\'", [$termLikeAny])
+                        ->orWhereRaw("produto_variacoes.nome LIKE ? ESCAPE '\\\\'", [$termLikeAny]);
+                })->orWhereHas('codigosHistoricos', function (Builder $sub) use ($termLikeAny) {
+                    $sub->whereRaw("codigo LIKE ? ESCAPE '\\\\'", [$termLikeAny])
+                        ->orWhereRaw("codigo_origem LIKE ? ESCAPE '\\\\'", [$termLikeAny])
+                        ->orWhereRaw("codigo_modelo LIKE ? ESCAPE '\\\\'", [$termLikeAny]);
+                });
             });
         }
 

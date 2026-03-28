@@ -92,7 +92,7 @@ class ProdutoVariacaoStoreTest extends TestCase
                 'referencia' => 'REF-ATTR',
             ]);
 
-        $variacaoId = $response->json('id');
+        $variacaoId = $response->json('data.id') ?? $response->json('id');
 
         $this->assertDatabaseHas('produto_variacao_atributos', [
             'id_variacao' => $variacaoId,

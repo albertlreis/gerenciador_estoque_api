@@ -42,7 +42,9 @@ class EstoqueDashboardQuery
                 'estoque_movimentacoes.data_movimentacao',
                 'estoque_movimentacoes.id_deposito_origem',
                 'estoque_movimentacoes.id_deposito_destino',
+                'produto_variacoes.sku_interno',
                 'produto_variacoes.referencia',
+                'produtos.codigo_produto',
                 'produtos.nome as produto_nome',
             ])
             ->orderByDesc('estoque_movimentacoes.data_movimentacao')
@@ -56,7 +58,10 @@ class EstoqueDashboardQuery
                 'data_movimentacao' => $row->data_movimentacao,
                 'deposito_origem_id' => $row->id_deposito_origem ? (int) $row->id_deposito_origem : null,
                 'deposito_destino_id' => $row->id_deposito_destino ? (int) $row->id_deposito_destino : null,
+                'codigo_produto' => $row->codigo_produto,
+                'sku_interno' => $row->sku_interno,
                 'referencia' => $row->referencia,
+                'identificador_variacao' => $row->sku_interno ?: $row->referencia,
                 'produto_nome' => $row->produto_nome,
             ])
             ->values()

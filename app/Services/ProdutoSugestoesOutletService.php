@@ -18,6 +18,8 @@ class ProdutoSugestoesOutletService
      *     itens: array<int, array{
      *         id:int,
      *         produto_id:int,
+     *         codigo_produto:string|null,
+     *         sku_interno:string|null,
      *         referencia:string|null,
      *         nome_completo:string,
      *         quantidade_total:int,
@@ -97,6 +99,8 @@ class ProdutoSugestoesOutletService
             ->select([
                 'pv.id',
                 'pv.produto_id',
+                'p.codigo_produto',
+                'pv.sku_interno',
                 'pv.referencia',
                 'pv.nome',
                 'pv.preco',
@@ -144,7 +148,10 @@ class ProdutoSugestoesOutletService
             return [
                 'id'               => (int)$r->id,
                 'produto_id'       => (int)$r->produto_id,
+                'codigo_produto'   => $r->codigo_produto,
+                'sku_interno'      => $r->sku_interno,
                 'referencia'       => $r->referencia,
+                'identificador_variacao' => $r->sku_interno ?: $r->referencia,
                 'nome_completo'    => $nomeCompleto,
                 'quantidade_total' => (int)$r->quantidade_total,
                 'dias_em_estoque'  => max(0, (int)$r->dias_em_estoque),

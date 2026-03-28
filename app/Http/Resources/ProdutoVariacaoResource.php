@@ -49,8 +49,19 @@ class ProdutoVariacaoResource extends JsonResource
             'nome' => $this->nome,
             'nome_completo' => $this->nome_completo,
             'referencia' => $this->referencia,
+            'sku_interno' => $this->sku_interno,
+            'chave_variacao' => $this->chave_variacao,
             'codigo_barras' => $this->codigo_barras,
             'imagem_url' => $this->imagem_url,
+            'dimensao_1' => $this->dimensao_1,
+            'dimensao_2' => $this->dimensao_2,
+            'dimensao_3' => $this->dimensao_3,
+            'cor' => $this->cor,
+            'lado' => $this->lado,
+            'material_oficial' => $this->material_oficial,
+            'acabamento_oficial' => $this->acabamento_oficial,
+            'conflito_codigo' => (bool) $this->conflito_codigo,
+            'status_revisao' => $this->status_revisao?->value ?? $this->status_revisao,
 
             'preco' => $preco,
             'preco_promocional' => $temDesconto ? (float) $precoPromocional : null,
@@ -72,10 +83,22 @@ class ProdutoVariacaoResource extends JsonResource
             'atributos' => ProdutoVariacaoAtributoResource::collection(
                 $atributosOrdenados ?? $this->whenLoaded('atributos')
             ),
+            'codigos_historicos' => $this->whenLoaded('codigosHistoricos', function () {
+                return $this->codigosHistoricos->map(fn ($codigo) => [
+                    'id' => $codigo->id,
+                    'codigo' => $codigo->codigo,
+                    'codigo_origem' => $codigo->codigo_origem,
+                    'codigo_modelo' => $codigo->codigo_modelo,
+                    'fonte' => $codigo->fonte,
+                    'aba_origem' => $codigo->aba_origem,
+                    'principal' => (bool) $codigo->principal,
+                ])->values();
+            }),
 
             'produto' => $this->whenLoaded('produto', fn () => [
                 'id'     => $this->produto->id,
                 'nome'   => $this->produto->nome,
+                'codigo_produto' => $this->produto->codigo_produto,
                 'imagem' => $this->produto->imagemPrincipal?->url,
             ]),
         ];

@@ -74,6 +74,8 @@ class ProdutoVariacaoIndexTest extends TestCase
         $variacaoId = DB::table('produto_variacoes')->insertGetId([
             'produto_id' => $produtoId,
             'referencia' => 'REF-INDEX',
+            'sku_interno' => 'SKU-INDEX-001',
+            'chave_variacao' => 'CATEGORIA TESTE|PRODUTO TESTE|COR:AZUL',
             'nome' => 'Variacao Index',
             'preco' => 100,
             'custo' => 40,
@@ -155,6 +157,9 @@ class ProdutoVariacaoIndexTest extends TestCase
             ])
             ->assertJsonFragment([
                 'quantidade' => 5,
+            ])
+            ->assertJsonFragment([
+                'sku_interno' => 'SKU-INDEX-001',
             ])
             ->assertJsonFragment([
                 'nome' => 'Defeito',

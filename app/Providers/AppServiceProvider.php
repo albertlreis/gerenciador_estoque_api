@@ -2,6 +2,18 @@
 
 namespace App\Providers;
 
+use App\Integrations\ContaAzul\Auth\ContaAzulOAuthService;
+use App\Integrations\ContaAzul\Clients\ContaAzulClient;
+use App\Integrations\ContaAzul\Mappers\ContaAzulBaixaMapper;
+use App\Integrations\ContaAzul\Mappers\ContaAzulPedidoMapper;
+use App\Integrations\ContaAzul\Mappers\ContaAzulPessoaMapper;
+use App\Integrations\ContaAzul\Mappers\ContaAzulProdutoMapper;
+use App\Integrations\ContaAzul\Mappers\ContaAzulTituloMapper;
+use App\Integrations\ContaAzul\Services\ConciliacaoContaAzulService;
+use App\Integrations\ContaAzul\Services\ContaAzulConnectionService;
+use App\Integrations\ContaAzul\Services\ExportacaoContaAzulService;
+use App\Integrations\ContaAzul\Services\ImportacaoContaAzulService;
+use App\Integrations\ContaAzul\Services\ReconciliacaoContaAzulService;
 use App\Repositories\Contracts\ContaPagarRepository;
 use App\Repositories\Eloquent\ContaPagarRepositoryEloquent;
 use Illuminate\Support\Facades\DB;
@@ -18,6 +30,58 @@ class AppServiceProvider extends ServiceProvider
     public function register()
     {
         $this->app->bind(ContaPagarRepository::class, ContaPagarRepositoryEloquent::class);
+
+        $this->app->singleton(ContaAzulClient::class, function ($app) {
+            return new ContaAzulClient($app['config']->get('conta_azul', []));
+        });
+
+        $this->app->singleton(ContaAzulOAuthService::class, function ($app) {
+            return new ContaAzulOAuthService($app['config']->get('conta_azul', []));
+        });
+
+        $this->app->singleton(ContaAzulConnectionService::class, function ($app) {
+            return new ContaAzulConnectionService(
+                $app['config']->get('conta_azul', []),
+                $app->make(ContaAzulOAuthService::class),
+                $app->make(ContaAzulClient::class)
+            );
+        });
+
+        $this->app->singleton(ContaAzulPessoaMapper::class, fn () => new ContaAzulPessoaMapper());
+        $this->app->singleton(ContaAzulProdutoMapper::class, fn () => new ContaAzulProdutoMapper());
+        $this->app->singleton(ContaAzulPedidoMapper::class, fn () => new ContaAzulPedidoMapper());
+        $this->app->singleton(ContaAzulTituloMapper::class, fn () => new ContaAzulTituloMapper());
+        $this->app->singleton(ContaAzulBaixaMapper::class, fn () => new ContaAzulBaixaMapper());
+
+        $this->app->singleton(ImportacaoContaAzulService::class, function ($app) {
+            return new ImportacaoContaAzulService(
+                $app['config']->get('conta_azul', []),
+                $app->make(ContaAzulConnectionService::class),
+                $app->make(ContaAzulClient::class)
+            );
+        });
+
+        $this->app->singleton(ConciliacaoContaAzulService::class, fn () => new ConciliacaoContaAzulService());
+
+        $this->app->singleton(ExportacaoContaAzulService::class, function ($app) {
+            return new ExportacaoContaAzulService(
+                $app['config']->get('conta_azul', []),
+                $app->make(ContaAzulConnectionService::class),
+                $app->make(ContaAzulClient::class),
+                $app->make(ContaAzulPessoaMapper::class),
+                $app->make(ContaAzulProdutoMapper::class),
+                $app->make(ContaAzulPedidoMapper::class),
+                $app->make(ContaAzulTituloMapper::class),
+                $app->make(ContaAzulBaixaMapper::class)
+            );
+        });
+
+        $this->app->singleton(ReconciliacaoContaAzulService::class, function ($app) {
+            return new ReconciliacaoContaAzulService(
+                $app->make(ImportacaoContaAzulService::class),
+                $app->make(ConciliacaoContaAzulService::class)
+            );
+        });
     }
 
     /**

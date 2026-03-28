@@ -26,6 +26,12 @@ class AssistenciaChamadoItemResource extends JsonResource
                 'id'            => $this->variacao->id,
                 'nome_completo' => $this->variacao->nome_completo,
                 'referencia'    => $this->variacao->referencia,
+                'sku_interno'   => $this->variacao->sku_interno,
+                'chave_variacao' => $this->variacao->chave_variacao,
+                'identificador_variacao' => $this->variacao->sku_interno
+                    ?? $this->variacao->referencia
+                    ?? $this->variacao->chave_variacao
+                    ?? null,
                 'produto'       => $this->variacao->produto?->only(['id','nome']),
             ]
             : null;

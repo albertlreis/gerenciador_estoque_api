@@ -9,7 +9,7 @@ namespace App\DTOs;
  */
 class FiltroEstoqueDTO
 {
-    /** Texto de busca (produto.nome ou produto_variacoes.referencia) */
+    /** Texto de busca (produto pai, SKU interno, códigos históricos ou referência legada) */
     public ?string $produto = null;
 
     /** ID do depósito (quando definido, agrega/filtra o estoque por depósito) */

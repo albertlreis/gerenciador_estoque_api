@@ -34,6 +34,7 @@ class ProdutoVariacaoController extends Controller
         $variacoes = $produto->variacoes()
             ->with([
                 'atributos',
+                'codigosHistoricos',
                 'imagem',
                 'produto',
                 'estoques',
@@ -51,32 +52,9 @@ class ProdutoVariacaoController extends Controller
             return $resposta;
         }
 
-        $validated = $request->validate([
-            'referencia' => 'required|string|max:100|unique:produto_variacoes,referencia',
-            'preco' => 'required|numeric',
-            'custo' => 'required|numeric',
-            'codigo_barras' => 'nullable|string|max:100',
-            'atributos' => 'nullable|array',
-            'atributos.*.atributo' => 'required_with:atributos.*.valor|string|max:255',
-            'atributos.*.valor' => 'required_with:atributos.*.atributo|string|max:255',
-        ]);
+        $variacao = $this->service->criarParaProduto($produto, $request->all());
 
-        $validated['produto_id'] = $produto->id;
-        $variacao = ProdutoVariacao::create($validated);
-
-        $atributos = collect($validated['atributos'] ?? [])
-            ->filter(fn($attr) => trim((string)($attr['atributo'] ?? '')) !== '' && trim((string)($attr['valor'] ?? '')) !== '')
-            ->map(fn($attr) => [
-                'atributo' => $attr['atributo'],
-                'valor' => $attr['valor'],
-            ])
-            ->values();
-
-        if ($atributos->isNotEmpty()) {
-            $variacao->atributos()->createMany($atributos->all());
-        }
-
-        return response()->json($variacao, 201);
+        return ProdutoVariacaoResource::make($variacao)->response()->setStatusCode(201);
     }
 
     /**
@@ -153,7 +131,7 @@ class ProdutoVariacaoController extends Controller
     public function buscar(Request $request): JsonResponse
     {
         $query = ProdutoVariacao::query()
-            ->with(['produto', 'atributos', 'imagem'])
+            ->with(['produto', 'atributos', 'codigosHistoricos', 'imagem'])
             ->orderBy('id', 'desc');
 
         if ($request->filled('search')) {
@@ -161,9 +139,17 @@ class ProdutoVariacaoController extends Controller
 
             $query->where(function ($q) use ($busca) {
                 $q->whereRaw("LOWER(referencia) COLLATE utf8mb4_general_ci LIKE ?", ["%{$busca}%"])
+                    ->orWhereRaw("LOWER(sku_interno) COLLATE utf8mb4_general_ci LIKE ?", ["%{$busca}%"])
+                    ->orWhereRaw("LOWER(chave_variacao) COLLATE utf8mb4_general_ci LIKE ?", ["%{$busca}%"])
                     ->orWhereRaw("LOWER(codigo_barras) COLLATE utf8mb4_general_ci LIKE ?", ["%{$busca}%"])
+                    ->orWhereHas('codigosHistoricos', function ($qc) use ($busca) {
+                        $qc->whereRaw("LOWER(codigo) COLLATE utf8mb4_general_ci LIKE ?", ["%{$busca}%"])
+                            ->orWhereRaw("LOWER(codigo_origem) COLLATE utf8mb4_general_ci LIKE ?", ["%{$busca}%"])
+                            ->orWhereRaw("LOWER(codigo_modelo) COLLATE utf8mb4_general_ci LIKE ?", ["%{$busca}%"]);
+                    })
                     ->orWhereHas('produto', function ($qp) use ($busca) {
-                        $qp->whereRaw("LOWER(nome) COLLATE utf8mb4_general_ci LIKE ?", ["%{$busca}%"]);
+                        $qp->whereRaw("LOWER(nome) COLLATE utf8mb4_general_ci LIKE ?", ["%{$busca}%"])
+                            ->orWhereRaw("LOWER(codigo_produto) COLLATE utf8mb4_general_ci LIKE ?", ["%{$busca}%"]);
                     });
             });
         }
@@ -176,8 +162,12 @@ class ProdutoVariacaoController extends Controller
                     'id' => $v->id,
                     'nome_completo' => $v->nome_completo,
                     'referencia' => $v->referencia,
+                    'sku_interno' => $v->sku_interno,
+                    'chave_variacao' => $v->chave_variacao,
+                    'identificador_variacao' => $v->sku_interno ?: ($v->referencia ?: $v->chave_variacao),
                     'produto_id' => $v->produto_id,
                     'produto_nome' => $v->produto?->nome,
+                    'codigo_produto' => $v->produto?->codigo_produto,
                     'preco' => (float) ($v->preco ?? 0),
                     'imagem_url' => $v->imagem?->url,
                 ];
@@ -196,7 +186,24 @@ class ProdutoVariacaoController extends Controller
             return response()->json(['message' => 'Formato inválido.'], 400);
         }
 
-        $camposPermitidos = ['referencia', 'nome', 'preco', 'custo', 'codigo_barras'];
+        $camposPermitidos = [
+            'referencia',
+            'nome',
+            'preco',
+            'custo',
+            'codigo_barras',
+            'sku_interno',
+            'chave_variacao',
+            'dimensao_1',
+            'dimensao_2',
+            'dimensao_3',
+            'cor',
+            'lado',
+            'material_oficial',
+            'acabamento_oficial',
+            'conflito_codigo',
+            'status_revisao',
+        ];
         $camposRecebidos = array_keys(array_diff_key($payload, ['audit' => true]));
         $naoPermitidos = array_values(array_diff($camposRecebidos, $camposPermitidos));
         if (!empty($naoPermitidos)) {
@@ -207,11 +214,22 @@ class ProdutoVariacaoController extends Controller
         }
 
         $validator = Validator::make($payload, [
-            'referencia' => 'sometimes|string|max:100|unique:produto_variacoes,referencia,' . $variacao->id,
+            'referencia' => 'sometimes|nullable|string|max:100|unique:produto_variacoes,referencia,' . $variacao->id,
             'nome' => 'sometimes|nullable|string|max:255',
             'preco' => 'sometimes|numeric|min:0',
             'custo' => 'sometimes|nullable|numeric|min:0',
             'codigo_barras' => 'sometimes|nullable|string|max:100',
+            'sku_interno' => 'sometimes|nullable|string|max:120|unique:produto_variacoes,sku_interno,' . $variacao->id,
+            'chave_variacao' => 'sometimes|nullable|string|max:255|unique:produto_variacoes,chave_variacao,' . $variacao->id,
+            'dimensao_1' => 'sometimes|nullable|numeric|min:0',
+            'dimensao_2' => 'sometimes|nullable|numeric|min:0',
+            'dimensao_3' => 'sometimes|nullable|numeric|min:0',
+            'cor' => 'sometimes|nullable|string|max:150',
+            'lado' => 'sometimes|nullable|string|max:120',
+            'material_oficial' => 'sometimes|nullable|string|max:180',
+            'acabamento_oficial' => 'sometimes|nullable|string|max:180',
+            'conflito_codigo' => 'sometimes|boolean',
+            'status_revisao' => 'sometimes|nullable|in:nao_revisado,pendente_revisao,aprovado,rejeitado',
             'audit' => 'sometimes|array',
             'audit.label' => 'sometimes|nullable|string|max:255',
             'audit.motivo' => 'sometimes|nullable|string|max:500',
@@ -241,6 +259,14 @@ class ProdutoVariacaoController extends Controller
             ->filter(fn (string $campo) => array_key_exists($campo, $payload))
             ->mapWithKeys(fn (string $campo) => [$campo => $payload[$campo]])
             ->all();
+
+        if (array_key_exists('referencia', $updates)) {
+            $updates['referencia'] = $this->service->gerarReferenciaLegadaFallback(
+                $updates,
+                $variacao,
+                $variacao->produto_id
+            );
+        }
 
         if (empty($updates)) {
             return response()->json($variacao->fresh());

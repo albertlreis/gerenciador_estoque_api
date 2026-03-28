@@ -55,6 +55,7 @@ class ProdutoListaViewTest extends TestCase
             'descricao' => null,
             'id_categoria' => $categoriaId,
             'id_fornecedor' => $fornecedorId,
+            'codigo_produto' => 'P-LISTA-001',
             'altura' => null,
             'largura' => null,
             'profundidade' => null,
@@ -78,6 +79,8 @@ class ProdutoListaViewTest extends TestCase
         $variacaoId = DB::table('produto_variacoes')->insertGetId([
             'produto_id' => $produtoId,
             'referencia' => 'REF-LISTA',
+            'sku_interno' => 'SKU-LISTA-001',
+            'chave_variacao' => 'CATEGORIA TESTE|PRODUTO LISTA|COR:AZUL',
             'nome' => 'Variacao Lista',
             'preco' => 100,
             'custo' => 40,
@@ -105,7 +108,12 @@ class ProdutoListaViewTest extends TestCase
             ->assertJsonFragment([
                 'id' => $variacaoId,
                 'referencia' => 'REF-LISTA',
+                'sku_interno' => 'SKU-LISTA-001',
                 'estoque_total' => 7,
+            ])
+            ->assertJsonFragment([
+                'id' => $produtoId,
+                'codigo_produto' => 'P-LISTA-001',
             ]);
     }
 }

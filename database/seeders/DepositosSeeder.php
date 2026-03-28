@@ -37,10 +37,15 @@ class DepositosSeeder extends Seeder
             $d['updated_at'] = $now;
         }
 
-        DB::table('depositos')->upsert(
-            $depositos,
-            ['nome'],
-            ['endereco', 'updated_at']
-        );
+        foreach ($depositos as $deposito) {
+            DB::table('depositos')->updateOrInsert(
+                ['nome' => $deposito['nome']],
+                [
+                    'endereco' => $deposito['endereco'],
+                    'created_at' => $deposito['created_at'],
+                    'updated_at' => $deposito['updated_at'],
+                ]
+            );
+        }
     }
 }

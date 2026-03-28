@@ -25,6 +25,9 @@ class Kernel extends ConsoleKernel
             ->monthly()
             ->when(fn() => now()->month >= 8 || now()->month <= 1)
             ->timezone('America/Belem');
+
+        $schedule->command('conta-azul:refresh-tokens')->hourly()->timezone('America/Belem');
+        $schedule->command('conta-azul:reconciliar --todos')->dailyAt('03:15')->timezone('America/Belem');
     }
 
     /**

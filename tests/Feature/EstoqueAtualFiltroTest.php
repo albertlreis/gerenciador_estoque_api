@@ -18,9 +18,11 @@ class EstoqueAtualFiltroTest extends TestCase
 
     private function seedBase(): array
     {
+        $suffix = uniqid();
+
         $usuario = Usuario::create([
             'nome' => 'Usuario Teste',
-            'email' => 'estoque@test.com',
+            'email' => 'estoque.' . $suffix . '@test.com',
             'senha' => 'senha',
             'ativo' => true,
         ]);
@@ -37,7 +39,8 @@ class EstoqueAtualFiltroTest extends TestCase
 
         $variacaoCom = ProdutoVariacao::create([
             'produto_id' => $produto->id,
-            'referencia' => 'REF-COM',
+            'referencia' => 'REF-COM-' . $suffix,
+            'sku_interno' => 'SKU-COM-' . $suffix,
             'nome' => 'Variacao Com',
             'preco' => 100,
             'custo' => 50,
@@ -45,7 +48,8 @@ class EstoqueAtualFiltroTest extends TestCase
 
         $variacaoSem = ProdutoVariacao::create([
             'produto_id' => $produto->id,
-            'referencia' => 'REF-SEM',
+            'referencia' => 'REF-SEM-' . $suffix,
+            'sku_interno' => 'SKU-SEM-' . $suffix,
             'nome' => 'Variacao Sem',
             'preco' => 120,
             'custo' => 60,
@@ -115,5 +119,18 @@ class EstoqueAtualFiltroTest extends TestCase
         $ids = collect($response->json('data'))->pluck('variacao_id')->all();
         $this->assertContains($variacaoCom->id, $ids);
         $this->assertNotContains($variacaoSem->id, $ids);
+    }
+
+    public function test_filtro_produto_por_sku_interno_funciona_no_estoque_atual(): void
+    {
+        [$variacaoCom, $variacaoSem] = $this->seedBase();
+
+        $response = $this->getJson('/api/v1/estoque/atual?produto=' . urlencode((string) $variacaoCom->sku_interno));
+        $response->assertOk();
+
+        $ids = collect($response->json('data'))->pluck('variacao_id')->all();
+        $this->assertContains($variacaoCom->id, $ids);
+        $this->assertNotContains($variacaoSem->id, $ids);
+        $this->assertSame($variacaoCom->sku_interno, data_get($response->json('data.0'), 'produto_sku_interno'));
     }
 }

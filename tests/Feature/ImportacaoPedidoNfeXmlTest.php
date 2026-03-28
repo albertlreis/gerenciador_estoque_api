@@ -2,7 +2,6 @@
 
 namespace Tests\Feature;
 
-use App\Models\PedidoImportacao;
 use App\Models\Usuario;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
@@ -90,35 +89,31 @@ class ImportacaoPedidoNfeXmlTest extends TestCase
         $response->assertJsonPath('mensagem', 'Arquivo de metadados (Zone.Identifier) não é aceito.');
     }
 
-    public function test_retorna_409_quando_arquivo_xml_ja_foi_confirmado(): void
+    public function test_reimportacao_de_nfe_cria_novo_preview_com_sucesso(): void
     {
         $usuario = Usuario::create([
-            'nome' => 'Usuario NFe Duplicado',
-            'email' => 'nfe-duplicado@example.com',
+            'nome' => 'Usuario NFe Reimportacao',
+            'email' => 'nfe-reimport@example.com',
             'senha' => 'teste',
             'ativo' => 1,
         ]);
 
         $path = $this->fixturePath('nfe-35250207.xml');
-        $hashArquivo = hash_file('sha256', $path);
-        $hash = hash('sha256', $hashArquivo . '|ADORNOS_XML_NFE');
+        $file1 = new UploadedFile($path, 'nfe-35250207.xml', 'application/xml', null, true);
+        $file2 = new UploadedFile($path, 'nfe-35250207.xml', 'application/xml', null, true);
 
-        PedidoImportacao::create([
-            'arquivo_nome' => 'nfe-35250207.xml',
-            'arquivo_hash' => $hash,
-            'usuario_id' => $usuario->id,
-            'status' => 'confirmado',
-            'pedido_id' => null,
+        $first = $this->actingAs($usuario, 'sanctum')->post('/api/v1/pedidos/import', [
+            'tipo_importacao' => 'ADORNOS_XML_NFE',
+            'arquivo' => $file1,
         ]);
 
-        $file = new UploadedFile($path, 'nfe-35250207.xml', 'application/xml', null, true);
-        $response = $this->actingAs($usuario, 'sanctum')
-            ->post('/api/v1/pedidos/import', [
-                'tipo_importacao' => 'ADORNOS_XML_NFE',
-                'arquivo' => $file,
-            ]);
+        $second = $this->actingAs($usuario, 'sanctum')->post('/api/v1/pedidos/import', [
+            'tipo_importacao' => 'ADORNOS_XML_NFE',
+            'arquivo' => $file2,
+        ]);
 
-        $response->assertStatus(409);
-        $response->assertJsonPath('sucesso', false);
+        $first->assertStatus(200);
+        $second->assertStatus(200);
+        $this->assertNotSame($first->json('importacao_id'), $second->json('importacao_id'));
     }
 }

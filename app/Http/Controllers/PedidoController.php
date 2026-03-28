@@ -6,12 +6,13 @@ use App\Helpers\AuthHelper;
 use App\Http\Requests\StorePedidoRequest;
 use App\Http\Requests\UpdatePedidoRequest;
 use App\Http\Resources\PedidoCompletoResource;
+use App\Enums\EstrategiaVinculoImportacao;
 use App\Enums\TipoImportacao;
 use App\Models\Deposito;
 use App\Models\Pedido;
 use App\Models\PedidoImportacao;
 use App\Models\ProdutoImagem;
-use App\Services\ExtratorPedidoPythonService;
+use App\Services\FornecedorPedidoXmlParserService;
 use App\Services\ImportacaoPedidoService;
 use App\Services\NfeXmlParserService;
 use App\Services\PedidoService;
@@ -37,7 +38,6 @@ class PedidoController extends Controller
     protected ImportacaoPedidoService $importacaoService;
     protected EstatisticaPedidoService $estatisticaService;
     protected PedidoExportService $exportService;
-    protected ExtratorPedidoPythonService $service;
 
     /**
      * Injeta as dependências necessárias.
@@ -47,14 +47,12 @@ class PedidoController extends Controller
         ImportacaoPedidoService $importacaoService,
         EstatisticaPedidoService $estatisticaService,
         PedidoExportService $exportService,
-        ExtratorPedidoPythonService $service,
         PedidoUpdateService $pedidoUpdateService
     ) {
         $this->pedidoService = $pedidoService;
         $this->importacaoService = $importacaoService;
         $this->estatisticaService = $estatisticaService;
         $this->exportService = $exportService;
-        $this->service = $service;
         $this->pedidoUpdateService = $pedidoUpdateService;
     }
 
@@ -149,7 +147,7 @@ class PedidoController extends Controller
     }
 
     /**
-     * Confirma a importação de um pedido previamente lido do PDF.
+     * Confirma a importação de um pedido previamente lido e armazenado em preview.
      *
      * @param Request $request
      * @return JsonResponse
@@ -161,7 +159,7 @@ class PedidoController extends Controller
     }
 
     /**
-     * Recebe o PDF, envia para a API Python e retorna JSON estruturado.
+     * Recebe o XML, realiza o parse e retorna JSON estruturado.
      */
     public function importar(Request $request): JsonResponse
     {
@@ -169,7 +167,7 @@ class PedidoController extends Controller
         $inicioImportacao = microtime(true);
 
         $tiposPermitidos = TipoImportacao::valores();
-        $tipoImportacao = strtoupper((string) $request->input('tipo_importacao', TipoImportacao::PRODUTOS_PDF_SIERRA->value));
+        $tipoImportacao = strtoupper((string) $request->input('tipo_importacao', TipoImportacao::PRODUTOS_XML_FORNECEDORES->value));
 
         if (!in_array($tipoImportacao, $tiposPermitidos, true)) {
             return response()->json([
@@ -177,18 +175,18 @@ class PedidoController extends Controller
                 'mensagem' => 'Tipo de importação inválido.',
                 'errors' => [
                     'tipo_importacao' => [
-                        'Informe um tipo válido: PRODUTOS_PDF_SIERRA, PRODUTOS_PDF_AVANTI, PRODUTOS_PDF_QUAKER ou ADORNOS_XML_NFE.',
+                        'Informe um tipo válido: PRODUTOS_XML_FORNECEDORES ou ADORNOS_XML_NFE.',
                     ],
                 ],
             ], 422);
         }
 
-        $isXml = $tipoImportacao === 'ADORNOS_XML_NFE';
+        $isXml = true;
 
         $arquivoRules = [
             'required',
             'file',
-            $isXml ? 'mimes:xml' : 'mimes:pdf',
+            'mimes:xml',
             'max:10240',
         ];
         if ($isXml) {
@@ -197,10 +195,9 @@ class PedidoController extends Controller
         $request->validate([
             'arquivo' => $arquivoRules,
             'tipo_importacao' => 'nullable|string',
+            'estrategia_vinculo' => 'nullable|string',
         ], [
-            'arquivo.mimes' => $isXml
-                ? 'Para ADORNOS_XML_NFE, envie um arquivo XML válido.'
-                : 'Para importação de produtos, envie um arquivo PDF válido.',
+            'arquivo.mimes' => 'Envie um arquivo XML válido para a importação.',
         ]);
 
         if ($isXml && str_ends_with(strtolower($request->file('arquivo')->getClientOriginalName()), ':zone.identifier')) {
@@ -213,7 +210,11 @@ class PedidoController extends Controller
         try {
             $arquivo = $request->file('arquivo');
             $hashArquivo = hash_file('sha256', $arquivo->getRealPath());
-            $hash = hash('sha256', $hashArquivo . '|' . $tipoImportacao);
+            // IMPORTANTE:
+            // - A mesma importação (mesmo arquivo) deve poder ser reprocessada N vezes.
+            // - Mantemos o hash do conteúdo apenas para log/telemetria, mas o identificador da importação
+            //   precisa ser único por tentativa (sem travas por hash/nome).
+            $hash = hash('sha256', $hashArquivo . '|' . $tipoImportacao . '|' . Str::uuid());
 
             Log::info('Importação de pedido - início', [
                 'request_id' => $requestId,
@@ -225,59 +226,10 @@ class PedidoController extends Controller
                 'arquivo_hash' => $hash,
             ]);
 
-            $importExistente = PedidoImportacao::query()
-                ->where('arquivo_hash', $hash)
-                ->first();
-
-            if ($importExistente && $importExistente->status === 'confirmado') {
-                return response()->json([
-                    'sucesso' => false,
-                    'mensagem' => 'Este arquivo já foi importado anteriormente para este tipo de importação.',
-                    'pedido_id' => $importExistente->pedido_id,
-                ], 409);
-            }
-
-            if ($importExistente && $importExistente->status === 'extraido' && $importExistente->dados_json) {
-                $preview = is_array($importExistente->dados_json)
-                    ? $importExistente->dados_json
-                    : (array) $importExistente->dados_json;
-                $itensPreview = data_get($preview, 'itens', []);
-                $previewValido = is_array($itensPreview) && count($itensPreview) > 0;
-
-                if ($previewValido || $this->previewTemDadosMinimos($preview)) {
-                    Log::info('Importação de pedido - preview reutilizado', [
-                        'request_id' => $requestId,
-                        'etapa' => 'staging',
-                        'usuario_id' => auth()->id(),
-                        'importacao_id' => $importExistente->id,
-                        'tipo_importacao' => $tipoImportacao,
-                        'itens_preview' => count($itensPreview),
-                        'tempo_ms' => (int) ((microtime(true) - $inicioImportacao) * 1000),
-                    ]);
-
-                    $dadosCached = $this->garantirContratoPreview($preview);
-                    return response()->json([
-                        'sucesso' => true,
-                        'mensagem' => 'Arquivo já processado. Usando dados existentes.',
-                        'importacao_id' => $importExistente->id,
-                        'dados' => $dadosCached,
-                    ]);
-                }
-
-                Log::warning('Importação de pedido - preview vazio, reprocessando arquivo', [
-                    'request_id' => $requestId,
-                    'etapa' => 'staging',
-                    'usuario_id' => auth()->id(),
-                    'importacao_id' => $importExistente->id,
-                    'tipo_importacao' => $tipoImportacao,
-                    'tempo_ms' => (int) ((microtime(true) - $inicioImportacao) * 1000),
-                ]);
-            }
-
-            if ($tipoImportacao === 'ADORNOS_XML_NFE') {
+            if ($tipoImportacao === TipoImportacao::ADORNOS_XML_NFE->value) {
                 $dados = app(NfeXmlParserService::class)->extrair($arquivo);
             } else {
-                $dados = $this->service->processar($arquivo, $tipoImportacao, $requestId);
+                $dados = app(FornecedorPedidoXmlParserService::class)->extrair($arquivo);
             }
 
             $pedido = $dados['pedido'] ?? [];
@@ -285,9 +237,9 @@ class PedidoController extends Controller
             $totais = $dados['totais'] ?? [];
 
             $temItens = is_array($itens) && count($itens) > 0;
-            $isPdf = $tipoImportacao !== 'ADORNOS_XML_NFE';
+            $permitePreviewSemItens = true;
 
-            if ($isPdf && !$temItens) {
+            if ($permitePreviewSemItens && !$temItens) {
                 $temPedidoMinimo = $this->temPedidoMinimo($pedido, $totais);
                 if (!$temPedidoMinimo) {
                     $nomeArquivo = $arquivo->getClientOriginalName();
@@ -304,7 +256,7 @@ class PedidoController extends Controller
                 }
                 $nomeArquivo = $arquivo->getClientOriginalName();
                 $debugTexto = $dados['debug_texto_extraido'] ?? null;
-                Log::warning('Importação de pedido - PDF sem itens identificados (preview ok, requer inserção manual)', [
+                Log::warning('Importação de pedido - XML sem itens identificados (preview ok, requer inserção manual)', [
                     'request_id' => $requestId,
                     'tipo_importacao' => $tipoImportacao,
                     'arquivo_nome' => $nomeArquivo,
@@ -312,8 +264,10 @@ class PedidoController extends Controller
                 ]);
             }
 
+            $estrategiaVinculo = EstrategiaVinculoImportacao::REF_SELECAO->value;
+
             $itens = app(ImportacaoPedidoService::class)
-                ->mesclarItensComVariacoes($itens);
+                ->mesclarItensComVariacoes($itens, $estrategiaVinculo);
 
             $cliente = [
                 'nome' => $pedido['cliente'] ?? '',
@@ -335,12 +289,13 @@ class PedidoController extends Controller
             $itensExtraidos = $temItens;
             $requerInsercaoManual = !$itensExtraidos;
             $avisos = [];
-            if ($requerInsercaoManual && $isPdf) {
+            if ($requerInsercaoManual && $permitePreviewSemItens) {
                 $avisos[] = 'Itens não puderam ser extraídos automaticamente. Insira manualmente.';
             }
 
             $payload = [
                 'tipo_importacao' => $tipoImportacao,
+                'estrategia_vinculo' => $estrategiaVinculo,
                 'cliente' => $cliente,
                 'pedido' => $pedidoFormatado,
                 'itens' => $itens,
@@ -352,17 +307,15 @@ class PedidoController extends Controller
                 'debug_motivo_itens_zero' => $dados['debug_motivo_itens_zero'] ?? null,
             ];
 
-            $importacao = PedidoImportacao::updateOrCreate(
-                ['arquivo_hash' => $hash],
-                [
-                    'arquivo_nome' => $arquivo->getClientOriginalName(),
-                    'numero_externo' => $pedidoFormatado['numero_externo'] ?: null,
-                    'usuario_id' => auth()->id(),
-                    'status' => 'extraido',
-                    'dados_json' => $payload,
-                    'erro' => null,
-                ]
-            );
+            $importacao = PedidoImportacao::create([
+                'arquivo_hash' => $hash,
+                'arquivo_nome' => $arquivo->getClientOriginalName(),
+                'numero_externo' => $pedidoFormatado['numero_externo'] ?: null,
+                'usuario_id' => auth()->id(),
+                'status' => 'extraido',
+                'dados_json' => $payload,
+                'erro' => null,
+            ]);
 
             Log::info('Importação de pedido - extração concluída', [
                 'request_id' => $requestId,
@@ -370,6 +323,7 @@ class PedidoController extends Controller
                 'usuario_id' => auth()->id(),
                 'importacao_id' => $importacao->id,
                 'tipo_importacao' => $tipoImportacao,
+                'estrategia_vinculo' => $estrategiaVinculo,
                 'itens_total' => count($itens),
                 'numero_externo' => $pedidoFormatado['numero_externo'] ?? null,
                 'tempo_ms' => (int) ((microtime(true) - $inicioImportacao) * 1000),
@@ -395,17 +349,15 @@ class PedidoController extends Controller
         } catch (Exception $e) {
             $hashErro = isset($hash)
                 ? $hash
-                : hash('sha256', ($request->file('arquivo')?->getClientOriginalName() ?? uniqid()) . '|' . $tipoImportacao);
+                : hash('sha256', ($request->file('arquivo')?->getClientOriginalName() ?? uniqid()) . '|' . $tipoImportacao . '|' . Str::uuid());
 
-            PedidoImportacao::updateOrCreate(
-                ['arquivo_hash' => $hashErro],
-                [
-                    'arquivo_nome' => $request->file('arquivo')?->getClientOriginalName(),
-                    'usuario_id' => auth()->id(),
-                    'status' => 'erro',
-                    'erro' => $e->getMessage(),
-                ]
-            );
+            PedidoImportacao::create([
+                'arquivo_hash' => $hashErro,
+                'arquivo_nome' => $request->file('arquivo')?->getClientOriginalName(),
+                'usuario_id' => auth()->id(),
+                'status' => 'erro',
+                'erro' => $e->getMessage(),
+            ]);
 
             Log::error('Importação de pedido - erro ao processar', [
                 'request_id' => $requestId,

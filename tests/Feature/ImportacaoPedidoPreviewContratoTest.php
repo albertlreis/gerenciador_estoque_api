@@ -48,14 +48,14 @@ class ImportacaoPedidoPreviewContratoTest extends TestCase
             'ativo' => 1,
         ]);
 
-        $this->mock(\App\Services\ExtratorPedidoPythonService::class, function ($mock) {
-            $mock->shouldReceive('processar')
+        $this->mock(\App\Services\FornecedorPedidoXmlParserService::class, function ($mock) {
+            $mock->shouldReceive('extrair')
                 ->once()
                 ->andReturn([
                     'pedido' => [
                         'numero_pedido' => '12345',
-                        'data_pedido' => '01/01/2025',
-                        'data_inclusao' => '01/01/2025',
+                        'data_pedido' => null,
+                        'data_inclusao' => null,
                         'cliente' => 'Fornecedor Teste',
                         'observacoes' => '',
                     ],
@@ -67,14 +67,15 @@ class ImportacaoPedidoPreviewContratoTest extends TestCase
                 ]);
         });
 
-        $pdfPath = base_path('tests/Fixtures/sierra-16552.pdf');
-        $this->assertFileExists($pdfPath);
-        $file = new UploadedFile($pdfPath, 'sierra-16552.pdf', 'application/pdf', null, true);
+        $arquivo = UploadedFile::fake()->createWithContent(
+            'pedido.xml',
+            '<?xml version="1.0" encoding="UTF-8"?><LISTING><NUMERO_PEDIDO>12345</NUMERO_PEDIDO><ITEMS /></LISTING>'
+        );
 
         $response = $this->actingAs($usuario, 'sanctum')
             ->post('/api/v1/pedidos/import', [
-                'tipo_importacao' => 'PRODUTOS_PDF_SIERRA',
-                'arquivo' => $file,
+                'tipo_importacao' => 'PRODUTOS_XML_FORNECEDORES',
+                'arquivo' => $arquivo,
             ]);
 
         $response->assertStatus(200);
@@ -96,12 +97,12 @@ class ImportacaoPedidoPreviewContratoTest extends TestCase
         ]);
 
         $importacao = PedidoImportacao::create([
-            'arquivo_nome' => 'test.pdf',
+            'arquivo_nome' => 'test.xml',
             'arquivo_hash' => hash('sha256', 'test'),
             'usuario_id' => $usuario->id,
             'status' => 'extraido',
             'dados_json' => [
-                'tipo_importacao' => 'PRODUTOS_PDF_SIERRA',
+                'tipo_importacao' => 'PRODUTOS_XML_FORNECEDORES',
                 'pedido' => ['numero_externo' => '999', 'total' => 100],
                 'itens' => [],
                 'totais' => ['total_liquido' => '100'],

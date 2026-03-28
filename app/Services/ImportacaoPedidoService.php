@@ -9,8 +9,10 @@ use App\Models\PedidoStatusHistorico;
 use App\Models\Produto;
 use App\Models\ProdutoVariacao;
 use App\Models\ProdutoVariacaoAtributo;
+use App\Models\ProdutoVariacaoCodigoHistorico;
 use App\Models\PedidoImportacao;
 use App\Models\Categoria;
+use App\Enums\EstrategiaVinculoImportacao;
 use App\Enums\PedidoStatus;
 use App\Enums\TipoImportacao;
 use App\Helpers\StringHelper;
@@ -21,11 +23,12 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
 
 /**
- * Serviço responsável pela importação de pedidos via PDF.
+ * Serviço responsável pela importação de pedidos via XML.
  */
 class ImportacaoPedidoService
 {
@@ -40,7 +43,7 @@ class ImportacaoPedidoService
      */
     public function confirmarImportacaoPDF(Request $request): JsonResponse
     {
-        Log::info('Importação PDF - confirmação iniciada', [
+        Log::info('Importação XML - confirmação iniciada', [
             'usuario_id' => Auth::id(),
             'importacao_id' => $request->input('importacao_id'),
             'itens_total' => is_array($request->input('itens')) ? count($request->input('itens')) : 0,
@@ -80,6 +83,8 @@ class ImportacaoPedidoService
             'itens.*.custo_unitario' => 'nullable|numeric|min:0',
             'itens.*.id_categoria' => 'required|integer',
             'itens.*.id_deposito'  => 'nullable|integer|exists:depositos,id',
+            'estrategia_vinculo'   => 'nullable|in:' . implode(',', EstrategiaVinculoImportacao::valores()),
+            'itens.*.forcar_produto_novo' => 'nullable|boolean',
         ], [
             'itens.required' => 'Adicione ao menos um item ao pedido antes de confirmar.',
             'itens.min' => 'Adicione ao menos um item ao pedido (inserção manual) antes de confirmar.',
@@ -91,7 +96,7 @@ class ImportacaoPedidoService
         });
 
         if ($validator->fails()) {
-            Log::warning('Importação PDF - validação falhou', [
+            Log::warning('Importação XML - validação falhou', [
                 'usuario_id' => Auth::id(),
                 'erros' => $validator->errors()->toArray(),
             ]);
@@ -293,24 +298,28 @@ class ImportacaoPedidoService
                 );
 
                 if ($index < 3) {
-                    Log::info('Importação PDF - item normalizado para persistência', [
+                    Log::info('Importação XML - item normalizado para persistência', [
                         'index' => $index,
                         'referencia' => $item['ref'] ?? null,
                         'quantidade' => $quantidade,
                         'preco_unitario' => $valorUnit,
                         'custo_unitario' => $custoUnit,
                         'valor_total_linha' => $this->toDecimal($item['valor_total_linha'] ?? ($item['valor_total'] ?? 0)),
+                        'forcar_produto_novo' => $this->itemDeveForcarProdutoNovo($request, $item),
                     ]);
                 }
 
+                $forcarProdutoNovo = $this->itemDeveForcarProdutoNovo($request, $item);
+
                 $variacao = null;
 
-                if (!empty($item['id_variacao'])) {
+                if (!$forcarProdutoNovo && !empty($item['id_variacao'])) {
                     $variacao = ProdutoVariacao::with('atributos')->find($item['id_variacao']);
                 }
 
                 if (
-                    !$variacao
+                    !$forcarProdutoNovo
+                    && !$variacao
                     && !empty($item['codigo_barras'])
                 ) {
                     $variacao = ProdutoVariacao::with('atributos')
@@ -318,10 +327,25 @@ class ImportacaoPedidoService
                         ->first();
                 }
 
-                if (!$variacao && !empty($item['ref'])) {
-                    $variacao = ProdutoVariacao::with('atributos')
-                        ->where('referencia', $item['ref'])
-                        ->first();
+                if (!$forcarProdutoNovo && !$variacao && !empty($item['ref'])) {
+                    // A referência pode NÃO ser única por variação.
+                    // Regra: se for ambígua e o front não enviou `id_variacao`,
+                    // não devemos "chutar" uma variação automaticamente.
+                    $variacoesPorIdentificador = ProdutoVariacao::with('atributos')
+                        ->where(function ($query) use ($item) {
+                            $this->aplicarBuscaPorIdentificador($query, (string) ($item['ref'] ?? ''));
+                        })
+                        ->get();
+
+                    if ($variacoesPorIdentificador->count() === 1) {
+                        $variacao = $variacoesPorIdentificador->first();
+                    } elseif ($variacoesPorIdentificador->count() > 1) {
+                        throw ValidationException::withMessages([
+                            "itens.{$index}.selecao_variacao" => [
+                                'A referência informada corresponde a múltiplas variações. Selecione a variação correta na tela de importação.',
+                            ],
+                        ]);
+                    }
                 }
 
                 if (!$variacao) {
@@ -333,6 +357,7 @@ class ImportacaoPedidoService
                     $variacao = ProdutoVariacao::create([
                         'produto_id' => $produto->id,
                         'referencia' => $item['ref'] ?? null,
+                        'sku_interno' => $item['sku_interno'] ?? null,
                         'nome'       => $item['nome'],
                         'preco'      => $valorUnit,
                         'custo'      => $custoUnit,
@@ -352,6 +377,8 @@ class ImportacaoPedidoService
                         );
                     }
                 }
+
+                $this->registrarCodigoHistoricoPedido($variacao, $item['ref'] ?? null);
 
                 PedidoItem::create([
                     'id_pedido'      => $pedido->id,
@@ -373,7 +400,7 @@ class ImportacaoPedidoService
                 ]);
             }
 
-            Log::info('Importação PDF - pedido confirmado', [
+            Log::info('Importação XML - pedido confirmado', [
                 'usuario_id' => $usuario->id,
                 'pedido_id' => $pedido->id,
                 'importacao_id' => $importacaoId,
@@ -392,6 +419,7 @@ class ImportacaoPedidoService
                     return [
                         'id_variacao'   => $item->variacao?->id,
                         'referencia'    => $item->variacao?->referencia,
+                        'sku_interno'   => $item->variacao?->sku_interno,
                         'nome_produto'  => $item->variacao?->produto?->nome,
                         'nome_completo' => $item->variacao?->nomeCompleto,
                         'categoria_id'  => $item->variacao?->produto?->id_categoria,
@@ -400,19 +428,19 @@ class ImportacaoPedidoService
             ]);
             });
         } catch (ValidationException $e) {
-            Log::warning('Importação PDF - erro de normalização/validação', [
+            Log::warning('Importação XML - erro de normalização/validação', [
                 'usuario_id' => Auth::id(),
                 'erros' => $e->errors(),
             ]);
             throw $e;
         } catch (\Throwable $e) {
-            Log::error('Importação PDF - erro ao confirmar', [
+            Log::error('Importação XML - erro ao confirmar', [
                 'usuario_id' => Auth::id(),
                 'mensagem' => $e->getMessage(),
             ]);
             throw $e;
         } finally {
-            Log::info('Importação PDF - confirmação finalizada', [
+            Log::info('Importação XML - confirmação finalizada', [
                 'usuario_id' => Auth::id(),
                 'importacao_id' => $request->input('importacao_id'),
             ]);
@@ -533,6 +561,54 @@ class ImportacaoPedidoService
         return !($value === null || (is_string($value) && trim($value) === ''));
     }
 
+    private function aplicarBuscaPorIdentificador($query, string $identificador): void
+    {
+        $query->where('sku_interno', $identificador)
+            ->orWhere('referencia', $identificador)
+            ->orWhereHas('codigosHistoricos', function ($codigoQuery) use ($identificador) {
+                $codigoQuery->where('codigo', $identificador)
+                    ->orWhere('codigo_origem', $identificador)
+                    ->orWhere('codigo_modelo', $identificador);
+            });
+    }
+
+    private function localizarVariacaoPorIdentificador(string $identificador): ?ProdutoVariacao
+    {
+        return ProdutoVariacao::with('atributos')
+            ->where(function ($query) use ($identificador) {
+                $this->aplicarBuscaPorIdentificador($query, $identificador);
+            })
+            ->first();
+    }
+
+    private function registrarCodigoHistoricoPedido(ProdutoVariacao $variacao, ?string $codigo): void
+    {
+        $codigo = trim((string) $codigo);
+        if ($codigo === '') {
+            return;
+        }
+
+        ProdutoVariacaoCodigoHistorico::updateOrCreate(
+            [
+                'produto_variacao_id' => $variacao->id,
+                'hash_conteudo' => sha1(json_encode([
+                    'codigo' => $codigo,
+                    'codigo_origem' => $codigo,
+                    'fonte' => 'importacao_pedido_xml',
+                ], JSON_UNESCAPED_UNICODE)),
+            ],
+            [
+                'codigo' => $codigo,
+                'codigo_origem' => $codigo,
+                'codigo_modelo' => null,
+                'fonte' => 'importacao_pedido_xml',
+                'aba_origem' => null,
+                'observacoes' => 'Importacao de pedido XML',
+                'principal' => false,
+            ]
+        );
+    }
+
     /**
      * Mescla itens extraídos do PDF com itens já cadastrados.
      *
@@ -543,7 +619,7 @@ class ImportacaoPedidoService
      * @param array $itens
      * @return array
      */
-    public function mesclarItensComVariacoes(array $itens): array
+    public function mesclarItensComVariacoes(array $itens, ?string $estrategiaVinculo = null): array
     {
         return collect($itens)->values()->map(function ($item, int $index) {
             $linha = $this->normalizarLinhaItem($item['linha'] ?? null, $index + 1);
@@ -558,67 +634,84 @@ class ImportacaoPedidoService
                 return $item;
             }
 
-            /** @var ProdutoVariacao|null $variacao */
+            // 1) Código de barras (quando existe) segue fluxo simples (tende a ser único)
             $variacaoQuery = ProdutoVariacao::with(['produto.categoria', 'atributos']);
-            $variacao = $variacaoQuery
-                ->where(function ($q) use ($ref, $codigoBarras) {
-                    if ($codigoBarras) {
-                        $q->where('codigo_barras', $codigoBarras);
-                    }
-                    if ($ref) {
-                        if ($codigoBarras) {
-                            $q->orWhere('referencia', $ref);
-                        } else {
-                            $q->where('referencia', $ref);
-                        }
-                    }
-                })
-                ->first();
+            if ($codigoBarras) {
+                $variacao = $variacaoQuery
+                    ->where('codigo_barras', $codigoBarras)
+                    ->first();
 
-            if ($variacao) {
+                if ($variacao) {
+                    return $this->mapearItemComVariacaoEncontrada($item, $linha, $ref, $variacao);
+                }
+            }
 
-                $produto = $variacao->produto;
+            // 2) Para identificadores gerais, mantém o comportamento antigo (SKU interno/códigos históricos)
+            //    mas NÃO assume unicidade de referência legada.
+            if ($ref) {
+                // 2.1 Referência legada: NÃO é única por variação → retorna lista quando houver ambiguidade.
+                // Prioriza `referencia` para evitar "chutar" variação a partir de outros campos
+                // quando o valor realmente representa apenas a referência legada do PDF.
+                $variacoesPorReferencia = ProdutoVariacao::with(['produto.categoria', 'atributos'])
+                    ->where('referencia', $ref)
+                    ->get();
 
-                // Mapeia atributos da variação para array simples chave => valor
-                $atributosVariacao = $variacao->atributos
-                    ->mapWithKeys(fn($attr) => [$attr->atributo => $attr->valor])
-                    ->toArray();
+                $variacoesEncontradas = $this->variacoesParaListaPreview($variacoesPorReferencia);
 
-                // Atributos vindos do PDF (se houver) – db sobrescreve o que vier errado
-                $atributosPdf = $item['atributos'] ?? [];
+                if ($variacoesPorReferencia->count() === 1) {
+                    $variacaoUnica = $variacoesPorReferencia->first();
+                    $itemMapeado = $this->mapearItemComVariacaoEncontrada($item, $linha, $ref, $variacaoUnica);
 
-                $atributosFinal = array_merge($atributosPdf, $atributosVariacao);
+                    // Contrato: referencia deve retornar TODAS as variações relacionadas à referencia informada.
+                    // Mesmo quando há apenas 1, entregamos a lista para o front manter estado consistente.
+                    return array_merge($itemMapeado, [
+                        'variacoes_encontradas' => $variacoesEncontradas,
+                    ]);
+                }
 
-                // Dimensões vindas do produto
-                $fixosDb = [
-                    'largura'      => $produto?->largura,
-                    'profundidade' => $produto?->profundidade,
-                    'altura'       => $produto?->altura,
-                ];
+                if ($variacoesPorReferencia->count() > 1) {
+                    $categoriaId = $item['id_categoria'] ?? $this->categoriaPadraoImportacaoId();
+                    $categoriaNome = $item['categoria'] ?? $this->categoriaPadraoNome($categoriaId);
 
-                $fixosPdf = $item['fixos'] ?? [];
+                    return array_merge($item, [
+                        "linha" => $linha,
+                        "ref" => $ref,
+                        "produto_id" => null,
+                        "id_variacao" => null,
+                        "variacao_nome" => null,
+                        "nome_completo" => null,
+                        "id_categoria" => $categoriaId,
+                        "categoria" => $categoriaNome,
+                        "atributos" => $item['atributos'] ?? [],
+                        "fixos" => $item['fixos'] ?? [],
+                        // lista de variações para seleção explícita no front
+                        "variacoes_encontradas" => $variacoesEncontradas,
+                    ]);
+                }
 
-                $fixosFinal = array_merge(
-                    $fixosPdf,
-                    array_filter($fixosDb, fn($v) => !is_null($v))
-                );
+                // Se não houver correspondência por referência, mantém comportamento legado
+                // (SKU interno/códigos históricos) para casos em que o PDF trouxe outro identificador.
+                // 2.2 SKU interno tem unicidade → pode selecionar direto
+                $variacaoSku = ProdutoVariacao::with(['produto.categoria', 'atributos'])
+                    ->where('sku_interno', $ref)
+                    ->first();
 
-                $categoriaId = $produto?->id_categoria ?? $this->categoriaPadraoImportacaoId();
-                $categoriaNome = $produto?->categoria?->nome ?? $this->categoriaPadraoNome($categoriaId);
+                if ($variacaoSku) {
+                    return $this->mapearItemComVariacaoEncontrada($item, $linha, $ref, $variacaoSku);
+                }
 
-                return array_merge($item, [
-                    "linha"         => $linha,
-                    "ref"           => $ref,
-                    "nome"          => $produto?->nome ?? $variacao->nome,
-                    "produto_id"    => $variacao->produto_id,
-                    "id_variacao"   => $variacao->id,
-                    "variacao_nome" => $variacao->nome,
-                    "nome_completo" => $variacao->nome_completo,
-                    "id_categoria"  => $categoriaId,
-                    "categoria"     => $categoriaNome,
-                    "atributos"     => $atributosFinal,
-                    "fixos"         => $fixosFinal,
-                ]);
+                // 2.3 Códigos históricos (geralmente únicos)
+                $variacaoHistorico = ProdutoVariacao::with(['produto.categoria', 'atributos'])
+                    ->whereHas('codigosHistoricos', function ($q) use ($ref) {
+                        $q->where('codigo', $ref)
+                            ->orWhere('codigo_origem', $ref)
+                            ->orWhere('codigo_modelo', $ref);
+                    })
+                    ->first();
+
+                if ($variacaoHistorico) {
+                    return $this->mapearItemComVariacaoEncontrada($item, $linha, $ref, $variacaoHistorico);
+                }
             }
 
             // Produto não encontrado → usar dados do PDF
@@ -636,6 +729,52 @@ class ImportacaoPedidoService
                 "fixos"         => $item['fixos'] ?? [],
             ]);
         })->toArray();
+    }
+
+    private function mapearItemComVariacaoEncontrada(array $item, int $linha, ?string $ref, ProdutoVariacao $variacao): array
+    {
+        $produto = $variacao->produto;
+
+        $atributosVariacao = $variacao->relationLoaded('atributos')
+            ? $variacao->atributos->mapWithKeys(fn($attr) => [$attr->atributo => $attr->valor])->toArray()
+            : [];
+
+        // Atributos vindos do PDF (se houver) – db sobrescreve o que vier errado
+        $atributosPdf = $item['atributos'] ?? [];
+        $atributosFinal = array_merge($atributosPdf, $atributosVariacao);
+
+        // Dimensões vindas do produto
+        $fixosDb = [
+            'largura' => $produto?->largura,
+            'profundidade' => $produto?->profundidade,
+            'altura' => $produto?->altura,
+        ];
+
+        $fixosPdf = $item['fixos'] ?? [];
+        $fixosFinal = array_merge(
+            $fixosPdf,
+            array_filter($fixosDb, fn($v) => !is_null($v))
+        );
+
+        $categoriaId = $produto?->id_categoria ?? $this->categoriaPadraoImportacaoId();
+        $categoriaNome = $produto?->categoria?->nome ?? $this->categoriaPadraoNome($categoriaId);
+
+        return array_merge($item, [
+            "linha" => $linha,
+            "ref" => $ref,
+            "sku_interno" => $variacao->sku_interno,
+            "nome" => $produto?->nome ?? $variacao->nome,
+            "produto_id" => $variacao->produto_id,
+            "id_variacao" => $variacao->id,
+            "variacao_nome" => $variacao->nome,
+            "nome_completo" => $variacao->nome_completo,
+            "id_categoria" => $categoriaId,
+            "categoria" => $categoriaNome,
+            "atributos" => $atributosFinal,
+            "fixos" => $fixosFinal,
+            // garante que o front não exiba seleção antiga
+            "variacoes_encontradas" => [],
+        ]);
     }
 
     private function normalizarLinhaItem(mixed $linha, int $fallback): int
@@ -657,11 +796,11 @@ class ImportacaoPedidoService
             return $this->categoriaPadraoId;
         }
 
-        $categoria = Categoria::query()->where('nome', 'Importacao PDF - Sem categoria')->first();
+        $categoria = Categoria::query()->where('nome', 'Importacao XML - Sem categoria')->first();
 
         if (!$categoria) {
             $categoria = Categoria::query()->create([
-                'nome' => 'Importacao PDF - Sem categoria',
+                'nome' => 'Importacao XML - Sem categoria',
             ]);
         }
 
@@ -672,5 +811,46 @@ class ImportacaoPedidoService
     private function categoriaPadraoNome(int $categoriaId): ?string
     {
         return Categoria::query()->whereKey($categoriaId)->value('nome');
+    }
+
+    /**
+     * @param Collection<int, ProdutoVariacao> $variacoesPorReferencia
+     * @return list<array<string, mixed>>
+     */
+    private function variacoesParaListaPreview(Collection $variacoesPorReferencia): array
+    {
+        return $variacoesPorReferencia->map(function (ProdutoVariacao $v) {
+            $produto = $v->produto;
+            $categoriaId = $produto?->id_categoria;
+
+            $atributos = $v->relationLoaded('atributos')
+                ? $v->atributos->mapWithKeys(fn ($a) => [$a->atributo => $a->valor])->toArray()
+                : [];
+
+            $fixosDb = [
+                'largura' => $produto?->largura,
+                'profundidade' => $produto?->profundidade,
+                'altura' => $produto?->altura,
+            ];
+
+            return [
+                'id_variacao' => $v->id,
+                'produto_id' => $v->produto_id,
+                'sku_interno' => $v->sku_interno,
+                'referencia' => $v->referencia,
+                'variacao_nome' => $v->nome,
+                'nome_produto' => $produto?->nome ?? null,
+                'nome_completo' => $v->nome_completo,
+                'id_categoria' => $categoriaId,
+                'categoria' => $produto?->categoria?->nome ?? null,
+                'atributos' => $atributos,
+                'fixos' => array_filter($fixosDb, fn ($val) => !is_null($val)),
+            ];
+        })->values()->toArray();
+    }
+
+    private function itemDeveForcarProdutoNovo(Request $request, array $item): bool
+    {
+        return filter_var($item['forcar_produto_novo'] ?? false, FILTER_VALIDATE_BOOLEAN);
     }
 }

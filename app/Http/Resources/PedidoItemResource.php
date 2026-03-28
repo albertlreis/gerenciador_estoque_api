@@ -18,7 +18,14 @@ class PedidoItemResource extends JsonResource
             'variacao_id' => $this->id_variacao,
             'produto_id' => $this->variacao->produto_id ?? null,
             'nome_produto' => $this->variacao->produto->nome ?? '-',
+            'codigo_produto' => $this->variacao->produto->codigo_produto ?? null,
             'referencia' => $this->variacao->referencia ?? '-',
+            'sku_interno' => $this->variacao->sku_interno ?? null,
+            'chave_variacao' => $this->variacao->chave_variacao ?? null,
+            'identificador_variacao' => $this->variacao->sku_interno
+                ?? $this->variacao->referencia
+                ?? $this->variacao->chave_variacao
+                ?? null,
             'quantidade' => $quantidade,
             'preco_venda' => $precoVenda,
             'preco_unitario' => $precoVenda,

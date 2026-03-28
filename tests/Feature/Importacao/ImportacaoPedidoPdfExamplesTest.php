@@ -2,7 +2,6 @@
 
 namespace Tests\Feature\Importacao;
 
-use App\Models\PedidoImportacao;
 use App\Models\Usuario;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
@@ -12,163 +11,81 @@ class ImportacaoPedidoPdfExamplesTest extends TestCase
 {
     use RefreshDatabase;
 
-    private static function manifest(): array
+    public static function fornecedorXmlExamplesProvider(): array
     {
-        $path = dirname(__DIR__, 3) . '/tests/Fixtures/Importacao/manifest.json';
-        $json = file_get_contents($path);
-        return is_string($json) ? (json_decode($json, true) ?: []) : [];
-    }
-
-    public static function pdfExamplesProvider(): array
-    {
-        $manifest = self::manifest();
-        $files = $manifest['files'] ?? [];
-
-        $cases = [];
-        foreach ($files as $entry) {
-            if (($entry['type'] ?? null) !== 'pdf') {
-                continue;
-            }
-            $cases[$entry['file']] = [$entry];
-        }
-
-        return $cases;
+        return [
+            'SIERRABELM__730759.xml' => ['SIERRABELM__730759.xml', 1, '780'],
+            'SIERRABELM__738588.xml' => ['SIERRABELM__738588.xml', 7, '787'],
+            'SIERRABELM__738589.xml' => ['SIERRABELM__738589.xml', 2, '788'],
+            'SIERRABELM__730256.xml' => ['SIERRABELM__730256.xml', 8, '776'],
+            'SIERRABELM__738599.xml' => ['SIERRABELM__738599.xml', 3, '794'],
+        ];
     }
 
     /**
-     * @dataProvider pdfExamplesProvider
+     * @dataProvider fornecedorXmlExamplesProvider
      */
-    public function test_importa_todos_exemplos_pdf_com_contagem_exata(array $entry): void
-    {
+    public function test_importa_todos_exemplos_xml_de_fornecedores_com_contagem_exata(
+        string $fileName,
+        int $expectedItems,
+        string $expectedNumero
+    ): void {
         $usuario = Usuario::create([
-            'nome' => 'Usuario PDF',
-            'email' => 'pdf-' . md5($entry['file']) . '@example.com',
+            'nome' => 'Usuario XML Fornecedor',
+            'email' => 'xml-fornecedor-' . md5($fileName) . '@example.com',
             'senha' => 'teste',
             'ativo' => 1,
         ]);
 
-        $path = base_path('tests/Fixtures/Importacao/' . $entry['file']);
+        $path = base_path('docs/' . $fileName);
         $this->assertFileExists($path);
 
-        $file = new UploadedFile($path, basename($path), 'application/pdf', null, true);
+        $file = new UploadedFile($path, $fileName, 'application/xml', null, true);
 
         $response = $this->actingAs($usuario, 'sanctum')
             ->post('/api/v1/pedidos/import', [
-                'tipo_importacao' => $entry['tipo_importacao'],
+                'tipo_importacao' => 'PRODUTOS_XML_FORNECEDORES',
                 'arquivo' => $file,
             ]);
 
         $response->assertStatus(200);
         $response->assertJsonPath('sucesso', true);
+        $response->assertJsonPath('dados.pedido.numero_externo', $expectedNumero);
 
         $itens = $response->json('dados.itens') ?? [];
-        $this->assertCount((int) $entry['expected_items'], $itens, 'Contagem de itens divergente para ' . $entry['file']);
-
-        $linhas = array_map(static fn (array $item) => (int) ($item['linha'] ?? 0), $itens);
-        $this->assertCount(count($linhas), array_filter($linhas, static fn (int $linha) => $linha > 0), 'Linha inválida no preview para ' . $entry['file']);
-        $this->assertCount(count($linhas), array_unique($linhas), 'Linha duplicada no preview para ' . $entry['file']);
+        $this->assertCount($expectedItems, $itens, 'Contagem de itens divergente para ' . $fileName);
 
         foreach ($itens as $idx => $item) {
-            $descricao = trim((string) ($item['descricao'] ?? ''));
+            $descricao = trim((string) ($item['descricao'] ?? $item['nome'] ?? ''));
             $quantidade = (float) ($item['quantidade'] ?? 0);
-            $valorUnitario = (float) ($item['valor_unitario'] ?? $item['preco_unitario'] ?? $item['preco'] ?? 0);
-            $valorTotalLinha = (float) ($item['valor_total_linha'] ?? $item['valor_total'] ?? 0);
+            $valorUnitario = (float) ($item['preco_unitario'] ?? $item['preco'] ?? 0);
 
-            $this->assertNotSame('', $descricao, "Descricao vazia no item {$idx} ({$entry['file']})");
-            $this->assertGreaterThan(0, $quantidade, "Quantidade invalida no item {$idx} ({$entry['file']})");
-            $this->assertGreaterThanOrEqual(0, $valorUnitario, "Valor unitario invalido no item {$idx} ({$entry['file']})");
-            $this->assertGreaterThanOrEqual(0, $valorTotalLinha, "Valor total invalido no item {$idx} ({$entry['file']})");
-
-            $identificadores = [
-                trim((string) ($item['codigo'] ?? '')),
-                trim((string) ($item['ref'] ?? '')),
-                trim((string) ($item['referencia'] ?? '')),
-                trim((string) ($item['codigo_barras'] ?? '')),
-            ];
-            $temIdentificador = false;
-            foreach ($identificadores as $id) {
-                if ($id !== '') {
-                    $temIdentificador = true;
-                    break;
-                }
-            }
-            $this->assertTrue($temIdentificador, "Item {$idx} sem identificador ({$entry['file']})");
+            $this->assertNotSame('', $descricao, "Descricao vazia no item {$idx} ({$fileName})");
+            $this->assertGreaterThan(0, $quantidade, "Quantidade invalida no item {$idx} ({$fileName})");
+            $this->assertGreaterThanOrEqual(0, $valorUnitario, "Valor unitario invalido no item {$idx} ({$fileName})");
+            $this->assertNotSame('', trim((string) ($item['ref'] ?? '')), "Referencia vazia no item {$idx} ({$fileName})");
         }
     }
 
-    public function test_preview_pdf_reutiliza_importacao_sem_duplicar(): void
+    public function test_rejeita_tipo_antigo_de_importacao_pdf(): void
     {
-        $entry = self::pdfExamplesProvider()['Pdf/16552 - SIERRA.pdf'][0];
-
         $usuario = Usuario::create([
-            'nome' => 'Usuario Preview PDF',
-            'email' => 'pdf-preview@example.com',
+            'nome' => 'Usuario Tipo Antigo',
+            'email' => 'xml-tipo-antigo@example.com',
             'senha' => 'teste',
             'ativo' => 1,
         ]);
 
-        $path = base_path('tests/Fixtures/Importacao/' . $entry['file']);
-        $this->assertFileExists($path);
+        $path = base_path('docs/SIERRABELM__730759.xml');
+        $file = new UploadedFile($path, 'SIERRABELM__730759.xml', 'application/xml', null, true);
 
-        $file1 = new UploadedFile($path, basename($path), 'application/pdf', null, true);
-        $first = $this->actingAs($usuario, 'sanctum')->post('/api/v1/pedidos/import', [
-            'tipo_importacao' => $entry['tipo_importacao'],
-            'arquivo' => $file1,
-        ]);
+        $response = $this->actingAs($usuario, 'sanctum')
+            ->post('/api/v1/pedidos/import', [
+                'tipo_importacao' => 'PRODUTOS_PDF_SIERRA',
+                'arquivo' => $file,
+            ]);
 
-        $first->assertStatus(200);
-        $firstImportacaoId = $first->json('importacao_id');
-        $this->assertNotNull($firstImportacaoId);
-
-        $file2 = new UploadedFile($path, basename($path), 'application/pdf', null, true);
-        $second = $this->actingAs($usuario, 'sanctum')->post('/api/v1/pedidos/import', [
-            'tipo_importacao' => $entry['tipo_importacao'],
-            'arquivo' => $file2,
-        ]);
-
-        $second->assertStatus(200);
-        $second->assertJsonPath('mensagem', 'Arquivo já processado. Usando dados existentes.');
-        $this->assertSame($firstImportacaoId, $second->json('importacao_id'));
-
-        $hashArquivo = hash_file('sha256', $path);
-        $hash = hash('sha256', $hashArquivo . '|' . $entry['tipo_importacao']);
-        $this->assertSame(1, PedidoImportacao::query()->where('arquivo_hash', $hash)->count());
-    }
-
-    public function test_reimportacao_pdf_confirmado_retorna_409(): void
-    {
-        $entry = self::pdfExamplesProvider()['Pdf/19166 - SIERRA.pdf'][0];
-
-        $usuario = Usuario::create([
-            'nome' => 'Usuario Confirmado PDF',
-            'email' => 'pdf-confirmado@example.com',
-            'senha' => 'teste',
-            'ativo' => 1,
-        ]);
-
-        $path = base_path('tests/Fixtures/Importacao/' . $entry['file']);
-        $this->assertFileExists($path);
-
-        $hashArquivo = hash_file('sha256', $path);
-        $hash = hash('sha256', $hashArquivo . '|' . $entry['tipo_importacao']);
-
-        PedidoImportacao::create([
-            'arquivo_nome' => basename($path),
-            'arquivo_hash' => $hash,
-            'usuario_id' => $usuario->id,
-            'status' => 'confirmado',
-            'pedido_id' => null,
-        ]);
-
-        $file = new UploadedFile($path, basename($path), 'application/pdf', null, true);
-        $response = $this->actingAs($usuario, 'sanctum')->post('/api/v1/pedidos/import', [
-            'tipo_importacao' => $entry['tipo_importacao'],
-            'arquivo' => $file,
-        ]);
-
-        $response->assertStatus(409);
+        $response->assertStatus(422);
         $response->assertJsonPath('sucesso', false);
-        $response->assertJsonPath('mensagem', 'Este arquivo já foi importado anteriormente para este tipo de importação.');
-        $this->assertStringNotContainsString('Ã', (string) $response->json('mensagem'));
     }
 }

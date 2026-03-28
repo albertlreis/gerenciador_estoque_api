@@ -10,6 +10,11 @@ use Illuminate\Support\Facades\Storage;
 
 class OutletCatalogoPdfService
 {
+    public function __construct(
+        private readonly OutletCatalogoPricingService $pricingService,
+    ) {
+    }
+
     /**
      * @param Collection<int, Produto>|iterable<Produto> $produtos
      * @return array{conjuntos: array<int, array<string,mixed>>, itens_avulsos: array<int, array<string,mixed>>}
@@ -73,6 +78,13 @@ class OutletCatalogoPdfService
                         return null;
                     }
 
+                    $pricing = $this->pricingService->build(collect([$variacao]));
+                    $precoBase = $pricing['preco_venda'];
+                    $precoOutlet = $pricing['preco_final_venda'] ?? $pricing['preco_outlet'] ?? $precoBase;
+                    $temPrecoOriginal = $precoBase !== null
+                        && $precoOutlet !== null
+                        && (float) $precoOutlet < (float) $precoBase;
+
                     return [
                         'variacao_id' => (int) $variacao->id,
                         'produto_id' => (int) $produto->id,
@@ -84,7 +96,12 @@ class OutletCatalogoPdfService
                         'referencia' => $variacao->referencia,
                         'nome' => $variacao->nome,
                         'nome_completo' => $variacao->nome_completo,
-                        'preco' => $variacao->preco !== null ? (float) $variacao->preco : null,
+                        'preco' => $precoBase !== null ? (float) $precoBase : null,
+                        'preco_outlet' => $precoOutlet !== null ? (float) $precoOutlet : null,
+                        'preco_label' => $precoOutlet !== null ? $this->formatMoney((float) $precoOutlet) : '-',
+                        'preco_original_label' => $temPrecoOriginal ? $this->formatMoney((float) $precoBase) : null,
+                        'percentual_desconto' => (float) ($pricing['percentual_desconto'] ?? 0),
+                        'pagamento_label' => $pricing['pagamento_label'] ?? null,
                         'qtd_total_restante' => $qtdTotalRestante,
                         'imagem_src' => $this->resolverImagemSrcVariacao($variacao),
                         'atributos_acabamentos' => $this->mapearAtributos($variacao),
@@ -123,6 +140,9 @@ class OutletCatalogoPdfService
                     'referencia' => $disponivel['referencia'],
                     'nome' => $disponivel['nome_completo'] ?: $disponivel['produto_nome'],
                     'preco' => $disponivel['preco'],
+                    'preco_outlet' => $disponivel['preco_outlet'],
+                    'preco_label' => $disponivel['preco_label'],
+                    'preco_original_label' => $disponivel['preco_original_label'],
                     'qtd' => $disponivel['qtd_total_restante'],
                 ];
             })
@@ -144,6 +164,7 @@ class OutletCatalogoPdfService
             'imagem_src' => $heroSrc,
             'preco_modo' => $precoModo,
             'preco_label' => $precoExibicao['label'],
+            'preco_original_label' => $precoExibicao['original_label'],
             'preco_valor' => $precoExibicao['valor'],
             'itens' => $itensDisponiveis->all(),
             'variacao_ids' => $itensDisponiveis->pluck('produto_variacao_id')->all(),
@@ -152,7 +173,7 @@ class OutletCatalogoPdfService
 
     /**
      * @param Collection<int, array<string,mixed>> $itensDisponiveis
-     * @return array{label:string,valor:float|null}
+     * @return array{label:string,valor:float|null,original_label:string|null}
      */
     private function buildPrecoConjunto(string $precoModo, ProdutoConjunto $conjunto, Collection $itensDisponiveis): array
     {
@@ -160,13 +181,18 @@ class OutletCatalogoPdfService
             return [
                 'label' => 'Preço por item',
                 'valor' => null,
+                'original_label' => null,
             ];
         }
 
         if ($precoModo === 'apartir') {
             $principalId = (int) ($conjunto->principal_variacao_id ?? 0);
             $principal = $itensDisponiveis->firstWhere('produto_variacao_id', $principalId);
-            $valor = $principal['preco'] ?? $itensDisponiveis
+            $valor = $principal['preco_outlet'] ?? $itensDisponiveis
+                ->pluck('preco_outlet')
+                ->filter(fn ($preco) => $preco !== null)
+                ->min();
+            $valorOriginal = $principal['preco'] ?? $itensDisponiveis
                 ->pluck('preco')
                 ->filter(fn ($preco) => $preco !== null)
                 ->min();
@@ -174,10 +200,17 @@ class OutletCatalogoPdfService
             return [
                 'label' => $valor !== null ? 'A partir de ' . $this->formatMoney((float) $valor) : 'A partir de -',
                 'valor' => $valor !== null ? (float) $valor : null,
+                'original_label' => $valorOriginal !== null && $valor !== null && (float) $valor < (float) $valorOriginal
+                    ? 'De ' . $this->formatMoney((float) $valorOriginal)
+                    : null,
             ];
         }
 
         $total = (float) $itensDisponiveis
+            ->pluck('preco_outlet')
+            ->filter(fn ($preco) => $preco !== null)
+            ->sum();
+        $totalOriginal = (float) $itensDisponiveis
             ->pluck('preco')
             ->filter(fn ($preco) => $preco !== null)
             ->sum();
@@ -185,6 +218,7 @@ class OutletCatalogoPdfService
         return [
             'label' => $this->formatMoney($total),
             'valor' => $total,
+            'original_label' => $totalOriginal > 0 && $total < $totalOriginal ? $this->formatMoney($totalOriginal) : null,
         ];
     }
 
@@ -206,8 +240,11 @@ class OutletCatalogoPdfService
             'largura' => $item['largura'],
             'profundidade' => $item['profundidade'],
             'imagem_src' => $item['imagem_src'],
-            'preco' => $item['preco'],
-            'preco_label' => $item['preco'] !== null ? $this->formatMoney((float) $item['preco']) : '-',
+            'preco' => $item['preco_outlet'],
+            'preco_label' => $item['preco_label'],
+            'preco_original_label' => $item['preco_original_label'],
+            'percentual_desconto' => $item['percentual_desconto'],
+            'pagamento_label' => $item['pagamento_label'],
             'qtd_total_restante' => $item['qtd_total_restante'],
             'atributos_acabamentos' => $item['atributos_acabamentos'],
         ];

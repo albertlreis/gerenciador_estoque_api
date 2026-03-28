@@ -122,6 +122,7 @@ class ProdutoController extends Controller
                 'cards' => $cards,
                 'conjuntos' => $catalogoPdf['conjuntos'],
                 'itensAvulsos' => $catalogoPdf['itens_avulsos'],
+                'generatedAt' => now('America/Belem')->format('d/m/Y H:i'),
             ];
 
             if (app()->environment('local')) {
@@ -175,7 +176,9 @@ class ProdutoController extends Controller
                 'ID',
                 'Nome',
                 'Categoria',
-                'Referencias',
+                'Codigo_Produto',
+                'SKUs_Internos',
+                'Referencias_Historicas',
                 'Preco_Minimo',
                 'Outlet_Restante',
             ], ';');
@@ -185,6 +188,8 @@ class ProdutoController extends Controller
                     $item['id'],
                     $item['nome'],
                     $item['categoria_nome'],
+                    $item['codigo_produto'],
+                    $item['skus_internos'],
                     $item['referencias'],
                     $item['preco_venda'] !== null ? number_format((float) $item['preco_venda'], 2, ',', '') : '',
                     $item['outlet_restante_total'],
@@ -239,6 +244,12 @@ class ProdutoController extends Controller
             ->unique()
             ->implode(', ');
 
+        $skusInternos = $variacoes
+            ->pluck('sku_interno')
+            ->filter()
+            ->unique()
+            ->implode(', ');
+
         $outletRestanteTotal = $variacoes->sum(function ($variacao) {
             return $variacao->relationLoaded('outlets')
                 ? (int) $variacao->outlets->sum('quantidade_restante')
@@ -250,10 +261,12 @@ class ProdutoController extends Controller
         return [
             'id' => $produto->id,
             'nome' => $produto->nome,
+            'codigo_produto' => $produto->codigo_produto,
             'altura' => $produto->altura,
             'largura' => $produto->largura,
             'profundidade' => $produto->profundidade,
             'categoria_nome' => $produto->categoria?->nome,
+            'skus_internos' => $skusInternos,
             'referencias' => $referencias,
             'atributos_acabamentos' => $atributosAcabamentos,
             'imagem_src' => $imagem,

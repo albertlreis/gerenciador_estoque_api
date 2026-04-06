@@ -139,7 +139,7 @@ class ImportacaoEstoquePlanilhaTest extends TestCase
         $this->assertDatabaseHas('fornecedores', ['nome' => 'Fornecedor Alpha']);
         $this->assertDatabaseHas('fornecedores', ['nome' => 'Fornecedor Beta']);
 
-        $variacaoSemReferencia = ProdutoVariacao::where('referencia', 'like', 'SC-%')->first();
+        $variacaoSemReferencia = ProdutoVariacao::where('referencia', 'like', 'LEG-%')->first();
         $this->assertNotNull($variacaoSemReferencia);
 
         $outlet = ProdutoVariacaoOutlet::first();

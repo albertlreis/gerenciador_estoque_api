@@ -432,7 +432,7 @@ class ImportacaoNormalizadaPipelineTest extends TestCase
 
         $this->assertCount(3, $linhasRefDup);
         $this->assertCount(3, $linhasRefDup->pluck('variacao_id_vinculada')->filter()->unique());
-        $this->assertCount(4, ProdutoVariacao::query()->count());
+        $this->assertSame(4, ProdutoVariacao::query()->count());
 
         $linhaLoja = $linhasRefDup->firstWhere('localizacao', 'A-01-01');
         $this->assertNotNull($linhaLoja);
@@ -459,9 +459,9 @@ class ImportacaoNormalizadaPipelineTest extends TestCase
         ]);
 
         $variacaoLoja = ProdutoVariacao::query()->findOrFail($linhaLoja->variacao_id_vinculada);
-        $this->assertSame('60.00', (string) $variacaoLoja->dimensao_1);
-        $this->assertSame('70.00', (string) $variacaoLoja->dimensao_2);
-        $this->assertSame('80.00', (string) $variacaoLoja->dimensao_3);
+        $this->assertSame(60.0, (float) $variacaoLoja->dimensao_1);
+        $this->assertSame(70.0, (float) $variacaoLoja->dimensao_2);
+        $this->assertSame(80.0, (float) $variacaoLoja->dimensao_3);
 
         $linhaVendida = $linhasRefDup->firstWhere('status', 'Vendido');
         $this->assertNotNull($linhaVendida);

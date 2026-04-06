@@ -20,7 +20,6 @@ use DateTimeInterface;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
-use PhpOffice\PhpSpreadsheet\IOFactory;
 use PhpOffice\PhpSpreadsheet\Shared\Date as SpreadsheetDate;
 use Throwable;
 
@@ -31,6 +30,7 @@ final class EstoqueImportService
         private DimensoesParser      $dimParser,
         private ProdutoUpsertService $produtoUpsert,
         private NomeAtributosParser  $nomeAttrParser,
+        private SpreadsheetWorksheetReader $worksheetReader,
     ) {}
 
     /**
@@ -63,20 +63,18 @@ final class EstoqueImportService
             'status'       => 'pendente',
         ]);
 
-        $spreadsheet = IOFactory::load($arquivo->getRealPath());
-
         $validos = 0;
         $invalidos = 0;
         $detectedNovoLayout = false;
 
-        foreach ($spreadsheet->getWorksheetIterator() as $ws) {
-            $sheetName = (string)$ws->getTitle();
+        foreach ($this->worksheetReader->read($arquivo->getRealPath()) as $worksheet) {
+            $sheetName = (string) ($worksheet['title'] ?? '');
 
             if ($this->shouldSkipSheet($sheetName)) {
                 continue;
             }
 
-            $rows = $ws->toArray(null, true, true, true);
+            $rows = $worksheet['rows'] ?? [];
             if (!$rows || count($rows) < 2) {
                 continue;
             }
@@ -1210,4 +1208,3 @@ final class EstoqueImportService
         return $out;
     }
 }
-

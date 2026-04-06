@@ -16,11 +16,15 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
-use PhpOffice\PhpSpreadsheet\IOFactory;
 use PhpOffice\PhpSpreadsheet\Shared\Date as SpreadsheetDate;
 
 final class ImportacaoNormalizadaSierraService
 {
+    public function __construct(
+        private readonly SpreadsheetWorksheetReader $worksheetReader
+    ) {
+    }
+
     /**
      * @var array<string, string>
      */
@@ -139,7 +143,6 @@ final class ImportacaoNormalizadaSierraService
 
         try {
             DB::transaction(function () use ($arquivo, $importacao, $modoCargaInicial): void {
-                $spreadsheet = IOFactory::load($arquivo->getRealPath());
                 $abas = [];
                 $modoCargaInicialDetectado = $modoCargaInicial;
                 $metricas = [
@@ -147,13 +150,13 @@ final class ImportacaoNormalizadaSierraService
                     'status' => [],
                 ];
 
-                foreach ($spreadsheet->getWorksheetIterator() as $worksheet) {
-                    $sheetName = trim((string) $worksheet->getTitle());
+                foreach ($this->worksheetReader->read($arquivo->getRealPath()) as $worksheet) {
+                    $sheetName = trim((string) ($worksheet['title'] ?? ''));
                     if ($this->shouldSkipSheet($sheetName)) {
                         continue;
                     }
 
-                    $rows = $worksheet->toArray(null, true, true, true);
+                    $rows = $worksheet['rows'] ?? [];
                     if (!$rows || count($rows) < 2) {
                         continue;
                     }

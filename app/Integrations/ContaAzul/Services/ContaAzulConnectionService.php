@@ -60,10 +60,13 @@ class ContaAzulConnectionService
     {
         $access = (string) ($tokenResponse['access_token'] ?? '');
         if ($access === '') {
-            throw new ContaAzulException('Resposta OAuth sem access_token.');
+            throw new ContaAzulException('Resposta OAuth sem access_token.', 'token_sem_access_token');
         }
 
-        $refresh = isset($tokenResponse['refresh_token']) ? (string) $tokenResponse['refresh_token'] : null;
+        $existingToken = $conexao->token;
+        $refresh = isset($tokenResponse['refresh_token']) && $tokenResponse['refresh_token'] !== ''
+            ? (string) $tokenResponse['refresh_token']
+            : ($existingToken?->refresh_token ? (string) $existingToken->refresh_token : null);
         $expiresIn = isset($tokenResponse['expires_in']) ? (int) $tokenResponse['expires_in'] : 3600;
         $scope = isset($tokenResponse['scope']) ? (string) $tokenResponse['scope'] : null;
 
@@ -93,7 +96,7 @@ class ContaAzulConnectionService
     {
         $token = $conexao->token;
         if (!$token) {
-            throw new ContaAzulException('Conexão sem tokens.');
+            throw new ContaAzulException('Conexão sem tokens.', 'conexao_sem_token');
         }
 
         if (!$token->isAccessTokenExpired()) {
@@ -103,7 +106,7 @@ class ContaAzulConnectionService
         $refresh = $token->refresh_token;
         if (!$refresh) {
             $conexao->update(['status' => 'erro', 'ultimo_erro' => 'Refresh token ausente.']);
-            throw new ContaAzulException('Refresh token ausente; reconecte a Conta Azul.');
+            throw new ContaAzulException('Refresh token ausente; reconecte a Conta Azul.', 'refresh_token_ausente');
         }
 
         $token->refresh();
@@ -122,13 +125,13 @@ class ContaAzulConnectionService
             StructuredLog::integration('conta_azul.token.refresh_failed', [
                 'conexao_id' => $conexao->id,
             ], 'error');
-            throw new ContaAzulException('Falha ao renovar token: ' . $e->getMessage(), 0, $e);
+            throw new ContaAzulException('Falha ao renovar token: ' . $e->getMessage(), 'refresh_token_falhou', [], $e);
         }
 
         $conexao->load('token');
         $new = $conexao->token;
         if (!$new) {
-            throw new ContaAzulException('Token não encontrado após refresh.');
+            throw new ContaAzulException('Token não encontrado após refresh.', 'token_nao_encontrado');
         }
 
         return (string) $new->access_token;

@@ -8,8 +8,10 @@ class ContaAzulHttpException extends ContaAzulException
         string $message,
         public readonly int $statusCode,
         public readonly ?string $responseBody = null,
+        string $reason = 'http_error',
+        array $context = [],
         ?\Throwable $previous = null
     ) {
-        parent::__construct($message, 0, $previous);
+        parent::__construct($message, $reason, $context, $previous);
     }
 }

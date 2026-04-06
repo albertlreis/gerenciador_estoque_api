@@ -103,3 +103,20 @@ Use ferramentas como Insomnia, Postman ou Swagger para testar os seguintes endpo
 | POST   | /api/pedidos       | Criação de pedido com variações |
 | POST   | /api/movimentacoes | Lançamento de entrada ou saída  |
 
+## Conta Azul OAuth
+
+Configure as variáveis `CONTA_AZUL_*` antes de iniciar a integração com a Conta Azul.
+
+```env
+CONTA_AZUL_CLIENT_ID=
+CONTA_AZUL_CLIENT_SECRET=
+CONTA_AZUL_REDIRECT_URI=http://localhost:8001/api/v1/integrations/conta-azul/callback
+CONTA_AZUL_AUTH_URL=https://auth.contaazul.com
+CONTA_AZUL_AUTHORIZE_PATH=/login
+CONTA_AZUL_TOKEN_PATH=/oauth2/token
+CONTA_AZUL_BASE_URL=https://api-v2.contaazul.com
+CONTA_AZUL_SCOPE="openid profile aws.cognito.signin.user.admin"
+CONTA_AZUL_OAUTH_FRONT_REDIRECT=http://localhost:3000/integracoes/conta-azul
+```
+
+A `CONTA_AZUL_REDIRECT_URI` precisa ser exatamente igual à URL cadastrada no Portal do Desenvolvedor da Conta Azul. Qualquer divergência entre a URL cadastrada e a URL enviada no OAuth pode causar erro `invalid_grant` ou falha de redirecionamento.

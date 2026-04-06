@@ -4,7 +4,7 @@ namespace Tests\Unit\Integrations\ContaAzul;
 
 use App\Integrations\ContaAzul\Mappers\ContaAzulTituloMapper;
 use App\Models\ContaReceber;
-use PHPUnit\Framework\TestCase;
+use Tests\TestCase;
 
 class ContaAzulTituloMapperTest extends TestCase
 {

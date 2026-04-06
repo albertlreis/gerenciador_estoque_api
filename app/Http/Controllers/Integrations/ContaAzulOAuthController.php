@@ -4,7 +4,9 @@ namespace App\Http\Controllers\Integrations;
 
 use App\Http\Controllers\Controller;
 use App\Integrations\ContaAzul\Auth\ContaAzulOAuthService;
+use App\Integrations\ContaAzul\Exceptions\ContaAzulException;
 use App\Integrations\ContaAzul\Services\ContaAzulConnectionService;
+use App\Integrations\ContaAzul\Support\StructuredLog;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -52,7 +54,12 @@ class ContaAzulOAuthController extends Controller
         $error = (string) $request->query('error', '');
 
         if ($error !== '') {
-            return redirect()->away($front . '?ca=erro&reason=' . urlencode($error));
+            StructuredLog::integration('conta_azul.oauth.provider_denied', [
+                'state' => $state !== '' ? $state : null,
+                'provider_error' => $error,
+            ], 'warning');
+
+            return redirect()->away($front . '?ca=erro&reason=' . urlencode('oauth_denied'));
         }
 
         if ($state === '' || $code === '') {
@@ -73,9 +80,33 @@ class ContaAzulOAuthController extends Controller
             $tokens = $this->oauth->exchangeCodeForToken($code);
             $conexao = $this->connections->findOrCreateConexao($lojaId);
             $this->connections->persistTokensFromOAuth($conexao, $tokens);
-            $this->connections->healthcheck($conexao);
+            $ok = $this->connections->healthcheck($conexao);
+
+            if (!$ok) {
+                StructuredLog::integration('conta_azul.oauth.healthcheck_failed', [
+                    'loja_id' => $lojaId,
+                    'state' => $state,
+                    'conexao_id' => $conexao->id,
+                ], 'warning');
+
+                return redirect()->away($front . '?ca=erro&reason=' . urlencode('healthcheck_failed'));
+            }
+        } catch (ContaAzulException $e) {
+            StructuredLog::integration('conta_azul.oauth.callback_failed', array_merge([
+                'loja_id' => $lojaId,
+                'state' => $state,
+                'reason' => $e->reason,
+            ], $e->context), 'warning');
+
+            return redirect()->away($front . '?ca=erro&reason=' . urlencode($e->reason));
         } catch (\Throwable $e) {
-            return redirect()->away($front . '?ca=erro&reason=' . urlencode('troca_token'));
+            StructuredLog::integration('conta_azul.oauth.callback_unexpected_failed', [
+                'loja_id' => $lojaId,
+                'state' => $state,
+                'message' => $e->getMessage(),
+            ], 'error');
+
+            return redirect()->away($front . '?ca=erro&reason=' . urlencode('oauth_callback_failed'));
         }
 
         return redirect()->away($front . '?ca=ok');

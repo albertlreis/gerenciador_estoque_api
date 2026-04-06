@@ -2,9 +2,13 @@
 
 return [
 
-    'base_url' => rtrim((string) env('CONTA_AZUL_BASE_URL', 'https://api.contaazul.com'), '/'),
+    'base_url' => rtrim((string) env('CONTA_AZUL_BASE_URL', 'https://api-v2.contaazul.com'), '/'),
 
     'auth_url' => rtrim((string) env('CONTA_AZUL_AUTH_URL', 'https://auth.contaazul.com'), '/'),
+
+    'authorize_path' => env('CONTA_AZUL_AUTHORIZE_PATH', '/login'),
+
+    'token_path' => env('CONTA_AZUL_TOKEN_PATH', '/oauth2/token'),
 
     'client_id' => env('CONTA_AZUL_CLIENT_ID'),
 

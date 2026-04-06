@@ -1,0 +1,57 @@
+# syntax=docker/dockerfile:1.7
+
+FROM php:8.2-cli-bookworm AS vendor
+
+WORKDIR /app
+
+COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git unzip \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY composer.json composer.lock ./
+RUN composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader --no-scripts --ignore-platform-req=ext-gd --ignore-platform-req=ext-zip
+
+COPY . .
+RUN composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader --no-scripts --ignore-platform-req=ext-gd --ignore-platform-req=ext-zip
+
+FROM node:20-bookworm-slim AS assets
+
+WORKDIR /app
+
+COPY package.json ./
+RUN npm install
+
+COPY . .
+RUN npm run build
+
+FROM php:8.2-fpm-bookworm AS runtime
+
+COPY --from=ghcr.io/mlocati/php-extension-installer:2 /usr/bin/install-php-extensions /usr/local/bin/
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl nginx supervisor \
+    && rm -rf /var/lib/apt/lists/* \
+    && install-php-extensions bcmath exif gd intl opcache pcntl pdo_mysql pdo_sqlite simplexml zip
+
+WORKDIR /var/www/html
+
+COPY --chown=www-data:www-data . .
+COPY --from=vendor --chown=www-data:www-data /app/vendor ./vendor
+COPY --from=assets --chown=www-data:www-data /app/public/build ./public/build
+COPY docker/prod/nginx.conf /etc/nginx/sites-available/default
+COPY docker/prod/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+COPY docker/prod/entrypoint.sh /usr/local/bin/app-entrypoint
+
+RUN chmod +x /usr/local/bin/app-entrypoint \
+    && mkdir -p storage/framework/cache storage/framework/sessions storage/framework/testing storage/framework/views storage/logs bootstrap/cache \
+    && chown -R www-data:www-data storage bootstrap/cache \
+    && rm -f bootstrap/cache/packages.php bootstrap/cache/services.php
+
+EXPOSE 80
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=5 CMD curl -fsS http://127.0.0.1/api/v1/health >/dev/null || exit 1
+
+ENTRYPOINT ["app-entrypoint"]
+CMD ["supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]

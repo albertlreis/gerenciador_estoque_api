@@ -53,13 +53,15 @@ class CarrinhoItemController extends Controller
      * @param int $id
      * @return JsonResponse
      */
-    public function destroy(int $id): JsonResponse
+    public function destroy(int $carrinho, int $item): JsonResponse
     {
-        $item = CarrinhoItem::whereHas('carrinho', function ($q) {
+        $item = CarrinhoItem::where('id_carrinho', $carrinho)
+            ->whereHas('carrinho', function ($q) {
             if (!AuthHelper::podeVisualizarCarrinhosDeTodos()) {
                 $q->where('id_usuario', Auth::id());
             }
-        })->findOrFail($id);
+            })
+            ->findOrFail($item);
 
         $item->delete();
 

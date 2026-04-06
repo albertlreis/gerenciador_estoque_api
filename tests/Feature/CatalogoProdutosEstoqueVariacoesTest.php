@@ -7,6 +7,7 @@ use App\Models\Deposito;
 use App\Models\Estoque;
 use App\Models\Produto;
 use App\Models\ProdutoVariacao;
+use App\Models\ProdutoVariacaoAtributo;
 use App\Models\Usuario;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
@@ -177,5 +178,120 @@ class CatalogoProdutosEstoqueVariacoesTest extends TestCase
         $response->assertStatus(200);
         $data = collect($response->json('data'));
         $this->assertTrue($data->pluck('id')->contains($produto->id));
+    }
+
+    public function test_busca_textual_por_nome_retorna_produto_do_catalogo(): void
+    {
+        $this->autenticar();
+
+        $categoria = Categoria::create(['nome' => 'Categoria Nome']);
+        $produto = Produto::create([
+            'nome' => 'Poltrona Siena Azul',
+            'descricao' => 'Descricao',
+            'id_categoria' => $categoria->id,
+            'ativo' => true,
+        ]);
+
+        ProdutoVariacao::create([
+            'produto_id' => $produto->id,
+            'referencia' => 'POL-001',
+            'nome' => 'Variacao Nome',
+            'preco' => 100,
+            'custo' => 70,
+        ]);
+
+        $response = $this->getJson('/api/v1/produtos?q=Poltrona%20Siena');
+
+        $response->assertStatus(200);
+        $data = collect($response->json('data'));
+        $this->assertTrue($data->pluck('id')->contains($produto->id));
+    }
+
+    public function test_filtro_por_atributos_retorna_apenas_produtos_compativeis(): void
+    {
+        $this->autenticar();
+
+        $categoria = Categoria::create(['nome' => 'Categoria Atributos']);
+
+        $produtoAzul = Produto::create([
+            'nome' => 'Sofa Azul',
+            'descricao' => 'Descricao',
+            'id_categoria' => $categoria->id,
+            'ativo' => true,
+        ]);
+
+        $produtoVerde = Produto::create([
+            'nome' => 'Sofa Verde',
+            'descricao' => 'Descricao',
+            'id_categoria' => $categoria->id,
+            'ativo' => true,
+        ]);
+
+        $variacaoAzul = ProdutoVariacao::create([
+            'produto_id' => $produtoAzul->id,
+            'referencia' => 'ATR-001',
+            'nome' => 'Variacao Azul',
+            'preco' => 100,
+            'custo' => 70,
+        ]);
+
+        $variacaoVerde = ProdutoVariacao::create([
+            'produto_id' => $produtoVerde->id,
+            'referencia' => 'ATR-002',
+            'nome' => 'Variacao Verde',
+            'preco' => 100,
+            'custo' => 70,
+        ]);
+
+        ProdutoVariacaoAtributo::create([
+            'id_variacao' => $variacaoAzul->id,
+            'atributo' => 'cor',
+            'valor' => 'Azul',
+        ]);
+
+        ProdutoVariacaoAtributo::create([
+            'id_variacao' => $variacaoVerde->id,
+            'atributo' => 'cor',
+            'valor' => 'Verde',
+        ]);
+
+        $response = $this->getJson('/api/v1/produtos?atributos[cor][]=Azul');
+
+        $response->assertStatus(200);
+        $ids = collect($response->json('data'))->pluck('id')->all();
+
+        $this->assertContains($produtoAzul->id, $ids);
+        $this->assertNotContains($produtoVerde->id, $ids);
+    }
+
+    public function test_listagem_do_catalogo_retorna_campos_necessarios_para_o_card(): void
+    {
+        $this->autenticar();
+
+        $categoria = Categoria::create(['nome' => 'Categoria Contrato']);
+        $deposito = Deposito::create(['nome' => 'Deposito Contrato']);
+        $produto = Produto::create([
+            'nome' => 'Produto Card',
+            'descricao' => 'Descricao',
+            'id_categoria' => $categoria->id,
+            'altura' => 10,
+            'largura' => 20,
+            'profundidade' => 30,
+            'ativo' => true,
+        ]);
+
+        $variacao = $this->criarVariacaoComEstoque($produto, $deposito, 'CARD-001', 4);
+
+        $response = $this->getJson('/api/v1/produtos?view=completa');
+        $response->assertStatus(200);
+
+        $produtoData = collect($response->json('data'))->firstWhere('id', $produto->id);
+        $this->assertNotNull($produtoData);
+        $this->assertSame('Produto Card', $produtoData['nome']);
+        $this->assertSame(10, (int) $produtoData['altura']);
+        $this->assertSame(20, (int) $produtoData['largura']);
+        $this->assertSame(30, (int) $produtoData['profundidade']);
+        $this->assertIsArray($produtoData['variacoes'] ?? null);
+        $this->assertTrue(collect($produtoData['variacoes'])->pluck('id')->contains($variacao->id));
     }
 }

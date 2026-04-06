@@ -95,7 +95,9 @@ class CarrinhoController extends Controller
             'status' => 'rascunho'
         ]);
 
-        return response()->json(new CarrinhoResource($carrinho->load(['usuario:id,nome', 'cliente'])), 201);
+        return (new CarrinhoResource($carrinho->load(['usuario:id,nome', 'cliente'])))
+            ->response()
+            ->setStatusCode(201);
     }
 
     /**

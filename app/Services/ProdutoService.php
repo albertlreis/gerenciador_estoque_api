@@ -307,6 +307,34 @@ class ProdutoService
             }
         }
 
+        $atributos = collect((array) $request->input('atributos', []))
+            ->map(function ($valores, $atributo) {
+                $lista = collect(is_array($valores) ? $valores : [$valores])
+                    ->filter(fn ($valor) => is_scalar($valor) && trim((string) $valor) !== '')
+                    ->map(fn ($valor) => trim((string) $valor))
+                    ->values()
+                    ->all();
+
+                return [
+                    'atributo' => trim((string) $atributo),
+                    'valores' => $lista,
+                ];
+            })
+            ->filter(fn (array $filtro) => $filtro['atributo'] !== '' && !empty($filtro['valores']))
+            ->values();
+
+        if ($atributos->isNotEmpty()) {
+            $query->whereHas('variacoes', function ($variacoes) use ($atributos) {
+                foreach ($atributos as $filtro) {
+                    $variacoes->whereHas('atributos', function ($atributosQuery) use ($filtro) {
+                        $atributosQuery
+                            ->where('atributo', $filtro['atributo'])
+                            ->whereIn('valor', $filtro['valores']);
+                    });
+                }
+            });
+        }
+
         $query->orderByDesc('created_at');
 
         return $query->paginate($request->integer('per_page', 15));

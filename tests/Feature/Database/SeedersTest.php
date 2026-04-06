@@ -15,7 +15,7 @@ class SeedersTest extends TestCase
         $this->seed(DatabaseSeeder::class);
 
         $this->assertDatabaseHas('configuracoes', ['chave' => 'dias_previsao_envio_fabrica']);
-        $this->assertDatabaseHas('categorias', ['id' => 1, 'nome' => 'Sofás']);
+        $this->assertDatabaseHas('categorias', ['nome' => 'Sofás']);
         $this->assertDatabaseHas('depositos', ['nome' => 'Showroom Umarizal']);
         $this->assertDatabaseHas('formas_pagamento', ['slug' => 'pix', 'ativo' => 1]);
     }

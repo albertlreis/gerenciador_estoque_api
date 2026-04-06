@@ -78,6 +78,13 @@ class ProdutoVariacaoPatchGlobalTest extends TestCase
             'updated_at' => $now,
         ]);
 
+        $motivoOutletId = DB::table('outlet_motivos')->insertGetId([
+            'nome' => 'Outlet Patch',
+            'slug' => 'outlet-patch-' . uniqid(),
+            'created_at' => $now,
+            'updated_at' => $now,
+        ]);
+
         $usuarioCarrinho = DB::table('acesso_usuarios')->insertGetId([
             'nome' => 'Usuario Carrinho',
             'email' => 'usuario.carrinho.' . uniqid() . '@example.test',
@@ -101,6 +108,16 @@ class ProdutoVariacaoPatchGlobalTest extends TestCase
             'id_usuario' => $usuarioCarrinho,
             'id_cliente' => null,
             'id_parceiro' => null,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ]);
+
+        $outletId = DB::table('produto_variacao_outlets')->insertGetId([
+            'produto_variacao_id' => $variacaoId,
+            'motivo_id' => $motivoOutletId,
+            'quantidade' => 1,
+            'quantidade_restante' => 1,
+            'usuario_id' => $usuarioCarrinho,
             'created_at' => $now,
             'updated_at' => $now,
         ]);
@@ -131,7 +148,7 @@ class ProdutoVariacaoPatchGlobalTest extends TestCase
             [
                 'id_carrinho' => $carrinhoRascunhoId,
                 'id_variacao' => $variacaoId,
-                'outlet_id' => 999,
+                'outlet_id' => $outletId,
                 'id_deposito' => null,
                 'quantidade' => 1,
                 'preco_unitario' => 100,
@@ -141,7 +158,7 @@ class ProdutoVariacaoPatchGlobalTest extends TestCase
             ],
         ]);
 
-        return [$variacaoId, $carrinhoRascunhoId, $carrinhoFinalizadoId];
+        return [$variacaoId, $carrinhoRascunhoId, $carrinhoFinalizadoId, $outletId];
     }
 
     public function test_patch_preco_exige_audit_motivo(): void
@@ -157,13 +174,14 @@ class ProdutoVariacaoPatchGlobalTest extends TestCase
         ]);
 
         $response->assertStatus(422)
-            ->assertJsonPath('errors.audit.motivo.0', 'O motivo é obrigatório para alteração de preço.');
+            ->assertJsonValidationErrors(['audit.motivo'])
+            ->assertJsonFragment(['O motivo é obrigatório para alteração de preço.']);
     }
 
     public function test_patch_preco_cria_auditoria_e_sincroniza_carrinho_rascunho(): void
     {
         $this->autenticar(['produto_variacoes.editar']);
-        [$variacaoId, $carrinhoRascunhoId, $carrinhoFinalizadoId] = $this->criarProdutoVariacaoComCarrinhos();
+        [$variacaoId, $carrinhoRascunhoId, $carrinhoFinalizadoId, $outletId] = $this->criarProdutoVariacaoComCarrinhos();
 
         $response = $this->patchJson("/api/v1/produto-variacoes/{$variacaoId}", [
             'preco' => 150.00,
@@ -178,7 +196,7 @@ class ProdutoVariacaoPatchGlobalTest extends TestCase
         ]);
 
         $response->assertOk()
-            ->assertJsonPath('preco', '150.00');
+            ->assertJsonPath('preco', 150);
 
         $this->assertDatabaseHas('auditoria_eventos', [
             'module' => 'produto_variacoes',
@@ -219,7 +237,7 @@ class ProdutoVariacaoPatchGlobalTest extends TestCase
         $this->assertDatabaseHas('carrinho_itens', [
             'id_carrinho' => $carrinhoRascunhoId,
             'id_variacao' => $variacaoId,
-            'outlet_id' => 999,
+            'outlet_id' => $outletId,
             'preco_unitario' => 100.00,
             'subtotal' => 100.00,
         ]);

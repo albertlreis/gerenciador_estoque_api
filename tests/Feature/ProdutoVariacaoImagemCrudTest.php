@@ -16,6 +16,13 @@ class ProdutoVariacaoImagemCrudTest extends TestCase
 {
     use DatabaseTransactions;
 
+    private function fakeImagemPng(string $nome = 'variacao.png'): UploadedFile
+    {
+        return UploadedFile::fake()->createWithContent($nome, base64_decode(
+            'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+yF9kAAAAASUVORK5CYII='
+        ));
+    }
+
     private function autenticarUsuario(): Usuario
     {
         $usuario = Usuario::create([
@@ -109,7 +116,7 @@ class ProdutoVariacaoImagemCrudTest extends TestCase
         Storage::fake('public');
         $this->autenticarUsuario();
         $variacaoId = $this->criarVariacao();
-        $arquivo = UploadedFile::fake()->image('variacao.jpg');
+        $arquivo = $this->fakeImagemPng('variacao.png');
 
         $post = $this->post("/api/v1/variacoes/{$variacaoId}/imagem", [
             'imagem' => $arquivo,
@@ -144,11 +151,11 @@ class ProdutoVariacaoImagemCrudTest extends TestCase
         $variacaoId = $this->criarVariacao();
 
         $this->post("/api/v1/variacoes/{$variacaoId}/imagem", [
-            'imagem' => UploadedFile::fake()->image('inicial.jpg'),
+            'imagem' => $this->fakeImagemPng('inicial.png'),
         ])->assertCreated();
 
         $update = $this->post("/api/v1/variacoes/{$variacaoId}/imagem", [
-            'imagem' => UploadedFile::fake()->image('atualizada.jpg'),
+            'imagem' => $this->fakeImagemPng('atualizada.png'),
         ]);
         $update->assertOk()->assertJsonPath('id_variacao', $variacaoId);
 
@@ -167,12 +174,12 @@ class ProdutoVariacaoImagemCrudTest extends TestCase
 
         $this->post("/api/v1/variacoes/{$variacaoId}/imagem", [
             '_method' => 'PUT',
-            'imagem' => UploadedFile::fake()->image('put-1.jpg'),
+            'imagem' => $this->fakeImagemPng('put-1.png'),
         ])->assertOk()->assertJsonPath('id_variacao', $variacaoId);
 
         $this->post("/api/v1/variacoes/{$variacaoId}/imagem", [
             '_method' => 'PUT',
-            'imagem' => UploadedFile::fake()->image('put-2.jpg'),
+            'imagem' => $this->fakeImagemPng('put-2.png'),
         ])->assertOk()->assertJsonPath('id_variacao', $variacaoId);
 
         $count = DB::table('produto_variacao_imagens')
@@ -189,7 +196,7 @@ class ProdutoVariacaoImagemCrudTest extends TestCase
         $variacaoId = $this->criarVariacao();
 
         $this->post("/api/v1/variacoes/{$variacaoId}/imagem", [
-            'imagem' => UploadedFile::fake()->image('delete.jpg'),
+            'imagem' => $this->fakeImagemPng('delete.png'),
         ])->assertCreated();
 
         $this->deleteJson("/api/v1/variacoes/{$variacaoId}/imagem")
@@ -203,4 +210,3 @@ class ProdutoVariacaoImagemCrudTest extends TestCase
             ->assertNotFound();
     }
 }
-

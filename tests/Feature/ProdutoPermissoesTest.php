@@ -13,6 +13,13 @@ use Tests\TestCase;
 
 class ProdutoPermissoesTest extends TestCase
 {
+    private function fakeImagemPng(string $nome = 'foto.png'): UploadedFile
+    {
+        return UploadedFile::fake()->createWithContent($nome, base64_decode(
+            'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+yF9kAAAAASUVORK5CYII='
+        ));
+    }
+
     private function criarUsuario(array $perfis = [], array $permissoes = []): Usuario
     {
         $usuario = Usuario::create([
@@ -85,7 +92,7 @@ class ProdutoPermissoesTest extends TestCase
         [$categoriaId, $fornecedorId, $now] = $this->criarProdutoBase();
         $produtoId = $this->criarProdutoDb($categoriaId, $fornecedorId, $now);
 
-        $arquivo = UploadedFile::fake()->image('foto.jpg');
+        $arquivo = $this->fakeImagemPng();
 
         $response = $this->post(
             "/api/v1/produtos/{$produtoId}/imagens",

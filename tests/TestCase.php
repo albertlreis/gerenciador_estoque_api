@@ -41,14 +41,14 @@ abstract class TestCase extends BaseTestCase
 
         $this->recreateTestingDatabase();
 
-        $externalPath = base_path('..' . DIRECTORY_SEPARATOR . 'autenticacao_api' . DIRECTORY_SEPARATOR . 'database' . DIRECTORY_SEPARATOR . 'migrations');
-        $relativePrefix = '..' . DIRECTORY_SEPARATOR . 'autenticacao_api' . DIRECTORY_SEPARATOR . 'database' . DIRECTORY_SEPARATOR . 'migrations';
-        $this->runExternalMigrations($externalPath, $relativePrefix);
-
         Artisan::call('migrate', [
             '--env' => 'testing',
             '--force' => true,
         ]);
+
+        $externalPath = base_path('..' . DIRECTORY_SEPARATOR . 'autenticacao_api' . DIRECTORY_SEPARATOR . 'database' . DIRECTORY_SEPARATOR . 'migrations');
+        $relativePrefix = '..' . DIRECTORY_SEPARATOR . 'autenticacao_api' . DIRECTORY_SEPARATOR . 'database' . DIRECTORY_SEPARATOR . 'migrations';
+        $this->runExternalMigrations($externalPath, $relativePrefix);
     }
 
     protected function recreateTestingDatabase(): void
@@ -66,6 +66,9 @@ abstract class TestCase extends BaseTestCase
         $port = (string) env('DB_PORT', '3306');
         $user = (string) env('DB_USERNAME', 'root');
         $pass = (string) env('DB_PASSWORD', '');
+
+        DB::disconnect();
+        DB::purge();
 
         $pdo = new PDO("mysql:host={$host};port={$port};charset=utf8mb4", $user, $pass, [
             PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
@@ -91,6 +94,11 @@ abstract class TestCase extends BaseTestCase
 
         foreach ($files as $file) {
             $migration = pathinfo($file, PATHINFO_FILENAME);
+
+            if (str_contains($migration, 'create_personal_access_tokens_table') && Schema::hasTable('personal_access_tokens')) {
+                continue;
+            }
+
             if ($hasMigrationsTable) {
                 if (DB::table('migrations')->where('migration', $migration)->exists()) {
                     continue;

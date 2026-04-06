@@ -20,6 +20,13 @@ class ProdutoConjuntoCrudTest extends TestCase
     private int $categoriaId;
     private int $fornecedorId;
 
+    private function fakeImagemPng(string $nome = 'hero.png'): UploadedFile
+    {
+        return UploadedFile::fake()->createWithContent($nome, base64_decode(
+            'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+yF9kAAAAASUVORK5CYII='
+        ));
+    }
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -132,7 +139,7 @@ class ProdutoConjuntoCrudTest extends TestCase
         ]);
 
         $upload = $this->post("/api/v1/produto-conjuntos/{$conjunto->id}/hero", [
-            'file' => UploadedFile::fake()->image('hero.jpg'),
+            'file' => $this->fakeImagemPng(),
         ]);
 
         $upload->assertOk()

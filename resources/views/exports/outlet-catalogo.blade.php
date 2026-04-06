@@ -366,7 +366,7 @@
         <table class="header-shell">
             <tr>
                 <td class="header-logo">
-                    <img src="{{ public_path('logo.png') }}" width="118" alt="Logo Sierra"/>
+                    <img src="{{ !extension_loaded('gd') ? 'data:image/svg+xml;base64,' . base64_encode('<svg xmlns="http://www.w3.org/2000/svg" width="118" height="26" viewBox="0 0 118 26"><rect width="118" height="26" rx="4" fill="#1f1a17"/><text x="59" y="17" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" fill="#f5ede2">Sierra</text></svg>') : public_path('logo.png') }}" width="118" alt="Logo Sierra"/>
                 </td>
                 <td class="header-copy">
                     <div class="header-kicker">Sierra Collection</div>

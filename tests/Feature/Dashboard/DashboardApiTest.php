@@ -197,17 +197,22 @@ class DashboardApiTest extends TestCase
             'updated_at' => now(),
         ]);
 
-        DB::table('estoque')->insert([
-            'id_variacao' => $variacaoId,
-            'id_deposito' => $depositoId,
-            'quantidade' => 2,
-            'created_at' => now(),
-            'updated_at' => now(),
-        ]);
+        DB::table('estoque')->updateOrInsert(
+            [
+                'id_variacao' => $variacaoId,
+                'id_deposito' => $depositoId,
+            ],
+            [
+                'quantidade' => 2,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]
+        );
 
         DB::table('estoque_movimentacoes')->insert([
             [
                 'id_variacao' => $variacaoId,
+                'id_deposito_origem' => null,
                 'id_deposito_destino' => $depositoId,
                 'id_usuario' => $usuario->id,
                 'tipo' => 'entrada',
@@ -219,6 +224,7 @@ class DashboardApiTest extends TestCase
             [
                 'id_variacao' => $variacaoId,
                 'id_deposito_origem' => $depositoId,
+                'id_deposito_destino' => null,
                 'id_usuario' => $usuario->id,
                 'tipo' => 'saida',
                 'quantidade' => 3,

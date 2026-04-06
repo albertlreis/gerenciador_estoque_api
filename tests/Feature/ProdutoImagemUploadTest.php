@@ -13,6 +13,13 @@ use Tests\TestCase;
 
 class ProdutoImagemUploadTest extends TestCase
 {
+    private function fakeImagemPng(string $nome = 'foto.png'): UploadedFile
+    {
+        return UploadedFile::fake()->createWithContent($nome, base64_decode(
+            'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+yF9kAAAAASUVORK5CYII='
+        ));
+    }
+
     private function criarUsuarioComPerfil(): Usuario
     {
         $usuario = Usuario::create([
@@ -95,7 +102,7 @@ class ProdutoImagemUploadTest extends TestCase
         $this->criarUsuarioComPerfil();
         [$produtoId] = $this->criarProdutoBase();
 
-        $arquivo = UploadedFile::fake()->image('foto.jpg');
+        $arquivo = $this->fakeImagemPng();
 
         $response = $this->post(
             "/api/v1/produtos/{$produtoId}/imagens",

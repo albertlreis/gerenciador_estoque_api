@@ -19,16 +19,8 @@
     </coverage>
     <php>
         <env name="APP_ENV" value="testing"/>
-        <env name="APP_KEY" value="base64:3OQ5fHnE0O2bqvJYz8f6Qj2aNw1xLrVtY7mP0kDcS2U="/>
         <env name="BCRYPT_ROUNDS" value="4"/>
         <env name="CACHE_DRIVER" value="array"/>
-        <env name="DB_CONNECTION" value="mysql"/>
-        <env name="DB_HOST" value="127.0.0.1"/>
-        <env name="DB_PORT" value="13307"/>
-        <env name="DB_DATABASE" value="estoque_test"/>
-        <env name="DB_USERNAME" value="dev"/>
-        <env name="DB_PASSWORD" value="123456"/>
-        <env name="DB_COLLATION" value="utf8mb4_0900_ai_ci"/>
         <env name="MAIL_MAILER" value="array"/>
         <env name="QUEUE_CONNECTION" value="sync"/>
         <env name="SESSION_DRIVER" value="array"/>

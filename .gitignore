@@ -20,7 +20,5 @@ yarn-error.log
 
 public/uploads/
 
-composer.lock
-
 /.config
 /.composer/

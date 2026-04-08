@@ -17,6 +17,7 @@ use App\Integrations\ContaAzul\Services\ReconciliacaoContaAzulService;
 use App\Repositories\Contracts\ContaPagarRepository;
 use App\Repositories\Eloquent\ContaPagarRepositoryEloquent;
 use Illuminate\Database\QueryException;
+use Illuminate\Filesystem\Filesystem;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
@@ -93,6 +94,8 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot()
     {
+        $this->ensureWritablePaths();
+
         Schema::defaultStringLength(191);
 
         config([
@@ -112,5 +115,22 @@ class AppServiceProvider extends ServiceProvider
         }
 
         require_once app_path('Helpers/AuditoriaHelper.php');
+    }
+
+    private function ensureWritablePaths(): void
+    {
+        $filesystem = new Filesystem();
+
+        foreach ([
+            storage_path('framework/cache/data'),
+            storage_path('framework/sessions'),
+            storage_path('framework/views'),
+            storage_path('logs'),
+            base_path('bootstrap/cache'),
+        ] as $path) {
+            if (!$filesystem->isDirectory($path)) {
+                $filesystem->makeDirectory($path, 0775, true);
+            }
+        }
     }
 }

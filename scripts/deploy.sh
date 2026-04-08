@@ -5,10 +5,10 @@
 
 set -euo pipefail
 
-APP_DIR="/home/docker/acadsoft/sierra-estoque"
-HTML_DIR="$APP_DIR/html"
-COMPOSE_FILE="$APP_DIR/docker-compose.yml"
-SERVICE="app"
+APP_DIR="${APP_DIR:-/home/docker/acadsoft/sierra-estoque}"
+HTML_DIR="${HTML_DIR:-$APP_DIR/html}"
+COMPOSE_FILE="${COMPOSE_FILE:-$APP_DIR/docker-compose.yml}"
+SERVICE="${SERVICE:-app}"
 
 DO_GIT=true
 DO_MAINTENANCE=true

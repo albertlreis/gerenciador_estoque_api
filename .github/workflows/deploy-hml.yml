@@ -1,0 +1,112 @@
+name: Deploy Homologation
+
+on:
+  push:
+    branches:
+      - hml
+  workflow_dispatch:
+    inputs:
+      run_migrations:
+        description: Run homologation migrations during deploy
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: homologation-gerenciador-estoque-api
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: estoque_test
+          MYSQL_USER: dev
+          MYSQL_PASSWORD: troque-esta-senha-dev
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: bcmath, exif, gd, iconv, intl, pdo_mysql, simplexml, zip
+          tools: composer:v2
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Prepare environment
+        run: |
+          cp .env.testing.example .env.testing
+          composer install --no-interaction --prefer-dist
+          npm install
+
+      - name: Enable MySQL trigger creation in CI
+        run: |
+          mysql_container="$(docker ps --filter "ancestor=mysql:8.0" --format '{{.ID}}' | head -n 1)"
+
+          if [ -z "${mysql_container}" ]; then
+            echo "MySQL service container not found"
+            exit 1
+          fi
+
+          docker exec "${mysql_container}" mysql -uroot -proot -e "SET GLOBAL log_bin_trust_function_creators = 1;"
+          docker exec "${mysql_container}" mysql -uroot -proot -e "SHOW VARIABLES LIKE 'log_bin_trust_function_creators';"
+
+      - name: Run migrations
+        env:
+          APP_ENV: testing
+        run: php artisan migrate --env=testing --force
+
+      - name: Run tests
+        env:
+          APP_ENV: testing
+        run: php artisan test
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    environment: homologation
+    env:
+      RUN_MIGRATIONS: ${{ github.event_name == 'workflow_dispatch' && inputs.run_migrations || 'false' }}
+
+    steps:
+      - name: Start ssh-agent
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
+
+      - name: Add droplet to known hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -p "${{ secrets.DEPLOY_PORT }}" "${{ secrets.DEPLOY_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Trigger deploy on droplet
+        run: |
+          remote_command="cd /home/docker/acadsoft/sierra-estoque-hml && ./deploy.sh"
+
+          if [ "${RUN_MIGRATIONS}" = "true" ]; then
+            remote_command="${remote_command} --migrate"
+          fi
+
+          ssh -p "${{ secrets.DEPLOY_PORT }}" "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" "${remote_command}"

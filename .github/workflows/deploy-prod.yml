@@ -61,6 +61,18 @@ jobs:
           composer install --no-interaction --prefer-dist
           npm install
 
+      - name: Enable MySQL trigger creation in CI
+        run: |
+          mysql_container="$(docker ps --filter "ancestor=mysql:8.0" --format '{{.ID}}' | head -n 1)"
+
+          if [ -z "${mysql_container}" ]; then
+            echo "MySQL service container not found"
+            exit 1
+          fi
+
+          docker exec "${mysql_container}" mysql -uroot -proot -e "SET GLOBAL log_bin_trust_function_creators = 1;"
+          docker exec "${mysql_container}" mysql -uroot -proot -e "SHOW VARIABLES LIKE 'log_bin_trust_function_creators';"
+
       - name: Run migrations
         env:
           APP_ENV: testing

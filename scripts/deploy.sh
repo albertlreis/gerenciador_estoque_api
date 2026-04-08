@@ -75,6 +75,46 @@ prepare_writable_paths() {
   '
 }
 
+clear_runtime_caches() {
+  log "Limpando config cache…"
+  artisan config:clear
+
+  log "Limpando application cache…"
+  artisan cache:clear
+
+  log "Limpando route cache…"
+  artisan route:clear
+
+  log "Limpando view cache…"
+  artisan view:clear
+
+  log "Limpando event cache…"
+  artisan event:clear || true
+
+  log "Limpando arquivos compilados…"
+  artisan clear-compiled || true
+}
+
+verify_file_cache() {
+  log "Validando escrita/leitura do cache de arquivo…"
+  compose exec -T "$SERVICE" bash -lc "
+    cat >/tmp/cache-smoke.php <<'PHP'
+<?php
+require '/var/www/html/vendor/autoload.php';
+\$app = require '/var/www/html/bootstrap/app.php';
+\$kernel = \$app->make(Illuminate\Contracts\Console\Kernel::class);
+\$kernel->bootstrap();
+cache()->put('deploy-cache-smoke', 'ok', 300);
+if (cache()->get('deploy-cache-smoke') !== 'ok') {
+    fwrite(STDERR, 'cache smoke test failed' . PHP_EOL);
+    exit(1);
+}
+PHP
+    php /tmp/cache-smoke.php
+    rm -f /tmp/cache-smoke.php
+  "
+}
+
 [[ -d "$APP_DIR" ]] || { echo "APP_DIR não encontrado: $APP_DIR"; exit 1; }
 [[ -f "$COMPOSE_FILE" ]] || { echo "docker-compose.yml não encontrado"; exit 1; }
 
@@ -134,8 +174,9 @@ if $DO_COMPOSER; then
   compose exec -T "$SERVICE" bash -lc 'composer install --no-dev --prefer-dist --optimize-autoloader'
 fi
 
-log "Limpando caches…"
-artisan optimize:clear
+clear_runtime_caches
+
+prepare_writable_paths
 
 log "Gerando config cache…"
 artisan config:cache
@@ -145,6 +186,8 @@ artisan route:cache
 
 log "Gerando view cache…"
 artisan view:cache
+
+verify_file_cache
 
 if $DO_MIGRATE; then
   log "Executando migrations…"

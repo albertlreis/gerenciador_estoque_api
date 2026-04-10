@@ -5,10 +5,12 @@ namespace App\Http\Controllers;
 use App\Http\Requests\StoreCarrinhoItemRequest;
 use App\Models\Carrinho;
 use App\Models\CarrinhoItem;
+use App\Models\ProdutoVariacaoOutlet;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use App\Helpers\AuthHelper;
+use Illuminate\Validation\ValidationException;
 
 /**
  * Controller responsável por gerenciar os itens do carrinho.
@@ -31,10 +33,13 @@ class CarrinhoItemController extends Controller
 
         $carrinho = $query->firstOrFail();
 
+        $this->validarOutletSelecionado($request);
+
         $item = CarrinhoItem::updateOrCreate(
             [
                 'id_carrinho' => $carrinho->id,
-                'id_variacao' => $request->id_variacao
+                'id_variacao' => $request->id_variacao,
+                'outlet_id' => $request->outlet_id ?? null,
             ],
             [
                 'quantidade'     => $request->quantidade,
@@ -45,6 +50,36 @@ class CarrinhoItemController extends Controller
         );
 
         return response()->json($item, 201);
+    }
+
+    private function validarOutletSelecionado(StoreCarrinhoItemRequest $request): void
+    {
+        if (!$request->filled('outlet_id')) {
+            return;
+        }
+
+        /** @var ProdutoVariacaoOutlet|null $outlet */
+        $outlet = ProdutoVariacaoOutlet::query()->find($request->outlet_id);
+
+        if (!$outlet || (int) $outlet->produto_variacao_id !== (int) $request->id_variacao) {
+            throw ValidationException::withMessages([
+                'outlet_id' => ['O outlet selecionado nao pertence a variacao informada.'],
+            ]);
+        }
+
+        if ((int) $outlet->quantidade_restante <= 0) {
+            throw ValidationException::withMessages([
+                'outlet_id' => ['O outlet selecionado nao possui saldo disponivel.'],
+            ]);
+        }
+
+        if ((int) $request->quantidade > (int) $outlet->quantidade_restante) {
+            throw ValidationException::withMessages([
+                'quantidade' => [
+                    "Quantidade indisponivel para este outlet. Saldo atual: {$outlet->quantidade_restante}.",
+                ],
+            ]);
+        }
     }
 
     /**

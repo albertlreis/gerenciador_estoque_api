@@ -12,9 +12,11 @@ use App\Models\Estoque;
 use App\Models\EstoqueMovimentacao;
 use App\Models\EstoqueReserva;
 use App\Models\Fornecedor;
+use App\Models\OutletMotivo;
 use App\Models\Pedido;
 use App\Models\Produto;
 use App\Models\ProdutoVariacao;
+use App\Models\ProdutoVariacaoOutlet;
 use App\Models\Usuario;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
@@ -116,6 +118,23 @@ class CatalogoCarrinhoPedidoFluxoTest extends TestCase
         return compact('carrinho', 'item');
     }
 
+    private function criarOutletParaVariacao(ProdutoVariacao $variacao, int $quantidade, ?int $quantidadeRestante = null): ProdutoVariacaoOutlet
+    {
+        $motivo = OutletMotivo::create([
+            'slug' => uniqid('motivo-', false),
+            'nome' => 'Motivo Teste',
+            'ativo' => true,
+        ]);
+
+        return ProdutoVariacaoOutlet::create([
+            'produto_variacao_id' => $variacao->id,
+            'motivo_id' => $motivo->id,
+            'quantidade' => $quantidade,
+            'quantidade_restante' => $quantidadeRestante ?? $quantidade,
+            'usuario_id' => null,
+        ]);
+    }
+
     public function test_cria_carrinho_com_cliente_existente_e_vendedor_selecionado_quando_permitido(): void
     {
         $this->autenticar(['pedidos.selecionar_vendedor', 'carrinhos.finalizar']);
@@ -199,6 +218,147 @@ class CatalogoCarrinhoPedidoFluxoTest extends TestCase
             'id_variacao' => $variacao->id,
             'quantidade' => 3,
             'subtotal' => 360,
+        ]);
+    }
+
+    public function test_adiciona_item_outlet_valido_no_carrinho(): void
+    {
+        $usuario = $this->autenticar(['carrinhos.finalizar'], ['Vendedor']);
+        $cliente = $this->criarCliente();
+        $deposito = Deposito::create(['nome' => 'Deposito Outlet']);
+        ['variacao' => $variacao] = $this->criarProdutoComVariacao([], [], $deposito, 12);
+        $outlet = $this->criarOutletParaVariacao($variacao, 5, 4);
+
+        $carrinho = Carrinho::create([
+            'id_usuario' => $usuario->id,
+            'id_cliente' => $cliente->id,
+            'status' => 'rascunho',
+        ]);
+
+        $response = $this->postJson("/api/v1/carrinhos/{$carrinho->id}/itens", [
+            'id_carrinho' => $carrinho->id,
+            'id_variacao' => $variacao->id,
+            'quantidade' => 3,
+            'preco_unitario' => 99.9,
+            'outlet_id' => $outlet->id,
+        ]);
+
+        $response->assertCreated()
+            ->assertJsonPath('quantidade', 3)
+            ->assertJsonPath('outlet_id', $outlet->id);
+
+        $this->assertDatabaseHas('carrinho_itens', [
+            'id_carrinho' => $carrinho->id,
+            'id_variacao' => $variacao->id,
+            'outlet_id' => $outlet->id,
+            'quantidade' => 3,
+        ]);
+    }
+
+    public function test_rejeita_item_quando_outlet_nao_pertence_a_variacao(): void
+    {
+        $usuario = $this->autenticar(['carrinhos.finalizar'], ['Vendedor']);
+        $cliente = $this->criarCliente();
+        $deposito = Deposito::create(['nome' => 'Deposito Outlet Invalido']);
+        ['variacao' => $variacao] = $this->criarProdutoComVariacao([], [], $deposito, 12);
+        ['variacao' => $outraVariacao] = $this->criarProdutoComVariacao([], [], $deposito, 7);
+        $outlet = $this->criarOutletParaVariacao($outraVariacao, 5, 4);
+
+        $carrinho = Carrinho::create([
+            'id_usuario' => $usuario->id,
+            'id_cliente' => $cliente->id,
+            'status' => 'rascunho',
+        ]);
+
+        $response = $this->postJson("/api/v1/carrinhos/{$carrinho->id}/itens", [
+            'id_carrinho' => $carrinho->id,
+            'id_variacao' => $variacao->id,
+            'quantidade' => 2,
+            'preco_unitario' => 90,
+            'outlet_id' => $outlet->id,
+        ]);
+
+        $response->assertStatus(422)
+            ->assertJsonValidationErrors(['outlet_id']);
+
+        $this->assertSame(
+            'O outlet selecionado nao pertence a variacao informada.',
+            data_get($response->json(), 'errors.outlet_id.0')
+        );
+    }
+
+    public function test_rejeita_item_outlet_quando_quantidade_excede_saldo_restante(): void
+    {
+        $usuario = $this->autenticar(['carrinhos.finalizar'], ['Vendedor']);
+        $cliente = $this->criarCliente();
+        $deposito = Deposito::create(['nome' => 'Deposito Saldo Outlet']);
+        ['variacao' => $variacao] = $this->criarProdutoComVariacao([], [], $deposito, 12);
+        $outlet = $this->criarOutletParaVariacao($variacao, 5, 1);
+
+        $carrinho = Carrinho::create([
+            'id_usuario' => $usuario->id,
+            'id_cliente' => $cliente->id,
+            'status' => 'rascunho',
+        ]);
+
+        $response = $this->postJson("/api/v1/carrinhos/{$carrinho->id}/itens", [
+            'id_carrinho' => $carrinho->id,
+            'id_variacao' => $variacao->id,
+            'quantidade' => 2,
+            'preco_unitario' => 90,
+            'outlet_id' => $outlet->id,
+        ]);
+
+        $response->assertStatus(422)
+            ->assertJsonValidationErrors(['quantidade']);
+
+        $this->assertSame(
+            'Quantidade indisponivel para este outlet. Saldo atual: 1.',
+            data_get($response->json(), 'errors.quantidade.0')
+        );
+    }
+
+    public function test_mesma_variacao_pode_ter_linha_normal_e_linha_outlet_no_mesmo_carrinho(): void
+    {
+        $usuario = $this->autenticar(['carrinhos.finalizar'], ['Vendedor']);
+        $cliente = $this->criarCliente();
+        $deposito = Deposito::create(['nome' => 'Deposito Linhas Distintas']);
+        ['variacao' => $variacao] = $this->criarProdutoComVariacao([], [], $deposito, 12);
+        $outlet = $this->criarOutletParaVariacao($variacao, 5, 4);
+
+        $carrinho = Carrinho::create([
+            'id_usuario' => $usuario->id,
+            'id_cliente' => $cliente->id,
+            'status' => 'rascunho',
+        ]);
+
+        $this->postJson("/api/v1/carrinhos/{$carrinho->id}/itens", [
+            'id_carrinho' => $carrinho->id,
+            'id_variacao' => $variacao->id,
+            'quantidade' => 2,
+            'preco_unitario' => 120,
+        ])->assertCreated();
+
+        $this->postJson("/api/v1/carrinhos/{$carrinho->id}/itens", [
+            'id_carrinho' => $carrinho->id,
+            'id_variacao' => $variacao->id,
+            'quantidade' => 1,
+            'preco_unitario' => 99.9,
+            'outlet_id' => $outlet->id,
+        ])->assertCreated();
+
+        $this->assertDatabaseCount('carrinho_itens', 2);
+        $this->assertDatabaseHas('carrinho_itens', [
+            'id_carrinho' => $carrinho->id,
+            'id_variacao' => $variacao->id,
+            'outlet_id' => null,
+            'quantidade' => 2,
+        ]);
+        $this->assertDatabaseHas('carrinho_itens', [
+            'id_carrinho' => $carrinho->id,
+            'id_variacao' => $variacao->id,
+            'outlet_id' => $outlet->id,
+            'quantidade' => 1,
         ]);
     }
 

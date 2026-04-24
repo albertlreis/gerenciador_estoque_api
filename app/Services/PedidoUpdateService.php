@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Helpers\AuthHelper;
+use App\Integrations\ContaAzul\Services\ContaAzulExportDispatchService;
 use App\Models\EstoqueMovimentacao;
 use App\Models\Pedido;
 use App\Models\PedidoItem;
@@ -19,6 +20,7 @@ class PedidoUpdateService
         private readonly PedidoPrazoService $prazoService,
         private readonly ReservaEstoqueService $reservaService,
         private readonly EstoqueMovimentacaoService $movimentacaoService,
+        private readonly ContaAzulExportDispatchService $contaAzulExports,
     ) {}
 
     /**
@@ -53,7 +55,7 @@ class PedidoUpdateService
                 $this->ajustarMovimentacoesSeNecessario($pedido, $diffs);
             }
 
-            return $pedido->fresh([
+            $pedido = $pedido->fresh([
                 'cliente:id,nome,email,telefone',
                 'parceiro:id,nome',
                 'usuario:id,nome',
@@ -65,6 +67,12 @@ class PedidoUpdateService
                 'devolucoes.itens.trocaItens.variacaoNova.produto',
                 'devolucoes.credito',
             ]);
+
+            if ($pedido->isVenda() && !$pedido->isConsignado()) {
+                $this->contaAzulExports->pedido((int) $pedido->id, null, ['evento' => 'pedido_atualizado']);
+            }
+
+            return $pedido;
         });
     }
 

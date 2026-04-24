@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Enums\PedidoStatus;
 use App\Helpers\AuthHelper;
+use App\Integrations\ContaAzul\Services\ContaAzulExportDispatchService;
 use App\Http\Requests\StorePedidoRequest;
 use App\Models\Carrinho;
 use App\Services\Movimentacao\MovimentarEstoqueStrategy;
@@ -47,6 +48,7 @@ final class FinalizarPedidoService
         private readonly MovimentarEstoqueStrategy $movimentarStrategy,
         private readonly ReservarEstoqueStrategy $reservarStrategy,
         private readonly ContaReceberService $contaReceberService,
+        private readonly ContaAzulExportDispatchService $contaAzulExports,
     ) {}
 
     /**
@@ -164,6 +166,10 @@ final class FinalizarPedidoService
                     report($e);
                     throw new RuntimeException("Falha ao gerar conta a receber: {$e->getMessage()}");
                 }
+            }
+
+            if (!$emConsignacao && $pedido->isVenda()) {
+                $this->contaAzulExports->pedido((int) $pedido->id, null, ['evento' => 'pedido_finalizado']);
             }
 
             // Finaliza carrinho

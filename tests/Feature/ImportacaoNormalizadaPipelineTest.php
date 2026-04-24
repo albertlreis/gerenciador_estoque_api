@@ -7,7 +7,6 @@ use App\Models\EstoqueMovimentacao;
 use App\Models\ImportacaoNormalizadaLinha;
 use App\Models\Produto;
 use App\Models\ProdutoVariacao;
-use App\Models\ProdutoVariacaoCodigoHistorico;
 use App\Models\Usuario;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
@@ -51,138 +50,8 @@ class ImportacaoNormalizadaPipelineTest extends TestCase
         return $usuario;
     }
 
-    private function criarPlanilhaFixture(): string
+    private function criarPlanilhaTemporaria(array $sheets, string $prefix): string
     {
-        $headers = [
-            'Código',
-            'Código origem',
-            'Código modelo',
-            'Nome',
-            'Nome normalizado',
-            'Nome base normalizado',
-            'Categoria',
-            'Categoria normalizada',
-            'Categoria oficial',
-            'Código produto',
-            'Chave produto',
-            'Chave variação',
-            'SKU interno',
-            'Conflito código',
-            'Regra categoria',
-            'Dimensão 1 (cm)',
-            'Dimensão 2 (cm)',
-            'Dimensão 3 (cm)',
-            'Cor extraída',
-            'Lado extraído',
-            'Material oficial',
-            'Acabamento oficial',
-            'Quantidade',
-            'Status',
-            'Localização',
-            'Data Entrada',
-            'Valor',
-            'Fornecedor',
-        ];
-
-        $sheets = [
-            'loja' => [
-                $headers,
-                [
-                    'COD-001',
-                    'ORIG-001',
-                    'MOD-001',
-                    'Sofá Alpha Azul',
-                    'sofa alpha azul',
-                    'sofa alpha',
-                    'Estofados',
-                    'estofados',
-                    'Estofados',
-                    'P-001',
-                    'ESTOFADOS|SOFA ALPHA',
-                    'ESTOFADOS|SOFA ALPHA|COR:AZUL|D1:200|D2:90|D3:80|MAT:TECIDO|ACAB:FOSCO',
-                    'SKU-001',
-                    '',
-                    'ESTOFADOS',
-                    200,
-                    90,
-                    80,
-                    'Azul',
-                    '',
-                    'Tecido',
-                    'Fosco',
-                    3,
-                    'Loja',
-                    'A-01-01',
-                    '2026-03-10',
-                    5990.00,
-                    'Fornecedor Sierra',
-                ],
-                [
-                    'COD-002',
-                    'ORIG-002',
-                    'MOD-002',
-                    'Sofá Alpha Verde',
-                    'sofa alpha verde',
-                    'sofa alpha',
-                    'Estofados',
-                    'estofados',
-                    'Estofados',
-                    'P-001',
-                    'ESTOFADOS|SOFA ALPHA',
-                    'ESTOFADOS|SOFA ALPHA|COR:VERDE|D1:200|D2:90|D3:80|MAT:TECIDO|ACAB:FOSCO',
-                    'SKU-002',
-                    'SIM',
-                    'ESTOFADOS',
-                    200,
-                    90,
-                    80,
-                    'Verde',
-                    '',
-                    'Tecido',
-                    'Fosco',
-                    2,
-                    'Brinde',
-                    '',
-                    '2026-03-11',
-                    5990.00,
-                    'Fornecedor Sierra',
-                ],
-            ],
-            'Depósito JB' => [
-                $headers,
-                [
-                    'COD-003',
-                    'ORIG-003',
-                    'MOD-003',
-                    'Sofá Alpha Azul',
-                    'sofa alpha azul',
-                    'sofa alpha',
-                    'Estofados',
-                    'estofados',
-                    'Estofados',
-                    'P-001',
-                    'ESTOFADOS|SOFA ALPHA',
-                    'ESTOFADOS|SOFA ALPHA|COR:AZUL|D1:200|D2:90|D3:80|MAT:TECIDO|ACAB:FOSCO',
-                    'SKU-001',
-                    '',
-                    'ESTOFADOS',
-                    200,
-                    90,
-                    80,
-                    'Azul',
-                    '',
-                    'Tecido',
-                    'Fosco',
-                    1,
-                    'Depósito',
-                    'B-02-01',
-                    '2026-03-12',
-                    5990.00,
-                    'Fornecedor Sierra',
-                ],
-            ],
-        ];
-
         $spreadsheet = new Spreadsheet();
         $defaultSheet = $spreadsheet->getActiveSheet();
         $sheetIndex = 0;
@@ -197,7 +66,7 @@ class ImportacaoNormalizadaPipelineTest extends TestCase
             $sheetIndex++;
         }
 
-        $tempBase = tempnam(sys_get_temp_dir(), 'importacao-normalizada-');
+        $tempBase = tempnam(sys_get_temp_dir(), $prefix);
         if ($tempBase === false) {
             $this->fail('Não foi possível criar o arquivo temporário da planilha de teste.');
         }
@@ -213,71 +82,217 @@ class ImportacaoNormalizadaPipelineTest extends TestCase
         return $path;
     }
 
-    private function criarPlanilhaCargaInicialFixture(): string
+    private function criarPlanilhaFixture(): string
     {
-        $spreadsheet = new Spreadsheet();
-        $sheetProdutos = $spreadsheet->getActiveSheet();
-        $sheetProdutos->setTitle('Produtos');
-        $sheetProdutos->fromArray([
-            [
-                'quantidade', 'data_entrada', 'referencia', 'localizacao', 'nome', 'categoria',
-                'Madeira', 'Tec. 1', 'Tec. 2', 'Metal / Vidro', 'valor', 'outlet', 'status',
-                'diametro_cm', 'largura_cm', 'profundidade_cm', 'altura_cm',
+        $headers = [
+            'quantidade',
+            'Data NF',
+            'codigo',
+            'localizacao',
+            'Nome',
+            'Largura (cm)',
+            'Profundidade (cm)',
+            'Altura (cm)',
+            'Categoria',
+            'Madeira',
+            'Tec. 1',
+            'Tec. 2',
+            'Metal / Vidro',
+            'Valor',
+            'outlet',
+            'status',
+        ];
+
+        $sheets = [
+            'Sierra Loja' => [
+                $headers,
+                [
+                    3,
+                    '2026-03-10',
+                    'COD-001',
+                    'A-01-01',
+                    'Sofa Alpha',
+                    200,
+                    90,
+                    80,
+                    'Estofados',
+                    'MA01',
+                    'LINHO',
+                    '',
+                    '',
+                    5990.00,
+                    '',
+                    'Loja',
+                ],
+                [
+                    2,
+                    '2026-03-11',
+                    'COD-001',
+                    'A-01-02',
+                    'Sofa Alpha',
+                    200,
+                    90,
+                    80,
+                    'Estofados',
+                    'MA02',
+                    'LINHO',
+                    '',
+                    '',
+                    5990.00,
+                    '',
+                    'Brinde',
+                ],
             ],
-            [1, '2026-03-12', 'REF-DUP-CARGA', 'A-01-01', 'Poltrona Carga Inicial', 'Poltrona', 'AC01', '', '', '', 1000, '', 'Loja', '', 60, 70, 80],
-            [1, '2026-03-12', 'REF-DUP-CARGA', 'A-01-02', 'Poltrona Carga Inicial', 'Poltrona', 'AC02', '', '', '', 1100, '', 'Depósito', '', 60, 70, 80],
-            [1, '2026-03-12', 'REF-DUP-CARGA', '', 'Poltrona Carga Inicial', 'Poltrona', 'AC03', '', '', '', 1200, '', 'Vendido', '', 60, 70, 80],
-        ], null, 'A1');
+            'Depósito JB' => [
+                $headers,
+                [
+                    1,
+                    '2026-03-12',
+                    'COD-001',
+                    'B-02-01',
+                    'Sofa Alpha',
+                    200,
+                    90,
+                    80,
+                    'Estofados',
+                    'MA01',
+                    'LINHO',
+                    '',
+                    '',
+                    5990.00,
+                    '',
+                    'Depósito',
+                ],
+            ],
+        ];
 
-        $sheetAdornos = $spreadsheet->createSheet();
-        $sheetAdornos->setTitle('Adornos');
-        $sheetAdornos->fromArray([
-            ['referencia', 'localizacao', 'Nome', 'Fornecedor', 'Unidade', 'Valor Unit', 'Status', 'Custo'],
-            ['REF-ADORNO-1', 'B-10-02', 'Vaso Teste', 'Fornecedor Teste', 'UN', 250, 'Loja', 100],
-        ], null, 'A1');
-
-        $tempBase = tempnam(sys_get_temp_dir(), 'importacao-carga-inicial-');
-        if ($tempBase === false) {
-            $this->fail('Não foi possível criar o arquivo temporário da planilha de carga inicial.');
-        }
-
-        @unlink($tempBase);
-        $path = $tempBase . '.xlsx';
-        (new Xlsx($spreadsheet))->save($path);
-        $spreadsheet->disconnectWorksheets();
-        $this->temporaryFiles[] = $path;
-
-        return $path;
+        return $this->criarPlanilhaTemporaria($sheets, 'importacao-normalizada-');
     }
 
-    public function test_pipeline_normalizado_respeita_status_revisao_estoque_e_idempotencia(): void
+    private function criarPlanilhaCargaInicialFixture(): string
+    {
+        $headers = [
+            'quantidade',
+            'Data NF',
+            'codigo',
+            'localizacao',
+            'nome',
+            'Largura (cm)',
+            'Profundidade (cm)',
+            'Altura (cm)',
+            'Categoria',
+            'Madeira',
+            'Tec. 1',
+            'Tec. 2',
+            'Metal / Vidro',
+            'valor',
+            'outlet',
+            'status',
+        ];
+
+        $sheets = [
+            'Sierra Loja' => [
+                $headers,
+                [
+                    1,
+                    '2026-03-12',
+                    'POL-900',
+                    'A-01-01',
+                    'Poltrona Teste',
+                    60,
+                    70,
+                    80,
+                    'Poltrona',
+                    'AC01',
+                    '',
+                    '',
+                    '',
+                    1000,
+                    '',
+                    'Loja',
+                ],
+                [
+                    1,
+                    '2026-03-12',
+                    'POL-900',
+                    'A-01-02',
+                    'Poltrona Teste',
+                    60,
+                    70,
+                    80,
+                    'Poltrona',
+                    'AC02',
+                    '',
+                    '',
+                    '',
+                    1100,
+                    '',
+                    'Depósito',
+                ],
+            ],
+            'Adornos' => [
+                ['codigo', 'nome', 'fornecedor', 'Unidade', 'Valor Unit', 'Status', 'Custo'],
+                ['ADOR-001', 'Vaso Teste', 'Fornecedor Teste', 6, 250, 'Loja', 100],
+            ],
+        ];
+
+        return $this->criarPlanilhaTemporaria($sheets, 'importacao-carga-inicial-');
+    }
+
+    public function test_pipeline_sierra_usa_campos_brutos_como_identidade_e_reaproveita_variacoes_por_atributos(): void
     {
         $this->autenticarComoDev();
         $arquivoPath = $this->criarPlanilhaFixture();
 
-        $upload = new UploadedFile(
-            $arquivoPath,
-            'importacao-normalizada-fixture.xlsx',
-            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            null,
-            true
-        );
-
         $response = $this->post('/api/v1/importacoes/normalizadas', [
-            'arquivo' => $upload,
+            'arquivo' => new UploadedFile(
+                $arquivoPath,
+                'importacao-sierra-fixture.xlsx',
+                'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                null,
+                true
+            ),
         ]);
 
         $response->assertCreated();
         $importacaoId = (int) $response->json('data.id');
 
+        $this->assertSame('planilha_sierra_carga_inicial', $response->json('data.tipo'));
         $this->assertSame(3, (int) $response->json('data.linhas_total'));
-        $this->assertSame(1, (int) $response->json('data.linhas_pendentes_revisao'));
-        $this->assertSame(1, (int) $response->json('data.linhas_com_conflito'));
+        $this->assertSame(0, (int) $response->json('data.linhas_pendentes_revisao'));
+        $this->assertSame(0, (int) $response->json('data.linhas_com_conflito'));
 
-        $linhasResponse = $this->getJson("/api/v1/importacoes/normalizadas/{$importacaoId}/linhas?status_normalizado=Loja");
-        $linhasResponse->assertOk();
-        $this->assertCount(1, $linhasResponse->json('data.data'));
-        $this->assertSame('SKU-001', $linhasResponse->json('data.data.0.sku_interno'));
+        $linhas = ImportacaoNormalizadaLinha::query()
+            ->where('importacao_id', $importacaoId)
+            ->orderBy('linha_planilha')
+            ->get();
+
+        $this->assertCount(3, $linhas);
+        $this->assertSame(0, $linhas->whereNotNull('sku_interno')->count());
+        $this->assertSame(0, $linhas->whereNotNull('chave_produto')->count());
+        $this->assertSame(0, $linhas->whereNotNull('chave_variacao')->count());
+        $this->assertSame(0, $linhas->whereNotNull('regra_categoria')->count());
+
+        /** @var ImportacaoNormalizadaLinha $linhaLoja */
+        $linhaLoja = $linhas->firstWhere('localizacao', 'A-01-01');
+        /** @var ImportacaoNormalizadaLinha $linhaBrinde */
+        $linhaBrinde = $linhas->firstWhere('localizacao', 'A-01-02');
+        /** @var ImportacaoNormalizadaLinha $linhaDeposito */
+        $linhaDeposito = $linhas->firstWhere('localizacao', 'B-02-01');
+
+        $this->assertNotNull($linhaLoja);
+        $this->assertNotNull($linhaBrinde);
+        $this->assertNotNull($linhaDeposito);
+
+        $this->assertSame('COD-001', $linhaLoja->codigo);
+        $this->assertSame('COD-001', $linhaLoja->codigo_produto);
+        $this->assertSame('Estofados', $linhaLoja->categoria_oficial);
+        $this->assertSame('Sofa Alpha', $linhaLoja->nome_base_normalizado);
+        $this->assertSame('2026-03-10', substr((string) $linhaLoja->data_entrada, 0, 10));
+        $this->assertSame(200.0, (float) $linhaLoja->dimensao_1);
+        $this->assertSame(90.0, (float) $linhaLoja->dimensao_2);
+        $this->assertSame(80.0, (float) $linhaLoja->dimensao_3);
+        $this->assertSame(3, (int) $linhaLoja->quantidade);
 
         $previewResponse = $this->getJson("/api/v1/importacoes/normalizadas/{$importacaoId}/preview");
         $previewResponse->assertOk();
@@ -286,45 +301,27 @@ class ImportacaoNormalizadaPipelineTest extends TestCase
         $this->assertSame(3, data_get($preview, 'totais.linhas_total'));
         $this->assertSame(2, data_get($preview, 'totais.linhas_que_gerariam_estoque'));
         $this->assertSame(1, data_get($preview, 'totais.linhas_que_nao_gerariam_estoque'));
-        $this->assertSame(1, data_get($preview, 'totais.linhas_com_conflito'));
-        $this->assertSame(1, data_get($preview, 'totais.linhas_bloqueadas'));
+        $this->assertSame(0, data_get($preview, 'totais.linhas_com_conflito'));
+        $this->assertSame(0, data_get($preview, 'totais.linhas_bloqueadas'));
         $this->assertSame(0, data_get($preview, 'totais.linhas_pendentes_revisao'));
-        $this->assertSame(2, data_get($preview, 'totais.variacoes_novas'));
         $this->assertSame(1, data_get($preview, 'totais.produtos_pais_novos'));
-
-        $confirmacaoBloqueada = $this->postJson("/api/v1/importacoes/normalizadas/{$importacaoId}/confirmar");
-        $confirmacaoBloqueada->assertStatus(422);
-        $this->assertFalse((bool) $confirmacaoBloqueada->json('sucesso'));
-
-        /** @var ImportacaoNormalizadaLinha $linhaBrinde */
-        $linhaBrinde = ImportacaoNormalizadaLinha::query()
-            ->where('importacao_id', $importacaoId)
-            ->where('sku_interno', 'SKU-002')
-            ->firstOrFail();
-
-        $revisaoResponse = $this->patchJson("/api/v1/importacoes/normalizadas/linhas/{$linhaBrinde->id}/revisao", [
-            'status_revisao' => 'aprovado',
-            'decisao' => 'manter_separado',
-            'motivo' => 'SKU separado e sem geração de estoque por status Brinde.',
-        ]);
-
-        $revisaoResponse->assertOk();
-
-        $previewAposRevisao = $this->getJson("/api/v1/importacoes/normalizadas/{$importacaoId}/preview");
-        $previewAposRevisao->assertOk();
-        $this->assertSame(0, data_get($previewAposRevisao->json('data.preview'), 'totais.linhas_bloqueadas'));
-        $this->assertSame(0, data_get($previewAposRevisao->json('data.preview'), 'totais.linhas_pendentes_revisao'));
-        $this->assertSame(3, data_get($previewAposRevisao->json('data.preview'), 'totais.linhas_validas_para_efetivacao'));
+        $this->assertSame(2, data_get($preview, 'totais.variacoes_novas'));
 
         $confirmacao = $this->postJson("/api/v1/importacoes/normalizadas/{$importacaoId}/confirmar");
         $confirmacao->assertOk();
         $this->assertTrue((bool) $confirmacao->json('sucesso'));
-        $this->assertSame('confirmada', $confirmacao->json('importacao.status'));
 
         $efetivacao = $this->postJson("/api/v1/importacoes/normalizadas/{$importacaoId}/efetivar");
         $efetivacao->assertOk();
         $this->assertTrue((bool) $efetivacao->json('sucesso'));
-        $this->assertSame('efetivada', $efetivacao->json('importacao.status'));
+
+        $linhaLoja->refresh();
+        $linhaBrinde->refresh();
+        $linhaDeposito->refresh();
+
+        $this->assertNotNull($linhaLoja->variacao_id_vinculada);
+        $this->assertSame($linhaLoja->variacao_id_vinculada, $linhaDeposito->variacao_id_vinculada);
+        $this->assertNotSame($linhaLoja->variacao_id_vinculada, $linhaBrinde->variacao_id_vinculada);
 
         $this->assertDatabaseMissing('estoque_movimentacoes', [
             'ref_type' => 'importacao_normalizada_linha',
@@ -332,144 +329,122 @@ class ImportacaoNormalizadaPipelineTest extends TestCase
         ]);
 
         /** @var Produto $produto */
-        $produto = Produto::query()->where('codigo_produto', 'P-001')->firstOrFail();
-        $this->assertSame('P-001', $produto->codigo_produto);
-        $this->assertSame(1, Produto::query()->where('codigo_produto', 'P-001')->count());
-
-        /** @var ProdutoVariacao $variacaoEstoque */
-        $variacaoEstoque = ProdutoVariacao::query()->where('sku_interno', 'SKU-001')->firstOrFail();
-        /** @var ProdutoVariacao $variacaoSemEstoque */
-        $variacaoSemEstoque = ProdutoVariacao::query()->where('sku_interno', 'SKU-002')->firstOrFail();
-
-        $this->assertSame($produto->id, $variacaoEstoque->produto_id);
-        $this->assertSame($produto->id, $variacaoSemEstoque->produto_id);
-        $this->assertTrue($variacaoSemEstoque->conflito_codigo);
+        $produto = Produto::query()->where('codigo_produto', 'COD-001')->firstOrFail();
+        $this->assertSame(1, Produto::query()->where('codigo_produto', 'COD-001')->count());
         $this->assertSame(2, ProdutoVariacao::query()->where('produto_id', $produto->id)->count());
-        $this->assertSame(
-            3,
-            ProdutoVariacaoCodigoHistorico::query()
-                ->whereIn('produto_variacao_id', [$variacaoEstoque->id, $variacaoSemEstoque->id])
-                ->count()
-        );
+
+        /** @var ProdutoVariacao $variacaoComEstoque */
+        $variacaoComEstoque = ProdutoVariacao::query()->findOrFail($linhaLoja->variacao_id_vinculada);
+        /** @var ProdutoVariacao $variacaoSemEstoque */
+        $variacaoSemEstoque = ProdutoVariacao::query()->findOrFail($linhaBrinde->variacao_id_vinculada);
+
+        $this->assertSame($produto->id, $variacaoComEstoque->produto_id);
+        $this->assertSame($produto->id, $variacaoSemEstoque->produto_id);
+        $this->assertNull($variacaoComEstoque->sku_interno);
+        $this->assertNull($variacaoComEstoque->chave_variacao);
+        $this->assertSame(200.0, (float) $variacaoComEstoque->dimensao_1);
+        $this->assertSame(90.0, (float) $variacaoComEstoque->dimensao_2);
+        $this->assertSame(80.0, (float) $variacaoComEstoque->dimensao_3);
+
         $this->assertSame(
             2,
             EstoqueMovimentacao::query()
                 ->where('ref_type', 'importacao_normalizada_linha')
-                ->whereIn('ref_id', ImportacaoNormalizadaLinha::query()->where('importacao_id', $importacaoId)->pluck('id'))
+                ->whereIn('ref_id', $linhas->pluck('id'))
                 ->count()
         );
 
-        $estoquesVariacao = Estoque::query()->where('id_variacao', $variacaoEstoque->id)->get();
+        $estoquesVariacao = Estoque::query()->where('id_variacao', $variacaoComEstoque->id)->get();
         $this->assertSame(2, $estoquesVariacao->where('quantidade', '>', 0)->count());
         $this->assertSame(4, (int) $estoquesVariacao->sum('quantidade'));
         $this->assertCount(0, Estoque::query()->where('id_variacao', $variacaoSemEstoque->id)->where('quantidade', '>', 0)->get());
 
-        $relatorio = $this->getJson("/api/v1/importacoes/normalizadas/{$importacaoId}/relatorio");
-        $relatorio->assertOk();
-        $this->assertSame(3, $relatorio->json('data.relatorio.total_linhas_processadas'));
-        $this->assertSame(3, $relatorio->json('data.relatorio.total_linhas_efetivadas'));
-        $this->assertSame(2, $relatorio->json('data.relatorio.total_linhas_que_geraram_estoque'));
-        $this->assertSame(1, $relatorio->json('data.relatorio.total_linhas_sem_estoque_por_status'));
-        $this->assertSame(2, $relatorio->json('data.relatorio.total_movimentacoes_criadas'));
-        $this->assertSame(3, $relatorio->json('data.relatorio.total_codigos_historicos_persistidos'));
+        $segundaImportacao = $this->post('/api/v1/importacoes/normalizadas', [
+            'arquivo' => new UploadedFile(
+                $arquivoPath,
+                'importacao-sierra-reimportacao.xlsx',
+                'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                null,
+                true
+            ),
+        ]);
+        $segundaImportacao->assertCreated();
+        $importacaoIdReimportada = (int) $segundaImportacao->json('data.id');
 
-        $movimentacoesAntes = EstoqueMovimentacao::query()->count();
-        $estoquesAntes = Estoque::query()->count();
-        $historicosAntes = ProdutoVariacaoCodigoHistorico::query()->count();
+        $this->postJson("/api/v1/importacoes/normalizadas/{$importacaoIdReimportada}/confirmar")->assertOk();
+        $this->postJson("/api/v1/importacoes/normalizadas/{$importacaoIdReimportada}/efetivar")->assertOk();
 
-        $efetivacaoIdempotente = $this->postJson("/api/v1/importacoes/normalizadas/{$importacaoId}/efetivar");
-        $efetivacaoIdempotente->assertOk();
-        $this->assertTrue((bool) $efetivacaoIdempotente->json('idempotente'));
-        $this->assertSame($movimentacoesAntes, EstoqueMovimentacao::query()->count());
-        $this->assertSame($estoquesAntes, Estoque::query()->count());
-        $this->assertSame($historicosAntes, ProdutoVariacaoCodigoHistorico::query()->count());
+        $linhasReimportadas = ImportacaoNormalizadaLinha::query()
+            ->where('importacao_id', $importacaoIdReimportada)
+            ->get()
+            ->keyBy('localizacao');
+
+        $this->assertSame($linhaLoja->produto_id_vinculada, $linhasReimportadas['A-01-01']->produto_id_vinculada);
+        $this->assertSame($linhaLoja->variacao_id_vinculada, $linhasReimportadas['A-01-01']->variacao_id_vinculada);
+        $this->assertSame($linhaBrinde->variacao_id_vinculada, $linhasReimportadas['A-01-02']->variacao_id_vinculada);
+        $this->assertSame($linhaDeposito->variacao_id_vinculada, $linhasReimportadas['B-02-01']->variacao_id_vinculada);
+        $this->assertSame(1, Produto::query()->where('codigo_produto', 'COD-001')->count());
+        $this->assertSame(2, ProdutoVariacao::query()->where('produto_id', $produto->id)->count());
     }
 
-    public function test_carga_inicial_sem_sku_cria_novas_variacoes_com_referencia_duplicada(): void
+    public function test_carga_inicial_sierra_usa_unidade_em_adornos_e_separa_variacoes_por_atributos(): void
     {
         $this->autenticarComoDev();
         $arquivoPath = $this->criarPlanilhaCargaInicialFixture();
 
-        $upload = new UploadedFile(
-            $arquivoPath,
-            'importacao-carga-inicial-fixture.xlsx',
-            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            null,
-            true
-        );
-
         $response = $this->post('/api/v1/importacoes/normalizadas', [
-            'arquivo' => $upload,
-            'modo_carga_inicial' => true,
+            'arquivo' => new UploadedFile(
+                $arquivoPath,
+                'importacao-carga-inicial-fixture.xlsx',
+                'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                null,
+                true
+            ),
         ]);
 
         $response->assertCreated();
         $importacaoId = (int) $response->json('data.id');
+
         $this->assertSame('planilha_sierra_carga_inicial', $response->json('data.tipo'));
-        $this->assertSame(4, (int) $response->json('data.linhas_total'));
+        $this->assertSame(3, (int) $response->json('data.linhas_total'));
 
         $previewResponse = $this->getJson("/api/v1/importacoes/normalizadas/{$importacaoId}/preview");
         $previewResponse->assertOk();
         $this->assertSame(3, data_get($previewResponse->json(), 'data.preview.totais.linhas_que_gerariam_estoque'));
-        $this->assertSame(1, data_get($previewResponse->json(), 'data.preview.totais.linhas_que_nao_gerariam_estoque'));
+        $this->assertSame(0, data_get($previewResponse->json(), 'data.preview.totais.linhas_que_nao_gerariam_estoque'));
 
-        $confirmacao = $this->postJson("/api/v1/importacoes/normalizadas/{$importacaoId}/confirmar", [
-            'modo_carga_inicial' => true,
-        ]);
-        $confirmacao->assertOk();
-
-        $efetivacao = $this->postJson("/api/v1/importacoes/normalizadas/{$importacaoId}/efetivar", [
-            'modo_carga_inicial' => true,
-        ]);
-        $efetivacao->assertOk();
-        $this->assertTrue((bool) $efetivacao->json('sucesso'));
-
-        $linhasRefDup = ImportacaoNormalizadaLinha::query()
+        /** @var ImportacaoNormalizadaLinha $linhaAdorno */
+        $linhaAdorno = ImportacaoNormalizadaLinha::query()
             ->where('importacao_id', $importacaoId)
-            ->where('codigo', 'REF-DUP-CARGA')
-            ->orderBy('id')
+            ->where('aba_origem', 'Adornos')
+            ->firstOrFail();
+
+        $this->assertSame('ADOR-001', $linhaAdorno->codigo);
+        $this->assertSame('ADOR-001', $linhaAdorno->codigo_produto);
+        $this->assertSame('Adornos', $linhaAdorno->categoria_oficial);
+        $this->assertSame('Vaso Teste', $linhaAdorno->nome_base_normalizado);
+        $this->assertSame(6, (int) $linhaAdorno->quantidade);
+        $this->assertNull($linhaAdorno->sku_interno);
+
+        $this->postJson("/api/v1/importacoes/normalizadas/{$importacaoId}/confirmar")->assertOk();
+        $this->postJson("/api/v1/importacoes/normalizadas/{$importacaoId}/efetivar")->assertOk();
+
+        $linhasPoltrona = ImportacaoNormalizadaLinha::query()
+            ->where('importacao_id', $importacaoId)
+            ->where('codigo', 'POL-900')
             ->get();
 
-        $this->assertCount(3, $linhasRefDup);
-        $this->assertCount(3, $linhasRefDup->pluck('variacao_id_vinculada')->filter()->unique());
-        $this->assertSame(4, ProdutoVariacao::query()->count());
+        $this->assertCount(2, $linhasPoltrona);
+        $this->assertCount(2, $linhasPoltrona->pluck('variacao_id_vinculada')->filter()->unique());
 
-        $linhaLoja = $linhasRefDup->firstWhere('localizacao', 'A-01-01');
-        $this->assertNotNull($linhaLoja);
-        $this->assertNotNull($linhaLoja->variacao_id_vinculada);
-        $this->assertDatabaseHas('produto_variacao_atributos', [
-            'id_variacao' => $linhaLoja->variacao_id_vinculada,
-            'atributo' => 'madeira',
-            'valor' => 'AC01',
-        ]);
-        $this->assertDatabaseHas('produto_variacao_atributos', [
-            'id_variacao' => $linhaLoja->variacao_id_vinculada,
-            'atributo' => 'largura_cm',
-            'valor' => '60',
-        ]);
-        $this->assertDatabaseHas('produto_variacao_atributos', [
-            'id_variacao' => $linhaLoja->variacao_id_vinculada,
-            'atributo' => 'profundidade_cm',
-            'valor' => '70',
-        ]);
-        $this->assertDatabaseHas('produto_variacao_atributos', [
-            'id_variacao' => $linhaLoja->variacao_id_vinculada,
-            'atributo' => 'altura_cm',
-            'valor' => '80',
-        ]);
+        $linhaAdorno->refresh();
+        $this->assertNotNull($linhaAdorno->variacao_id_vinculada);
 
-        $variacaoLoja = ProdutoVariacao::query()->findOrFail($linhaLoja->variacao_id_vinculada);
-        $this->assertSame(60.0, (float) $variacaoLoja->dimensao_1);
-        $this->assertSame(70.0, (float) $variacaoLoja->dimensao_2);
-        $this->assertSame(80.0, (float) $variacaoLoja->dimensao_3);
+        $estoqueAdorno = Estoque::query()
+            ->where('id_variacao', $linhaAdorno->variacao_id_vinculada)
+            ->sum('quantidade');
 
-        $linhaVendida = $linhasRefDup->firstWhere('status', 'Vendido');
-        $this->assertNotNull($linhaVendida);
-        $this->assertDatabaseMissing('estoque_movimentacoes', [
-            'ref_type' => 'importacao_normalizada_linha',
-            'ref_id' => $linhaVendida->id,
-        ]);
-
+        $this->assertSame(6, (int) $estoqueAdorno);
         $this->assertSame(
             3,
             EstoqueMovimentacao::query()

@@ -562,6 +562,7 @@ Route::middleware('auth:sanctum')
             Route::get('oauth/authorize', [ContaAzulOAuthController::class, 'redirect']);
             Route::get('status', [ContaAzulIntegracaoController::class, 'status']);
             Route::get('pendencias', [ContaAzulIntegracaoController::class, 'pendencias']);
+            Route::post('manual-token', [ContaAzulIntegracaoController::class, 'registrarTokenManual']);
             Route::post('test-connection', [ContaAzulIntegracaoController::class, 'testarConexao']);
             Route::get('batches', [ContaAzulIntegracaoController::class, 'batches']);
             Route::get('sync-logs', [ContaAzulIntegracaoController::class, 'syncLogs']);

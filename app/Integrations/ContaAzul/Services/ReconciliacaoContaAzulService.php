@@ -31,7 +31,6 @@ class ReconciliacaoContaAzulService
             'produtos' => $this->conciliacao->conciliarProdutos($lojaId),
             'vendas' => $this->conciliacao->conciliarVendas($lojaId),
             'financeiro', 'titulos' => $this->conciliacao->conciliarTitulos($lojaId),
-            'baixas' => $this->conciliacao->conciliarBaixas($lojaId),
             'notas' => null,
             default => null,
         };
@@ -57,7 +56,7 @@ class ReconciliacaoContaAzulService
 
     public function reconciliarTodos(ContaAzulConexao $conexao, ?int $lojaId = null): void
     {
-        foreach (['pessoas', 'produtos', 'vendas', 'titulos', 'baixas', 'notas'] as $r) {
+        foreach (['pessoas', 'produtos', 'vendas', 'titulos', 'notas'] as $r) {
             $this->reconciliarRecurso($conexao, $r, $lojaId);
         }
     }
@@ -69,7 +68,6 @@ class ReconciliacaoContaAzulService
             'produtos' => ContaAzulEntityType::PRODUTO,
             'vendas' => ContaAzulEntityType::VENDA,
             'financeiro', 'titulos' => ContaAzulEntityType::TITULO,
-            'baixas' => ContaAzulEntityType::BAIXA,
             'notas' => ContaAzulEntityType::NOTA,
             default => null,
         };

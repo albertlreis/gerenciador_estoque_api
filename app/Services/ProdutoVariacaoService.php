@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Enums\StatusRevisaoCadastro;
+use App\Integrations\ContaAzul\Services\ContaAzulExportDispatchService;
 use App\Models\Produto;
 use App\Models\ProdutoVariacao;
 use App\Models\ProdutoVariacaoCodigoHistorico;
@@ -17,6 +18,11 @@ use Illuminate\Validation\ValidationException;
 
 class ProdutoVariacaoService
 {
+    public function __construct(
+        private readonly ContaAzulExportDispatchService $contaAzulExports,
+    ) {
+    }
+
     public function obterVariacaoCompleta(int $produtoId, int $variacaoId): Builder|array|Collection|Model
     {
         $variacao = ProdutoVariacao::with([
@@ -55,7 +61,10 @@ class ProdutoVariacaoService
             array_key_exists('codigos_historicos', $data)
         );
 
-        return $variacao->refresh()->load('atributos', 'codigosHistoricos', 'imagem');
+        $variacao = $variacao->refresh()->load('atributos', 'codigosHistoricos', 'imagem');
+        $this->contaAzulExports->produto((int) $produto->id, (int) $variacao->id, null, ['evento' => 'variacao_criada']);
+
+        return $variacao;
     }
 
     public function atualizarLote(int $produtoId, array $variacoes): void
@@ -99,6 +108,8 @@ class ProdutoVariacaoService
                     array_key_exists('codigos_historicos', $variacaoData)
                 );
             }
+
+            $this->contaAzulExports->produto((int) $produto->id, (int) $variacao->id, null, ['evento' => 'variacao_atualizada_lote']);
         }
 
         $produto->variacoes()->whereNotIn('id', $idsRecebidos)->delete();
@@ -135,7 +146,10 @@ class ProdutoVariacaoService
             );
         }
 
-        return $variacao->refresh()->load('atributos', 'codigosHistoricos', 'imagem');
+        $variacao = $variacao->refresh()->load('atributos', 'codigosHistoricos', 'imagem');
+        $this->contaAzulExports->produto((int) $variacao->produto_id, (int) $variacao->id, null, ['evento' => 'variacao_atualizada']);
+
+        return $variacao;
     }
 
     public function gerarReferenciaLegadaFallback(array $data, ?ProdutoVariacao $variacao = null, ?int $produtoId = null): string

@@ -3,7 +3,9 @@
 namespace App\Http\Controllers\Integrations;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Integrations\ContaAzulManualTokenRequest;
 use App\Integrations\ContaAzul\ContaAzulEntityType;
+use App\Integrations\ContaAzul\Exceptions\ContaAzulException;
 use App\Integrations\ContaAzul\Models\ContaAzulImportBatch;
 use App\Integrations\ContaAzul\Models\ContaAzulSyncLog;
 use App\Integrations\ContaAzul\Services\ConciliacaoContaAzulService;
@@ -81,6 +83,27 @@ class ContaAzulIntegracaoController extends Controller
         }
 
         return response()->json(['data' => $q->get()]);
+    }
+
+    public function registrarTokenManual(ContaAzulManualTokenRequest $request): JsonResponse
+    {
+        $dados = $request->validated();
+        $lojaId = isset($dados['loja_id']) ? (int) $dados['loja_id'] : null;
+
+        try {
+            $conexao = $this->connections->persistManualTokens($lojaId, $dados);
+        } catch (ContaAzulException $e) {
+            return response()->json([
+                'ok' => false,
+                'mensagem' => $e->getMessage(),
+                'reason' => $e->reason,
+            ], 422);
+        }
+
+        return response()->json([
+            'ok' => true,
+            'conexao' => $conexao->only(['id', 'status', 'loja_id', 'ambiente', 'nome_externo', 'ultimo_healthcheck_em', 'ultimo_erro']),
+        ]);
     }
 
     public function importar(Request $request, string $entidade): JsonResponse
@@ -171,7 +194,6 @@ class ContaAzulIntegracaoController extends Controller
             'produtos' => ContaAzulEntityType::PRODUTO,
             'vendas' => ContaAzulEntityType::VENDA,
             'financeiro' => ContaAzulEntityType::TITULO,
-            'baixas' => ContaAzulEntityType::BAIXA,
             'notas' => ContaAzulEntityType::NOTA,
             default => throw new \InvalidArgumentException('Entidade inválida'),
         };

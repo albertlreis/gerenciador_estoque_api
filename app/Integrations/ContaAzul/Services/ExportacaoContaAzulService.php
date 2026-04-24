@@ -79,7 +79,7 @@ class ExportacaoContaAzulService
     public function exportarTitulo(ContaAzulConexao $conexao, ContaReceber $conta, ?int $lojaId = null): void
     {
         $conta->loadMissing(['pedido.cliente']);
-        $path = (string) ($this->config['paths']['financeiro_create'] ?? ($this->config['paths']['financeiro'] ?? '/v1/financeiro/titulos'));
+        $path = (string) ($this->config['paths']['titulos_create'] ?? '/v1/financeiro/eventos-financeiros/contas-a-receber');
         $this->exportJsonEntity(
             $conexao,
             $path,
@@ -105,7 +105,8 @@ class ExportacaoContaAzulService
             );
         }
 
-        $path = (string) ($this->config['paths']['baixa_create'] ?? ($this->config['paths']['baixas'] ?? '/v1/financeiro/baixas'));
+        $path = (string) ($this->config['paths']['baixa_create'] ?? '/v1/financeiro/eventos-financeiros/parcelas/{parcela_id}/baixa');
+        $path = str_replace('{parcela_id}', $idTituloExt, $path);
         $this->exportJsonEntity(
             $conexao,
             $path,

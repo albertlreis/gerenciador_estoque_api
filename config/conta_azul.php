@@ -35,7 +35,7 @@ return [
     'pagination' => [
         'page_size' => (int) env('CONTA_AZUL_PAGE_SIZE', 50),
         'page_param' => env('CONTA_AZUL_PAGE_PARAM', 'pagina'),
-        'page_size_param' => env('CONTA_AZUL_PAGE_SIZE_PARAM', 'tamanhoPagina'),
+        'page_size_param' => env('CONTA_AZUL_PAGE_SIZE_PARAM', 'tamanho_pagina'),
     ],
 
     /**
@@ -58,32 +58,21 @@ return [
             'query' => [],
             'body' => [],
             'date_start_days_ago' => (int) env('CONTA_AZUL_IMPORT_VENDA_DAYS', 730),
-            'date_query_keys' => ['dataInicio', 'dataFim'],
+            'date_query_keys' => ['data_inicio', 'data_fim'],
         ],
         'titulo' => [
-            'method' => env('CONTA_AZUL_IMPORT_TITULO_METHOD', 'POST'),
+            'method' => env('CONTA_AZUL_IMPORT_TITULO_METHOD', 'GET'),
             'query' => [],
-            'body' => [
-                'tipoConsulta' => env('CONTA_AZUL_IMPORT_TITULO_TIPO', 'TODOS'),
-            ],
+            'body' => [],
             'date_start_days_ago' => (int) env('CONTA_AZUL_IMPORT_FIN_DAYS', 730),
-            'date_query_keys' => ['dataInicio', 'dataFim'],
-        ],
-        'baixa' => [
-            'method' => env('CONTA_AZUL_IMPORT_BAIXA_METHOD', 'POST'),
-            'query' => [],
-            'body' => [
-                'tipoConsulta' => env('CONTA_AZUL_IMPORT_BAIXA_TIPO', 'BAIXA'),
-            ],
-            'date_start_days_ago' => (int) env('CONTA_AZUL_IMPORT_BAIXA_DAYS', 730),
-            'date_query_keys' => ['dataInicio', 'dataFim'],
+            'date_query_keys' => ['data_vencimento_de', 'data_vencimento_ate'],
         ],
         'nota' => [
             'method' => 'GET',
             'query' => [],
             'body' => [],
             'date_start_days_ago' => (int) env('CONTA_AZUL_IMPORT_NOTA_DAYS', 730),
-            'date_query_keys' => ['dataInicio', 'dataFim'],
+            'date_query_keys' => ['data_inicial', 'data_final'],
         ],
     ],
 
@@ -92,13 +81,12 @@ return [
         'pessoas' => env('CONTA_AZUL_PATH_PESSOAS', '/v1/pessoas'),
         'produtos' => env('CONTA_AZUL_PATH_PRODUTOS', '/v1/produtos'),
         'vendas_busca' => env('CONTA_AZUL_PATH_VENDAS', '/v1/venda/busca'),
-        'financeiro' => env('CONTA_AZUL_PATH_FINANCEIRO', '/v1/financeiro/eventos-financeiros/consulta'),
-        'baixas' => env('CONTA_AZUL_PATH_BAIXAS', '/v1/financeiro/eventos-financeiros/consulta'),
-        'notas' => env('CONTA_AZUL_PATH_NOTAS', '/v1/notas'),
+        'titulos_list' => env('CONTA_AZUL_PATH_TITULOS_LIST', env('CONTA_AZUL_PATH_FINANCEIRO', '/v1/financeiro/eventos-financeiros/contas-a-receber/buscar')),
+        'notas_list' => env('CONTA_AZUL_PATH_NOTAS_LIST', env('CONTA_AZUL_PATH_NOTAS', '/v1/notas-fiscais')),
         /** Exportação (criação) — podem divergir da importação/consulta. */
         'venda_create' => env('CONTA_AZUL_PATH_VENDA_CREATE', '/v1/venda'),
-        'financeiro_create' => env('CONTA_AZUL_PATH_FIN_CREATE', '/v1/financeiro/titulos'),
-        'baixa_create' => env('CONTA_AZUL_PATH_BAIXA_CREATE', '/v1/financeiro/baixas'),
+        'titulos_create' => env('CONTA_AZUL_PATH_TITULOS_CREATE', env('CONTA_AZUL_PATH_FIN_CREATE', '/v1/financeiro/eventos-financeiros/contas-a-receber')),
+        'baixa_create' => env('CONTA_AZUL_PATH_BAIXA_CREATE', '/v1/financeiro/eventos-financeiros/parcelas/{parcela_id}/baixa'),
     ],
 
     /** URL do front para onde o callback OAuth redireciona (ex.: http://localhost:5173/integracoes/conta-azul). */

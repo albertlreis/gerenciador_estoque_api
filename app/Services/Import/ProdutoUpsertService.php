@@ -13,9 +13,55 @@ use Illuminate\Support\Str;
 
 final class ProdutoUpsertService
 {
+    private const SIERRA_IMPORT_SOURCES = [
+        'carga_inicial_sierra',
+        'importacao_normalizada',
+    ];
+
+    private const SIERRA_VARIATION_IDENTITY_ATTRS = [
+        'madeira',
+        'tecido_1',
+        'tecido_2',
+        'metal_vidro',
+        'cor',
+        'lado',
+        'material_oficial',
+        'acabamento_oficial',
+        'dimensao_1',
+        'dimensao_2',
+        'dimensao_3',
+    ];
+
     public function __construct(
         private readonly ProdutoVariacaoService $variacaoService
     ) {}
+
+    public function localizarProdutoPorIdentidade(array $payload): ?Produto
+    {
+        return $this->localizarProdutoExistente($payload);
+    }
+
+    public function localizarVariacaoPorIdentidade(array $payload, ?Produto $produto = null): ?ProdutoVariacao
+    {
+        $variacao = $this->localizarVariacaoExistente($payload);
+        if ($variacao) {
+            return $variacao;
+        }
+
+        if (!$produto) {
+            $produto = $this->localizarProdutoExistente($payload);
+        }
+
+        if (!$produto) {
+            return null;
+        }
+
+        return $this->localizarVariacaoPorProduto(
+            $produto,
+            $payload,
+            $this->normalizeAttrs((array) ($payload['atributos'] ?? []))
+        );
+    }
 
     /**
      * @return array{
@@ -109,8 +155,6 @@ final class ProdutoUpsertService
     private function localizarVariacaoExistente(array $payload): ?ProdutoVariacao
     {
         $variacaoIdForcada = (int) ($payload['variacao_id_forcada'] ?? 0);
-        $modoCargaInicial = (bool) ($payload['modo_carga_inicial'] ?? false);
-        $forcarNovaVariacao = (bool) ($payload['forcar_nova_variacao'] ?? false);
         if ($variacaoIdForcada > 0) {
             $variacao = ProdutoVariacao::with('produto')->find($variacaoIdForcada);
             if ($variacao) {
@@ -118,6 +162,12 @@ final class ProdutoUpsertService
             }
         }
 
+        if ($this->isSierraImportPayload($payload)) {
+            return null;
+        }
+
+        $modoCargaInicial = (bool) ($payload['modo_carga_inicial'] ?? false);
+        $forcarNovaVariacao = (bool) ($payload['forcar_nova_variacao'] ?? false);
         if ($modoCargaInicial && $forcarNovaVariacao) {
             return null;
         }
@@ -149,14 +199,18 @@ final class ProdutoUpsertService
     private function localizarProdutoExistente(array $payload): ?Produto
     {
         $produtoIdForcado = (int) ($payload['produto_id_forcado'] ?? 0);
-        $modoCargaInicial = (bool) ($payload['modo_carga_inicial'] ?? false);
         if ($produtoIdForcado > 0) {
-            $produto = Produto::find($produtoIdForcado);
+            $produto = Produto::with('categoria')->find($produtoIdForcado);
             if ($produto) {
                 return $produto;
             }
         }
 
+        if ($this->isSierraImportPayload($payload)) {
+            return $this->localizarProdutoExistenteSierra($payload);
+        }
+
+        $modoCargaInicial = (bool) ($payload['modo_carga_inicial'] ?? false);
         if ($modoCargaInicial) {
             return null;
         }
@@ -177,6 +231,10 @@ final class ProdutoUpsertService
         array $payload,
         $normalizedAttrs
     ): ?ProdutoVariacao {
+        if ($this->isSierraImportPayload($payload)) {
+            return $this->localizarVariacaoPorProdutoSierra($produto, $payload, $normalizedAttrs);
+        }
+
         $referencia = trim((string) ($payload['referencia'] ?? $payload['cod'] ?? ''));
         $forcarNovaVariacao = (bool) ($payload['forcar_nova_variacao'] ?? false);
 
@@ -274,6 +332,7 @@ final class ProdutoUpsertService
     {
         $modoCargaInicial = (bool) ($payload['modo_carga_inicial'] ?? false);
         $forcarNovaVariacao = (bool) ($payload['forcar_nova_variacao'] ?? false);
+        $isSierraImport = $this->isSierraImportPayload($payload);
 
         return [
             'referencia' => $this->variacaoService->gerarReferenciaLegadaFallback($payload, $variacao, $produtoId),
@@ -281,11 +340,15 @@ final class ProdutoUpsertService
             'preco' => $payload['valor'] ?? $variacao?->preco,
             'custo' => $payload['custo'] ?? $variacao?->custo,
             'codigo_barras' => $payload['codigo_barras'] ?? $variacao?->codigo_barras,
-            'sku_interno' => $payload['sku_interno'] ?? $variacao?->sku_interno,
+            'sku_interno' => $isSierraImport
+                ? $variacao?->sku_interno
+                : ($payload['sku_interno'] ?? $variacao?->sku_interno),
             // Carga inicial aceita duplicidades; não força unicidade por chave de variação.
-            'chave_variacao' => ($modoCargaInicial && $forcarNovaVariacao)
-                ? null
-                : ($payload['chave_variacao'] ?? $variacao?->chave_variacao),
+            'chave_variacao' => $isSierraImport
+                ? $variacao?->chave_variacao
+                : (($modoCargaInicial && $forcarNovaVariacao)
+                    ? null
+                    : ($payload['chave_variacao'] ?? $variacao?->chave_variacao)),
             'dimensao_1' => $payload['dimensao_1'] ?? $payload['w_cm'] ?? $variacao?->dimensao_1,
             'dimensao_2' => $payload['dimensao_2'] ?? $payload['p_cm'] ?? $variacao?->dimensao_2,
             'dimensao_3' => $payload['dimensao_3'] ?? $payload['a_cm'] ?? $variacao?->dimensao_3,
@@ -342,6 +405,191 @@ final class ProdutoUpsertService
         }
 
         return (string) Str::of((string) $v)->squish();
+    }
+
+    private function isSierraImportPayload(array $payload): bool
+    {
+        return in_array((string) ($payload['fonte'] ?? ''), self::SIERRA_IMPORT_SOURCES, true);
+    }
+
+    private function localizarProdutoExistenteSierra(array $payload): ?Produto
+    {
+        $codigoProduto = trim((string) ($payload['codigo_produto'] ?? $payload['codigo'] ?? ''));
+        $nomeIdentidade = $this->normalizeIdentityText(
+            (string) ($payload['nome_limpo'] ?? $payload['nome_base_normalizado'] ?? $payload['nome_completo'] ?? '')
+        );
+        $categoriaIdentidade = $this->normalizeIdentityText(
+            (string) ($payload['categoria_nome'] ?? $payload['categoria_oficial'] ?? '')
+        );
+
+        $query = Produto::query()->with('categoria');
+        if ($codigoProduto !== '') {
+            $query->where('codigo_produto', $codigoProduto);
+        } elseif ($nomeIdentidade !== '') {
+            $query->where('nome', trim((string) ($payload['nome_limpo'] ?? $payload['nome_completo'] ?? '')));
+        } else {
+            return null;
+        }
+
+        $candidatos = $query->get();
+        if ($candidatos->isEmpty()) {
+            return null;
+        }
+
+        $identityKey = $this->produtoIdentityKeyFromPayload($payload);
+        if ($identityKey === null) {
+            return $candidatos->first();
+        }
+
+        return $candidatos
+            ->first(fn (Produto $produto) => $this->produtoIdentityKeyFromModel($produto) === $identityKey);
+    }
+
+    private function localizarVariacaoPorProdutoSierra(
+        Produto $produto,
+        array $payload,
+        $normalizedAttrs
+    ): ?ProdutoVariacao {
+        $variacoes = ProdutoVariacao::query()
+            ->with(['produto', 'atributos'])
+            ->where('produto_id', $produto->id)
+            ->get();
+
+        if ($variacoes->isEmpty()) {
+            return null;
+        }
+
+        $identityKey = $this->variacaoIdentityKeyFromPayload($payload, $normalizedAttrs);
+        if ($identityKey === null) {
+            return null;
+        }
+
+        return $variacoes
+            ->first(fn (ProdutoVariacao $variacao) => $this->variacaoIdentityKeyFromModel($variacao) === $identityKey);
+    }
+
+    private function produtoIdentityKeyFromPayload(array $payload): ?string
+    {
+        $codigo = $this->normalizeIdentityCode((string) ($payload['codigo_produto'] ?? $payload['codigo'] ?? ''));
+        $categoria = $this->normalizeIdentityText((string) ($payload['categoria_nome'] ?? $payload['categoria_oficial'] ?? ''));
+        $nome = $this->normalizeIdentityText(
+            (string) ($payload['nome_limpo'] ?? $payload['nome_base_normalizado'] ?? $payload['nome_completo'] ?? '')
+        );
+
+        if ($codigo === '' || $nome === '') {
+            return null;
+        }
+
+        return implode('|', [$codigo, $categoria, $nome]);
+    }
+
+    private function produtoIdentityKeyFromModel(Produto $produto): ?string
+    {
+        $codigo = $this->normalizeIdentityCode((string) ($produto->codigo_produto ?? ''));
+        $categoria = $this->normalizeIdentityText((string) ($produto->categoria?->nome ?? ''));
+        $nome = $this->normalizeIdentityText((string) ($produto->nome ?? ''));
+
+        if ($codigo === '' || $nome === '') {
+            return null;
+        }
+
+        return implode('|', [$codigo, $categoria, $nome]);
+    }
+
+    private function variacaoIdentityKeyFromPayload(array $payload, $normalizedAttrs): ?string
+    {
+        $nome = $this->normalizeIdentityText((string) ($payload['nome_completo'] ?? $payload['nome_limpo'] ?? ''));
+        if ($nome === '') {
+            return null;
+        }
+
+        return json_encode([
+            'nome' => $nome,
+            'atributos' => $this->normalizeIdentityAttrsFromCollection($normalizedAttrs),
+        ], JSON_UNESCAPED_UNICODE);
+    }
+
+    private function variacaoIdentityKeyFromModel(ProdutoVariacao $variacao): ?string
+    {
+        $nome = $this->normalizeIdentityText((string) ($variacao->nome ?? ''));
+        if ($nome === '') {
+            return null;
+        }
+
+        $attrs = $variacao->relationLoaded('atributos')
+            ? $variacao->atributos->mapWithKeys(fn (ProdutoVariacaoAtributo $atributo) => [$atributo->atributo => $atributo->valor])->all()
+            : [];
+
+        foreach ([
+            'dimensao_1' => $variacao->dimensao_1,
+            'dimensao_2' => $variacao->dimensao_2,
+            'dimensao_3' => $variacao->dimensao_3,
+            'cor' => $variacao->cor,
+            'lado' => $variacao->lado,
+            'material_oficial' => $variacao->material_oficial,
+            'acabamento_oficial' => $variacao->acabamento_oficial,
+        ] as $campo => $valor) {
+            if (($attrs[$campo] ?? null) === null && $valor !== null && $valor !== '') {
+                $attrs[$campo] = $valor;
+            }
+        }
+
+        return json_encode([
+            'nome' => $nome,
+            'atributos' => $this->normalizeIdentityAttrsFromArray($attrs),
+        ], JSON_UNESCAPED_UNICODE);
+    }
+
+    private function normalizeIdentityAttrsFromCollection($normalizedAttrs): array
+    {
+        $attrs = [];
+        foreach ($normalizedAttrs as $chave => $valor) {
+            $identityKey = $this->normalizeIdentityAttrKey((string) $chave);
+            if ($identityKey === null) {
+                continue;
+            }
+
+            $attrs[$identityKey] = $this->normalizeIdentityText((string) $valor);
+        }
+
+        ksort($attrs);
+
+        return $attrs;
+    }
+
+    private function normalizeIdentityAttrsFromArray(array $attrs): array
+    {
+        return $this->normalizeIdentityAttrsFromCollection($this->normalizeAttrs($attrs));
+    }
+
+    private function normalizeIdentityAttrKey(string $key): ?string
+    {
+        $normalized = (string) Str::of($key)->squish()->lower()->ascii();
+
+        $normalized = match ($normalized) {
+            'largura_cm', 'diametro_cm', 'comprimento_cm' => 'dimensao_1',
+            'profundidade_cm', 'espessura_cm' => 'dimensao_2',
+            'altura_cm' => 'dimensao_3',
+            default => $normalized,
+        };
+
+        return in_array($normalized, self::SIERRA_VARIATION_IDENTITY_ATTRS, true)
+            ? $normalized
+            : null;
+    }
+
+    private function normalizeIdentityText(string $value): string
+    {
+        $normalized = (string) Str::of($value)->ascii()->lower();
+        $normalized = preg_replace('/[^a-z0-9]+/', ' ', $normalized);
+        $normalized = preg_replace('/\s+/', ' ', $normalized);
+
+        return trim((string) $normalized);
+    }
+
+    private function normalizeIdentityCode(string $value): string
+    {
+        return trim((string) Str::of($value)->squish()->upper());
     }
 
     private function syncAtributos(int $variacaoId, $normalizedAttrs): void

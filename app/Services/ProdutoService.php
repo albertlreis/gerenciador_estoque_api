@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Integrations\ContaAzul\Services\ContaAzulExportDispatchService;
 use App\Models\Produto;
 use Exception;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
@@ -17,6 +18,11 @@ use Throwable;
 
 class ProdutoService
 {
+    public function __construct(
+        private readonly ContaAzulExportDispatchService $contaAzulExports,
+    ) {
+    }
+
     public function store(array $data): Produto
     {
         $manualPath = null;
@@ -25,7 +31,7 @@ class ProdutoService
             $manualPath = $this->armazenarManualConservacao($data['manual_conservacao']);
         }
 
-        return Produto::create([
+        $produto = Produto::create([
             'nome' => $data['nome'],
             'descricao' => $data['descricao'] ?? null,
             'id_categoria' => $data['id_categoria'],
@@ -40,6 +46,10 @@ class ProdutoService
             'motivo_desativacao' => $data['motivo_desativacao'] ?? null,
             'estoque_minimo' => $data['estoque_minimo'] ?? null,
         ]);
+
+        $this->contaAzulExports->produto((int) $produto->id, null, null, ['evento' => 'produto_criado']);
+
+        return $produto;
     }
 
     public function update(Produto $produto, array $data): Produto
@@ -65,7 +75,10 @@ class ProdutoService
 
         $produto->update($updateData);
 
-        return $produto->refresh();
+        $produto = $produto->refresh();
+        $this->contaAzulExports->produto((int) $produto->id, null, null, ['evento' => 'produto_atualizado']);
+
+        return $produto;
     }
 
 

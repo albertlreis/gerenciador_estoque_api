@@ -34,14 +34,7 @@ class ContaAzulConnectionService
 
     public function findOrCreateConexao(?int $lojaId = null): ContaAzulConexao
     {
-        $query = ContaAzulConexao::query();
-        if ($lojaId === null) {
-            $query->whereNull('loja_id');
-        } else {
-            $query->where('loja_id', $lojaId);
-        }
-
-        $existing = $query->first();
+        $existing = $this->latestForLoja($lojaId);
         if ($existing) {
             return $existing;
         }
@@ -92,6 +85,37 @@ class ContaAzulConnectionService
         });
     }
 
+    /**
+     * @param  array<string, mixed>  $payload
+     */
+    public function persistManualTokens(?int $lojaId, array $payload): ContaAzulConexao
+    {
+        $conexao = $this->findOrCreateConexao($lojaId);
+        $conexao->fill([
+            'ambiente' => (string) ($payload['ambiente'] ?? $conexao->ambiente ?? 'producao'),
+            'nome_externo' => $payload['nome_externo'] ?? null,
+            'observacoes' => $payload['observacoes'] ?? null,
+        ]);
+        $conexao->save();
+
+        $this->persistTokensFromOAuth($conexao, [
+            'access_token' => $payload['access_token'] ?? null,
+            'refresh_token' => $payload['refresh_token'] ?? null,
+            'expires_in' => $payload['expires_in'] ?? 3600,
+            'scope' => $payload['scope'] ?? null,
+        ]);
+        $conexao->load('token');
+
+        if (!$this->healthcheck($conexao)) {
+            throw new ContaAzulException(
+                'O token manual foi salvo, mas o teste de conexão com a Conta Azul falhou.',
+                'healthcheck_failed'
+            );
+        }
+
+        return $conexao->fresh(['token']);
+    }
+
     public function getValidAccessToken(ContaAzulConexao $conexao): string
     {
         $token = $conexao->token;
@@ -105,8 +129,12 @@ class ContaAzulConnectionService
 
         $refresh = $token->refresh_token;
         if (!$refresh) {
+            $manualDevMessage = 'Refresh token ausente; gere um novo access token manual da Conta Azul e salve novamente.';
+            $defaultMessage = 'Refresh token ausente; reconecte a Conta Azul.';
+            $message = $conexao->ambiente === 'homologacao' ? $manualDevMessage : $defaultMessage;
+
             $conexao->update(['status' => 'erro', 'ultimo_erro' => 'Refresh token ausente.']);
-            throw new ContaAzulException('Refresh token ausente; reconecte a Conta Azul.', 'refresh_token_ausente');
+            throw new ContaAzulException($message, 'refresh_token_ausente');
         }
 
         $token->refresh();
@@ -144,7 +172,7 @@ class ContaAzulConnectionService
     {
         $path = (string) ($this->config['paths']['pessoas'] ?? '/v1/pessoas');
         $pageParam = (string) ($this->config['pagination']['page_param'] ?? 'pagina');
-        $sizeParam = (string) ($this->config['pagination']['page_size_param'] ?? 'tamanhoPagina');
+        $sizeParam = (string) ($this->config['pagination']['page_size_param'] ?? 'tamanho_pagina');
 
         $token = $this->getValidAccessToken($conexao);
         $res = $this->client->get($path, $token, [

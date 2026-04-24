@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Enums\ContaStatus;
 use App\Enums\LancamentoTipo;
+use App\Integrations\ContaAzul\Services\ContaAzulExportDispatchService;
 use App\Models\ContaReceber;
 use App\Models\ContaReceberPagamento;
 use BackedEnum;
@@ -18,6 +19,7 @@ class ContaReceberCommandService
         private readonly FinanceiroLedgerService $ledger,
         private readonly FinanceiroAuditoriaService $audit,
         private readonly ComunicacaoApiClient $comms,
+        private readonly ContaAzulExportDispatchService $contaAzulExports,
     ) {}
 
     public function criar(array $dados): ContaReceber
@@ -44,6 +46,8 @@ class ContaReceberCommandService
                 ]);
             }
 
+            $this->contaAzulExports->titulo((int) $fresh->id, null, ['evento' => 'conta_receber_criada']);
+
             return $fresh;
         });
     }
@@ -61,6 +65,8 @@ class ContaReceberCommandService
 
             $fresh = $conta->fresh();
             $this->audit->log('updated', $conta, $antes, $fresh->toArray());
+
+            $this->contaAzulExports->titulo((int) $fresh->id, null, ['evento' => 'conta_receber_atualizada']);
 
             return $fresh;
         });
@@ -123,6 +129,7 @@ class ContaReceberCommandService
 
             $this->audit->log('received', $conta, $antesConta, $depoisConta);
             $this->audit->log('ledger_created', $lancamento, null, $lancamento->fresh()->toArray());
+            $this->contaAzulExports->baixa((int) $pagamento->id, null, ['evento' => 'pagamento_registrado']);
 
             return $pagamento->fresh(['usuario', 'contaFinanceira']);
         });

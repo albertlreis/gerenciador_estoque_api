@@ -31,6 +31,19 @@ use Throwable;
 final class ImportacaoNormalizadaPipelineService
 {
     private const REF_TYPE_LINHA_IMPORTACAO = 'importacao_normalizada_linha';
+    private const VARIATION_IDENTITY_ATTRS = [
+        'madeira',
+        'tecido_1',
+        'tecido_2',
+        'metal_vidro',
+        'cor',
+        'lado',
+        'material_oficial',
+        'acabamento_oficial',
+        'dimensao_1',
+        'dimensao_2',
+        'dimensao_3',
+    ];
 
     public function __construct(
         private readonly ProdutoUpsertService $produtoUpsertService,
@@ -500,16 +513,16 @@ final class ImportacaoNormalizadaPipelineService
     private function carregarContextoCatalogo(EloquentCollection $linhas, bool $modoCargaInicial = false): array
     {
         $produtoIds = $linhas->pluck('produto_id_vinculado')->filter()->map(fn ($id) => (int) $id)->unique()->values();
-        $variacaoIds = $linhas->pluck('variacao_id_vinculada')->filter()->map(fn ($id) => (int) $id)->unique()->values();        
-        $codigosProduto = $modoCargaInicial
-            ? collect()
-            : $linhas->pluck('codigo_produto')->filter()->map(fn ($value) => trim((string) $value))->unique()->values();
-        $skus = $linhas->pluck('sku_interno')->filter()->map(fn ($value) => trim((string) $value))->unique()->values();
-        $chavesVariacao = $linhas->pluck('chave_variacao')->filter()->map(fn ($value) => trim((string) $value))->unique()->values();
+        $variacaoIds = $linhas->pluck('variacao_id_vinculada')->filter()->map(fn ($id) => (int) $id)->unique()->values();
+        $codigosProduto = $linhas->map(fn (ImportacaoNormalizadaLinha $linha) => trim((string) ($linha->codigo_produto ?: $linha->codigo)))
+            ->filter()
+            ->unique()
+            ->values();
 
         $produtos = collect();
         if ($produtoIds->isNotEmpty() || $codigosProduto->isNotEmpty()) {
             $produtos = Produto::query()
+                ->with(['categoria', 'variacoes.atributos', 'variacoes.produto.categoria'])
                 ->where(function ($query) use ($produtoIds, $codigosProduto) {
                     if ($produtoIds->isNotEmpty()) {
                         $query->whereIn('id', $produtoIds->all());
@@ -521,36 +534,32 @@ final class ImportacaoNormalizadaPipelineService
                 ->get();
         }
 
-        $variacoes = collect();
-        if ($variacaoIds->isNotEmpty() || $skus->isNotEmpty() || $chavesVariacao->isNotEmpty()) {
-            $variacoes = ProdutoVariacao::query()
-                ->with('produto')
-                ->where(function ($query) use ($variacaoIds, $skus, $chavesVariacao) {
-                    if ($variacaoIds->isNotEmpty()) {
-                        $query->whereIn('id', $variacaoIds->all());
-                    }
-                    if ($skus->isNotEmpty()) {
-                        $query->orWhereIn('sku_interno', $skus->all());
-                    }
-                    if ($chavesVariacao->isNotEmpty()) {
-                        $query->orWhereIn('chave_variacao', $chavesVariacao->all());
-                    }
-                })
-                ->get();
+        $variacoes = $produtos->flatMap(fn (Produto $produto) => $produto->variacoes);
+        if ($variacaoIds->isNotEmpty()) {
+            $variacoes = $variacoes->merge(
+                ProdutoVariacao::query()
+                    ->with(['produto.categoria', 'atributos'])
+                    ->whereIn('id', $variacaoIds->all())
+                    ->get()
+            );
         }
+
+        $variacoes = $variacoes
+            ->unique('id')
+            ->values();
 
         return [
             'modo_carga_inicial' => $modoCargaInicial,
             'produtos_por_id' => $produtos->keyBy('id')->all(),
             'produtos_por_codigo' => $produtos->filter(fn (Produto $produto) => !empty($produto->codigo_produto))
-                ->keyBy(fn (Produto $produto) => trim((string) $produto->codigo_produto))
+                ->groupBy(fn (Produto $produto) => trim((string) $produto->codigo_produto))
+                ->map(fn ($items) => $items->values())
                 ->all(),
             'variacoes_por_id' => $variacoes->keyBy('id')->all(),
-            'variacoes_por_sku' => $variacoes->filter(fn (ProdutoVariacao $variacao) => !empty($variacao->sku_interno))
-                ->keyBy(fn (ProdutoVariacao $variacao) => trim((string) $variacao->sku_interno))
-                ->all(),
-            'variacoes_por_chave' => $variacoes->filter(fn (ProdutoVariacao $variacao) => !empty($variacao->chave_variacao))
-                ->keyBy(fn (ProdutoVariacao $variacao) => trim((string) $variacao->chave_variacao))
+            'variacoes_por_produto' => $variacoes
+                ->filter(fn (ProdutoVariacao $variacao) => !empty($variacao->produto_id))
+                ->groupBy(fn (ProdutoVariacao $variacao) => (int) $variacao->produto_id)
+                ->map(fn ($items) => $items->values())
                 ->all(),
         ];
     }
@@ -561,7 +570,6 @@ final class ImportacaoNormalizadaPipelineService
      */
     private function classificarLinha(ImportacaoNormalizadaLinha $linha, array $contextoCatalogo): array
     {
-        $modoCargaInicial = (bool) ($contextoCatalogo['modo_carga_inicial'] ?? false);
         $motivosBloqueio = [];
 
         if ($linha->status_revisao === StatusRevisaoCadastro::REJEITADO) {
@@ -597,7 +605,7 @@ final class ImportacaoNormalizadaPipelineService
         }
 
         $produtoExistente = $this->resolverProdutoExistente($linha, $contextoCatalogo, $motivosBloqueio);
-        $variacaoExistente = $this->resolverVariacaoExistente($linha, $contextoCatalogo, $motivosBloqueio);
+        $variacaoExistente = $this->resolverVariacaoExistente($linha, $produtoExistente, $contextoCatalogo, $motivosBloqueio);
 
         if ($variacaoExistente && $produtoExistente && (int) $variacaoExistente->produto_id !== (int) $produtoExistente->id) {
             $motivosBloqueio[] = 'A variação vinculada pertence a um produto diferente do produto pai associado.';
@@ -619,7 +627,7 @@ final class ImportacaoNormalizadaPipelineService
                 true
             ));
 
-        if (!$modoCargaInicial && ($linha->status_revisao === StatusRevisaoCadastro::PENDENTE_REVISAO || $conflitosPendentes->isNotEmpty())) {
+        if ($linha->status_revisao === StatusRevisaoCadastro::PENDENTE_REVISAO || $conflitosPendentes->isNotEmpty()) {
             $motivo = $conflitosPendentes->isNotEmpty()
                 ? 'Existem conflitos pendentes de decisão manual.'
                 : 'A linha ainda depende de revisão manual.';
@@ -644,7 +652,7 @@ final class ImportacaoNormalizadaPipelineService
             );
         }
 
-        if (!$modoCargaInicial && !empty($motivosBloqueio)) {
+        if (!empty($motivosBloqueio)) {
             return $this->resultadoClassificacao(
                 $linha,
                 ImportacaoNormalizadaAcaoLinha::BLOQUEADA_POR_CONFLITO,
@@ -827,18 +835,18 @@ final class ImportacaoNormalizadaPipelineService
             }
 
             if ($classificacao['produto_acao'] === 'CRIAR') {
-                $produtoIdentidade = $linha->codigo_produto ?: ($linha->chave_produto ?: 'linha:' . $linha->id);
+                $produtoIdentidade = $this->produtoIdentityKeyFromLinha($linha) ?: ('linha:' . $linha->id);
                 $produtosNovos[$produtoIdentidade] = true;
             } elseif ($classificacao['produto_acao'] === 'ATUALIZAR') {
-                $produtoIdentidade = (string) ($classificacao['produto_id_vinculado'] ?: $linha->codigo_produto ?: $linha->chave_produto);
+                $produtoIdentidade = (string) ($classificacao['produto_id_vinculado'] ?: ($this->produtoIdentityKeyFromLinha($linha) ?: ('linha:' . $linha->id)));
                 $produtosAtualizados[$produtoIdentidade] = true;
             }
 
             if ($classificacao['variacao_acao'] === 'CRIAR') {
-                $variacaoIdentidade = $linha->sku_interno ?: ($linha->chave_variacao ?: 'linha:' . $linha->id);
+                $variacaoIdentidade = $this->variacaoIdentityKeyFromLinha($linha) ?: ('linha:' . $linha->id);
                 $variacoesNovas[$variacaoIdentidade] = true;
             } elseif ($classificacao['variacao_acao'] === 'ATUALIZAR') {
-                $variacaoIdentidade = (string) ($classificacao['variacao_id_vinculado'] ?: $linha->sku_interno ?: $linha->chave_variacao);
+                $variacaoIdentidade = (string) ($classificacao['variacao_id_vinculada'] ?: ($this->variacaoIdentityKeyFromLinha($linha) ?: ('linha:' . $linha->id)));
                 $variacoesAtualizadas[$variacaoIdentidade] = true;
             }
         }
@@ -899,10 +907,10 @@ final class ImportacaoNormalizadaPipelineService
         array $contextoCatalogo,
         array &$motivosBloqueio
     ): ?Produto {
-        $modoCargaInicial = (bool) ($contextoCatalogo['modo_carga_inicial'] ?? false);
         $manual = null;
         if (!empty($linha->produto_id_vinculado)) {
-            $manual = $contextoCatalogo['produtos_por_id'][(int) $linha->produto_id_vinculado] ?? Produto::find($linha->produto_id_vinculado);
+            $manual = $contextoCatalogo['produtos_por_id'][(int) $linha->produto_id_vinculado]
+                ?? Produto::with('categoria')->find($linha->produto_id_vinculado);
             if (!$manual) {
                 $motivosBloqueio[] = 'Produto pai vinculado manualmente não foi encontrado.';
                 return null;
@@ -910,12 +918,18 @@ final class ImportacaoNormalizadaPipelineService
         }
 
         $automatico = null;
-        if (!$modoCargaInicial && !empty($linha->codigo_produto)) {
-            $automatico = $contextoCatalogo['produtos_por_codigo'][trim((string) $linha->codigo_produto)] ?? null;
+        $codigoProduto = trim((string) ($linha->codigo_produto ?: $linha->codigo));
+        if ($codigoProduto !== '') {
+            $candidatos = $contextoCatalogo['produtos_por_codigo'][$codigoProduto] ?? collect();
+            $identityKey = $this->produtoIdentityKeyFromLinha($linha);
+            $automatico = $candidatos->first(
+                fn (Produto $produto) => $identityKey !== null
+                    && $this->produtoIdentityKeyFromProduto($produto) === $identityKey
+            );
         }
 
         if ($manual && $automatico && (int) $manual->id !== (int) $automatico->id) {
-            $motivosBloqueio[] = 'O vínculo manual do produto diverge do produto encontrado pelas chaves oficiais.';
+            $motivosBloqueio[] = 'O vínculo manual do produto diverge do produto encontrado pela identidade código + categoria + nome.';
             return $manual;
         }
 
@@ -937,13 +951,14 @@ final class ImportacaoNormalizadaPipelineService
      */
     private function resolverVariacaoExistente(
         ImportacaoNormalizadaLinha $linha,
+        ?Produto $produto,
         array $contextoCatalogo,
         array &$motivosBloqueio
     ): ?ProdutoVariacao {
         $manual = null;
         if (!empty($linha->variacao_id_vinculada)) {
             $manual = $contextoCatalogo['variacoes_por_id'][(int) $linha->variacao_id_vinculada]
-                ?? ProdutoVariacao::with('produto')->find($linha->variacao_id_vinculada);
+                ?? ProdutoVariacao::with(['produto.categoria', 'atributos'])->find($linha->variacao_id_vinculada);
             if (!$manual) {
                 $motivosBloqueio[] = 'Variação vinculada manualmente não foi encontrada.';
                 return null;
@@ -951,15 +966,17 @@ final class ImportacaoNormalizadaPipelineService
         }
 
         $automatica = null;
-        if (!empty($linha->sku_interno)) {
-            $automatica = $contextoCatalogo['variacoes_por_sku'][trim((string) $linha->sku_interno)] ?? null;
-        }
-        if (!$automatica && !empty($linha->chave_variacao)) {
-            $automatica = $contextoCatalogo['variacoes_por_chave'][trim((string) $linha->chave_variacao)] ?? null;
+        if ($produto) {
+            $identityKey = $this->variacaoIdentityKeyFromLinha($linha);
+            $candidatos = $contextoCatalogo['variacoes_por_produto'][(int) $produto->id] ?? collect();
+            $automatica = $candidatos->first(
+                fn (ProdutoVariacao $variacao) => $identityKey !== null
+                    && $this->variacaoIdentityKeyFromVariacao($variacao) === $identityKey
+            );
         }
 
         if ($manual && $automatica && (int) $manual->id !== (int) $automatica->id) {
-            $motivosBloqueio[] = 'O vínculo manual da variação diverge da variação encontrada pelas chaves oficiais.';
+            $motivosBloqueio[] = 'O vínculo manual da variação diverge da variação encontrada pela identidade código + nome + atributos.';
             return $manual;
         }
 
@@ -968,15 +985,166 @@ final class ImportacaoNormalizadaPipelineService
             return null;
         }
 
-        if (!empty($linha->sku_interno) && !empty($variacao->sku_interno) && trim((string) $variacao->sku_interno) !== trim((string) $linha->sku_interno)) {
-            $motivosBloqueio[] = 'A variação vinculada possui SKU interno diferente do informado na planilha.';
-        }
-
-        if (!empty($linha->chave_variacao) && !empty($variacao->chave_variacao) && trim((string) $variacao->chave_variacao) !== trim((string) $linha->chave_variacao)) {
-            $motivosBloqueio[] = 'A variação vinculada possui chave de variação diferente da planilha.';
+        if ($produto && (int) $variacao->produto_id !== (int) $produto->id) {
+            $motivosBloqueio[] = 'A variação encontrada pertence a um produto diferente do produto pai resolvido para a linha.';
         }
 
         return $variacao;
+    }
+
+    private function produtoIdentityKeyFromLinha(ImportacaoNormalizadaLinha $linha): ?string
+    {
+        $codigo = $this->normalizeIdentityCode((string) ($linha->codigo_produto ?: $linha->codigo));
+        $categoria = $this->normalizeIdentityText((string) ($linha->categoria_oficial ?: $linha->categoria));
+        $nome = $this->normalizeIdentityText((string) ($linha->nome_base_normalizado ?: $linha->nome_normalizado ?: $linha->nome));
+
+        if ($codigo === '' || $nome === '') {
+            return null;
+        }
+
+        return implode('|', [$codigo, $categoria, $nome]);
+    }
+
+    private function produtoIdentityKeyFromProduto(Produto $produto): ?string
+    {
+        $codigo = $this->normalizeIdentityCode((string) ($produto->codigo_produto ?? ''));
+        $categoria = $this->normalizeIdentityText((string) ($produto->categoria?->nome ?? ''));
+        $nome = $this->normalizeIdentityText((string) ($produto->nome ?? ''));
+
+        if ($codigo === '' || $nome === '') {
+            return null;
+        }
+
+        return implode('|', [$codigo, $categoria, $nome]);
+    }
+
+    private function variacaoIdentityKeyFromLinha(ImportacaoNormalizadaLinha $linha): ?string
+    {
+        $nome = $this->normalizeIdentityText((string) ($linha->nome ?: $linha->nome_base_normalizado ?: $linha->nome_normalizado));
+        if ($nome === '') {
+            return null;
+        }
+
+        return json_encode([
+            'nome' => $nome,
+            'atributos' => $this->normalizeIdentityAttrs($this->montarAtributosLegadosDaLinha($linha)),
+        ], JSON_UNESCAPED_UNICODE);
+    }
+
+    private function variacaoIdentityKeyFromVariacao(ProdutoVariacao $variacao): ?string
+    {
+        $nome = $this->normalizeIdentityText((string) ($variacao->nome ?? ''));
+        if ($nome === '') {
+            return null;
+        }
+
+        $attrs = $variacao->relationLoaded('atributos')
+            ? $variacao->atributos->mapWithKeys(fn ($atributo) => [$atributo->atributo => $atributo->valor])->all()
+            : [];
+
+        foreach ([
+            'dimensao_1' => $variacao->dimensao_1,
+            'dimensao_2' => $variacao->dimensao_2,
+            'dimensao_3' => $variacao->dimensao_3,
+            'cor' => $variacao->cor,
+            'lado' => $variacao->lado,
+            'material_oficial' => $variacao->material_oficial,
+            'acabamento_oficial' => $variacao->acabamento_oficial,
+        ] as $campo => $valor) {
+            if (($attrs[$campo] ?? null) === null && $valor !== null && $valor !== '') {
+                $attrs[$campo] = $valor;
+            }
+        }
+
+        return json_encode([
+            'nome' => $nome,
+            'atributos' => $this->normalizeIdentityAttrs($attrs),
+        ], JSON_UNESCAPED_UNICODE);
+    }
+
+    private function normalizeIdentityAttrs(array $attrs): array
+    {
+        $normalized = [];
+
+        foreach ($attrs as $chave => $valor) {
+            if ($valor === null || trim((string) $valor) === '') {
+                continue;
+            }
+
+            $identityKey = $this->normalizeIdentityAttrKey((string) $chave);
+            if ($identityKey === null) {
+                continue;
+            }
+
+            $normalized[$identityKey] = $this->normalizeIdentityAttrValue($valor);
+        }
+
+        ksort($normalized);
+
+        return $normalized;
+    }
+
+    private function normalizeIdentityAttrKey(string $key): ?string
+    {
+        $normalized = (string) Str::of($key)->squish()->lower()->ascii();
+
+        $normalized = match ($normalized) {
+            'largura_cm', 'diametro_cm', 'comprimento_cm' => 'dimensao_1',
+            'profundidade_cm', 'espessura_cm' => 'dimensao_2',
+            'altura_cm' => 'dimensao_3',
+            default => $normalized,
+        };
+
+        return in_array($normalized, self::VARIATION_IDENTITY_ATTRS, true)
+            ? $normalized
+            : null;
+    }
+
+    private function normalizeIdentityText(string $value): string
+    {
+        $normalized = (string) Str::of($value)->ascii()->lower();
+        $normalized = preg_replace('/[^a-z0-9]+/', ' ', $normalized);
+        $normalized = preg_replace('/\s+/', ' ', $normalized);
+
+        return trim((string) $normalized);
+    }
+
+    private function normalizeIdentityAttrValue(mixed $value): string
+    {
+        if (is_int($value)) {
+            return (string) $value;
+        }
+
+        if (is_float($value)) {
+            return rtrim(rtrim(sprintf('%.4F', $value), '0'), '.');
+        }
+
+        $text = trim((string) $value);
+        if ($text === '') {
+            return '';
+        }
+
+        if (is_numeric($text)) {
+            return rtrim(rtrim(sprintf('%.4F', (float) $text), '0'), '.');
+        }
+
+        if (str_contains($text, '.') && str_contains($text, ',')) {
+            $text = str_replace('.', '', $text);
+        }
+        if (str_contains($text, ',')) {
+            $text = str_replace(',', '.', $text);
+        }
+
+        if (is_numeric($text)) {
+            return rtrim(rtrim(sprintf('%.4F', (float) $text), '0'), '.');
+        }
+
+        return $this->normalizeIdentityText((string) $value);
+    }
+
+    private function normalizeIdentityCode(string $value): string
+    {
+        return trim((string) Str::of($value)->squish()->upper());
     }
 
     private function resolverCategoriaOficialId(string $categoriaOficial): int
@@ -1037,10 +1205,12 @@ final class ImportacaoNormalizadaPipelineService
             'nome_limpo' => $linha->nome_base_normalizado ?: $linha->nome_normalizado ?: $linha->nome,
             'nome_completo' => $linha->nome,
             'categoria_id' => $categoriaId,
+            'categoria_nome' => $linha->categoria_oficial ?: $linha->categoria,
             'fornecedor_id' => $fornecedorId,
             'codigo_produto' => $linha->codigo_produto,
-            'sku_interno' => $linha->sku_interno,
-            'chave_variacao' => $linha->chave_variacao ?: $linha->chave_variacao_calculada,
+            'nome_base_normalizado' => $linha->nome_base_normalizado ?: $linha->nome,
+            'sku_interno' => null,
+            'chave_variacao' => null,
             'dimensao_1' => $linha->dimensao_1,
             'dimensao_2' => $linha->dimensao_2,
             'dimensao_3' => $linha->dimensao_3,
@@ -1059,7 +1229,7 @@ final class ImportacaoNormalizadaPipelineService
             'fonte' => $modoCargaInicial ? 'carga_inicial_sierra' : 'importacao_normalizada',
             'aba_origem' => $linha->aba_origem,
             'modo_carga_inicial' => $modoCargaInicial,
-            'forcar_nova_variacao' => $modoCargaInicial,
+            'forcar_nova_variacao' => false,
             'atributos' => $this->montarAtributosLegadosDaLinha($linha),
         ];
     }
@@ -1118,11 +1288,17 @@ final class ImportacaoNormalizadaPipelineService
             'metal/vidro' => 'metal_vidro',
             'metal vidro' => 'metal_vidro',
             'diametro cm' => 'diametro_cm',
+            'diametro (cm)' => 'diametro_cm',
             'largura cm' => 'largura_cm',
+            'largura (cm)' => 'largura_cm',
             'profundidade cm' => 'profundidade_cm',
+            'profundidade (cm)' => 'profundidade_cm',
             'altura cm' => 'altura_cm',
+            'altura (cm)' => 'altura_cm',
             'comprimento cm' => 'comprimento_cm',
+            'comprimento (cm)' => 'comprimento_cm',
             'espessura cm' => 'espessura_cm',
+            'espessura (cm)' => 'espessura_cm',
         ];
 
         $atributos = [];
@@ -1136,7 +1312,7 @@ final class ImportacaoNormalizadaPipelineService
                 ->squish()
                 ->lower()
                 ->ascii()
-                ->replace(['_', ':'], ' ');
+                ->replace(['_', ':', '(', ')'], ' ');
             $normalizada = preg_replace('/\s+/', ' ', $normalizada);
             $normalizada = trim((string) $normalizada);
 
@@ -1240,7 +1416,7 @@ final class ImportacaoNormalizadaPipelineService
             sprintf('Importação normalizada #%d', $importacao->id),
             'Aba: ' . $linha->aba_origem,
             'Linha: ' . $linha->linha_planilha,
-            'SKU: ' . $linha->sku_interno,
+            'Código: ' . ($linha->codigo_produto ?: $linha->codigo ?: 'sem código'),
             'Status: ' . ($linha->status_normalizado ?: $linha->status ?: 'sem status'),
         ];
 

@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Integrations\ContaAzul\Services\ContaAzulExportDispatchService;
 use App\Models\Cliente;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
@@ -14,6 +15,7 @@ class ClienteService
     public function __construct(
         protected ClienteRepository $clientes,
         protected ClienteEnderecoRepository $enderecosRepo,
+        protected ContaAzulExportDispatchService $contaAzulExports,
     ) {}
 
     public function listarClientes(array $filtros = []): Collection
@@ -140,7 +142,10 @@ class ClienteService
                 $this->syncEnderecos($cliente, $enderecos);
             }
 
-            return $cliente->load(['enderecos']);
+            $cliente = $cliente->load(['enderecos']);
+            $this->contaAzulExports->cliente((int) $cliente->id, null, ['evento' => 'cliente_criado']);
+
+            return $cliente;
         });
     }
 
@@ -158,7 +163,10 @@ class ClienteService
                 $this->syncEnderecos($cliente, $enderecos);
             }
 
-            return $cliente->load(['enderecos']);
+            $cliente = $cliente->load(['enderecos']);
+            $this->contaAzulExports->cliente((int) $cliente->id, null, ['evento' => 'cliente_atualizado']);
+
+            return $cliente;
         });
     }
 }

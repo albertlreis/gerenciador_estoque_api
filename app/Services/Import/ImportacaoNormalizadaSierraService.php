@@ -31,6 +31,7 @@ final class ImportacaoNormalizadaSierraService
     private const HEADER_ALIASES = [
         'quantidade' => 'quantidade',
         'data entrada' => 'data_entrada',
+        'data nf' => 'data_entrada',
         'codigo' => 'codigo',
         'referencia' => 'codigo',
         'valor unit' => 'valor',
@@ -56,11 +57,17 @@ final class ImportacaoNormalizadaSierraService
         'dimensao 2 (cm)' => 'dimensao_2',
         'dimensao 3 (cm)' => 'dimensao_3',
         'diametro cm' => 'diametro_cm',
+        'diametro (cm)' => 'diametro_cm',
         'largura cm' => 'largura_cm',
+        'largura (cm)' => 'largura_cm',
         'profundidade cm' => 'profundidade_cm',
+        'profundidade (cm)' => 'profundidade_cm',
         'altura cm' => 'altura_cm',
+        'altura (cm)' => 'altura_cm',
         'comprimento cm' => 'comprimento_cm',
+        'comprimento (cm)' => 'comprimento_cm',
         'espessura cm' => 'espessura_cm',
+        'espessura (cm)' => 'espessura_cm',
         'nome normalizado' => 'nome_normalizado',
         'categoria normalizada' => 'categoria_normalizada',
         'codigo origem' => 'codigo_origem',
@@ -84,9 +91,24 @@ final class ImportacaoNormalizadaSierraService
     /**
      * @var string[]
      */
-    private const REQUIRED_HEADERS_PADRAO = [
+    private const REQUIRED_HEADERS_BASE = [
         'codigo',
         'nome',
+        'status',
+    ];
+
+    /**
+     * @var string[]
+     */
+    private const REQUIRED_HEADERS_QUANTIDADE = [
+        'quantidade',
+        'unidade',
+    ];
+
+    /**
+     * @var string[]
+     */
+    private const LEGACY_NORMALIZED_HEADERS = [
         'codigo_produto',
         'chave_produto',
         'chave_variacao',
@@ -94,17 +116,6 @@ final class ImportacaoNormalizadaSierraService
         'categoria_oficial',
         'nome_base_normalizado',
         'regra_categoria',
-        'quantidade',
-        'status',
-    ];
-
-    /**
-     * @var string[]
-     */
-    private const REQUIRED_HEADERS_CARGA_INICIAL = [
-        'codigo',
-        'nome',
-        'status',
     ];
 
     /**
@@ -398,21 +409,14 @@ final class ImportacaoNormalizadaSierraService
         $nomeOriginal = $this->toText($canonical['nome'] ?? null);
         $regraCategoria = Str::upper($this->toText($canonical['regra_categoria'] ?? null));
 
-        if ($modoCargaInicial) {
-            if ($codigoProduto === '' && $codigoBase !== '') {
-                $codigoProduto = $codigoBase;
-            }
-            if ($categoriaOficial === '') {
-                $categoriaOficial = $categoriaBase !== '' ? $categoriaBase : $sheetName;
-            }
-            if ($nomeBase === '' && $nomeOriginal !== '') {
-                $nomeBase = $nomeOriginal;
-            }
-            if ($regraCategoria === '') {
-                $regraCategoria = Str::contains($this->normalizarTextoComparacao($sheetName), 'adornos')
-                    ? 'ADORNOS'
-                    : 'GERAL';
-            }
+        if ($codigoProduto === '' && $codigoBase !== '') {
+            $codigoProduto = $codigoBase;
+        }
+        if ($categoriaOficial === '') {
+            $categoriaOficial = $categoriaBase !== '' ? $categoriaBase : $sheetName;
+        }
+        if ($nomeBase === '' && $nomeOriginal !== '') {
+            $nomeBase = $nomeOriginal;
         }
         $status = $this->toText($canonical['status'] ?? null);
         $statusNormalizado = $this->normalizarStatus($status);
@@ -457,35 +461,21 @@ final class ImportacaoNormalizadaSierraService
         $erros = [];
         $divergencias = [];
 
-        if (!$modoCargaInicial && $codigoProduto === '') {
-            $erros[] = 'Código produto ausente.';
+        if ($codigoBase === '') {
+            $erros[] = 'Código ausente.';
         }
-        if (!$modoCargaInicial && $skuInterno === '') {
-            $erros[] = 'SKU interno ausente.';
+        if ($nomeOriginal === '') {
+            $erros[] = 'Nome ausente.';
         }
-        if (!$modoCargaInicial && $categoriaOficial === '') {
-            $erros[] = 'Categoria oficial ausente.';
-        }
-        if (!$modoCargaInicial && $nomeBase === '') {
-            $erros[] = 'Nome base normalizado ausente.';
-        }
-        if ($this->toText($canonical['chave_produto'] ?? null) !== ''
-            && $chaveProdutoCalculada !== null
-            && $this->normalizarTextoComparacao((string) $canonical['chave_produto']) !== $this->normalizarTextoComparacao($chaveProdutoCalculada)
-        ) {
-            $divergencias[] = 'Chave produto divergente da composição oficial.';
-        }
-        if ($this->toText($canonical['chave_variacao'] ?? null) !== ''
-            && $chaveVariacaoCalculada !== null
-            && $this->normalizarTextoComparacao((string) $canonical['chave_variacao']) !== $this->normalizarTextoComparacao($chaveVariacaoCalculada)
-        ) {
-            $divergencias[] = 'Chave variação divergente da composição oficial.';
+        if ($categoriaOficial === '') {
+            $erros[] = 'Categoria ausente.';
         }
 
         if ($regraCategoria !== '' && !in_array($regraCategoria, self::SUPPORTED_RULES, true)) {
             $avisos[] = 'Regra de categoria fora do conjunto suportado: ' . $regraCategoria;
         }
-        if (!$geraEstoque && $this->toInt($canonical['quantidade'] ?? null) > 0) {
+        $quantidadeInformada = $this->toInt($canonical['quantidade'] ?? ($canonical['unidade'] ?? null));
+        if (!$geraEstoque && $quantidadeInformada > 0) {
             $avisos[] = 'Linha com quantidade positiva, mas status não elegível para estoque.';
         }
 
@@ -538,7 +528,7 @@ final class ImportacaoNormalizadaSierraService
             'lado' => $this->toNullableText($canonical['lado'] ?? null),
             'material_oficial' => $this->toNullableText($canonical['material_oficial'] ?? null),
             'acabamento_oficial' => $this->toNullableText($canonical['acabamento_oficial'] ?? null),
-            'quantidade' => $this->toInt($canonical['quantidade'] ?? null) ?? ($modoCargaInicial ? 1 : null),
+            'quantidade' => $quantidadeInformada,
             'status' => $status !== '' ? $status : null,
             'status_normalizado' => $statusNormalizado,
             'gera_estoque' => $geraEstoque,
@@ -619,14 +609,7 @@ final class ImportacaoNormalizadaSierraService
 
     private function registrarConflitosDeConsistencia(ImportacaoNormalizada $importacao): void
     {
-        if ((string) $importacao->tipo === 'planilha_sierra_carga_inicial') {
-            return;
-        }
-
-        $linhas = $importacao->linhas()->get();
-
-        $this->registrarConflitosPorSkuInterno($importacao, $linhas);
-        $this->registrarConflitosPorCodigoProduto($importacao, $linhas);
+        return;
     }
 
     private function registrarConflitosPorSkuInterno(ImportacaoNormalizada $importacao, Collection $linhas): void
@@ -756,14 +739,10 @@ final class ImportacaoNormalizadaSierraService
         $map = [];
 
         foreach ($headerRow as $col => $header) {
-            $normalized = $this->normalizarTextoComparacao((string) $header);
+            $normalized = $this->normalizarCabecalho((string) $header);
             if ($normalized === '') {
                 continue;
             }
-
-            $normalized = str_replace(['_', ':'], ' ', $normalized);
-            $normalized = preg_replace('/\s+/', ' ', $normalized);
-            $normalized = trim((string) $normalized);
 
             if (isset(self::HEADER_ALIASES[$normalized])) {
                 $map[self::HEADER_ALIASES[$normalized]] = $col;
@@ -775,16 +754,16 @@ final class ImportacaoNormalizadaSierraService
 
     private function assertRequiredHeaders(array $headerMap, string $sheetName, bool $modoCargaInicial): void
     {
-        $requiredHeaders = $modoCargaInicial
-            ? self::REQUIRED_HEADERS_CARGA_INICIAL
-            : self::REQUIRED_HEADERS_PADRAO;
+        $missing = array_values(array_diff(self::REQUIRED_HEADERS_BASE, array_keys($headerMap)));
 
-        $missing = array_values(array_diff($requiredHeaders, array_keys($headerMap)));
+        if (empty(array_intersect(self::REQUIRED_HEADERS_QUANTIDADE, array_keys($headerMap)))) {
+            $missing[] = 'quantidade ou unidade';
+        }
 
         if (!empty($missing)) {
             throw new \RuntimeException(
                 sprintf(
-                    'A aba "%s" não contém todas as colunas obrigatórias da importação normalizada: %s',
+                    'A aba "%s" não contém todas as colunas obrigatórias da importação Sierra: %s',
                     $sheetName,
                     implode(', ', $missing)
                 )
@@ -795,10 +774,11 @@ final class ImportacaoNormalizadaSierraService
     private function deveUsarModoCargaInicial(array $headerMap): bool
     {
         $keys = array_keys($headerMap);
-        $temCabecalhoCargaInicial = empty(array_diff(self::REQUIRED_HEADERS_CARGA_INICIAL, $keys));
-        $faltamCamposNormalizados = !empty(array_diff(self::REQUIRED_HEADERS_PADRAO, $keys));
+        $temCabecalhoBase = empty(array_diff(self::REQUIRED_HEADERS_BASE, $keys))
+            && !empty(array_intersect(self::REQUIRED_HEADERS_QUANTIDADE, $keys));
+        $faltamCamposLegados = !empty(array_diff(self::LEGACY_NORMALIZED_HEADERS, $keys));
 
-        return $temCabecalhoCargaInicial && $faltamCamposNormalizados;
+        return $temCabecalhoBase && $faltamCamposLegados;
     }
 
     private function rowToRaw(array $row, array $headerRow): array
@@ -936,6 +916,15 @@ final class ImportacaoNormalizadaSierraService
     private function normalizarTextoComparacao(string $texto): string
     {
         return (string) Str::of($texto)->squish()->lower()->ascii();
+    }
+
+    private function normalizarCabecalho(string $texto): string
+    {
+        $normalizado = $this->normalizarTextoComparacao($texto);
+        $normalizado = str_replace(['_', ':', '(', ')'], ' ', $normalizado);
+        $normalizado = preg_replace('/\s+/', ' ', $normalizado);
+
+        return trim((string) $normalizado);
     }
 
     private function toText(mixed $value): string

@@ -90,7 +90,6 @@ class ConciliacaoContaAzulService
             'produtos' => $this->conciliarProdutos($lojaId),
             'vendas' => $this->conciliarVendas($lojaId),
             'titulos' => $this->conciliarTitulos($lojaId),
-            'baixas' => $this->conciliarBaixas($lojaId),
         ];
     }
 

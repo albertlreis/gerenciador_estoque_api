@@ -4,6 +4,11 @@ namespace App\Providers;
 
 use App\Integrations\ContaAzul\Auth\ContaAzulOAuthService;
 use App\Integrations\ContaAzul\Clients\ContaAzulClient;
+use App\Integrations\ContaAzul\Import\NotaContaAzulImportAdapter;
+use App\Integrations\ContaAzul\Import\PessoaContaAzulImportAdapter;
+use App\Integrations\ContaAzul\Import\ProdutoContaAzulImportAdapter;
+use App\Integrations\ContaAzul\Import\TituloContaAzulImportAdapter;
+use App\Integrations\ContaAzul\Import\VendaContaAzulImportAdapter;
 use App\Integrations\ContaAzul\Mappers\ContaAzulBaixaMapper;
 use App\Integrations\ContaAzul\Mappers\ContaAzulPedidoMapper;
 use App\Integrations\ContaAzul\Mappers\ContaAzulPessoaMapper;
@@ -55,12 +60,24 @@ class AppServiceProvider extends ServiceProvider
         $this->app->singleton(ContaAzulPedidoMapper::class, fn () => new ContaAzulPedidoMapper());
         $this->app->singleton(ContaAzulTituloMapper::class, fn () => new ContaAzulTituloMapper());
         $this->app->singleton(ContaAzulBaixaMapper::class, fn () => new ContaAzulBaixaMapper());
+        $this->app->singleton(PessoaContaAzulImportAdapter::class, fn () => new PessoaContaAzulImportAdapter());
+        $this->app->singleton(ProdutoContaAzulImportAdapter::class, fn () => new ProdutoContaAzulImportAdapter());
+        $this->app->singleton(VendaContaAzulImportAdapter::class, fn () => new VendaContaAzulImportAdapter());
+        $this->app->singleton(TituloContaAzulImportAdapter::class, fn () => new TituloContaAzulImportAdapter());
+        $this->app->singleton(NotaContaAzulImportAdapter::class, fn () => new NotaContaAzulImportAdapter());
 
         $this->app->singleton(ImportacaoContaAzulService::class, function ($app) {
             return new ImportacaoContaAzulService(
                 $app['config']->get('conta_azul', []),
                 $app->make(ContaAzulConnectionService::class),
-                $app->make(ContaAzulClient::class)
+                $app->make(ContaAzulClient::class),
+                [
+                    $app->make(PessoaContaAzulImportAdapter::class),
+                    $app->make(ProdutoContaAzulImportAdapter::class),
+                    $app->make(VendaContaAzulImportAdapter::class),
+                    $app->make(TituloContaAzulImportAdapter::class),
+                    $app->make(NotaContaAzulImportAdapter::class),
+                ]
             );
         });
 

@@ -15,7 +15,7 @@ class ContaAzulImportAllCommand extends Command
         $loja = $this->option('loja');
         $args = $loja !== null && $loja !== '' ? ['--loja' => $loja] : [];
 
-        foreach (['pessoas', 'produtos', 'vendas', 'financeiro', 'baixas', 'notas'] as $e) {
+        foreach (['pessoas', 'produtos', 'vendas', 'financeiro', 'notas'] as $e) {
             $this->call('conta-azul:import', array_merge(['entidade' => $e], $args));
         }
 

@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Exceptions\ImportacaoNormalizadaDuplicadaException;
 use App\Helpers\AuthHelper;
 use App\Http\Requests\AtualizarRevisaoImportacaoNormalizadaConflitoRequest;
 use App\Http\Requests\AtualizarRevisaoImportacaoNormalizadaLinhaRequest;
@@ -28,7 +29,11 @@ class ImportacaoNormalizadaController extends Controller
         $this->prepararAmbienteImportacao();
 
         $modoCargaInicial = $request->boolean('modo_carga_inicial', false);
-        $importacao = $this->service->criarStaging($request->file('arquivo'), auth()->id(), $modoCargaInicial);
+        try {
+            $importacao = $this->service->criarStaging($request->file('arquivo'), auth()->id(), $modoCargaInicial);
+        } catch (ImportacaoNormalizadaDuplicadaException $e) {
+            return $this->responderDuplicidadeImportacao($e);
+        }
 
         return response()->json([
             'sucesso' => true,
@@ -226,7 +231,11 @@ class ImportacaoNormalizadaController extends Controller
         $this->prepararAmbienteImportacao();
 
         $importacao = ImportacaoNormalizada::query()->findOrFail($id);
-        $resultado = $this->pipelineService->confirmar($importacao, auth()->id(), $request->boolean('modo_carga_inicial', false));
+        try {
+            $resultado = $this->pipelineService->confirmar($importacao, auth()->id(), $request->boolean('modo_carga_inicial', false));
+        } catch (ImportacaoNormalizadaDuplicadaException $e) {
+            return $this->responderDuplicidadeImportacao($e);
+        }
 
         return response()->json($resultado, $resultado['sucesso'] ? 200 : 422);
     }
@@ -236,7 +245,11 @@ class ImportacaoNormalizadaController extends Controller
         $this->prepararAmbienteImportacao();
 
         $importacao = ImportacaoNormalizada::query()->findOrFail($id);
-        $resultado = $this->pipelineService->efetivar($importacao, auth()->id(), $request->boolean('modo_carga_inicial', false));
+        try {
+            $resultado = $this->pipelineService->efetivar($importacao, auth()->id(), $request->boolean('modo_carga_inicial', false));
+        } catch (ImportacaoNormalizadaDuplicadaException $e) {
+            return $this->responderDuplicidadeImportacao($e);
+        }
 
         return response()->json($resultado, $resultado['sucesso'] ? 200 : 422);
     }
@@ -306,5 +319,18 @@ class ImportacaoNormalizadaController extends Controller
             'created_at' => $importacao->created_at,
             'updated_at' => $importacao->updated_at,
         ];
+    }
+
+    private function responderDuplicidadeImportacao(ImportacaoNormalizadaDuplicadaException $exception): JsonResponse
+    {
+        $importacaoExistente = $exception->importacaoExistente()->loadCount(['linhas', 'conflitos']);
+
+        return response()->json([
+            'sucesso' => false,
+            'mensagem' => $exception->getMessage(),
+            'data' => [
+                'importacao_existente' => $this->serializarImportacao($importacaoExistente),
+            ],
+        ], 409);
     }
 }

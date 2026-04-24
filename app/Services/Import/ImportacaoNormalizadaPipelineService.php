@@ -49,6 +49,7 @@ final class ImportacaoNormalizadaPipelineService
         private readonly ProdutoUpsertService $produtoUpsertService,
         private readonly EstoqueMovimentacaoService $estoqueMovimentacaoService,
         private readonly LocalizacaoParser $localizacaoParser,
+        private readonly ImportacaoNormalizadaDuplicateGuard $duplicateGuard,
     ) {}
 
     public function gerarPreview(ImportacaoNormalizada $importacao, bool $persist = true): array
@@ -154,6 +155,8 @@ final class ImportacaoNormalizadaPipelineService
                 ];
             }
 
+            $this->duplicateGuard->assertPodeAvancarFluxo($locked);
+
             $preview = $this->gerarPreview($locked, true);
             $validacao = $this->validarParaConfirmacao($locked, $preview);
 
@@ -216,6 +219,8 @@ final class ImportacaoNormalizadaPipelineService
                         'importacao' => $locked->fresh(),
                     ];
                 }
+
+                $this->duplicateGuard->assertPodeAvancarFluxo($locked);
 
                 $preview = $this->gerarPreview($locked, true);
                 $validacao = $this->validarParaConfirmacao($locked, $preview);

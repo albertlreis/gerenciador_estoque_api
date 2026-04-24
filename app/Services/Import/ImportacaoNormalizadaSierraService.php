@@ -21,7 +21,8 @@ use PhpOffice\PhpSpreadsheet\Shared\Date as SpreadsheetDate;
 final class ImportacaoNormalizadaSierraService
 {
     public function __construct(
-        private readonly SpreadsheetWorksheetReader $worksheetReader
+        private readonly SpreadsheetWorksheetReader $worksheetReader,
+        private readonly ImportacaoNormalizadaDuplicateGuard $duplicateGuard
     ) {
     }
 
@@ -136,6 +137,7 @@ final class ImportacaoNormalizadaSierraService
     ): ImportacaoNormalizada
     {
         $hash = hash_file('sha256', $arquivo->getRealPath());
+        $this->duplicateGuard->assertPodeCriarStaging($hash);
 
         $importacao = ImportacaoNormalizada::create([
             'tipo' => $modoCargaInicial ? 'planilha_sierra_carga_inicial' : 'planilha_sierra_normalizada',

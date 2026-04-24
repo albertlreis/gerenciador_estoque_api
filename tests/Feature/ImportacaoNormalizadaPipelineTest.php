@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\Estoque;
 use App\Models\EstoqueMovimentacao;
+use App\Models\ImportacaoNormalizada;
 use App\Models\ImportacaoNormalizadaLinha;
 use App\Models\Produto;
 use App\Models\ProdutoVariacao;
@@ -167,6 +168,94 @@ class ImportacaoNormalizadaPipelineTest extends TestCase
         ];
 
         return $this->criarPlanilhaTemporaria($sheets, 'importacao-normalizada-');
+    }
+
+    private function criarPlanilhaFixtureReimportacao(): string
+    {
+        $headers = [
+            'quantidade',
+            'Data NF',
+            'codigo',
+            'localizacao',
+            'Nome',
+            'Largura (cm)',
+            'Profundidade (cm)',
+            'Altura (cm)',
+            'Categoria',
+            'Madeira',
+            'Tec. 1',
+            'Tec. 2',
+            'Metal / Vidro',
+            'Valor',
+            'outlet',
+            'status',
+        ];
+
+        $sheets = [
+            'Sierra Loja' => [
+                $headers,
+                [
+                    3,
+                    '2026-03-10',
+                    'COD-001',
+                    'A-01-01',
+                    'Sofa Alpha',
+                    200,
+                    90,
+                    80,
+                    'Estofados',
+                    'MA01',
+                    'LINHO',
+                    '',
+                    '',
+                    5990.00,
+                    '',
+                    'Loja',
+                ],
+                [
+                    2,
+                    '2026-03-11',
+                    'COD-001',
+                    'A-01-02',
+                    'Sofa Alpha',
+                    200,
+                    90,
+                    80,
+                    'Estofados',
+                    'MA02',
+                    'LINHO',
+                    '',
+                    '',
+                    5990.00,
+                    '',
+                    'Brinde',
+                ],
+                array_fill(0, count($headers), null),
+            ],
+            'Depósito JB' => [
+                $headers,
+                [
+                    1,
+                    '2026-03-12',
+                    'COD-001',
+                    'B-02-01',
+                    'Sofa Alpha',
+                    200,
+                    90,
+                    80,
+                    'Estofados',
+                    'MA01',
+                    'LINHO',
+                    '',
+                    '',
+                    5990.00,
+                    '',
+                    'Depósito',
+                ],
+            ],
+        ];
+
+        return $this->criarPlanilhaTemporaria($sheets, 'importacao-normalizada-reimportacao-');
     }
 
     private function criarPlanilhaCargaInicialFixture(): string
@@ -359,9 +448,10 @@ class ImportacaoNormalizadaPipelineTest extends TestCase
         $this->assertSame(4, (int) $estoquesVariacao->sum('quantidade'));
         $this->assertCount(0, Estoque::query()->where('id_variacao', $variacaoSemEstoque->id)->where('quantidade', '>', 0)->get());
 
+        $arquivoReimportacaoPath = $this->criarPlanilhaFixtureReimportacao();
         $segundaImportacao = $this->post('/api/v1/importacoes/normalizadas', [
             'arquivo' => new UploadedFile(
-                $arquivoPath,
+                $arquivoReimportacaoPath,
                 'importacao-sierra-reimportacao.xlsx',
                 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
                 null,
@@ -452,5 +542,129 @@ class ImportacaoNormalizadaPipelineTest extends TestCase
                 ->whereIn('ref_id', ImportacaoNormalizadaLinha::query()->where('importacao_id', $importacaoId)->pluck('id'))
                 ->count()
         );
+    }
+
+    public function test_upload_bloqueia_staging_duplicado_por_arquivo_hash_e_retorna_409(): void
+    {
+        $this->autenticarComoDev();
+        $arquivoPath = $this->criarPlanilhaFixture();
+
+        $primeiroUpload = $this->post('/api/v1/importacoes/normalizadas', [
+            'arquivo' => new UploadedFile(
+                $arquivoPath,
+                'importacao-duplicada.xlsx',
+                'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                null,
+                true
+            ),
+        ]);
+
+        $primeiroUpload->assertCreated();
+        $importacaoExistenteId = (int) $primeiroUpload->json('data.id');
+
+        $segundoUpload = $this->post('/api/v1/importacoes/normalizadas', [
+            'arquivo' => new UploadedFile(
+                $arquivoPath,
+                'importacao-duplicada.xlsx',
+                'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                null,
+                true
+            ),
+        ]);
+
+        $segundoUpload->assertStatus(409);
+        $segundoUpload->assertJsonPath('sucesso', false);
+        $segundoUpload->assertJsonPath('data.importacao_existente.id', $importacaoExistenteId);
+        $this->assertSame(1, ImportacaoNormalizada::query()->count());
+    }
+
+    public function test_upload_permanece_permitido_quando_importacao_igual_anterior_esta_cancelada(): void
+    {
+        $this->autenticarComoDev();
+        $arquivoPath = $this->criarPlanilhaFixture();
+        $arquivoHash = hash_file('sha256', $arquivoPath);
+
+        ImportacaoNormalizada::create([
+            'tipo' => 'planilha_sierra_carga_inicial',
+            'arquivo_nome' => 'importacao-anterior.xlsx',
+            'arquivo_hash' => $arquivoHash,
+            'usuario_id' => null,
+            'status' => 'cancelada',
+        ]);
+
+        $response = $this->post('/api/v1/importacoes/normalizadas', [
+            'arquivo' => new UploadedFile(
+                $arquivoPath,
+                'importacao-nova.xlsx',
+                'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                null,
+                true
+            ),
+        ]);
+
+        $response->assertCreated();
+        $this->assertSame(2, ImportacaoNormalizada::query()->count());
+    }
+
+    public function test_confirmar_retorna_409_quando_ja_existe_importacao_mesmo_hash_confirmada(): void
+    {
+        $this->autenticarComoDev();
+
+        $arquivoHash = str_repeat('a', 64);
+        ImportacaoNormalizada::create([
+            'tipo' => 'planilha_sierra_carga_inicial',
+            'arquivo_nome' => 'existente.xlsx',
+            'arquivo_hash' => $arquivoHash,
+            'usuario_id' => null,
+            'status' => 'confirmada',
+            'confirmado_em' => now(),
+        ]);
+
+        $importacaoDuplicada = ImportacaoNormalizada::create([
+            'tipo' => 'planilha_sierra_carga_inicial',
+            'arquivo_nome' => 'duplicada.xlsx',
+            'arquivo_hash' => $arquivoHash,
+            'usuario_id' => null,
+            'status' => 'pronta_para_efetivar',
+            'preview_resumo' => ['totais' => ['linhas_validas_para_efetivacao' => 1]],
+        ]);
+
+        $response = $this->postJson("/api/v1/importacoes/normalizadas/{$importacaoDuplicada->id}/confirmar");
+
+        $response->assertStatus(409);
+        $response->assertJsonPath('sucesso', false);
+        $response->assertJsonPath('data.importacao_existente.status', 'confirmada');
+    }
+
+    public function test_efetivar_retorna_409_quando_ja_existe_importacao_mesmo_hash_efetivada(): void
+    {
+        $this->autenticarComoDev();
+
+        $arquivoHash = str_repeat('b', 64);
+        ImportacaoNormalizada::create([
+            'tipo' => 'planilha_sierra_carga_inicial',
+            'arquivo_nome' => 'existente.xlsx',
+            'arquivo_hash' => $arquivoHash,
+            'usuario_id' => null,
+            'status' => 'efetivada',
+            'confirmado_em' => now()->subMinute(),
+            'efetivado_em' => now()->subSecond(),
+        ]);
+
+        $importacaoDuplicada = ImportacaoNormalizada::create([
+            'tipo' => 'planilha_sierra_carga_inicial',
+            'arquivo_nome' => 'duplicada.xlsx',
+            'arquivo_hash' => $arquivoHash,
+            'usuario_id' => null,
+            'status' => 'confirmada',
+            'preview_resumo' => ['totais' => ['linhas_validas_para_efetivacao' => 1]],
+            'confirmado_em' => now(),
+        ]);
+
+        $response = $this->postJson("/api/v1/importacoes/normalizadas/{$importacaoDuplicada->id}/efetivar");
+
+        $response->assertStatus(409);
+        $response->assertJsonPath('sucesso', false);
+        $response->assertJsonPath('data.importacao_existente.status', 'efetivada');
     }
 }

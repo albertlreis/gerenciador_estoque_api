@@ -138,4 +138,52 @@ class ImportacaoPedidoEstrategiaVinculoTest extends TestCase
         $this->assertNotNull($item);
         $this->assertSame($variacaoExistente->id, $item->id_variacao);
     }
+
+    public function test_atributo_com_valor_longo_retorna_validacao_amigavel_sem_sqlstate(): void
+    {
+        $usuario = Usuario::create([
+            'nome' => 'Usuario Atributo Longo',
+            'email' => 'usuario_atributo_longo_' . Str::random(6) . '@example.com',
+            'senha' => 'teste',
+            'ativo' => 1,
+        ]);
+
+        $categoria = Categoria::create(['nome' => 'Cat Atributo Longo']);
+        $numeroExterno = 'IMP-ATTR-' . Str::random(8);
+
+        $payload = [
+            'importacao_id' => null,
+            'cliente' => [],
+            'pedido' => [
+                'tipo' => 'reposicao',
+                'numero_externo' => $numeroExterno,
+                'total' => 120,
+                'data_pedido' => '2024-02-01',
+            ],
+            'itens' => [
+                [
+                    'ref' => 'REF-ATTR-LONGO',
+                    'nome' => 'Mesa Atributo Longo',
+                    'quantidade' => 1,
+                    'valor' => 120,
+                    'preco_unitario' => 120,
+                    'custo_unitario' => 60,
+                    'id_categoria' => $categoria->id,
+                    'forcar_produto_novo' => true,
+                    'atributos' => [
+                        'modelo_referencia' => str_repeat('A', 101),
+                    ],
+                ],
+            ],
+        ];
+
+        $response = $this->actingAs($usuario, 'sanctum')
+            ->postJson('/api/v1/pedidos/import/pdf/confirm', $payload);
+
+        $response->assertStatus(422);
+
+        $conteudo = $response->getContent();
+        $this->assertStringContainsString('Produto 1: o valor do atributo', $conteudo);
+        $this->assertStringNotContainsString('SQLSTATE', $conteudo);
+    }
 }

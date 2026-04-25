@@ -76,19 +76,99 @@ class ImportacaoPedidoService
             'dias_corridos_previstos' => 'nullable|integer|min:0|max:3650',
 
             'itens'                => 'required|array|min:1',
-            'itens.*.nome'         => 'required|string',
-            'itens.*.quantidade'   => 'required|numeric|min:0.01',
-            'itens.*.valor'        => 'required|numeric|min:0',
-            'itens.*.preco_unitario' => 'nullable|numeric|min:0',
-            'itens.*.custo_unitario' => 'nullable|numeric|min:0',
+            'itens.*.nome'         => 'required|string|max:255',
+            'itens.*.ref'          => 'nullable|string|max:100',
+            'itens.*.sku_interno'  => 'nullable|string|max:120',
+            'itens.*.quantidade'   => 'required|integer|min:1',
+            'itens.*.valor'        => 'required|numeric|min:0|max:99999999.99',
+            'itens.*.preco_unitario' => 'nullable|numeric|min:0|max:99999999.99',
+            'itens.*.custo_unitario' => 'nullable|numeric|min:0|max:99999999.99',
             'itens.*.id_categoria' => 'required|integer',
             'itens.*.id_deposito'  => 'nullable|integer|exists:depositos,id',
+            'itens.*.atributos'    => 'nullable|array',
+            'itens.*.atributos.*'  => 'nullable',
             'estrategia_vinculo'   => 'nullable|in:' . implode(',', EstrategiaVinculoImportacao::valores()),
             'itens.*.forcar_produto_novo' => 'nullable|boolean',
         ], [
             'itens.required' => 'Adicione ao menos um item ao pedido antes de confirmar.',
             'itens.min' => 'Adicione ao menos um item ao pedido (inserção manual) antes de confirmar.',
+            'pedido.numero_externo.max' => 'Número do pedido deve ter no máximo 50 caracteres.',
+            'itens.*.nome.required' => 'Informe o nome do produto.',
+            'itens.*.nome.max' => 'O nome do produto deve ter no máximo 255 caracteres.',
+            'itens.*.ref.max' => 'A referência do produto deve ter no máximo 100 caracteres.',
+            'itens.*.sku_interno.max' => 'O SKU interno deve ter no máximo 120 caracteres.',
+            'itens.*.quantidade.integer' => 'A quantidade deve ser um número inteiro maior que zero.',
+            'itens.*.quantidade.min' => 'A quantidade deve ser um número inteiro maior que zero.',
+            'itens.*.valor.max' => 'O preço de venda deve ser no máximo R$ 99.999.999,99.',
+            'itens.*.preco_unitario.max' => 'O preço unitário deve ser no máximo R$ 99.999.999,99.',
+            'itens.*.custo_unitario.max' => 'O custo unitário deve ser no máximo R$ 99.999.999,99.',
+            'itens.*.id_categoria.required' => 'Selecione uma categoria para todos os produtos.',
+            'itens.*.atributos.array' => 'Os atributos do produto devem ser enviados em formato válido.',
         ]);
+
+        $validator->after(function ($validator) use ($request) {
+            $itens = $request->input('itens', []);
+            if (!is_array($itens)) {
+                return;
+            }
+
+            foreach ($itens as $index => $item) {
+                $atributos = $item['atributos'] ?? [];
+                if (!is_array($atributos)) {
+                    continue;
+                }
+
+                $normalizados = [];
+                foreach ($atributos as $atributo => $valor) {
+                    $nome = trim((string) $atributo);
+                    $label = 'Produto ' . ($index + 1);
+
+                    if ($nome === '') {
+                        $validator->errors()->add(
+                            "itens.$index.atributos",
+                            "$label: informe o nome do atributo ou remova a linha incompleta."
+                        );
+                        continue;
+                    }
+
+                    if (mb_strlen($nome) > 100) {
+                        $validator->errors()->add(
+                            "itens.$index.atributos.$atributo",
+                            "$label: o nome do atributo \"$nome\" deve ter no máximo 100 caracteres."
+                        );
+                    }
+
+                    if (is_array($valor)) {
+                        $validator->errors()->add(
+                            "itens.$index.atributos.$atributo",
+                            "$label: o valor do atributo \"$nome\" deve ser um texto."
+                        );
+                        continue;
+                    }
+
+                    $valorTexto = trim((string) $valor);
+                    if ($valorTexto === '') {
+                        continue;
+                    }
+
+                    if (mb_strlen($valorTexto) > 100) {
+                        $validator->errors()->add(
+                            "itens.$index.atributos.$atributo",
+                            "$label: o valor do atributo \"$nome\" deve ter no máximo 100 caracteres."
+                        );
+                    }
+
+                    $normalizado = StringHelper::normalizarAtributo($nome);
+                    if (isset($normalizados[$normalizado])) {
+                        $validator->errors()->add(
+                            "itens.$index.atributos.$atributo",
+                            "$label: o atributo \"$nome\" está duplicado. Mantenha apenas uma linha para esse atributo."
+                        );
+                    }
+                    $normalizados[$normalizado] = true;
+                }
+            }
+        });
 
         // Condicional: se for venda, cliente.id é obrigatório
         $validator->sometimes('cliente.id', 'required|numeric|min:1', function ($input) {
@@ -438,6 +518,18 @@ class ImportacaoPedidoService
                 'usuario_id' => Auth::id(),
                 'mensagem' => $e->getMessage(),
             ]);
+
+            if (
+                str_contains($e->getMessage(), 'SQLSTATE[22001]')
+                && str_contains($e->getMessage(), 'produto_variacao_atributos')
+            ) {
+                throw ValidationException::withMessages([
+                    'itens' => [
+                        'Um atributo do produto está maior que o permitido. Revise os atributos dos produtos novos antes de salvar.',
+                    ],
+                ]);
+            }
+
             throw $e;
         } finally {
             Log::info('Importação XML - confirmação finalizada', [

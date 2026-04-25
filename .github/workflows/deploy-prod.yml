@@ -103,7 +103,7 @@ jobs:
 
       - name: Trigger deploy on droplet
         run: |
-          remote_command="cd /home/docker/acadsoft/sierra-estoque && ./deploy.sh"
+          remote_command="cd /home/docker/acadsoft/sierra-estoque && git fetch origin master && git reset --hard origin/master && git clean -fd && ./deploy.sh"
 
           if [ "${RUN_MIGRATIONS}" = "true" ]; then
             remote_command="${remote_command} --migrate"

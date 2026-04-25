@@ -102,6 +102,7 @@ class ImportacaoNormalizadaPipelineTest extends TestCase
             'Valor',
             'outlet',
             'status',
+            '__teste_hash',
         ];
 
         $sheets = [
@@ -124,6 +125,7 @@ class ImportacaoNormalizadaPipelineTest extends TestCase
                     5990.00,
                     '',
                     'Loja',
+                    'reimportacao',
                 ],
                 [
                     2,
@@ -229,6 +231,7 @@ class ImportacaoNormalizadaPipelineTest extends TestCase
                     5990.00,
                     '',
                     'Brinde',
+                    'reimportacao',
                 ],
                 array_fill(0, count($headers), null),
             ],
@@ -251,6 +254,7 @@ class ImportacaoNormalizadaPipelineTest extends TestCase
                     5990.00,
                     '',
                     'Depósito',
+                    'reimportacao',
                 ],
             ],
         ];
@@ -332,6 +336,7 @@ class ImportacaoNormalizadaPipelineTest extends TestCase
     {
         $this->autenticarComoDev();
         $arquivoPath = $this->criarPlanilhaFixture();
+        $arquivoHash = hash_file('sha256', $arquivoPath);
 
         $response = $this->post('/api/v1/importacoes/normalizadas', [
             'arquivo' => new UploadedFile(
@@ -548,6 +553,7 @@ class ImportacaoNormalizadaPipelineTest extends TestCase
     {
         $this->autenticarComoDev();
         $arquivoPath = $this->criarPlanilhaFixture();
+        $arquivoHash = hash_file('sha256', $arquivoPath);
 
         $primeiroUpload = $this->post('/api/v1/importacoes/normalizadas', [
             'arquivo' => new UploadedFile(
@@ -575,7 +581,7 @@ class ImportacaoNormalizadaPipelineTest extends TestCase
         $segundoUpload->assertStatus(409);
         $segundoUpload->assertJsonPath('sucesso', false);
         $segundoUpload->assertJsonPath('data.importacao_existente.id', $importacaoExistenteId);
-        $this->assertSame(1, ImportacaoNormalizada::query()->count());
+        $this->assertSame(1, ImportacaoNormalizada::query()->where('arquivo_hash', $arquivoHash)->count());
     }
 
     public function test_upload_permanece_permitido_quando_importacao_igual_anterior_esta_cancelada(): void
@@ -603,7 +609,7 @@ class ImportacaoNormalizadaPipelineTest extends TestCase
         ]);
 
         $response->assertCreated();
-        $this->assertSame(2, ImportacaoNormalizada::query()->count());
+        $this->assertSame(2, ImportacaoNormalizada::query()->where('arquivo_hash', $arquivoHash)->count());
     }
 
     public function test_confirmar_retorna_409_quando_ja_existe_importacao_mesmo_hash_confirmada(): void

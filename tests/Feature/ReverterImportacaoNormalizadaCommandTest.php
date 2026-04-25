@@ -47,13 +47,17 @@ class ReverterImportacaoNormalizadaCommandTest extends TestCase
         $linha1 = $this->criarLinhaImportacao($importacaoDuplicada->id, 1, 'DUP-001');
         $linha2 = $this->criarLinhaImportacao($importacaoDuplicada->id, 2, 'DUP-002');
 
-        DB::table('estoque')->insert([
-            'id_variacao' => $variacaoId,
-            'id_deposito' => $depositoId,
-            'quantidade' => 9,
-            'created_at' => now(),
-            'updated_at' => now(),
-        ]);
+        DB::table('estoque')->updateOrInsert(
+            [
+                'id_variacao' => $variacaoId,
+                'id_deposito' => $depositoId,
+            ],
+            [
+                'quantidade' => 9,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]
+        );
 
         DB::table('estoque_movimentacoes')->insert([
             [
@@ -93,6 +97,10 @@ class ReverterImportacaoNormalizadaCommandTest extends TestCase
                 'updated_at' => now(),
             ],
         ]);
+        $movimentacaoIds = DB::table('estoque_movimentacoes')
+            ->where('ref_type', 'importacao_normalizada_linha')
+            ->whereIn('ref_id', [$linha1->id, $linha2->id])
+            ->pluck('id');
 
         $this->artisan('importacoes:reverter-normalizada', [
             'importacao_id' => $importacaoDuplicada->id,
@@ -112,7 +120,10 @@ class ReverterImportacaoNormalizadaCommandTest extends TestCase
             'id_deposito' => $depositoId,
         ])->value('quantidade'));
 
-        $this->assertSame(2, DB::table('estoque_movimentacoes')->where('ref_type', 'estorno')->count());
+        $this->assertSame(2, DB::table('estoque_movimentacoes')
+            ->where('ref_type', 'estorno')
+            ->whereIn('ref_id', $movimentacaoIds)
+            ->count());
         $this->assertDatabaseHas('importacoes_normalizadas', [
             'id' => $importacaoDuplicada->id,
             'status' => ImportacaoNormalizadaStatus::CANCELADA->value,
@@ -130,7 +141,10 @@ class ReverterImportacaoNormalizadaCommandTest extends TestCase
             ->expectsOutputToContain('Nenhuma nova movimentação precisou ser estornada.')
             ->assertExitCode(0);
 
-        $this->assertSame(2, DB::table('estoque_movimentacoes')->where('ref_type', 'estorno')->count());
+        $this->assertSame(2, DB::table('estoque_movimentacoes')
+            ->where('ref_type', 'estorno')
+            ->whereIn('ref_id', $movimentacaoIds)
+            ->count());
     }
 
     public function test_execucao_aborta_sem_alterar_dados_quando_houver_saldo_insuficiente(): void
@@ -150,15 +164,19 @@ class ReverterImportacaoNormalizadaCommandTest extends TestCase
         $importacao = $this->criarImportacao('hash-sem-saldo', ImportacaoNormalizadaStatus::EFETIVADA);
         $linha = $this->criarLinhaImportacao($importacao->id, 1, 'SEM-001');
 
-        DB::table('estoque')->insert([
-            'id_variacao' => $variacaoId,
-            'id_deposito' => $depositoId,
-            'quantidade' => 1,
-            'created_at' => now(),
-            'updated_at' => now(),
-        ]);
+        DB::table('estoque')->updateOrInsert(
+            [
+                'id_variacao' => $variacaoId,
+                'id_deposito' => $depositoId,
+            ],
+            [
+                'quantidade' => 1,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]
+        );
 
-        DB::table('estoque_movimentacoes')->insert([
+        $movimentacaoId = DB::table('estoque_movimentacoes')->insertGetId([
             'id_variacao' => $variacaoId,
             'id_deposito_origem' => null,
             'id_deposito_destino' => $depositoId,
@@ -192,7 +210,10 @@ class ReverterImportacaoNormalizadaCommandTest extends TestCase
             'id_variacao' => $variacaoId,
             'id_deposito' => $depositoId,
         ])->value('quantidade'));
-        $this->assertSame(0, DB::table('estoque_movimentacoes')->where('ref_type', 'estorno')->count());
+        $this->assertSame(0, DB::table('estoque_movimentacoes')
+            ->where('ref_type', 'estorno')
+            ->where('ref_id', $movimentacaoId)
+            ->count());
         $this->assertDatabaseHas('importacoes_normalizadas', [
             'id' => $importacao->id,
             'status' => ImportacaoNormalizadaStatus::EFETIVADA->value,

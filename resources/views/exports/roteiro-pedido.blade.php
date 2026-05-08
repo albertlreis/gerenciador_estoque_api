@@ -79,7 +79,6 @@
                 <tr>
                     <th style="width: 90px;">IMG</th>
                     <th style="width: 45px;">QTD</th>
-                    <th style="width: 80px;">REF</th>
                     <th>DESCRIÇÃO</th>
                     <th style="width: 100px;">LOCALIZAÇÃO</th>
                     <th style="width: 160px;">OBS</th>
@@ -89,15 +88,15 @@
                 @foreach ($itens as $item)
                     @php
                         $variacao   = $item->variacao;
-                        $produto    = $variacao?->produto;
-                        $referencia = $variacao?->referencia ?? '-';
-                        $descricao  = $variacao?->nome_completo ?? '-';
+                        $referencia = trim((string)($variacao?->referencia ?? ''));
+                        $descricao  = trim((string)($variacao?->nome_completo ?? ''));
+                        $temReferencia = $referencia !== '' && $referencia !== '-';
+                        $temDescricao = $descricao !== '' && $descricao !== '-';
+                        $descricaoComReferencia = $temReferencia
+                            ? ($temDescricao ? "{$referencia} - {$descricao}" : $referencia)
+                            : ($temDescricao ? $descricao : '-');
 
-                        // imagem principal (mesma lógica do roteiro-consignacao)
-                        $imgRel = optional($produto?->imagemPrincipal)->url ?? '';
-                        $imgAbs = ($imgRel && !empty($baseFsDir ?? null))
-                            ? ($baseFsDir . DIRECTORY_SEPARATOR . $imgRel)
-                            : '';
+                        $imgDataUri = trim((string)($item->pdf_imagem_data_uri ?? ''));
 
                         // localização: pega estoque da variação no depósito do item (Estoque.id_deposito)
                         $locTexto = '—';
@@ -131,13 +130,12 @@
 
                     <tr>
                         <td style="text-align:center;">
-                            @if($imgAbs)
-                                <img src="{{ $imgAbs }}" width="80" style="max-height:64px;" alt="Imagem produto"/>
+                            @if($imgDataUri)
+                                <img src="{{ $imgDataUri }}" width="80" style="max-height:64px;" alt="Imagem produto"/>
                             @endif
                         </td>
                         <td class="nowrap">{{ (int)($item->quantidade ?? 0) }}</td>
-                        <td class="nowrap">{{ $referencia }}</td>
-                        <td class="wrap">{{ $descricao }}</td>
+                        <td class="wrap">{{ $descricaoComReferencia }}</td>
                         <td class="wrap">{{ $locTexto }}</td>
                         <td class="wrap">{{ $obsItem !== '' ? $obsItem : '—' }}</td>
                     </tr>

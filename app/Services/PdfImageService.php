@@ -2,6 +2,8 @@
 
 namespace App\Services;
 
+use App\Models\ProdutoImagem;
+use App\Models\ProdutoVariacao;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -45,6 +47,28 @@ class PdfImageService
         return sprintf('data:%s;base64,%s', $mime, base64_encode($raw));
     }
 
+    public function fromProdutoVariacao(?ProdutoVariacao $variacao): ?string
+    {
+        if ($variacao === null) {
+            return null;
+        }
+
+        $paths = [
+            $variacao->imagem?->url,
+            $variacao->produto?->imagemPrincipal?->url,
+            $variacao->produto?->imagemPrincipal?->url_completa,
+        ];
+
+        foreach ($paths as $path) {
+            $dataUri = $this->toDataUri($path);
+            if ($dataUri !== null) {
+                return $dataUri;
+            }
+        }
+
+        return null;
+    }
+
     private function normalizeToStorageRelativePath(string $path): ?string
     {
         if (Str::startsWith($path, ['http://', 'https://'])) {
@@ -82,6 +106,10 @@ class PdfImageService
 
         if (Str::startsWith($path, 'uploads/produtos/')) {
             return ltrim(substr($path, strlen('uploads/')), '/');
+        }
+
+        if (!str_contains($path, '/') && $path !== '') {
+            return ProdutoImagem::FOLDER . '/' . $path;
         }
 
         return $path;

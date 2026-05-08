@@ -9,8 +9,8 @@ use App\Models\AcessoUsuario;
 use App\Models\Cliente;
 use App\Models\Consignacao;
 use App\Models\Pedido;
-use App\Models\ProdutoImagem;
 use App\Services\EstoqueMovimentacaoService;
+use App\Services\PdfImageService;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -287,11 +287,20 @@ class ConsignacaoController extends Controller
             'parceiro',
             'statusAtual',
             'consignacoes.deposito',
+            'consignacoes.produtoVariacao.imagem',
             'consignacoes.produtoVariacao.produto.imagemPrincipal',
             'consignacoes.produtoVariacao.produto',
             'consignacoes.produtoVariacao.atributos',
             'consignacoes.produtoVariacao.estoquesComLocalizacao',
         ])->findOrFail($id);
+
+        $pdfImageService = app(PdfImageService::class);
+        $pedido->consignacoes->each(function ($consignacao) use ($pdfImageService) {
+            $consignacao->setAttribute(
+                'pdf_imagem_data_uri',
+                $pdfImageService->fromProdutoVariacao($consignacao->produtoVariacao)
+            );
+        });
 
         $grupos = $pedido->consignacoes->groupBy(fn($item) => $item->deposito->nome ?? 'Sem depósito');
         $isDevolucao = $this->isRoteiroDeDevolucao($pedido);
@@ -306,16 +315,12 @@ class ConsignacaoController extends Controller
             'documento' => $tituloRoteiro,
         ]);
 
-        // Mesmo padrão do relatório de estoque para caminho de imagens:
-        $baseFsDir = public_path('storage' . DIRECTORY_SEPARATOR . ProdutoImagem::FOLDER);
-
         // Permitir imagens locais/externas
         Pdf::setOptions(['isRemoteEnabled' => true]);
 
         $pdf = Pdf::loadView('exports.roteiro-consignacao', [
             'pedido'     => $pedido,
             'grupos'     => $grupos,
-            'baseFsDir'  => $baseFsDir,  // <-- usado na blade para montar caminho absoluto
             'geradoEm'   => now('America/Belem')->format('d/m/Y H:i'),
             'tituloRoteiro' => $tituloRoteiro,
         ])->setPaper('a4');

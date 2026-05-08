@@ -11,7 +11,6 @@ use App\Enums\TipoImportacao;
 use App\Models\Deposito;
 use App\Models\Pedido;
 use App\Models\PedidoImportacao;
-use App\Models\ProdutoImagem;
 use App\Services\FornecedorPedidoXmlParserService;
 use App\Services\ImportacaoPedidoService;
 use App\Services\NfeXmlParserService;
@@ -19,6 +18,7 @@ use App\Services\PedidoService;
 use App\Services\PedidoUpdateService;
 use App\Services\EstatisticaPedidoService;
 use App\Services\PedidoExportService;
+use App\Services\PdfImageService;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Exception;
 use Illuminate\Http\JsonResponse;
@@ -400,7 +400,7 @@ class PedidoController extends Controller
         // você pode habilitar esse fallback (roda 1 exists()):
         // if (!$isConsignado) $isConsignado = $pedidoBase->isConsignado();
 
-        $baseFsDir = public_path('storage' . DIRECTORY_SEPARATOR . ProdutoImagem::FOLDER);
+        $pdfImageService = app(PdfImageService::class);
         Pdf::setOptions(['isRemoteEnabled' => true]);
 
         // 2) Se for consignado: carrega APENAS consignações e gera o mesmo PDF existente
@@ -412,6 +412,7 @@ class PedidoController extends Controller
                 'statusAtual',
 
                 'consignacoes.deposito',
+                'consignacoes.produtoVariacao.imagem',
                 'consignacoes.produtoVariacao.produto.imagemPrincipal',
                 'consignacoes.produtoVariacao.produto',
                 'consignacoes.produtoVariacao.atributos',
@@ -419,6 +420,13 @@ class PedidoController extends Controller
                 // localização
                 'consignacoes.produtoVariacao.estoquesComLocalizacao.localizacao.area',
             ])->findOrFail($pedidoId);
+
+            $pedido->consignacoes->each(function ($consignacao) use ($pdfImageService) {
+                $consignacao->setAttribute(
+                    'pdf_imagem_data_uri',
+                    $pdfImageService->fromProdutoVariacao($consignacao->produtoVariacao)
+                );
+            });
 
             $grupos = $pedido->consignacoes->groupBy(fn($c) => $c->deposito->nome ?? 'Sem depósito');
             $isDevolucao = $this->isRoteiroConsignacaoDevolucao($pedido);
@@ -437,7 +445,6 @@ class PedidoController extends Controller
             $pdf = Pdf::loadView('exports.roteiro-consignacao', [
                 'pedido'     => $pedido,
                 'grupos'     => $grupos,
-                'baseFsDir'  => $baseFsDir,
                 'geradoEm'   => now('America/Belem')->format('d/m/Y H:i'),
                 'tituloRoteiro' => $tituloRoteiro,
             ])->setPaper('a4');
@@ -451,6 +458,7 @@ class PedidoController extends Controller
             'usuario',
             'parceiro',
 
+            'itens.variacao.imagem',
             'itens.variacao.produto.imagemPrincipal',
             'itens.variacao.produto',
             'itens.variacao.atributos',
@@ -458,6 +466,13 @@ class PedidoController extends Controller
             // localização
             'itens.variacao.estoquesComLocalizacao.localizacao.area',
         ])->findOrFail($pedidoId);
+
+        $pedido->itens->each(function ($item) use ($pdfImageService) {
+            $item->setAttribute(
+                'pdf_imagem_data_uri',
+                $pdfImageService->fromProdutoVariacao($item->variacao)
+            );
+        });
 
         // Depósitos: temos id_deposito no item, e model Deposito existe.
         $depositoIds = $pedido->itens
@@ -485,7 +500,6 @@ class PedidoController extends Controller
         $pdf = Pdf::loadView('exports.roteiro-pedido', [
             'pedido'     => $pedido,
             'grupos'     => $grupos,
-            'baseFsDir'  => $baseFsDir,
             'geradoEm'   => now('America/Belem')->format('d/m/Y H:i'),
         ])->setPaper('a4');
 

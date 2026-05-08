@@ -40,15 +40,25 @@
 
 @php
     $enderecoPrincipal = $pedido->cliente?->enderecoPrincipal ?? null;
-    $enderecoTexto = $enderecoPrincipal
-        ? trim(implode(' - ', array_filter([
-            $enderecoPrincipal->logradouro ?? null,
+    $enderecoTexto = '-';
+
+    if ($enderecoPrincipal) {
+        $cidade = trim((string)($enderecoPrincipal->cidade ?? ''));
+        $estado = trim((string)($enderecoPrincipal->estado ?? ''));
+        $cidadeEstado = trim($cidade . ($cidade !== '' && $estado !== '' ? '/' : '') . $estado);
+        $cep = trim((string)($enderecoPrincipal->cep ?? ''));
+
+        $enderecoTexto = trim(implode(' - ', array_filter([
+            $enderecoPrincipal->endereco ?? null,
             $enderecoPrincipal->numero ?? null,
+            $enderecoPrincipal->complemento ?? null,
             $enderecoPrincipal->bairro ?? null,
-            $enderecoPrincipal->cidade ?? null,
-            $enderecoPrincipal->uf ?? null,
-        ])))
-        : ($pedido->cliente?->endereco ?? '-'); // fallback caso exista coluna legada
+            $cidadeEstado !== '' ? $cidadeEstado : null,
+            $cep !== '' ? 'CEP ' . $cep : null,
+        ], fn($valor) => trim((string)$valor) !== '')));
+    } elseif (!empty($pedido->cliente?->endereco)) {
+        $enderecoTexto = $pedido->cliente->endereco;
+    }
 @endphp
 
 <table width="100%" style="margin-bottom: 10px;">

@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Enums\PedidoStatus;
 use App\Models\Categoria;
 use App\Models\Cliente;
+use App\Models\ClienteEndereco;
 use App\Models\Consignacao;
 use App\Models\Deposito;
 use App\Models\Pedido;
@@ -91,6 +92,12 @@ class ConsignacaoRoteiroPdfTest extends TestCase
         ])->render();
 
         $this->assertStringContainsString('src="data:image/png;base64,', $html);
+        $this->assertStringContainsString('Rua Consignacao PDF', $html);
+        $this->assertStringContainsString('101', $html);
+        $this->assertStringContainsString('Sala 1', $html);
+        $this->assertStringContainsString('Bairro Consignacao', $html);
+        $this->assertStringContainsString('Belem/PA', $html);
+        $this->assertStringContainsString('CEP 66000101', $html);
     }
 
     public function test_view_do_roteiro_de_entrega_renderiza_imagem_embutida_do_produto_como_fallback(): void
@@ -129,6 +136,12 @@ class ConsignacaoRoteiroPdfTest extends TestCase
         ])->render();
 
         $this->assertStringContainsString('src="data:image/png;base64,', $html);
+        $this->assertStringContainsString('Rua Pedido PDF', $html);
+        $this->assertStringContainsString('202', $html);
+        $this->assertStringContainsString('Sala 2', $html);
+        $this->assertStringContainsString('Bairro Pedido', $html);
+        $this->assertStringContainsString('Belem/PA', $html);
+        $this->assertStringContainsString('CEP 66000202', $html);
     }
 
     private function criarPedidoConsignado(string $statusConsignacao, PedidoStatus $statusPedido): array
@@ -145,6 +158,15 @@ class ConsignacaoRoteiroPdfTest extends TestCase
         $cliente = Cliente::create([
             'nome' => 'Cliente PDF',
             'documento' => (string) random_int(10000000000, 99999999999),
+        ]);
+        $this->criarEnderecoPrincipal($cliente, [
+            'cep' => '66000101',
+            'endereco' => 'Rua Consignacao PDF',
+            'numero' => '101',
+            'complemento' => 'Sala 1',
+            'bairro' => 'Bairro Consignacao',
+            'cidade' => 'Belem',
+            'estado' => 'PA',
         ]);
 
         $categoria = Categoria::create(['nome' => 'Categoria PDF']);
@@ -215,6 +237,15 @@ class ConsignacaoRoteiroPdfTest extends TestCase
             'nome' => 'Cliente Pedido PDF',
             'documento' => (string) random_int(10000000000, 99999999999),
         ]);
+        $this->criarEnderecoPrincipal($cliente, [
+            'cep' => '66000202',
+            'endereco' => 'Rua Pedido PDF',
+            'numero' => '202',
+            'complemento' => 'Sala 2',
+            'bairro' => 'Bairro Pedido',
+            'cidade' => 'Belem',
+            'estado' => 'PA',
+        ]);
 
         $categoria = Categoria::create(['nome' => 'Categoria Pedido PDF']);
         $produto = Produto::create([
@@ -252,5 +283,14 @@ class ConsignacaoRoteiroPdfTest extends TestCase
         ]);
 
         return [$pedido->id, $produto->id];
+    }
+
+    private function criarEnderecoPrincipal(Cliente $cliente, array $dados): void
+    {
+        ClienteEndereco::create($dados + [
+            'cliente_id' => $cliente->id,
+            'principal' => true,
+            'fingerprint' => hash('sha256', 'cliente-endereco-' . $cliente->id . '-' . ($dados['endereco'] ?? '')),
+        ]);
     }
 }

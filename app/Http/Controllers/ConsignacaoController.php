@@ -282,7 +282,7 @@ class ConsignacaoController extends Controller
     public function gerarPdf(int $id): Response
     {
         $pedido = Pedido::with([
-            'cliente',
+            'cliente.enderecoPrincipal',
             'usuario',
             'parceiro',
             'statusAtual',

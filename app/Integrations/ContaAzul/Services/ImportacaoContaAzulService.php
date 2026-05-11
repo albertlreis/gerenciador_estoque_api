@@ -98,11 +98,28 @@ class ImportacaoContaAzulService
                             'batch_id' => $batch->id,
                             'status_conciliacao' => 'novo',
                             'observacao_conciliacao' => null,
+                            'candidato_id_local' => null,
+                            'candidato_score' => null,
+                            'candidato_motivo' => null,
+                            'candidato_json' => null,
+                            'conciliacao_origem' => null,
                             'created_at' => now(),
                             'updated_at' => now(),
                         ]],
                         ['loja_id', 'identificador_externo'],
-                        ['payload_json', 'hash_payload', 'batch_id', 'status_conciliacao', 'observacao_conciliacao', 'updated_at']
+                        [
+                            'payload_json',
+                            'hash_payload',
+                            'batch_id',
+                            'status_conciliacao',
+                            'observacao_conciliacao',
+                            'candidato_id_local',
+                            'candidato_score',
+                            'candidato_motivo',
+                            'candidato_json',
+                            'conciliacao_origem',
+                            'updated_at',
+                        ]
                     );
 
                     $lidos++;

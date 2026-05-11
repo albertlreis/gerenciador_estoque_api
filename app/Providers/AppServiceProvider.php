@@ -4,6 +4,7 @@ namespace App\Providers;
 
 use App\Integrations\ContaAzul\Auth\ContaAzulOAuthService;
 use App\Integrations\ContaAzul\Clients\ContaAzulClient;
+use App\Integrations\ContaAzul\Import\ContaPagarContaAzulImportAdapter;
 use App\Integrations\ContaAzul\Import\NotaContaAzulImportAdapter;
 use App\Integrations\ContaAzul\Import\PessoaContaAzulImportAdapter;
 use App\Integrations\ContaAzul\Import\ProdutoContaAzulImportAdapter;
@@ -16,6 +17,8 @@ use App\Integrations\ContaAzul\Mappers\ContaAzulProdutoMapper;
 use App\Integrations\ContaAzul\Mappers\ContaAzulTituloMapper;
 use App\Integrations\ContaAzul\Services\ConciliacaoContaAzulService;
 use App\Integrations\ContaAzul\Services\ContaAzulConnectionService;
+use App\Integrations\ContaAzul\Services\ContaAzulAutoMatchService;
+use App\Integrations\ContaAzul\Services\ContaAzulLocalCreationService;
 use App\Integrations\ContaAzul\Services\ExportacaoContaAzulService;
 use App\Integrations\ContaAzul\Services\ImportacaoContaAzulService;
 use App\Integrations\ContaAzul\Services\ReconciliacaoContaAzulService;
@@ -64,6 +67,7 @@ class AppServiceProvider extends ServiceProvider
         $this->app->singleton(ProdutoContaAzulImportAdapter::class, fn () => new ProdutoContaAzulImportAdapter());
         $this->app->singleton(VendaContaAzulImportAdapter::class, fn () => new VendaContaAzulImportAdapter());
         $this->app->singleton(TituloContaAzulImportAdapter::class, fn () => new TituloContaAzulImportAdapter());
+        $this->app->singleton(ContaPagarContaAzulImportAdapter::class, fn () => new ContaPagarContaAzulImportAdapter());
         $this->app->singleton(NotaContaAzulImportAdapter::class, fn () => new NotaContaAzulImportAdapter());
 
         $this->app->singleton(ImportacaoContaAzulService::class, function ($app) {
@@ -76,12 +80,18 @@ class AppServiceProvider extends ServiceProvider
                     $app->make(ProdutoContaAzulImportAdapter::class),
                     $app->make(VendaContaAzulImportAdapter::class),
                     $app->make(TituloContaAzulImportAdapter::class),
+                    $app->make(ContaPagarContaAzulImportAdapter::class),
                     $app->make(NotaContaAzulImportAdapter::class),
                 ]
             );
         });
 
-        $this->app->singleton(ConciliacaoContaAzulService::class, fn () => new ConciliacaoContaAzulService());
+        $this->app->singleton(ContaAzulAutoMatchService::class, fn () => new ContaAzulAutoMatchService());
+        $this->app->singleton(ContaAzulLocalCreationService::class, fn () => new ContaAzulLocalCreationService());
+
+        $this->app->singleton(ConciliacaoContaAzulService::class, function ($app) {
+            return new ConciliacaoContaAzulService($app->make(ContaAzulAutoMatchService::class));
+        });
 
         $this->app->singleton(ExportacaoContaAzulService::class, function ($app) {
             return new ExportacaoContaAzulService(

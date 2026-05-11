@@ -157,6 +157,80 @@ class ContaAzulConnectionServiceManualTokenTest extends TestCase
         $this->assertSame('HTTP 401', $conexao->ultimo_erro);
     }
 
+    public function test_healthcheck_salva_detalhes_do_payload_de_erro(): void
+    {
+        $oauth = Mockery::mock(ContaAzulOAuthService::class);
+        $client = Mockery::mock(ContaAzulClient::class);
+        $client->shouldReceive('get')
+            ->once()
+            ->andReturn([
+                'status' => 403,
+                'json' => [
+                    'descricao_erro' => 'A conta nao esta elegivel para uso da API devido ao status atual do plano.',
+                    'status_conta' => 'END_TRIAL',
+                ],
+                'body' => '{"status_conta":"END_TRIAL"}',
+            ]);
+
+        $service = new ContaAzulConnectionService(config('conta_azul'), $oauth, $client);
+
+        $conexao = ContaAzulConexao::create([
+            'status' => 'ativa',
+            'ambiente' => 'homologacao',
+        ]);
+
+        ContaAzulToken::create([
+            'conexao_id' => $conexao->id,
+            'access_token' => 'manual-access-token-1234567890',
+            'refresh_token' => 'manual-refresh-token-1234567890',
+            'expires_at' => CarbonImmutable::now()->addHour(),
+        ]);
+
+        $ok = $service->healthcheck($conexao->fresh('token'));
+
+        $this->assertFalse($ok);
+        $conexao->refresh();
+        $this->assertSame('erro', $conexao->status);
+        $this->assertSame(
+            'HTTP 403 - status_conta=END_TRIAL - descricao_erro=A conta nao esta elegivel para uso da API devido ao status atual do plano.',
+            $conexao->ultimo_erro
+        );
+    }
+
+    public function test_healthcheck_usa_menor_tamanho_de_pagina_aceito_pela_conta_azul(): void
+    {
+        $oauth = Mockery::mock(ContaAzulOAuthService::class);
+        $client = Mockery::mock(ContaAzulClient::class);
+        $client->shouldReceive('get')
+            ->once()
+            ->with('/v1/pessoas', 'manual-access-token-1234567890', [
+                'pagina' => 1,
+                'tamanho_pagina' => 10,
+            ])
+            ->andReturn([
+                'status' => 200,
+                'json' => ['items' => []],
+            ]);
+
+        $config = config('conta_azul');
+        $config['healthcheck_page_size'] = 1;
+        $service = new ContaAzulConnectionService($config, $oauth, $client);
+
+        $conexao = ContaAzulConexao::create([
+            'status' => 'ativa',
+            'ambiente' => 'homologacao',
+        ]);
+
+        ContaAzulToken::create([
+            'conexao_id' => $conexao->id,
+            'access_token' => 'manual-access-token-1234567890',
+            'refresh_token' => 'manual-refresh-token-1234567890',
+            'expires_at' => CarbonImmutable::now()->addHour(),
+        ]);
+
+        $this->assertTrue($service->healthcheck($conexao->fresh('token')));
+    }
+
     public function test_get_valid_access_token_em_homologacao_sem_refresh_pede_novo_token_manual(): void
     {
         $oauth = Mockery::mock(ContaAzulOAuthService::class);

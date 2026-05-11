@@ -38,7 +38,7 @@ class BaixaContaReceberRequest extends FormRequest
             ],
             'observacoes' => ['nullable','string'],
             'comprovante' => ['nullable','file','mimes:pdf,jpg,jpeg,png','max:4096'],
-            'conta_financeira_id' => ['nullable','integer','exists:contas_financeiras,id'],
+            'conta_financeira_id' => ['required','integer','exists:contas_financeiras,id'],
         ];
     }
 }

@@ -17,7 +17,7 @@ class ContaPagar extends Model
 
     protected $fillable = [
         'fornecedor_id','descricao','numero_documento','data_emissao','data_vencimento',
-        'valor_bruto','desconto','juros','multa','status',
+        'valor_bruto','desconto','juros','multa','status','forma_pagamento',
         'categoria_id','centro_custo_id','observacoes'
     ];
 

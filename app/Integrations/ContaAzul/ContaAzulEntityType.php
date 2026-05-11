@@ -12,6 +12,10 @@ final class ContaAzulEntityType
 
     public const TITULO = 'titulo';
 
+    public const CONTA_PAGAR = 'conta_pagar';
+
+    public const FORNECEDOR = 'fornecedor';
+
     public const BAIXA = 'baixa';
 
     public const NOTA = 'nota';

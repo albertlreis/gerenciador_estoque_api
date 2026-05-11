@@ -53,6 +53,12 @@ class ContaReceberResource extends JsonResource
                     'valor' => (float) $p->valor,
                     'forma_pagamento' => $p->forma_pagamento,
                     'comprovante_path' => $p->comprovante_path,
+                    'comprovante_url' => $p->comprovante_path ? \Storage::url($p->comprovante_path) : null,
+                    'observacoes' => $p->observacoes,
+                    'conta_financeira' => $p->relationLoaded('contaFinanceira') ? [
+                        'id' => $p->contaFinanceira?->id,
+                        'nome' => $p->contaFinanceira?->nome,
+                    ] : null,
                     'usuario' => $p->relationLoaded('usuario') ? [
                         'id' => $p->usuario?->id,
                         'nome' => $p->usuario?->nome,

@@ -38,6 +38,8 @@ return [
         'page_size_param' => env('CONTA_AZUL_PAGE_SIZE_PARAM', 'tamanho_pagina'),
     ],
 
+    'healthcheck_page_size' => (int) env('CONTA_AZUL_HEALTHCHECK_PAGE_SIZE', 10),
+
     /**
      * Importação por entidade: método HTTP, path opcional (sobrescreve paths.*),
      * query/body mesclados a cada página. Datas relativas para buscas (vendas/financeiro).

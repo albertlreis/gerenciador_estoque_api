@@ -21,6 +21,7 @@ class ContaPagarRequest extends FormRequest
             'juros' => ['nullable','numeric','min:0'],
             'multa' => ['nullable','numeric','min:0'],
             'status' => ['nullable','in:ABERTA,PARCIAL,PAGA,CANCELADA'],
+            'forma_pagamento' => ['nullable','string','max:50'],
             'categoria_id' => ['nullable','integer','exists:categorias_financeiras,id'],
             'centro_custo_id' => ['nullable','integer','exists:centros_custo,id'],
             'observacoes' => ['nullable','string'],

@@ -136,4 +136,57 @@ class ContaAzulManualTokenEndpointTest extends TestCase
             ->assertJsonPath('ok', false)
             ->assertJsonPath('reason', 'healthcheck_failed');
     }
+
+    public function test_testar_conexao_retorna_ok_quando_healthcheck_passa(): void
+    {
+        $conexao = new ContaAzulConexao([
+            'id' => 101,
+            'status' => 'ativa',
+            'ambiente' => 'homologacao',
+            'ultimo_erro' => null,
+        ]);
+
+        $service = Mockery::mock(ContaAzulConnectionService::class);
+        $service->shouldReceive('latestForLoja')->once()->with(null)->andReturn($conexao);
+        $service->shouldReceive('healthcheck')->once()->with($conexao)->andReturn(true);
+
+        $this->app->instance(ContaAzulConnectionService::class, $service);
+
+        $response = $this->postJson('/api/v1/integrations/conta-azul/test-connection');
+
+        $response->assertOk()
+            ->assertJsonPath('ok', true)
+            ->assertJsonPath('conexao.status', 'ativa');
+    }
+
+    public function test_testar_conexao_retorna_erro_http_quando_healthcheck_falha(): void
+    {
+        $conexao = new ContaAzulConexao([
+            'id' => 102,
+            'status' => 'ativa',
+            'ambiente' => 'homologacao',
+        ]);
+
+        $service = Mockery::mock(ContaAzulConnectionService::class);
+        $service->shouldReceive('latestForLoja')->once()->with(null)->andReturn($conexao);
+        $service->shouldReceive('healthcheck')
+            ->once()
+            ->with($conexao)
+            ->andReturnUsing(function (ContaAzulConexao $conexao) {
+                $conexao->status = 'erro';
+                $conexao->ultimo_erro = 'HTTP 403 - status_conta=END_TRIAL';
+
+                return false;
+            });
+
+        $this->app->instance(ContaAzulConnectionService::class, $service);
+
+        $response = $this->postJson('/api/v1/integrations/conta-azul/test-connection');
+
+        $response->assertStatus(422)
+            ->assertJsonPath('ok', false)
+            ->assertJsonPath('conexao.status', 'erro')
+            ->assertJsonPath('conexao.ultimo_erro', 'HTTP 403 - status_conta=END_TRIAL')
+            ->assertJsonPath('mensagem', 'Teste de conexao com a Conta Azul falhou: HTTP 403 - status_conta=END_TRIAL');
+    }
 }

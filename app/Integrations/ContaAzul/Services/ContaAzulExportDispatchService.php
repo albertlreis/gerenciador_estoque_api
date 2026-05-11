@@ -103,9 +103,24 @@ class ContaAzulExportDispatchService
             return;
         }
 
+        if ($conexao->status !== 'ativa') {
+            $this->log($tipoEntidade, $idLocal, $lojaId, 'ignorado', 'ConexÃ£o Conta Azul inativa ou em erro.', $contexto + [
+                'conexao_id' => $conexao->id,
+                'status_conexao' => $conexao->status,
+            ]);
+            return;
+        }
+
         $conexao->loadMissing('token');
         if ($conexao->token === null) {
             $this->log($tipoEntidade, $idLocal, $lojaId, 'ignorado', 'Conexão Conta Azul sem tokens válidos.', $contexto);
+            return;
+        }
+
+        if ($conexao->token->isAccessTokenExpired() && !$conexao->token->refresh_token) {
+            $this->log($tipoEntidade, $idLocal, $lojaId, 'ignorado', 'Conexao Conta Azul com access token expirado e sem refresh token.', $contexto + [
+                'conexao_id' => $conexao->id,
+            ]);
             return;
         }
 

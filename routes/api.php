@@ -561,10 +561,16 @@ Route::middleware('auth:sanctum')
         Route::prefix('integrations/conta-azul')->group(function () {
             Route::get('oauth/authorize', [ContaAzulOAuthController::class, 'redirect']);
             Route::get('status', [ContaAzulIntegracaoController::class, 'status']);
+            Route::get('local-lookup', [ContaAzulIntegracaoController::class, 'localLookup']);
             Route::get('pendencias', [ContaAzulIntegracaoController::class, 'pendencias']);
+            Route::get('pendencias/detalhes', [ContaAzulIntegracaoController::class, 'pendenciasDetalhadas']);
+            Route::get('pendencias/{entidade}/{id}/criacao-local/preview', [ContaAzulIntegracaoController::class, 'previewCriacaoLocal']);
+            Route::post('pendencias/{entidade}/{id}/criar-local', [ContaAzulIntegracaoController::class, 'criarRegistroLocal']);
+            Route::post('pendencias/{entidade}/{id}/resolver', [ContaAzulIntegracaoController::class, 'resolverPendencia']);
             Route::post('manual-token', [ContaAzulIntegracaoController::class, 'registrarTokenManual']);
             Route::post('test-connection', [ContaAzulIntegracaoController::class, 'testarConexao']);
             Route::get('batches', [ContaAzulIntegracaoController::class, 'batches']);
+            Route::get('batches/{id}', [ContaAzulIntegracaoController::class, 'batchDetalhe'])->whereNumber('id');
             Route::get('sync-logs', [ContaAzulIntegracaoController::class, 'syncLogs']);
             Route::post('import/{entidade}', [ContaAzulIntegracaoController::class, 'importar']);
             Route::post('conciliar', [ContaAzulIntegracaoController::class, 'conciliar']);

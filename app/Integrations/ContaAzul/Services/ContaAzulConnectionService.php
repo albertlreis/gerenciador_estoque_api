@@ -173,20 +173,48 @@ class ContaAzulConnectionService
         $path = (string) ($this->config['paths']['pessoas'] ?? '/v1/pessoas');
         $pageParam = (string) ($this->config['pagination']['page_param'] ?? 'pagina');
         $sizeParam = (string) ($this->config['pagination']['page_size_param'] ?? 'tamanho_pagina');
+        $pageSize = max(10, (int) ($this->config['healthcheck_page_size'] ?? 10));
 
         $token = $this->getValidAccessToken($conexao);
         $res = $this->client->get($path, $token, [
             $pageParam => 1,
-            $sizeParam => 1,
+            $sizeParam => $pageSize,
         ]);
 
         $ok = $res['status'] >= 200 && $res['status'] < 300;
         $conexao->update([
             'ultimo_healthcheck_em' => now(),
-            'ultimo_erro' => $ok ? null : ('HTTP ' . $res['status']),
+            'ultimo_erro' => $ok ? null : $this->formatHealthcheckError($res),
             'status' => $ok ? 'ativa' : 'erro',
         ]);
 
         return $ok;
+    }
+
+    /**
+     * @param  array{status:int, body?:?string, json?:mixed}  $res
+     */
+    private function formatHealthcheckError(array $res): string
+    {
+        $parts = ['HTTP ' . (int) $res['status']];
+        $json = $res['json'] ?? null;
+
+        if (is_array($json)) {
+            foreach (['status_conta', 'codigo_erro', 'error', 'descricao_erro', 'mensagem', 'message'] as $key) {
+                $value = $json[$key] ?? null;
+                if (is_scalar($value) && $value !== '') {
+                    $parts[] = $key . '=' . (string) $value;
+                }
+            }
+        }
+
+        if (count($parts) === 1 && isset($res['body']) && is_string($res['body']) && $res['body'] !== '') {
+            $body = trim(preg_replace('/\s+/', ' ', $res['body']) ?? '');
+            if ($body !== '') {
+                $parts[] = mb_substr($body, 0, 240);
+            }
+        }
+
+        return implode(' - ', array_values(array_unique($parts)));
     }
 }

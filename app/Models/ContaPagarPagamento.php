@@ -2,7 +2,6 @@
 
 namespace App\Models;
 
-use App\Enums\FormaPagamento;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -21,7 +20,6 @@ class ContaPagarPagamento extends Model
     protected $casts = [
         'data_pagamento' => 'date',
         'valor' => 'decimal:2',
-        'forma_pagamento' => FormaPagamento::class,
     ];
 
     public function conta(): BelongsTo

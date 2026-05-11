@@ -110,13 +110,23 @@ Configure as variáveis `CONTA_AZUL_*` antes de iniciar a integração com a Con
 ```env
 CONTA_AZUL_CLIENT_ID=
 CONTA_AZUL_CLIENT_SECRET=
-CONTA_AZUL_REDIRECT_URI=http://localhost:8001/api/v1/integrations/conta-azul/callback
+CONTA_AZUL_REDIRECT_URI=http://localhost:8004/api/v1/integrations/conta-azul/callback
 CONTA_AZUL_AUTH_URL=https://auth.contaazul.com
 CONTA_AZUL_AUTHORIZE_PATH=/login
 CONTA_AZUL_TOKEN_PATH=/oauth2/token
 CONTA_AZUL_BASE_URL=https://api-v2.contaazul.com
 CONTA_AZUL_SCOPE="openid profile aws.cognito.signin.user.admin"
-CONTA_AZUL_OAUTH_FRONT_REDIRECT=http://localhost:3000/integracoes/conta-azul
+CONTA_AZUL_OAUTH_FRONT_REDIRECT=http://localhost:5173/integracoes/conta-azul
 ```
 
 A `CONTA_AZUL_REDIRECT_URI` precisa ser exatamente igual à URL cadastrada no Portal do Desenvolvedor da Conta Azul. Qualquer divergência entre a URL cadastrada e a URL enviada no OAuth pode causar erro `invalid_grant` ou falha de redirecionamento.
+### Checklist de producao Conta Azul
+
+1. Crie uma aplicacao no Portal do Desenvolvedor da Conta Azul e cadastre a callback publica, por exemplo `https://estoque.sierra.acadsoft.com.br/api/v1/integrations/conta-azul/callback`.
+2. Configure as variaveis acima no ambiente do backend e rode `php artisan config:clear && php artisan config:cache`.
+3. Rode as migrations, mantenha o queue worker ativo e confirme que o scheduler executa `conta-azul:refresh-tokens` e `conta-azul:reconciliar --todos`.
+4. No front, acesse `/integracoes/conta-azul`, use **Conectar (OAuth)** e depois **Testar conexao**.
+5. Importe pessoas, produtos, vendas, titulos e notas; rode conciliacao; resolva pendencias pela tabela da tela de integracao.
+6. Habilite exportacao automatica apenas depois de validar payloads reais de clientes, produtos, vendas, titulos e baixas contra uma conta de teste/producao controlada.
+
+Notas fiscais da Conta Azul estao tratadas como fluxo somente leitura nesta versao: o sistema importa para staging e permite ignorar pendencias, mas bloqueia vinculo manual fiscal ate o desenho de emissao/vinculo fiscal ser fechado.

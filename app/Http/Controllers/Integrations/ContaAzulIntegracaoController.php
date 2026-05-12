@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Integrations;
 
+use App\Helpers\AuthHelper;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Integrations\ContaAzulManualTokenRequest;
 use App\Integrations\ContaAzul\ContaAzulEntityType;
@@ -30,6 +31,10 @@ class ContaAzulIntegracaoController extends Controller
 
     public function status(Request $request): JsonResponse
     {
+        if ($response = $this->autorizar('conta_azul.visualizar')) {
+            return $response;
+        }
+
         $lojaId = $this->lojaId($request);
         $conexao = $this->connections->latestForLoja($lojaId);
 
@@ -48,6 +53,10 @@ class ContaAzulIntegracaoController extends Controller
 
     public function pendencias(Request $request): JsonResponse
     {
+        if ($response = $this->autorizar('conta_azul.visualizar')) {
+            return $response;
+        }
+
         $lojaId = $this->lojaId($request);
 
         return response()->json([
@@ -57,6 +66,10 @@ class ContaAzulIntegracaoController extends Controller
 
     public function pendenciasDetalhadas(Request $request): JsonResponse
     {
+        if ($response = $this->autorizar('conta_azul.visualizar')) {
+            return $response;
+        }
+
         $lojaId = $this->lojaId($request);
         $statuses = $request->query('status', ['novo', 'pendente', 'conflito']);
         if (is_string($statuses)) {
@@ -88,6 +101,10 @@ class ContaAzulIntegracaoController extends Controller
 
     public function testarConexao(Request $request): JsonResponse
     {
+        if ($response = $this->autorizar('conta_azul.configurar')) {
+            return $response;
+        }
+
         $lojaId = $this->lojaId($request);
         $conexao = $this->connections->latestForLoja($lojaId);
         if (!$conexao) {
@@ -123,6 +140,10 @@ class ContaAzulIntegracaoController extends Controller
 
     public function batches(Request $request): JsonResponse
     {
+        if ($response = $this->autorizar('conta_azul.auditar')) {
+            return $response;
+        }
+
         $perPage = max(1, min((int) $request->query('per_page', 10), 100));
         $q = ContaAzulImportBatch::query()->orderByDesc('id');
         if ($request->filled('loja_id')) {
@@ -139,6 +160,10 @@ class ContaAzulIntegracaoController extends Controller
 
     public function syncLogs(Request $request): JsonResponse
     {
+        if ($response = $this->autorizar('conta_azul.auditar')) {
+            return $response;
+        }
+
         $perPage = max(1, min((int) $request->query('per_page', 10), 100));
         $q = ContaAzulSyncLog::query()->orderByDesc('id');
         if ($request->filled('loja_id')) {
@@ -164,6 +189,10 @@ class ContaAzulIntegracaoController extends Controller
 
     public function batchDetalhe(Request $request, int $id): JsonResponse
     {
+        if ($response = $this->autorizar('conta_azul.auditar')) {
+            return $response;
+        }
+
         $batch = ContaAzulImportBatch::query()
             ->when($request->filled('loja_id'), fn ($q) => $q->where('loja_id', (int) $request->query('loja_id')))
             ->findOrFail($id);
@@ -178,6 +207,10 @@ class ContaAzulIntegracaoController extends Controller
 
     public function localLookup(Request $request): JsonResponse
     {
+        if ($response = $this->autorizar('conta_azul.visualizar')) {
+            return $response;
+        }
+
         $entidade = (string) $request->query('entidade', '');
         $q = trim((string) $request->query('q', ''));
         $limit = max(1, min((int) $request->query('limit', 10), 20));
@@ -201,6 +234,10 @@ class ContaAzulIntegracaoController extends Controller
             ContaAzulEntityType::VENDA => $this->lookupVendas($like, $numeric, $limit),
             ContaAzulEntityType::TITULO => $this->lookupContasReceber($like, $numeric, $limit),
             ContaAzulEntityType::CONTA_PAGAR => $this->lookupContasPagar($like, $numeric, $limit),
+            ContaAzulEntityType::CONTA_FINANCEIRA => $this->lookupContasFinanceiras($like, $limit),
+            ContaAzulEntityType::CATEGORIA_FINANCEIRA => $this->lookupCategoriasFinanceiras($like, $limit),
+            ContaAzulEntityType::CENTRO_CUSTO => $this->lookupCentrosCusto($like, $limit),
+            ContaAzulEntityType::FORMA_PAGAMENTO => $this->lookupFormasPagamento($like, $limit),
             default => [],
         };
 
@@ -209,6 +246,10 @@ class ContaAzulIntegracaoController extends Controller
 
     public function registrarTokenManual(ContaAzulManualTokenRequest $request): JsonResponse
     {
+        if ($response = $this->autorizar('conta_azul.configurar')) {
+            return $response;
+        }
+
         $dados = $request->validated();
         $lojaId = isset($dados['loja_id']) ? (int) $dados['loja_id'] : null;
 
@@ -230,6 +271,10 @@ class ContaAzulIntegracaoController extends Controller
 
     public function importar(Request $request, string $entidade): JsonResponse
     {
+        if ($response = $this->autorizar('conta_azul.importar')) {
+            return $response;
+        }
+
         $lojaId = $this->lojaId($request);
         $conexao = $this->connections->latestForLoja($lojaId);
         if (!$conexao) {
@@ -249,6 +294,10 @@ class ContaAzulIntegracaoController extends Controller
 
     public function conciliar(Request $request): JsonResponse
     {
+        if ($response = $this->autorizar('conta_azul.conciliar')) {
+            return $response;
+        }
+
         $lojaId = $this->lojaId($request);
         $res = $this->conciliacao->conciliarPessoas($lojaId);
 
@@ -257,6 +306,10 @@ class ContaAzulIntegracaoController extends Controller
 
     public function conciliarEntidade(Request $request, string $entidade): JsonResponse
     {
+        if ($response = $this->autorizar('conta_azul.conciliar')) {
+            return $response;
+        }
+
         $lojaId = $this->lojaId($request);
         $res = match ($entidade) {
             'pessoas' => $this->conciliacao->conciliarPessoas($lojaId),
@@ -264,7 +317,13 @@ class ContaAzulIntegracaoController extends Controller
             'vendas' => $this->conciliacao->conciliarVendas($lojaId),
             'titulos', 'financeiro' => $this->conciliacao->conciliarTitulos($lojaId),
             'contas-pagar', 'contas_pagar' => $this->conciliacao->conciliarContasPagar($lojaId),
+            'parcelas' => $this->conciliacao->conciliarParcelas($lojaId),
             'baixas' => $this->conciliacao->conciliarBaixas($lojaId),
+            'contas-financeiras', 'contas_financeiras' => $this->conciliacao->conciliarContasFinanceiras($lojaId),
+            'saldos-contas-financeiras', 'saldos_contas_financeiras' => $this->conciliacao->conciliarSaldosContasFinanceiras($lojaId),
+            'categorias-financeiras', 'categorias_financeiras' => $this->conciliacao->conciliarCategoriasFinanceiras($lojaId),
+            'centros-custo', 'centros_custo' => $this->conciliacao->conciliarCentrosCusto($lojaId),
+            'formas-pagamento', 'formas_pagamento' => $this->conciliacao->conciliarFormasPagamento($lojaId),
             'tudo' => $this->conciliacao->conciliarTudo($lojaId),
             default => null,
         };
@@ -278,6 +337,10 @@ class ContaAzulIntegracaoController extends Controller
 
     public function resolverPendencia(Request $request, string $entidade, int $id): JsonResponse
     {
+        if ($response = $this->autorizar('conta_azul.conciliar')) {
+            return $response;
+        }
+
         $dados = $request->validate([
             'acao' => ['required', 'in:vincular,ignorar'],
             'id_local' => ['nullable', 'integer', 'min:1'],
@@ -309,6 +372,10 @@ class ContaAzulIntegracaoController extends Controller
 
     public function previewCriacaoLocal(Request $request, string $entidade, int $id): JsonResponse
     {
+        if ($response = $this->autorizar('conta_azul.visualizar')) {
+            return $response;
+        }
+
         try {
             $preview = $this->criacaoLocal->preview($entidade, $id, $this->lojaId($request));
         } catch (ContaAzulException $e) {
@@ -324,6 +391,10 @@ class ContaAzulIntegracaoController extends Controller
 
     public function criarRegistroLocal(Request $request, string $entidade, int $id): JsonResponse
     {
+        if ($response = $this->autorizar('conta_azul.conciliar')) {
+            return $response;
+        }
+
         $dados = $request->validate([
             'tipo_local' => ['required', 'string', 'max:50'],
             'dados' => ['required', 'array'],
@@ -347,6 +418,10 @@ class ContaAzulIntegracaoController extends Controller
 
     public function reconciliar(Request $request): JsonResponse
     {
+        if ($response = $this->autorizar('conta_azul.conciliar')) {
+            return $response;
+        }
+
         $lojaId = $this->lojaId($request);
         $conexao = $this->connections->latestForLoja($lojaId);
         if (!$conexao) {
@@ -361,6 +436,10 @@ class ContaAzulIntegracaoController extends Controller
 
     public function reconciliarTodos(Request $request): JsonResponse
     {
+        if ($response = $this->autorizar('conta_azul.conciliar')) {
+            return $response;
+        }
+
         $lojaId = $this->lojaId($request);
         $conexao = $this->connections->latestForLoja($lojaId);
         if (!$conexao) {
@@ -370,6 +449,15 @@ class ContaAzulIntegracaoController extends Controller
         $this->reconciliacao->reconciliarTodos($conexao, $lojaId);
 
         return response()->json(['ok' => true]);
+    }
+
+    private function autorizar(string $permissao): ?JsonResponse
+    {
+        if (AuthHelper::hasPermissao($permissao)) {
+            return null;
+        }
+
+        return response()->json(['message' => 'Sem permissao para acessar a integracao Conta Azul.'], 403);
     }
 
     /**
@@ -432,8 +520,14 @@ class ContaAzulIntegracaoController extends Controller
             ContaAzulEntityType::VENDA => 'stg_conta_azul_vendas',
             ContaAzulEntityType::TITULO => 'stg_conta_azul_financeiro',
             ContaAzulEntityType::CONTA_PAGAR => 'stg_conta_azul_contas_pagar',
+            ContaAzulEntityType::PARCELA => 'stg_conta_azul_parcelas',
             ContaAzulEntityType::BAIXA => 'stg_conta_azul_baixas',
             ContaAzulEntityType::NOTA => 'stg_conta_azul_notas',
+            ContaAzulEntityType::CONTA_FINANCEIRA => 'stg_conta_azul_contas_financeiras',
+            ContaAzulEntityType::SALDO_CONTA_FINANCEIRA => 'stg_conta_azul_saldos_contas_financeiras',
+            ContaAzulEntityType::CATEGORIA_FINANCEIRA => 'stg_conta_azul_categorias_financeiras',
+            ContaAzulEntityType::CENTRO_CUSTO => 'stg_conta_azul_centros_custo',
+            ContaAzulEntityType::FORMA_PAGAMENTO => 'stg_conta_azul_formas_pagamento',
         ];
 
         $table = $tables[$batch->tipo_entidade] ?? null;
@@ -632,6 +726,97 @@ class ContaAzulIntegracaoController extends Controller
             ->all();
     }
 
+    /**
+     * @return array<int, array{id:int,label:string,detail:string,type:string}>
+     */
+    private function lookupContasFinanceiras(string $like, int $limit): array
+    {
+        return DB::table('contas_financeiras')
+            ->select(['id', 'nome', 'tipo', 'banco_nome', 'agencia', 'conta'])
+            ->where(function ($query) use ($like) {
+                $query->where('nome', 'like', $like)
+                    ->orWhere('banco_nome', 'like', $like)
+                    ->orWhere('conta', 'like', $like);
+            })
+            ->orderBy('nome')
+            ->limit($limit)
+            ->get()
+            ->map(fn ($row) => [
+                'id' => (int) $row->id,
+                'label' => (string) ($row->nome ?: 'Conta financeira #' . $row->id),
+                'detail' => $this->joinDetails([$row->tipo, $row->banco_nome, $row->agencia ? 'Ag. ' . $row->agencia : null, $row->conta ? 'Conta ' . $row->conta : null]),
+                'type' => 'conta_financeira',
+            ])
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @return array<int, array{id:int,label:string,detail:string,type:string}>
+     */
+    private function lookupCategoriasFinanceiras(string $like, int $limit): array
+    {
+        return DB::table('categorias_financeiras')
+            ->select(['id', 'nome', 'tipo', 'ativo'])
+            ->where('nome', 'like', $like)
+            ->orderBy('nome')
+            ->limit($limit)
+            ->get()
+            ->map(fn ($row) => [
+                'id' => (int) $row->id,
+                'label' => (string) ($row->nome ?: 'Categoria #' . $row->id),
+                'detail' => $this->joinDetails(['Categoria financeira', $row->tipo, $row->ativo ? 'Ativa' : 'Inativa']),
+                'type' => 'categoria_financeira',
+            ])
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @return array<int, array{id:int,label:string,detail:string,type:string}>
+     */
+    private function lookupCentrosCusto(string $like, int $limit): array
+    {
+        return DB::table('centros_custo')
+            ->select(['id', 'nome', 'ativo'])
+            ->where('nome', 'like', $like)
+            ->orderBy('nome')
+            ->limit($limit)
+            ->get()
+            ->map(fn ($row) => [
+                'id' => (int) $row->id,
+                'label' => (string) ($row->nome ?: 'Centro de custo #' . $row->id),
+                'detail' => $this->joinDetails(['Centro de custo', $row->ativo ? 'Ativo' : 'Inativo']),
+                'type' => 'centro_custo',
+            ])
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @return array<int, array{id:int,label:string,detail:string,type:string}>
+     */
+    private function lookupFormasPagamento(string $like, int $limit): array
+    {
+        return DB::table('formas_pagamento')
+            ->select(['id', 'nome', 'slug', 'ativo'])
+            ->where(function ($query) use ($like) {
+                $query->where('nome', 'like', $like)
+                    ->orWhere('slug', 'like', $like);
+            })
+            ->orderBy('nome')
+            ->limit($limit)
+            ->get()
+            ->map(fn ($row) => [
+                'id' => (int) $row->id,
+                'label' => (string) ($row->nome ?: 'Forma de pagamento #' . $row->id),
+                'detail' => $this->joinDetails(['Forma de pagamento', $row->slug, $row->ativo ? 'Ativa' : 'Inativa']),
+                'type' => 'forma_pagamento',
+            ])
+            ->values()
+            ->all();
+    }
+
     private function joinDetails(array $parts): string
     {
         return implode(' - ', array_values(array_filter(array_map(
@@ -656,6 +841,13 @@ class ContaAzulIntegracaoController extends Controller
             'financeiro' => ContaAzulEntityType::TITULO,
             'contas-receber' => ContaAzulEntityType::TITULO,
             'contas_pagar', 'contas-pagar' => ContaAzulEntityType::CONTA_PAGAR,
+            'parcelas' => ContaAzulEntityType::PARCELA,
+            'baixas' => ContaAzulEntityType::BAIXA,
+            'contas_financeiras', 'contas-financeiras', 'conta-financeira' => ContaAzulEntityType::CONTA_FINANCEIRA,
+            'saldos_contas_financeiras', 'saldos-contas-financeiras' => ContaAzulEntityType::SALDO_CONTA_FINANCEIRA,
+            'categorias_financeiras', 'categorias-financeiras', 'categoria-financeira', 'categorias' => ContaAzulEntityType::CATEGORIA_FINANCEIRA,
+            'centros_custo', 'centros-custo', 'centro-de-custo' => ContaAzulEntityType::CENTRO_CUSTO,
+            'formas_pagamento', 'formas-pagamento', 'formas-de-pagamento' => ContaAzulEntityType::FORMA_PAGAMENTO,
             'notas' => ContaAzulEntityType::NOTA,
             default => throw new \InvalidArgumentException('Entidade inválida'),
         };
@@ -669,6 +861,13 @@ class ContaAzulIntegracaoController extends Controller
             'venda', 'vendas' => ContaAzulEntityType::VENDA,
             'titulo', 'titulos', 'financeiro' => ContaAzulEntityType::TITULO,
             'conta_pagar', 'contas_pagar', 'contas-pagar' => ContaAzulEntityType::CONTA_PAGAR,
+            'parcela', 'parcelas' => ContaAzulEntityType::PARCELA,
+            'baixa', 'baixas' => ContaAzulEntityType::BAIXA,
+            'conta_financeira', 'contas_financeiras', 'contas-financeiras', 'conta-financeira' => ContaAzulEntityType::CONTA_FINANCEIRA,
+            'saldo_conta_financeira', 'saldo-conta-financeira', 'saldos-contas-financeiras', 'saldos_contas_financeiras' => ContaAzulEntityType::SALDO_CONTA_FINANCEIRA,
+            'categoria_financeira', 'categorias_financeiras', 'categorias-financeiras', 'categoria-financeira', 'categoria', 'categorias' => ContaAzulEntityType::CATEGORIA_FINANCEIRA,
+            'centro_custo', 'centros_custo', 'centros-custo', 'centro-de-custo' => ContaAzulEntityType::CENTRO_CUSTO,
+            'forma_pagamento', 'formas_pagamento', 'formas-pagamento', 'formas-de-pagamento' => ContaAzulEntityType::FORMA_PAGAMENTO,
             default => throw new \InvalidArgumentException('Entidade invalida'),
         };
     }

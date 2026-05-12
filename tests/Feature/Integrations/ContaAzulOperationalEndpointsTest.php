@@ -7,6 +7,7 @@ use App\Integrations\ContaAzul\Models\ContaAzulImportBatch;
 use App\Integrations\ContaAzul\Models\ContaAzulSyncLog;
 use App\Models\Usuario;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
@@ -27,6 +28,13 @@ class ContaAzulOperationalEndpointsTest extends TestCase
         ]);
 
         Sanctum::actingAs($usuario);
+        Cache::put('permissoes_usuario_' . $usuario->id, [
+            'conta_azul.visualizar',
+            'conta_azul.configurar',
+            'conta_azul.importar',
+            'conta_azul.conciliar',
+            'conta_azul.auditar',
+        ], now()->addHour());
     }
 
     public function test_lista_pendencias_com_paginacao_e_filtro_de_bucket(): void

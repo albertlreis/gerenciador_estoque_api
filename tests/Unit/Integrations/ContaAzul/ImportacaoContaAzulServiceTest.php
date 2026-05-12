@@ -4,6 +4,9 @@ namespace Tests\Unit\Integrations\ContaAzul;
 
 use App\Integrations\ContaAzul\Auth\ContaAzulOAuthService;
 use App\Integrations\ContaAzul\ContaAzulEntityType;
+use App\Integrations\ContaAzul\Import\CategoriaFinanceiraContaAzulImportAdapter;
+use App\Integrations\ContaAzul\Import\CentroCustoContaAzulImportAdapter;
+use App\Integrations\ContaAzul\Import\ContaFinanceiraContaAzulImportAdapter;
 use App\Integrations\ContaAzul\Import\NotaContaAzulImportAdapter;
 use App\Integrations\ContaAzul\Import\PessoaContaAzulImportAdapter;
 use App\Integrations\ContaAzul\Import\ProdutoContaAzulImportAdapter;
@@ -91,5 +94,74 @@ class ImportacaoContaAzulServiceTest extends TestCase
             3,
             DB::table('stg_conta_azul_financeiro')->whereIn('identificador_externo', ['titulo-1', 'titulo-2', 'titulo-3'])->count()
         );
+    }
+
+    /**
+     * @dataProvider catalogosFinanceirosProvider
+     */
+    public function test_importa_catalogos_financeiros_usando_items(string $adapterClass, string $tipo, string $path, string $table): void
+    {
+        $config = config('conta_azul');
+        $config['pagination']['page_size'] = 2;
+
+        $client = Mockery::mock(\App\Integrations\ContaAzul\Clients\ContaAzulClient::class);
+        $client->shouldReceive('get')
+            ->once()
+            ->with(ltrim($path, '/'), 'token-valido', Mockery::on(fn (array $query) => ($query['pagina'] ?? null) === 1 && ($query['tamanho_pagina'] ?? null) === 2))
+            ->andReturn([
+                'status' => 200,
+                'json' => [
+                    'items' => [
+                        ['id' => 'catalogo-1', 'nome' => 'Catalogo 1'],
+                        ['id' => 'catalogo-2', 'nome' => 'Catalogo 2'],
+                    ],
+                    'paginacao' => ['total_paginas' => 1],
+                ],
+            ]);
+
+        $connections = Mockery::mock(ContaAzulConnectionService::class);
+        $connections->shouldReceive('getValidAccessToken')->once()->andReturn('token-valido');
+
+        $service = new ImportacaoContaAzulService(
+            $config,
+            $connections,
+            $client,
+            [new $adapterClass()]
+        );
+
+        $conexao = ContaAzulConexao::create([
+            'status' => 'ativa',
+            'ambiente' => 'homologacao',
+        ]);
+
+        $resultado = $service->importarParaStaging($conexao, $tipo);
+
+        $this->assertSame(2, $resultado['lidos']);
+        $this->assertDatabaseCount($table, 2);
+        $this->assertSame(2, DB::table($table)->whereIn('identificador_externo', ['catalogo-1', 'catalogo-2'])->count());
+    }
+
+    public static function catalogosFinanceirosProvider(): array
+    {
+        return [
+            'contas financeiras' => [
+                ContaFinanceiraContaAzulImportAdapter::class,
+                ContaAzulEntityType::CONTA_FINANCEIRA,
+                '/v1/conta-financeira',
+                'stg_conta_azul_contas_financeiras',
+            ],
+            'categorias financeiras' => [
+                CategoriaFinanceiraContaAzulImportAdapter::class,
+                ContaAzulEntityType::CATEGORIA_FINANCEIRA,
+                '/v1/categorias',
+                'stg_conta_azul_categorias_financeiras',
+            ],
+            'centros de custo' => [
+                CentroCustoContaAzulImportAdapter::class,
+                ContaAzulEntityType::CENTRO_CUSTO,
+                '/v1/centro-de-custo',
+                'stg_conta_azul_centros_custo',
+            ],
+        ];
     }
 }

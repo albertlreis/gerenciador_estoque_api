@@ -2,16 +2,24 @@
 
 namespace App\Integrations\ContaAzul\Services;
 
+use App\Enums\ContaStatus;
 use App\Integrations\ContaAzul\ContaAzulEntityType;
 use App\Integrations\ContaAzul\Models\ContaAzulMapeamento;
+use App\Models\CategoriaFinanceira;
 use App\Models\Cliente;
+use App\Models\CentroCusto;
+use App\Models\ContaFinanceira;
 use App\Models\ContaPagar;
+use App\Models\ContaPagarPagamento;
 use App\Models\ContaReceber;
 use App\Models\ContaReceberPagamento;
+use App\Models\FormaPagamento;
 use App\Models\Pedido;
 use App\Models\Produto;
 use App\Models\ProdutoVariacao;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Str;
 
 class ContaAzulAutoMatchService
 {
@@ -300,27 +308,375 @@ class ContaAzulAutoMatchService
             return $this->auto($mapped);
         }
 
-        $contaId = $this->localIdByExternal(ContaAzulEntityType::TITULO, $this->firstString($payload, ['idTitulo', 'tituloId', 'idParcela', 'idEvento']), $lojaId);
-        $valor = $this->parseMoney($this->firstString($payload, ['valor', 'valorBaixa', 'valorPago']));
-        $data = $this->parseDate($this->firstString($payload, ['data', 'dataPagamento', 'dataBaixa']));
-        if ($contaId && $valor !== null) {
-            $pagamentos = ContaReceberPagamento::query()
-                ->where('conta_receber_id', $contaId)
-                ->when($data, fn ($q) => $q->whereDate('data_pagamento', $data->format('Y-m-d')))
-                ->get()
-                ->filter(fn (ContaReceberPagamento $pagamento) => $this->moneyClose((float) $pagamento->valor, $valor))
-                ->values();
+        $target = $this->paymentTarget($payload, $lojaId);
+        $valor = $this->parseMoney($this->firstStringNested($payload, ['valor', 'valorBaixa', 'valorPago', 'valor_pago', 'amount']));
+        $data = $this->parseDate($this->firstStringNested($payload, ['data', 'dataPagamento', 'data_pagamento', 'dataBaixa', 'paidAt']));
+        if (!$target || $valor === null || !$data) {
+            return ['status' => 'pendente', 'observacao' => 'Baixa sem parcela/titulo, data ou valor suficientes'];
+        }
 
-            $candidate = $this->uniqueCandidate($pagamentos, 97, 'Título mapeado, data e valor únicos', fn (ContaReceberPagamento $pagamento) => 'Pagamento #' . $pagamento->id);
-            if ($candidate['ambiguous']) {
-                return $this->conflict($candidate['candidates'], 'Mais de um pagamento com mesmo título, data e valor');
-            }
-            if ($candidate['candidate']) {
-                return $this->auto($candidate['candidate']);
+        $contaFinanceiraId = $this->localIdByExternal(
+            ContaAzulEntityType::CONTA_FINANCEIRA,
+            $this->firstStringNested($payload, ['idContaFinanceira', 'contaFinanceiraId', 'idConta', 'id_conta_financeira', 'contaFinanceira.id', 'conta.id']),
+            $lojaId
+        );
+        if (!$contaFinanceiraId) {
+            return ['status' => 'pendente', 'observacao' => 'Baixa sem conta financeira mapeada'];
+        }
+
+        $pagamentos = $this->matchingPayments($target['tipo'], $target['id_local'], $valor, $data, $contaFinanceiraId);
+        $candidate = $this->uniqueCandidate($pagamentos, 97, 'Titulo, data, valor e conta financeira unicos', fn ($pagamento) => 'Pagamento #' . $pagamento->id);
+        if ($candidate['ambiguous']) {
+            return $this->conflict($candidate['candidates'], 'Mais de um pagamento com mesmo titulo, data, valor e conta financeira');
+        }
+        if ($candidate['candidate']) {
+            return $this->auto($candidate['candidate']);
+        }
+
+        $forma = $this->paymentMethodCode($payload) ?: 'OUTROS';
+        $this->ensureFormaPagamento($forma);
+
+        $pagamento = $this->createPayment($target['tipo'], $target['id_local'], [
+            'data_pagamento' => $data->format('Y-m-d'),
+            'valor' => $valor,
+            'forma_pagamento' => $forma,
+            'conta_financeira_id' => $contaFinanceiraId,
+        ]);
+        $this->syncPaymentStatus($target['tipo'], $target['id_local']);
+
+        return $this->auto($this->candidate((int) $pagamento->id, 100, 'Criado a partir da baixa Conta Azul', 'Pagamento #' . $pagamento->id));
+    }
+
+    public function matchParcela(object $row, array $payload, ?int $lojaId): array
+    {
+        $extId = (string) $row->identificador_externo;
+        $mapped = $this->mappedCandidate(ContaAzulEntityType::PARCELA, $extId, $lojaId, 'Mapeamento existente', 'parcela');
+        if ($mapped) {
+            return $this->auto($mapped);
+        }
+
+        $target = $this->paymentTarget($payload, $lojaId);
+        if (!$target) {
+            return ['status' => 'pendente', 'observacao' => 'Parcela sem evento financeiro local mapeado'];
+        }
+
+        return $this->auto($this->candidate($target['id_local'], 100, 'Evento financeiro mapeado', ucfirst($target['tipo']) . ' #' . $target['id_local']));
+    }
+
+    public function matchSaldoContaFinanceira(object $row, array $payload, ?int $lojaId): array
+    {
+        $contaId = $this->localIdByExternal(ContaAzulEntityType::CONTA_FINANCEIRA, (string) $row->identificador_externo, $lojaId);
+        if (!$contaId) {
+            return ['status' => 'pendente', 'observacao' => 'Saldo sem conta financeira local mapeada'];
+        }
+
+        $saldo = $this->parseMoney($this->firstStringNested($payload, ['saldo_atual', 'saldoAtual', 'saldo', 'valor', 'balance']));
+        if ($saldo === null) {
+            return ['status' => 'pendente', 'observacao' => 'Payload de saldo sem valor reconhecido'];
+        }
+
+        $conta = ContaFinanceira::query()->find($contaId);
+        if (!$conta) {
+            return ['status' => 'pendente', 'observacao' => 'Conta financeira local nao encontrada'];
+        }
+
+        $meta = is_array($conta->meta_json) ? $conta->meta_json : [];
+        $meta['conta_azul_saldo'] = $payload;
+        $conta->forceFill([
+            'saldo_atual' => $saldo,
+            'saldo_atual_em' => $this->parseDate($this->firstStringNested($payload, ['consultado_em', 'dataConsulta', 'updatedAt']))?->format('Y-m-d H:i:s') ?? now(),
+            'meta_json' => $meta,
+        ])->save();
+
+        return $this->auto($this->candidate((int) $conta->id, 100, 'Saldo atualizado da Conta Azul', $conta->nome ?: 'Conta financeira #' . $conta->id));
+    }
+
+    public function matchFormaPagamento(object $row, array $payload, ?int $lojaId): array
+    {
+        $code = $this->paymentMethodCode($payload) ?: $this->normalizeCode((string) $row->identificador_externo);
+        if ($code === '') {
+            return ['status' => 'pendente', 'observacao' => 'Forma de pagamento sem codigo'];
+        }
+
+        $mapped = $this->mappedCandidate(ContaAzulEntityType::FORMA_PAGAMENTO, $code, $lojaId, 'Mapeamento existente', 'forma de pagamento');
+        if ($mapped) {
+            return $this->auto($mapped);
+        }
+
+        $forma = $this->ensureFormaPagamento($code, $this->firstStringNested($payload, ['nome', 'descricao']));
+
+        return $this->auto($this->candidate((int) $forma->id, 100, 'Criada ou vinculada por metodo_pagamento', $forma->nome, [
+            'codigo_externo' => $code,
+        ]));
+    }
+
+    public function matchContaFinanceira(object $row, array $payload, ?int $lojaId): array
+    {
+        $extId = (string) $row->identificador_externo;
+        $mapped = $this->mappedCandidate(ContaAzulEntityType::CONTA_FINANCEIRA, $extId, $lojaId, 'Mapeamento existente', 'conta financeira');
+        if ($mapped) {
+            return $this->auto($mapped);
+        }
+
+        $nome = $this->catalogName($payload);
+        if ($nome === '') {
+            return ['status' => 'pendente', 'observacao' => 'Conta financeira sem nome no payload'];
+        }
+
+        $matches = ContaFinanceira::query()
+            ->whereRaw('LOWER(nome) = ?', [$this->normalizeNome($nome)])
+            ->get();
+        $candidate = $this->uniqueCandidate($matches, 100, 'Nome local exato', fn (ContaFinanceira $conta) => $conta->nome ?: 'Conta financeira #' . $conta->id);
+        if ($candidate['ambiguous']) {
+            return $this->conflict($candidate['candidates'], 'Mais de uma conta financeira local com o mesmo nome');
+        }
+        if ($candidate['candidate']) {
+            return $this->auto($candidate['candidate']);
+        }
+
+        $conta = ContaFinanceira::create([
+            'nome' => $nome,
+            'slug' => $this->uniqueSlug(ContaFinanceira::class, $nome),
+            'tipo' => $this->financeAccountType($payload),
+            'banco_nome' => $this->firstStringNested($payload, ['banco_nome', 'bancoNome', 'nomeBanco', 'bankName', 'bank.name', 'banco.nome']),
+            'banco_codigo' => $this->firstStringNested($payload, ['banco_codigo', 'bancoCodigo', 'codigoBanco', 'bankCode', 'bank.code', 'banco.codigo']),
+            'agencia' => $this->firstStringNested($payload, ['agencia', 'agency', 'dadosBancarios.agencia']),
+            'agencia_dv' => $this->firstStringNested($payload, ['agencia_dv', 'agenciaDv', 'agencyDigit', 'dadosBancarios.agenciaDv']),
+            'conta' => $this->firstStringNested($payload, ['conta', 'numeroConta', 'accountNumber', 'dadosBancarios.conta']),
+            'conta_dv' => $this->firstStringNested($payload, ['conta_dv', 'contaDv', 'accountDigit', 'dadosBancarios.contaDv']),
+            'moeda' => $this->firstStringNested($payload, ['moeda', 'currency']) ?: 'BRL',
+            'ativo' => $this->activeFromPayload($payload),
+            'saldo_inicial' => $this->parseMoney($this->firstStringNested($payload, ['saldoInicial', 'saldo_inicial', 'saldo', 'balance'])) ?? 0,
+            'meta_json' => ['conta_azul_payload' => $payload],
+        ]);
+
+        return $this->auto($this->candidate((int) $conta->id, 100, 'Criado a partir da Conta Azul', $conta->nome));
+    }
+
+    public function matchCategoriaFinanceira(object $row, array $payload, ?int $lojaId): array
+    {
+        $extId = (string) $row->identificador_externo;
+        $mapped = $this->mappedCandidate(ContaAzulEntityType::CATEGORIA_FINANCEIRA, $extId, $lojaId, 'Mapeamento existente', 'categoria financeira');
+        if ($mapped) {
+            return $this->auto($mapped);
+        }
+
+        $nome = $this->catalogName($payload);
+        if ($nome === '') {
+            return ['status' => 'pendente', 'observacao' => 'Categoria financeira sem nome no payload'];
+        }
+
+        $tipo = $this->financeCategoryType($payload);
+        $matches = CategoriaFinanceira::query()
+            ->whereRaw('LOWER(nome) = ?', [$this->normalizeNome($nome)])
+            ->when($tipo !== null, fn ($q) => $q->where(fn ($inner) => $inner->where('tipo', $tipo)->orWhereNull('tipo')))
+            ->get();
+        $candidate = $this->uniqueCandidate($matches, 100, 'Nome e tipo locais equivalentes', fn (CategoriaFinanceira $categoria) => $categoria->nome ?: 'Categoria #' . $categoria->id);
+        if ($candidate['ambiguous']) {
+            return $this->conflict($candidate['candidates'], 'Mais de uma categoria local com o mesmo nome');
+        }
+        if ($candidate['candidate']) {
+            return $this->auto($candidate['candidate']);
+        }
+
+        $parentId = $this->localIdByExternal(ContaAzulEntityType::CATEGORIA_FINANCEIRA, $this->parentExternalId($payload), $lojaId);
+        $categoria = CategoriaFinanceira::create([
+            'nome' => $nome,
+            'slug' => $this->uniqueSlug(CategoriaFinanceira::class, $nome),
+            'tipo' => $tipo,
+            'categoria_pai_id' => $parentId,
+            'ativo' => $this->activeFromPayload($payload),
+            'meta_json' => ['conta_azul_payload' => $payload],
+        ]);
+
+        return $this->auto($this->candidate((int) $categoria->id, 100, 'Criado a partir da Conta Azul', $categoria->nome));
+    }
+
+    public function matchCentroCusto(object $row, array $payload, ?int $lojaId): array
+    {
+        $extId = (string) $row->identificador_externo;
+        $mapped = $this->mappedCandidate(ContaAzulEntityType::CENTRO_CUSTO, $extId, $lojaId, 'Mapeamento existente', 'centro de custo');
+        if ($mapped) {
+            return $this->auto($mapped);
+        }
+
+        $nome = $this->catalogName($payload);
+        if ($nome === '') {
+            return ['status' => 'pendente', 'observacao' => 'Centro de custo sem nome no payload'];
+        }
+
+        $matches = CentroCusto::query()
+            ->whereRaw('LOWER(nome) = ?', [$this->normalizeNome($nome)])
+            ->get();
+        $candidate = $this->uniqueCandidate($matches, 100, 'Nome local exato', fn (CentroCusto $centro) => $centro->nome ?: 'Centro de custo #' . $centro->id);
+        if ($candidate['ambiguous']) {
+            return $this->conflict($candidate['candidates'], 'Mais de um centro de custo local com o mesmo nome');
+        }
+        if ($candidate['candidate']) {
+            return $this->auto($candidate['candidate']);
+        }
+
+        $parentId = $this->localIdByExternal(ContaAzulEntityType::CENTRO_CUSTO, $this->parentExternalId($payload), $lojaId);
+        $centro = CentroCusto::create([
+            'nome' => $nome,
+            'slug' => $this->uniqueSlug(CentroCusto::class, $nome),
+            'centro_custo_pai_id' => $parentId,
+            'ativo' => $this->activeFromPayload($payload),
+            'meta_json' => ['conta_azul_payload' => $payload],
+        ]);
+
+        return $this->auto($this->candidate((int) $centro->id, 100, 'Criado a partir da Conta Azul', $centro->nome));
+    }
+
+    /**
+     * @return array{tipo:string, id_local:int}|null
+     */
+    private function paymentTarget(array $payload, ?int $lojaId): ?array
+    {
+        $eventId = $this->firstStringNested($payload, [
+            'id_evento',
+            'evento_identificador_externo',
+            'idEvento',
+            'idTitulo',
+            'tituloId',
+            'evento.id',
+        ]);
+        $eventType = $this->firstStringNested($payload, ['evento_tipo_sierra', 'tipo_evento', 'tipoEvento']);
+
+        $preferred = match ($eventType) {
+            ContaAzulEntityType::CONTA_PAGAR, 'conta_pagar', 'pagar' => [ContaAzulEntityType::CONTA_PAGAR],
+            ContaAzulEntityType::TITULO, 'titulo', 'receber' => [ContaAzulEntityType::TITULO],
+            default => [ContaAzulEntityType::TITULO, ContaAzulEntityType::CONTA_PAGAR],
+        };
+
+        foreach ($preferred as $type) {
+            $id = $this->localIdByExternal($type, $eventId, $lojaId);
+            if ($id) {
+                return [
+                    'tipo' => $type === ContaAzulEntityType::CONTA_PAGAR ? 'pagar' : 'receber',
+                    'id_local' => $id,
+                ];
             }
         }
 
-        return ['status' => 'pendente', 'observacao' => 'Baixa sem candidato local com confiança suficiente'];
+        return null;
+    }
+
+    private function matchingPayments(string $tipo, int $contaId, float $valor, \DateTimeImmutable $data, ?int $contaFinanceiraId = null)
+    {
+        $model = $tipo === 'pagar' ? ContaPagarPagamento::query() : ContaReceberPagamento::query();
+        $column = $tipo === 'pagar' ? 'conta_pagar_id' : 'conta_receber_id';
+
+        $query = $model
+            ->where($column, $contaId)
+            ->whereDate('data_pagamento', $data->format('Y-m-d'));
+
+        if ($contaFinanceiraId !== null) {
+            $query->where('conta_financeira_id', $contaFinanceiraId);
+        }
+
+        return $query->get()
+            ->filter(fn ($pagamento) => $this->moneyClose((float) $pagamento->valor, $valor))
+            ->values();
+    }
+
+    private function createPayment(string $tipo, int $contaId, array $data): ContaPagarPagamento|ContaReceberPagamento
+    {
+        $payload = [
+            'data_pagamento' => $data['data_pagamento'],
+            'valor' => $data['valor'],
+            'forma_pagamento' => $data['forma_pagamento'],
+            'conta_financeira_id' => $data['conta_financeira_id'],
+            'observacoes' => 'Criado automaticamente pela baixa Conta Azul',
+            'usuario_id' => auth()->id(),
+        ];
+
+        if ($tipo === 'pagar') {
+            return ContaPagarPagamento::create($payload + ['conta_pagar_id' => $contaId]);
+        }
+
+        return ContaReceberPagamento::create($payload + ['conta_receber_id' => $contaId]);
+    }
+
+    private function syncPaymentStatus(string $tipo, int $contaId): void
+    {
+        if ($tipo === 'pagar') {
+            $conta = ContaPagar::query()->find($contaId);
+            if (!$conta) {
+                return;
+            }
+            $valorPago = (float) $conta->pagamentos()->sum('valor');
+            $valorLiquido = (float) $conta->valor_liquido;
+            $conta->forceFill([
+                'status' => $valorPago <= 0
+                    ? ContaStatus::ABERTA->value
+                    : ($valorPago + 0.005 >= $valorLiquido ? ContaStatus::PAGA->value : ContaStatus::PARCIAL->value),
+            ])->save();
+
+            return;
+        }
+
+        $conta = ContaReceber::query()->find($contaId);
+        if (!$conta) {
+            return;
+        }
+        $valorRecebido = (float) $conta->pagamentos()->sum('valor');
+        $valorLiquido = (float) $conta->valor_liquido;
+        $saldo = max(0, $valorLiquido - $valorRecebido);
+        $conta->forceFill([
+            'valor_recebido' => $valorRecebido,
+            'saldo_aberto' => $saldo,
+            'status' => $valorRecebido <= 0
+                ? ContaStatus::ABERTA->value
+                : ($saldo <= 0.005 ? ContaStatus::PAGA->value : ContaStatus::PARCIAL->value),
+        ])->save();
+    }
+
+    private function paymentMethodCode(array $payload): string
+    {
+        return $this->normalizeCode($this->firstStringNested($payload, [
+            'codigo',
+            'metodo_pagamento',
+            'metodoPagamento',
+            'forma_pagamento',
+            'formaPagamento',
+            'payment_method',
+            'paymentMethod',
+        ]));
+    }
+
+    private function ensureFormaPagamento(string $code, ?string $name = null): FormaPagamento
+    {
+        $code = $this->normalizeCode($code);
+        $slug = Str::slug($code) ?: 'outros';
+        $name = trim((string) $name) ?: $this->paymentMethodName($code);
+
+        return FormaPagamento::query()->firstOrCreate(
+            ['slug' => $slug],
+            ['nome' => $name, 'ativo' => true]
+        );
+    }
+
+    private function paymentMethodName(string $code): string
+    {
+        return [
+            'PIX' => 'PIX',
+            'BOLETO' => 'Boleto',
+            'TRANSFERENCIA' => 'Transferencia',
+            'TED' => 'TED',
+            'DOC' => 'DOC',
+            'DINHEIRO' => 'Dinheiro',
+            'CARTAO_CREDITO' => 'Cartao de credito',
+            'CARTAO_DEBITO' => 'Cartao de debito',
+        ][$code] ?? Str::of($code)->lower()->replace('_', ' ')->title()->toString();
+    }
+
+    private function normalizeCode(string $code): string
+    {
+        $code = Str::ascii(trim($code));
+        $code = strtoupper((string) preg_replace('/[^A-Z0-9]+/', '_', $code));
+
+        return trim($code, '_');
     }
 
     private function auto(array $candidate): array
@@ -489,5 +845,149 @@ class ContaAzulAutoMatchService
     private function moneyClose(float $a, float $b): bool
     {
         return abs($a - $b) < 0.06;
+    }
+
+    private function catalogName(array $payload): string
+    {
+        return $this->firstStringNested($payload, ['nome', 'descricao', 'name', 'description', 'titulo']);
+    }
+
+    private function financeAccountType(array $payload): string
+    {
+        $tipo = mb_strtolower($this->firstStringNested($payload, ['tipo', 'type', 'categoria', 'accountType']));
+
+        if (str_contains($tipo, 'caixa')) {
+            return 'caixa';
+        }
+
+        if (str_contains($tipo, 'pix')) {
+            return 'pix';
+        }
+
+        if (str_contains($tipo, 'carteira')) {
+            return 'carteira';
+        }
+
+        if (str_contains($tipo, 'invest')) {
+            return 'investimento';
+        }
+
+        return 'banco';
+    }
+
+    private function financeCategoryType(array $payload): ?string
+    {
+        $tipo = mb_strtolower($this->firstStringNested($payload, ['tipo', 'type', 'natureza', 'operacao']));
+
+        if ($tipo === '') {
+            return null;
+        }
+
+        if (str_contains($tipo, 'receita') || str_contains($tipo, 'income') || str_contains($tipo, 'entrada') || str_contains($tipo, 'credit')) {
+            return 'receita';
+        }
+
+        if (str_contains($tipo, 'despesa') || str_contains($tipo, 'expense') || str_contains($tipo, 'saida') || str_contains($tipo, 'debit')) {
+            return 'despesa';
+        }
+
+        return null;
+    }
+
+    private function activeFromPayload(array $payload): bool
+    {
+        $raw = $this->firstScalarNested($payload, ['ativo', 'active', 'habilitado', 'status', 'situacao']);
+        if ($raw === null || $raw === '') {
+            return true;
+        }
+
+        if (is_bool($raw)) {
+            return $raw;
+        }
+
+        $value = mb_strtolower(trim((string) $raw));
+
+        return !in_array($value, ['0', 'false', 'inativo', 'inactive', 'desativado', 'disabled', 'cancelado'], true);
+    }
+
+    private function parentExternalId(array $payload): string
+    {
+        return $this->firstStringNested($payload, [
+            'idCategoriaPai',
+            'categoriaPaiId',
+            'categoria_pai_id',
+            'idCentroCustoPai',
+            'centroCustoPaiId',
+            'centro_custo_pai_id',
+            'parentId',
+            'parent.id',
+            'pai.id',
+            'idPai',
+            'paiId',
+        ]);
+    }
+
+    /**
+     * @param  class-string<Model>  $modelClass
+     */
+    private function uniqueSlug(string $modelClass, string $name): string
+    {
+        $base = Str::slug($name) ?: 'conta-azul';
+        $slug = $base;
+        $suffix = 2;
+
+        while ($modelClass::query()->where('slug', $slug)->exists()) {
+            $slug = $base . '-' . $suffix;
+            $suffix++;
+        }
+
+        return $slug;
+    }
+
+    /**
+     * @param  array<int, string>  $keys
+     */
+    private function firstStringNested(array $payload, array $keys): string
+    {
+        $value = $this->firstScalarNested($payload, $keys);
+
+        return $value === null ? '' : trim((string) $value);
+    }
+
+    /**
+     * @param  array<int, string>  $keys
+     */
+    private function firstScalarNested(array $payload, array $keys): mixed
+    {
+        foreach ($keys as $key) {
+            $value = $this->valueAtPath($payload, $key);
+            if ($value !== null && $value !== '') {
+                return $value;
+            }
+        }
+
+        return null;
+    }
+
+    private function valueAtPath(array $payload, string $path): mixed
+    {
+        if (array_key_exists($path, $payload) && (is_scalar($payload[$path]) || $payload[$path] === null)) {
+            return $payload[$path];
+        }
+
+        if (!str_contains($path, '.')) {
+            return null;
+        }
+
+        $cursor = $payload;
+        foreach (explode('.', $path) as $part) {
+            if (!is_array($cursor) || !array_key_exists($part, $cursor)) {
+                return null;
+            }
+
+            $cursor = $cursor[$part];
+        }
+
+        return is_scalar($cursor) || $cursor === null ? $cursor : null;
     }
 }

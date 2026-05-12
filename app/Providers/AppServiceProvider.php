@@ -4,6 +4,9 @@ namespace App\Providers;
 
 use App\Integrations\ContaAzul\Auth\ContaAzulOAuthService;
 use App\Integrations\ContaAzul\Clients\ContaAzulClient;
+use App\Integrations\ContaAzul\Import\CategoriaFinanceiraContaAzulImportAdapter;
+use App\Integrations\ContaAzul\Import\CentroCustoContaAzulImportAdapter;
+use App\Integrations\ContaAzul\Import\ContaFinanceiraContaAzulImportAdapter;
 use App\Integrations\ContaAzul\Import\ContaPagarContaAzulImportAdapter;
 use App\Integrations\ContaAzul\Import\NotaContaAzulImportAdapter;
 use App\Integrations\ContaAzul\Import\PessoaContaAzulImportAdapter;
@@ -69,6 +72,9 @@ class AppServiceProvider extends ServiceProvider
         $this->app->singleton(TituloContaAzulImportAdapter::class, fn () => new TituloContaAzulImportAdapter());
         $this->app->singleton(ContaPagarContaAzulImportAdapter::class, fn () => new ContaPagarContaAzulImportAdapter());
         $this->app->singleton(NotaContaAzulImportAdapter::class, fn () => new NotaContaAzulImportAdapter());
+        $this->app->singleton(ContaFinanceiraContaAzulImportAdapter::class, fn () => new ContaFinanceiraContaAzulImportAdapter());
+        $this->app->singleton(CategoriaFinanceiraContaAzulImportAdapter::class, fn () => new CategoriaFinanceiraContaAzulImportAdapter());
+        $this->app->singleton(CentroCustoContaAzulImportAdapter::class, fn () => new CentroCustoContaAzulImportAdapter());
 
         $this->app->singleton(ImportacaoContaAzulService::class, function ($app) {
             return new ImportacaoContaAzulService(
@@ -82,6 +88,9 @@ class AppServiceProvider extends ServiceProvider
                     $app->make(TituloContaAzulImportAdapter::class),
                     $app->make(ContaPagarContaAzulImportAdapter::class),
                     $app->make(NotaContaAzulImportAdapter::class),
+                    $app->make(ContaFinanceiraContaAzulImportAdapter::class),
+                    $app->make(CategoriaFinanceiraContaAzulImportAdapter::class),
+                    $app->make(CentroCustoContaAzulImportAdapter::class),
                 ]
             );
         });

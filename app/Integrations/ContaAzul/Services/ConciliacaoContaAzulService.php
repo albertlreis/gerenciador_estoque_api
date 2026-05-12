@@ -100,6 +100,104 @@ class ConciliacaoContaAzulService
     }
 
     /**
+     * @return array{conciliados:int, pendentes:int, conflitos:int}
+     */
+    public function conciliarParcelas(?int $lojaId = null): array
+    {
+        return $this->conciliarStaging(
+            'stg_conta_azul_parcelas',
+            ContaAzulEntityType::PARCELA,
+            $lojaId,
+            fn (object $row, array $payload) => $this->autoMatch->matchParcela($row, $payload, $lojaId)
+        );
+    }
+
+    /**
+     * @return array{conciliados:int, pendentes:int, conflitos:int}
+     */
+    public function conciliarSaldosContasFinanceiras(?int $lojaId = null): array
+    {
+        return $this->conciliarStaging(
+            'stg_conta_azul_saldos_contas_financeiras',
+            ContaAzulEntityType::SALDO_CONTA_FINANCEIRA,
+            $lojaId,
+            fn (object $row, array $payload) => $this->autoMatch->matchSaldoContaFinanceira($row, $payload, $lojaId)
+        );
+    }
+
+    /**
+     * @return array{conciliados:int, pendentes:int, conflitos:int}
+     */
+    public function conciliarFormasPagamento(?int $lojaId = null): array
+    {
+        return $this->conciliarStaging(
+            'stg_conta_azul_formas_pagamento',
+            ContaAzulEntityType::FORMA_PAGAMENTO,
+            $lojaId,
+            fn (object $row, array $payload) => $this->autoMatch->matchFormaPagamento($row, $payload, $lojaId)
+        );
+    }
+
+    /**
+     * @return array{conciliados:int, pendentes:int, conflitos:int}
+     */
+    public function conciliarContasFinanceiras(?int $lojaId = null): array
+    {
+        return $this->conciliarStaging(
+            'stg_conta_azul_contas_financeiras',
+            ContaAzulEntityType::CONTA_FINANCEIRA,
+            $lojaId,
+            fn (object $row, array $payload) => $this->autoMatch->matchContaFinanceira($row, $payload, $lojaId)
+        );
+    }
+
+    /**
+     * @return array{conciliados:int, pendentes:int, conflitos:int}
+     */
+    public function conciliarCategoriasFinanceiras(?int $lojaId = null): array
+    {
+        $result = $this->conciliarStaging(
+            'stg_conta_azul_categorias_financeiras',
+            ContaAzulEntityType::CATEGORIA_FINANCEIRA,
+            $lojaId,
+            fn (object $row, array $payload) => $this->autoMatch->matchCategoriaFinanceira($row, $payload, $lojaId)
+        );
+
+        $this->preencherHierarquiaCatalogo(
+            ContaAzulEntityType::CATEGORIA_FINANCEIRA,
+            'stg_conta_azul_categorias_financeiras',
+            'categorias_financeiras',
+            'categoria_pai_id',
+            $lojaId
+        );
+
+        return $result;
+    }
+
+    /**
+     * @return array{conciliados:int, pendentes:int, conflitos:int}
+     */
+    public function conciliarCentrosCusto(?int $lojaId = null): array
+    {
+        $result = $this->conciliarStaging(
+            'stg_conta_azul_centros_custo',
+            ContaAzulEntityType::CENTRO_CUSTO,
+            $lojaId,
+            fn (object $row, array $payload) => $this->autoMatch->matchCentroCusto($row, $payload, $lojaId)
+        );
+
+        $this->preencherHierarquiaCatalogo(
+            ContaAzulEntityType::CENTRO_CUSTO,
+            'stg_conta_azul_centros_custo',
+            'centros_custo',
+            'centro_custo_pai_id',
+            $lojaId
+        );
+
+        return $result;
+    }
+
+    /**
      * @return array<string, array{conciliados:int, pendentes:int, conflitos:int}>
      */
     public function conciliarTudo(?int $lojaId = null): array
@@ -110,7 +208,13 @@ class ConciliacaoContaAzulService
             'vendas' => $this->conciliarVendas($lojaId),
             'titulos' => $this->conciliarTitulos($lojaId),
             'contas_pagar' => $this->conciliarContasPagar($lojaId),
+            'parcelas' => $this->conciliarParcelas($lojaId),
             'baixas' => $this->conciliarBaixas($lojaId),
+            'contas_financeiras' => $this->conciliarContasFinanceiras($lojaId),
+            'saldos_contas_financeiras' => $this->conciliarSaldosContasFinanceiras($lojaId),
+            'categorias_financeiras' => $this->conciliarCategoriasFinanceiras($lojaId),
+            'centros_custo' => $this->conciliarCentrosCusto($lojaId),
+            'formas_pagamento' => $this->conciliarFormasPagamento($lojaId),
         ];
     }
 
@@ -125,8 +229,14 @@ class ConciliacaoContaAzulService
             'venda' => 'stg_conta_azul_vendas',
             'titulo' => 'stg_conta_azul_financeiro',
             'conta_pagar' => 'stg_conta_azul_contas_pagar',
+            'parcela' => 'stg_conta_azul_parcelas',
             'baixa' => 'stg_conta_azul_baixas',
             'nota' => 'stg_conta_azul_notas',
+            'conta_financeira' => 'stg_conta_azul_contas_financeiras',
+            'saldo_conta_financeira' => 'stg_conta_azul_saldos_contas_financeiras',
+            'categoria_financeira' => 'stg_conta_azul_categorias_financeiras',
+            'centro_custo' => 'stg_conta_azul_centros_custo',
+            'forma_pagamento' => 'stg_conta_azul_formas_pagamento',
         ];
 
         $out = [];
@@ -789,6 +899,107 @@ class ConciliacaoContaAzulService
         return ['status' => 'pendente', 'observacao' => 'Baixa sem título mapeado ou pagamento correspondente'];
     }
 
+    private function preencherHierarquiaCatalogo(
+        string $tipo,
+        string $stagingTable,
+        string $localTable,
+        string $parentColumn,
+        ?int $lojaId
+    ): void {
+        $rows = DB::table($stagingTable)
+            ->where('status_conciliacao', 'conciliado')
+            ->whereNotNull('candidato_id_local')
+            ->when($lojaId !== null, fn ($q) => $q->where('loja_id', $lojaId))
+            ->when($lojaId === null, fn ($q) => $q->whereNull('loja_id'))
+            ->orderBy('id')
+            ->get();
+
+        foreach ($rows as $row) {
+            $payload = json_decode((string) $row->payload_json, true);
+            if (!is_array($payload)) {
+                continue;
+            }
+
+            $parentExt = $this->parentExternalId($payload);
+            if ($parentExt === '') {
+                continue;
+            }
+
+            $parentLocalId = ContaAzulMapeamento::query()
+                ->where('tipo_entidade', $tipo)
+                ->where('id_externo', $parentExt)
+                ->when($lojaId !== null, fn ($q) => $q->where('loja_id', $lojaId))
+                ->value('id_local');
+            $localId = (int) $row->candidato_id_local;
+
+            if (!$parentLocalId || (int) $parentLocalId === $localId) {
+                continue;
+            }
+
+            DB::table($localTable)
+                ->where('id', $localId)
+                ->whereNull($parentColumn)
+                ->update([
+                    $parentColumn => (int) $parentLocalId,
+                    'updated_at' => now(),
+                ]);
+        }
+    }
+
+    private function parentExternalId(array $payload): string
+    {
+        return $this->firstStringNested($payload, [
+            'idCategoriaPai',
+            'categoriaPaiId',
+            'categoria_pai_id',
+            'idCentroCustoPai',
+            'centroCustoPaiId',
+            'centro_custo_pai_id',
+            'parentId',
+            'parent.id',
+            'pai.id',
+            'idPai',
+            'paiId',
+        ]);
+    }
+
+    /**
+     * @param  array<int, string>  $keys
+     */
+    private function firstStringNested(array $payload, array $keys): string
+    {
+        foreach ($keys as $key) {
+            $value = $this->valueAtPath($payload, $key);
+            if ($value !== null && $value !== '') {
+                return trim((string) $value);
+            }
+        }
+
+        return '';
+    }
+
+    private function valueAtPath(array $payload, string $path): mixed
+    {
+        if (array_key_exists($path, $payload) && (is_scalar($payload[$path]) || $payload[$path] === null)) {
+            return $payload[$path];
+        }
+
+        if (!str_contains($path, '.')) {
+            return null;
+        }
+
+        $cursor = $payload;
+        foreach (explode('.', $path) as $part) {
+            if (!is_array($cursor) || !array_key_exists($part, $cursor)) {
+                return null;
+            }
+
+            $cursor = $cursor[$part];
+        }
+
+        return is_scalar($cursor) || $cursor === null ? $cursor : null;
+    }
+
     private function logConciliacao(?int $lojaId, string $tipo, string $idExterno, string $status, ?string $msg): void
     {
         ContaAzulSyncLog::create([
@@ -817,8 +1028,14 @@ class ConciliacaoContaAzulService
             ContaAzulEntityType::VENDA => 'stg_conta_azul_vendas',
             ContaAzulEntityType::TITULO => 'stg_conta_azul_financeiro',
             ContaAzulEntityType::CONTA_PAGAR => 'stg_conta_azul_contas_pagar',
+            ContaAzulEntityType::PARCELA => 'stg_conta_azul_parcelas',
             ContaAzulEntityType::BAIXA => 'stg_conta_azul_baixas',
             ContaAzulEntityType::NOTA => 'stg_conta_azul_notas',
+            ContaAzulEntityType::CONTA_FINANCEIRA => 'stg_conta_azul_contas_financeiras',
+            ContaAzulEntityType::SALDO_CONTA_FINANCEIRA => 'stg_conta_azul_saldos_contas_financeiras',
+            ContaAzulEntityType::CATEGORIA_FINANCEIRA => 'stg_conta_azul_categorias_financeiras',
+            ContaAzulEntityType::CENTRO_CUSTO => 'stg_conta_azul_centros_custo',
+            ContaAzulEntityType::FORMA_PAGAMENTO => 'stg_conta_azul_formas_pagamento',
         ];
     }
 
@@ -841,8 +1058,14 @@ class ConciliacaoContaAzulService
             'venda', 'vendas' => ContaAzulEntityType::VENDA,
             'titulo', 'titulos', 'financeiro' => ContaAzulEntityType::TITULO,
             'conta_pagar', 'contas_pagar', 'contas-pagar' => ContaAzulEntityType::CONTA_PAGAR,
+            'parcela', 'parcelas' => ContaAzulEntityType::PARCELA,
             'baixa', 'baixas' => ContaAzulEntityType::BAIXA,
             'nota', 'notas' => ContaAzulEntityType::NOTA,
+            'conta_financeira', 'contas_financeiras', 'contas-financeiras', 'conta-financeira' => ContaAzulEntityType::CONTA_FINANCEIRA,
+            'saldo_conta_financeira', 'saldo-conta-financeira', 'saldos-contas-financeiras', 'saldos_contas_financeiras' => ContaAzulEntityType::SALDO_CONTA_FINANCEIRA,
+            'categoria_financeira', 'categorias_financeiras', 'categorias-financeiras', 'categoria-financeira', 'categoria', 'categorias' => ContaAzulEntityType::CATEGORIA_FINANCEIRA,
+            'centro_custo', 'centros_custo', 'centros-custo', 'centro-de-custo', 'centro_custos' => ContaAzulEntityType::CENTRO_CUSTO,
+            'forma_pagamento', 'formas_pagamento', 'formas-pagamento', 'formas-de-pagamento' => ContaAzulEntityType::FORMA_PAGAMENTO,
             default => throw new ContaAzulException('Entidade Conta Azul invalida.', 'entidade_invalida'),
         };
     }
@@ -872,8 +1095,20 @@ class ConciliacaoContaAzulService
             'valor',
             'valorTotal',
             'valorLiquido',
+            'valorPago',
+            'valorBaixa',
             'status',
             'situacao',
+            'tipo',
+            'metodo_pagamento',
+            'metodoPagamento',
+            'bancoNome',
+            'nomeBanco',
+            'agencia',
+            'conta',
+            'moeda',
+            'saldo_atual',
+            'saldoAtual',
         ];
 
         $out = [];

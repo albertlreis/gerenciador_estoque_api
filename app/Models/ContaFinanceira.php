@@ -29,6 +29,8 @@ class ContaFinanceira extends Model
         'ativo',
         'padrao',
         'saldo_inicial',
+        'saldo_atual',
+        'saldo_atual_em',
         'observacoes',
         'meta_json',
     ];
@@ -37,6 +39,8 @@ class ContaFinanceira extends Model
         'ativo'         => 'boolean',
         'padrao'        => 'boolean',
         'saldo_inicial' => 'decimal:2',
+        'saldo_atual'   => 'decimal:2',
+        'saldo_atual_em'=> 'datetime',
         'meta_json'     => 'array',
     ];
 

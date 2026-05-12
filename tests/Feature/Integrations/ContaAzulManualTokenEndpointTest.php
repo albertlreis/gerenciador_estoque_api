@@ -7,6 +7,7 @@ use App\Integrations\ContaAzul\Models\ContaAzulConexao;
 use App\Integrations\ContaAzul\Services\ContaAzulConnectionService;
 use App\Models\Usuario;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
+use Illuminate\Support\Facades\Cache;
 use Laravel\Sanctum\Sanctum;
 use Mockery;
 use Tests\TestCase;
@@ -27,6 +28,13 @@ class ContaAzulManualTokenEndpointTest extends TestCase
         ]);
 
         Sanctum::actingAs($usuario);
+        Cache::put('permissoes_usuario_' . $usuario->id, [
+            'conta_azul.visualizar',
+            'conta_azul.configurar',
+            'conta_azul.importar',
+            'conta_azul.conciliar',
+            'conta_azul.auditar',
+        ], now()->addHour());
     }
 
     public function test_registra_token_manual_com_sucesso(): void

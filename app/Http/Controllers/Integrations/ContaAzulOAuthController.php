@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Integrations;
 
+use App\Helpers\AuthHelper;
 use App\Http\Controllers\Controller;
 use App\Integrations\ContaAzul\Auth\ContaAzulOAuthService;
 use App\Integrations\ContaAzul\Exceptions\ContaAzulException;
@@ -23,6 +24,10 @@ class ContaAzulOAuthController extends Controller
 
     public function redirect(Request $request): JsonResponse|RedirectResponse
     {
+        if (!AuthHelper::hasPermissao('conta_azul.configurar')) {
+            return response()->json(['message' => 'Sem permissao para configurar a integracao Conta Azul.'], 403);
+        }
+
         $lojaId = $request->query('loja_id');
         $lojaId = $lojaId !== null && $lojaId !== '' ? (int) $lojaId : null;
 

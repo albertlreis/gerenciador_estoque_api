@@ -11,6 +11,7 @@ use App\Models\ProdutoVariacaoOutletPagamento;
 use App\Models\Usuario;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Cache;
 use Laravel\Sanctum\Sanctum;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
@@ -24,7 +25,7 @@ class ImportacaoEstoquePlanilhaTest extends TestCase
     {
         $usuario = Usuario::create([
             'nome' => 'Dev Teste',
-            'email' => 'dev.importacao@example.com',
+            'email' => 'dev.importacao.' . uniqid() . '@example.com',
             'senha' => 'senha',
             'ativo' => true,
         ]);
@@ -92,14 +93,11 @@ class ImportacaoEstoquePlanilhaTest extends TestCase
 
     public function test_importacao_estoque_aplica_regras_de_status_outlet_fornecedor_e_referencia_vazia(): void
     {
-        $this->autenticar();
+        $usuario = $this->autenticar();
+        Cache::put('permissoes_usuario_' . $usuario->id, ['estoque.importar_planilha_dev'], now()->addHour());
         $arquivo = $this->criarPlanilhaExemplo();
 
-        $headers = [
-            'X-Permissoes' => json_encode(['estoque.importar_planilha_dev']),
-        ];
-
-        $upload = $this->withHeaders($headers)->post('/api/v1/importacoes/estoque', [
+        $upload = $this->post('/api/v1/importacoes/estoque', [
             'arquivo' => $arquivo,
         ]);
 
@@ -107,11 +105,11 @@ class ImportacaoEstoquePlanilhaTest extends TestCase
         $importId = (int) $upload->json('data.import_id');
         $this->assertGreaterThan(0, $importId);
 
-        $preview = $this->withHeaders($headers)->postJson("/api/v1/importacoes/estoque/{$importId}/processar?dry_run=1");
+        $preview = $this->postJson("/api/v1/importacoes/estoque/{$importId}/processar?dry_run=1");
         $preview->assertStatus(200);
         $this->assertSame(0, EstoqueMovimentacao::count());
 
-        $confirm = $this->withHeaders($headers)->postJson("/api/v1/importacoes/estoque/{$importId}/processar");
+        $confirm = $this->postJson("/api/v1/importacoes/estoque/{$importId}/processar");
         $confirm->assertStatus(200);
 
         $resumo = $confirm->json('resumo');

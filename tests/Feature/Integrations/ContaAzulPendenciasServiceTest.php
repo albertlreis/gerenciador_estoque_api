@@ -255,6 +255,7 @@ class ContaAzulPendenciasServiceTest extends TestCase
     {
         $clienteId = $this->createCliente(['nome' => 'Cliente Financeiro']);
         $pedidoId = $this->createPedido($clienteId, ['valor_total' => 250.00]);
+        $contaFinanceiraId = $this->createContaFinanceira();
         $contaId = DB::table('contas_receber')->insertGetId([
             'pedido_id' => $pedidoId,
             'descricao' => 'Parcela Conta Azul',
@@ -273,11 +274,12 @@ class ContaAzulPendenciasServiceTest extends TestCase
             'data_pagamento' => '2026-05-21',
             'valor' => 250.00,
             'forma_pagamento' => 'pix',
-            'conta_financeira_id' => $this->createContaFinanceira(),
+            'conta_financeira_id' => $contaFinanceiraId,
             'created_at' => now(),
             'updated_at' => now(),
         ]);
         $this->createMapeamento(ContaAzulEntityType::VENDA, 'venda-ca-fin-1', $pedidoId);
+        $this->createMapeamento(ContaAzulEntityType::CONTA_FINANCEIRA, 'conta-ca-fin-1', $contaFinanceiraId);
 
         $tituloStagingId = $this->insertStaging('stg_conta_azul_financeiro', 'titulo-ca-1', [
             'idVenda' => 'venda-ca-fin-1',
@@ -298,6 +300,7 @@ class ContaAzulPendenciasServiceTest extends TestCase
 
         $baixaStagingId = $this->insertStaging('stg_conta_azul_baixas', 'baixa-ca-1', [
             'idTitulo' => 'titulo-ca-1',
+            'idContaFinanceira' => 'conta-ca-fin-1',
             'dataPagamento' => '2026-05-21',
             'valor' => '250.00',
         ]);

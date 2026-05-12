@@ -90,6 +90,7 @@ class ContaPagarController extends Controller
             'fornecedor:id,nome',
             'categoria:id,nome,tipo',
             'centroCusto:id,nome',
+            'parcelamento',
             'pagamentos' => function ($q) {
                 $q->orderByDesc('data_pagamento')
                     ->with([

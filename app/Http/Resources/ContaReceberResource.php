@@ -10,6 +10,10 @@ class ContaReceberResource extends JsonResource
     {
         return [
             'id'                => $this->id,
+            'parcelamento_id'   => $this->parcelamento_id ? (int) $this->parcelamento_id : null,
+            'parcela_numero'    => $this->parcela_numero !== null ? (int) $this->parcela_numero : null,
+            'parcelas_total'    => $this->parcelas_total !== null ? (int) $this->parcelas_total : null,
+            'is_entrada'        => (bool) $this->is_entrada,
             'pedido_id'         => $this->pedido_id ? (int) $this->pedido_id : null,
             'descricao'         => $this->descricao,
             'numero_documento'  => $this->numero_documento,
@@ -34,6 +38,14 @@ class ContaReceberResource extends JsonResource
             'centro_custo' => $this->whenLoaded('centroCusto', fn() => [
                 'id' => $this->centroCusto?->id,
                 'nome' => $this->centroCusto?->nome,
+            ]),
+            'parcelamento' => $this->whenLoaded('parcelamento', fn() => [
+                'id' => $this->parcelamento?->id,
+                'tipo' => $this->parcelamento?->tipo,
+                'descricao' => $this->parcelamento?->descricao,
+                'valor_total' => (float) ($this->parcelamento?->valor_total ?? 0),
+                'valor_entrada' => (float) ($this->parcelamento?->valor_entrada ?? 0),
+                'quantidade_parcelas' => (int) ($this->parcelamento?->quantidade_parcelas ?? 0),
             ]),
             'observacoes'       => $this->observacoes,
 

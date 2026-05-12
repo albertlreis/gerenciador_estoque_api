@@ -16,6 +16,7 @@ class ContaPagar extends Model
     protected $table = 'contas_pagar';
 
     protected $fillable = [
+        'parcelamento_id','parcela_numero','parcelas_total','is_entrada',
         'fornecedor_id','descricao','numero_documento','data_emissao','data_vencimento',
         'valor_bruto','desconto','juros','multa','status','forma_pagamento',
         'categoria_id','centro_custo_id','observacoes'
@@ -28,8 +29,14 @@ class ContaPagar extends Model
         'desconto' => 'decimal:2',
         'juros' => 'decimal:2',
         'multa' => 'decimal:2',
+        'is_entrada' => 'boolean',
         'status' => ContaStatus::class,
     ];
+
+    public function parcelamento(): BelongsTo
+    {
+        return $this->belongsTo(FinanceiroParcelamento::class, 'parcelamento_id')->withDefault();
+    }
 
     public function categoria(): BelongsTo
     {

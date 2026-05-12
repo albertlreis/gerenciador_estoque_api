@@ -69,6 +69,8 @@ class CentroCustoController extends Controller
         $data = $request->validated();
 
         return DB::transaction(function () use ($data, $request) {
+            $this->assertNomeUnicoNormalizado($data['nome']);
+
             $slug = $this->resolveSlug(
                 table: 'centros_custo',
                 nome: $data['nome'],
@@ -106,6 +108,8 @@ class CentroCustoController extends Controller
         $data = $request->validated();
 
         return DB::transaction(function () use ($data, $centroCusto) {
+            $this->assertNomeUnicoNormalizado($data['nome'] ?? $centroCusto->nome, (int)$centroCusto->id);
+
             $slug = $this->resolveSlug(
                 table: 'centros_custo',
                 nome: $data['nome'] ?? $centroCusto->nome,
@@ -181,6 +185,24 @@ class CentroCustoController extends Controller
         }
 
         return $candidate;
+    }
+
+    private function assertNomeUnicoNormalizado(string $nome, ?int $ignoreId = null): void
+    {
+        $alvo = $this->normalizarNome($nome);
+        $exists = CentroCusto::query()
+            ->when($ignoreId, fn($q) => $q->whereKeyNot($ignoreId))
+            ->get(['id', 'nome'])
+            ->contains(fn($item) => $this->normalizarNome((string)$item->nome) === $alvo);
+
+        if ($exists) {
+            throw ValidationException::withMessages(['nome' => 'Já existe um centro de custo com este nome.']);
+        }
+    }
+
+    private function normalizarNome(string $nome): string
+    {
+        return Str::lower(Str::ascii(trim($nome)));
     }
 
     private function assertNoCycleCentroCusto(?int $currentId, int $parentId): void

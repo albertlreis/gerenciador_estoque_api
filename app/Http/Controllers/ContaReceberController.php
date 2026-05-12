@@ -57,7 +57,7 @@ class ContaReceberController extends Controller
         $perPage = $request->integer('per_page', 20);
 
         $q = ContaReceber::query()
-            ->with(['pedido.cliente', 'pagamentos.usuario', 'pagamentos.contaFinanceira']);
+            ->with(['pedido.cliente', 'parcelamento', 'pagamentos.usuario', 'pagamentos.contaFinanceira']);
 
         if ($request->filled('busca')) {
             $busca = '%' . $request->string('busca')->toString() . '%';
@@ -112,7 +112,7 @@ class ContaReceberController extends Controller
      */
     public function show(ContaReceber $conta): JsonResponse
     {
-        $conta->load(['pedido.cliente', 'pagamentos.usuario', 'pagamentos.contaFinanceira']);
+        $conta->load(['pedido.cliente', 'categoria', 'centroCusto', 'parcelamento', 'pagamentos.usuario', 'pagamentos.contaFinanceira']);
 
         return response()->json([
             'data' => new ContaReceberResource($conta),

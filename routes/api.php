@@ -30,6 +30,7 @@ use App\Http\Controllers\{AreaEstoqueController,
     EstoqueTransferenciaController,
     FeriadoController,
     FinanceiroDashboardController,
+    FinanceiroExtratoController,
     FornecedorController,
     FormaPagamentoController,
     ImportEstoqueController,
@@ -488,6 +489,7 @@ Route::middleware(['auth:sanctum', 'senha.nao_obrigatoria'])
          * ============================================================ */
         Route::prefix('financeiro')->group(function () {
             Route::get('dashboard', [FinanceiroDashboardController::class, 'show']);
+            Route::get('extrato/export/pdf', [FinanceiroExtratoController::class, 'exportPdf']);
 
             Route::apiResource('categorias-financeiras', CategoriaFinanceiraController::class)
                 ->parameters(['categorias-financeiras' => 'categoria_financeira'])

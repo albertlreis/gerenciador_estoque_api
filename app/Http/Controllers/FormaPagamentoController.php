@@ -40,7 +40,7 @@ class FormaPagamentoController extends Controller
             $nome = trim((string) $data['nome']);
             $slug = $this->resolveSlug($nome, $data['slug'] ?? null, null);
 
-            if (FormaPagamento::query()->whereRaw('LOWER(nome) = ?', [Str::lower($nome)])->exists()) {
+            if ($this->nomeExisteNormalizado($nome)) {
                 throw ValidationException::withMessages(['nome' => 'Já existe uma forma de pagamento com este nome.']);
             }
 
@@ -75,5 +75,14 @@ class FormaPagamentoController extends Controller
         }
 
         return $candidate;
+    }
+
+    private function nomeExisteNormalizado(string $nome): bool
+    {
+        $alvo = Str::lower(Str::ascii(trim($nome)));
+
+        return FormaPagamento::query()
+            ->get(['id', 'nome'])
+            ->contains(fn ($item) => Str::lower(Str::ascii(trim((string)$item->nome))) === $alvo);
     }
 }

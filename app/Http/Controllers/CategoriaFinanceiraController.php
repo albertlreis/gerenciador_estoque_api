@@ -59,6 +59,8 @@ class CategoriaFinanceiraController extends Controller
         $data = $request->validated();
 
         return DB::transaction(function () use ($data, $request) {
+            $this->assertNomeUnicoNormalizado($data['nome'], $data['tipo']);
+
             $slug = $this->resolveSlug(
                 table: 'categorias_financeiras',
                 nome: $data['nome'],
@@ -97,6 +99,12 @@ class CategoriaFinanceiraController extends Controller
         $data = $request->validated();
 
         return DB::transaction(function () use ($data, $categoriaFinanceira) {
+            $this->assertNomeUnicoNormalizado(
+                $data['nome'] ?? $categoriaFinanceira->nome,
+                $data['tipo'] ?? $categoriaFinanceira->tipo,
+                (int)$categoriaFinanceira->id
+            );
+
             $slug = $this->resolveSlug(
                 table: 'categorias_financeiras',
                 nome: $data['nome'] ?? $categoriaFinanceira->nome,
@@ -185,6 +193,25 @@ class CategoriaFinanceiraController extends Controller
         }
 
         return $candidate;
+    }
+
+    private function assertNomeUnicoNormalizado(string $nome, string $tipo, ?int $ignoreId = null): void
+    {
+        $alvo = $this->normalizarNome($nome);
+        $exists = CategoriaFinanceira::query()
+            ->where('tipo', $tipo)
+            ->when($ignoreId, fn($q) => $q->whereKeyNot($ignoreId))
+            ->get(['id', 'nome'])
+            ->contains(fn($item) => $this->normalizarNome((string)$item->nome) === $alvo);
+
+        if ($exists) {
+            throw ValidationException::withMessages(['nome' => 'Já existe uma categoria financeira com este nome.']);
+        }
+    }
+
+    private function normalizarNome(string $nome): string
+    {
+        return Str::lower(Str::ascii(trim($nome)));
     }
 
     private function assertNoCycleCategoria(?int $currentId, int $parentId): void

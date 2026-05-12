@@ -14,7 +14,7 @@ class ContaPagarRepositoryEloquent implements ContaPagarRepository
 {
     public function listar(FiltroContaPagarDTO $filtro, int $page = 1, int $perPage = 15): LengthAwarePaginator
     {
-        $q = ContaPagar::query()->with(['fornecedor']);
+        $q = ContaPagar::query()->with(['fornecedor', 'parcelamento']);
 
         if ($filtro->busca) {
             $busca = "%{$filtro->busca}%";
@@ -39,7 +39,7 @@ class ContaPagarRepositoryEloquent implements ContaPagarRepository
 
     public function encontrar(int $id): Builder|array|Collection|Model
     {
-        return ContaPagar::with(['fornecedor','pagamentos.usuario'])->find($id);
+        return ContaPagar::with(['fornecedor','parcelamento','pagamentos.usuario'])->find($id);
     }
 
     public function criar(array $dados): ContaPagar

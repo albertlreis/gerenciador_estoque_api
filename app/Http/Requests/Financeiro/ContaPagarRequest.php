@@ -25,6 +25,18 @@ class ContaPagarRequest extends FormRequest
             'categoria_id' => ['nullable','integer','exists:categorias_financeiras,id'],
             'centro_custo_id' => ['nullable','integer','exists:centros_custo,id'],
             'observacoes' => ['nullable','string'],
+            'parcelamento' => ['nullable','array'],
+            'parcelamento.quantidade_parcelas' => ['nullable','integer','min:1','max:120'],
+            'parcelamento.valor_entrada' => ['nullable','numeric','min:0'],
+            'parcelamento.intervalo_meses' => ['nullable','integer','min:1','max:24'],
+            'parcelamento.primeiro_vencimento' => ['nullable','date'],
+            'parcelamento.data_entrada' => ['nullable','date'],
+            'pagamento_inicial' => ['nullable','array'],
+            'pagamento_inicial.valor' => ['required_with:pagamento_inicial','numeric','gt:0'],
+            'pagamento_inicial.data_pagamento' => ['required_with:pagamento_inicial','date'],
+            'pagamento_inicial.forma_pagamento' => ['required_with:pagamento_inicial','string','max:50'],
+            'pagamento_inicial.conta_financeira_id' => ['required_with:pagamento_inicial','integer','exists:contas_financeiras,id'],
+            'pagamento_inicial.observacoes' => ['nullable','string'],
         ];
     }
 }

@@ -15,6 +15,7 @@ class ContaReceber extends Model
     protected $table = 'contas_receber';
 
     protected $fillable = [
+        'parcelamento_id','parcela_numero','parcelas_total','is_entrada',
         'pedido_id','descricao','numero_documento','data_emissao','data_vencimento',
         'valor_bruto','desconto','juros','multa',
         'valor_liquido','valor_recebido','saldo_aberto',
@@ -32,8 +33,14 @@ class ContaReceber extends Model
         'valor_liquido' => 'decimal:2',
         'valor_recebido' => 'decimal:2',
         'saldo_aberto' => 'decimal:2',
+        'is_entrada' => 'boolean',
         'status' => ContaStatus::class,
     ];
+
+    public function parcelamento(): BelongsTo
+    {
+        return $this->belongsTo(FinanceiroParcelamento::class, 'parcelamento_id')->withDefault();
+    }
 
     public function categoria(): BelongsTo
     {

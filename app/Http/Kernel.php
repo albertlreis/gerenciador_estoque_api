@@ -4,6 +4,7 @@ namespace App\Http;
 
 use App\Http\Middleware\Authenticate;
 use App\Http\Middleware\EncryptCookies;
+use App\Http\Middleware\EnsureSenhaNaoObrigatoria;
 use App\Http\Middleware\LogRequests;
 use App\Http\Middleware\PreventRequestsDuringMaintenance;
 use App\Http\Middleware\RedirectIfAuthenticated;
@@ -82,6 +83,7 @@ class Kernel extends HttpKernel
         'auth.session' => AuthenticateSession::class,
         'cache.headers' => SetCacheHeaders::class,
         'can' => Authorize::class,
+        'senha.nao_obrigatoria' => EnsureSenhaNaoObrigatoria::class,
         'guest' => RedirectIfAuthenticated::class,
         'password.confirm' => RequirePassword::class,
         'signed' => ValidateSignature::class,

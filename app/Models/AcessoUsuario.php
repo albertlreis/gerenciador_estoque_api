@@ -15,11 +15,23 @@ class AcessoUsuario extends Authenticatable
     protected $table = 'acesso_usuarios';
 
     protected $fillable = [
-        'nome', 'email', 'senha', 'ativo'
+        'nome',
+        'email',
+        'telefone',
+        'cargo',
+        'avatar_path',
+        'senha',
+        'ativo',
+        'forcar_troca_senha',
     ];
 
     protected $hidden = [
         'senha',
+    ];
+
+    protected $casts = [
+        'ativo' => 'boolean',
+        'forcar_troca_senha' => 'boolean',
     ];
 
     public function pedidos(): HasMany

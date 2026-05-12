@@ -31,6 +31,9 @@ return new class extends Migration
                 $table->id();
                 $table->string('nome', 255);
                 $table->string('email', 100)->unique();
+                $table->string('telefone', 30)->nullable();
+                $table->string('cargo', 100)->nullable();
+                $table->string('avatar_path', 255)->nullable();
                 $table->string('senha', 255);
                 $table->boolean('ativo')->default(true);
                 $table->timestamp('ultimo_login_em')->nullable();
@@ -39,6 +42,7 @@ return new class extends Migration
                 $table->unsignedSmallInteger('tentativas_login')->default(0);
                 $table->timestamp('bloqueado_ate')->nullable();
                 $table->timestamp('senha_alterada_em')->nullable();
+                $table->boolean('forcar_troca_senha')->default(false);
                 $table->timestamps();
             });
         }

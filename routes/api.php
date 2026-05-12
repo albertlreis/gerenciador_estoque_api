@@ -75,7 +75,7 @@ Route::get('v1/health', fn () => response()->json([
 
 Route::get('v1/integrations/conta-azul/callback', [ContaAzulOAuthController::class, 'callback']);
 
-Route::middleware('auth:sanctum')
+Route::middleware(['auth:sanctum', 'senha.nao_obrigatoria'])
     ->prefix('v1')
     ->group(function () {
 

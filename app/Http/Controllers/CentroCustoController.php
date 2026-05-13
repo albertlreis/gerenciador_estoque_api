@@ -6,6 +6,7 @@ use App\Http\Requests\Financeiro\CentroCustoIndexRequest;
 use App\Http\Requests\Financeiro\CentroCustoUpsertRequest;
 use App\Http\Resources\CentroCustoResource;
 use App\Models\CentroCusto;
+use App\Support\Financeiro\CatalogoFinanceiroNome;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -67,6 +68,7 @@ class CentroCustoController extends Controller
     public function store(CentroCustoUpsertRequest $request): JsonResponse
     {
         $data = $request->validated();
+        $data['nome'] = CatalogoFinanceiroNome::limpar($data['nome']);
 
         return DB::transaction(function () use ($data, $request) {
             $this->assertNomeUnicoNormalizado($data['nome']);
@@ -106,6 +108,9 @@ class CentroCustoController extends Controller
     public function update(CentroCustoUpsertRequest $request, CentroCusto $centroCusto): JsonResponse
     {
         $data = $request->validated();
+        if (array_key_exists('nome', $data)) {
+            $data['nome'] = CatalogoFinanceiroNome::limpar($data['nome']);
+        }
 
         return DB::transaction(function () use ($data, $centroCusto) {
             $this->assertNomeUnicoNormalizado($data['nome'] ?? $centroCusto->nome, (int)$centroCusto->id);
@@ -189,20 +194,16 @@ class CentroCustoController extends Controller
 
     private function assertNomeUnicoNormalizado(string $nome, ?int $ignoreId = null): void
     {
-        $alvo = $this->normalizarNome($nome);
-        $exists = CentroCusto::query()
-            ->when($ignoreId, fn($q) => $q->whereKeyNot($ignoreId))
-            ->get(['id', 'nome'])
-            ->contains(fn($item) => $this->normalizarNome((string)$item->nome) === $alvo);
+        $duplicado = CatalogoFinanceiroNome::primeiroDuplicado(CentroCusto::class, $nome, $ignoreId);
 
-        if ($exists) {
-            throw ValidationException::withMessages(['nome' => 'Já existe um centro de custo com este nome.']);
+        if ($duplicado) {
+            $mensagem = $duplicado->ativo
+                ? 'Ja existe um centro de custo com este nome.'
+                : 'Ja existe um centro de custo inativo com este nome. Reative o cadastro existente para usa-lo.';
+
+            throw ValidationException::withMessages(['nome' => $mensagem]);
         }
-    }
 
-    private function normalizarNome(string $nome): string
-    {
-        return Str::lower(Str::ascii(trim($nome)));
     }
 
     private function assertNoCycleCentroCusto(?int $currentId, int $parentId): void

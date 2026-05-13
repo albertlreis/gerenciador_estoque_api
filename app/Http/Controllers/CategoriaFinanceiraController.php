@@ -8,6 +8,7 @@ use App\Http\Resources\CategoriaFinanceiraOptionResource;
 use App\Http\Resources\CategoriaFinanceiraResource;
 use App\Models\CategoriaFinanceira;
 use App\Services\CategoriaFinanceiraCatalogoService;
+use App\Support\Financeiro\CatalogoFinanceiroNome;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
@@ -57,6 +58,7 @@ class CategoriaFinanceiraController extends Controller
     public function store(CategoriaFinanceiraUpsertRequest $request): JsonResponse
     {
         $data = $request->validated();
+        $data['nome'] = CatalogoFinanceiroNome::limpar($data['nome']);
 
         return DB::transaction(function () use ($data, $request) {
             $this->assertNomeUnicoNormalizado($data['nome'], $data['tipo']);
@@ -97,6 +99,9 @@ class CategoriaFinanceiraController extends Controller
     public function update(CategoriaFinanceiraUpsertRequest $request, CategoriaFinanceira $categoriaFinanceira): JsonResponse
     {
         $data = $request->validated();
+        if (array_key_exists('nome', $data)) {
+            $data['nome'] = CatalogoFinanceiroNome::limpar($data['nome']);
+        }
 
         return DB::transaction(function () use ($data, $categoriaFinanceira) {
             $this->assertNomeUnicoNormalizado(
@@ -197,21 +202,21 @@ class CategoriaFinanceiraController extends Controller
 
     private function assertNomeUnicoNormalizado(string $nome, string $tipo, ?int $ignoreId = null): void
     {
-        $alvo = $this->normalizarNome($nome);
-        $exists = CategoriaFinanceira::query()
-            ->where('tipo', $tipo)
-            ->when($ignoreId, fn($q) => $q->whereKeyNot($ignoreId))
-            ->get(['id', 'nome'])
-            ->contains(fn($item) => $this->normalizarNome((string)$item->nome) === $alvo);
+        $duplicado = CatalogoFinanceiroNome::primeiroDuplicado(
+            CategoriaFinanceira::class,
+            $nome,
+            $ignoreId,
+            fn ($q) => $q->where('tipo', $tipo)
+        );
 
-        if ($exists) {
-            throw ValidationException::withMessages(['nome' => 'Já existe uma categoria financeira com este nome.']);
+        if ($duplicado) {
+            $mensagem = $duplicado->ativo
+                ? 'Ja existe uma categoria financeira com este nome.'
+                : 'Ja existe uma categoria financeira inativa com este nome. Reative o cadastro existente para usa-lo.';
+
+            throw ValidationException::withMessages(['nome' => $mensagem]);
         }
-    }
 
-    private function normalizarNome(string $nome): string
-    {
-        return Str::lower(Str::ascii(trim($nome)));
     }
 
     private function assertNoCycleCategoria(?int $currentId, int $parentId): void

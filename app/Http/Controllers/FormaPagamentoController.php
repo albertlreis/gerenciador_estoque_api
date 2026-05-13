@@ -6,6 +6,7 @@ use App\Http\Requests\Financeiro\FormaPagamentoIndexRequest;
 use App\Http\Requests\Financeiro\FormaPagamentoUpsertRequest;
 use App\Http\Resources\FormaPagamentoResource;
 use App\Models\FormaPagamento;
+use App\Support\Financeiro\CatalogoFinanceiroNome;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -37,12 +38,9 @@ class FormaPagamentoController extends Controller
         $data = $request->validated();
 
         return DB::transaction(function () use ($data) {
-            $nome = trim((string) $data['nome']);
+            $nome = CatalogoFinanceiroNome::limpar((string) $data['nome']);
             $slug = $this->resolveSlug($nome, $data['slug'] ?? null, null);
-
-            if ($this->nomeExisteNormalizado($nome)) {
-                throw ValidationException::withMessages(['nome' => 'Já existe uma forma de pagamento com este nome.']);
-            }
+            $this->assertNomeUnicoNormalizado($nome);
 
             $forma = FormaPagamento::create([
                 'nome' => $nome,
@@ -77,12 +75,19 @@ class FormaPagamentoController extends Controller
         return $candidate;
     }
 
-    private function nomeExisteNormalizado(string $nome): bool
+    private function assertNomeUnicoNormalizado(string $nome): void
     {
-        $alvo = Str::lower(Str::ascii(trim($nome)));
+        $duplicado = CatalogoFinanceiroNome::primeiroDuplicado(FormaPagamento::class, $nome);
 
-        return FormaPagamento::query()
-            ->get(['id', 'nome'])
-            ->contains(fn ($item) => Str::lower(Str::ascii(trim((string)$item->nome))) === $alvo);
+        if (!$duplicado) {
+            return;
+        }
+
+        $mensagem = $duplicado->ativo
+            ? 'Ja existe uma forma de pagamento com este nome.'
+            : 'Ja existe uma forma de pagamento inativa com este nome. Reative o cadastro existente para usa-la.';
+
+        throw ValidationException::withMessages(['nome' => $mensagem]);
     }
+
 }

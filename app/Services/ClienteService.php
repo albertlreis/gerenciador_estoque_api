@@ -6,9 +6,11 @@ use App\Integrations\ContaAzul\Services\ContaAzulExportDispatchService;
 use App\Models\Cliente;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use App\Repositories\ClienteRepository;
 use App\Repositories\ClienteEnderecoRepository;
 use App\Validators\DocumentoValidator;
+use Throwable;
 
 class ClienteService
 {
@@ -130,7 +132,7 @@ class ClienteService
 
     public function criarClienteComEnderecos(array $data): Cliente
     {
-        return DB::transaction(function () use ($data) {
+        $cliente = DB::transaction(function () use ($data) {
             $data = $this->normalizeClienteData($data);
 
             $enderecos = $data['enderecos'] ?? [];
@@ -143,15 +145,18 @@ class ClienteService
             }
 
             $cliente = $cliente->load(['enderecos']);
-            $this->contaAzulExports->cliente((int) $cliente->id, null, ['evento' => 'cliente_criado']);
 
             return $cliente;
         });
+
+        $this->dispatchContaAzulClienteExport($cliente, 'cliente_criado');
+
+        return $cliente;
     }
 
     public function atualizarClienteComEnderecos(Cliente $cliente, array $data): Cliente
     {
-        return DB::transaction(function () use ($cliente, $data) {
+        $cliente = DB::transaction(function () use ($cliente, $data) {
             $data = $this->normalizeClienteData($data);
 
             $enderecos = $data['enderecos'] ?? null;
@@ -164,9 +169,26 @@ class ClienteService
             }
 
             $cliente = $cliente->load(['enderecos']);
-            $this->contaAzulExports->cliente((int) $cliente->id, null, ['evento' => 'cliente_atualizado']);
 
             return $cliente;
         });
+
+        $this->dispatchContaAzulClienteExport($cliente, 'cliente_atualizado');
+
+        return $cliente;
+    }
+
+    private function dispatchContaAzulClienteExport(Cliente $cliente, string $evento): void
+    {
+        try {
+            $this->contaAzulExports->cliente((int) $cliente->id, null, ['evento' => $evento]);
+        } catch (Throwable $e) {
+            Log::warning('Falha ao disparar exportacao Conta Azul para cliente.', [
+                'cliente_id' => $cliente->id,
+                'evento' => $evento,
+                'exception' => $e::class,
+                'erro' => $e->getMessage(),
+            ]);
+        }
     }
 }

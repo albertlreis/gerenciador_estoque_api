@@ -34,7 +34,7 @@
             <td class="right">{{ number_format($c->juros,2,',','.') }}</td>
             <td class="right">{{ number_format($c->multa,2,',','.') }}</td>
             <td class="right">{{ number_format($liq,2,',','.') }}</td>
-            <td>{{ $c->status }}</td>
+            <td>{{ $c->status?->value ?? $c->status }}</td>
         </tr>
     @endforeach
     </tbody>

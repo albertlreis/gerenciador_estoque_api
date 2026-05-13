@@ -10,6 +10,7 @@ use App\Repositories\LancamentoFinanceiroRepository;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Validation\ValidationException;
 
@@ -25,6 +26,11 @@ class LancamentoFinanceiroService
             perPage: $f->perPage,
             page: $f->page
         );
+    }
+
+    public function listarParaExportacao(FiltroLancamentoFinanceiroDTO $f): Collection
+    {
+        return $this->repo->queryBase($f)->get();
     }
 
     public function obter(int $id): LancamentoFinanceiro

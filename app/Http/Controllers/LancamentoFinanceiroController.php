@@ -3,13 +3,18 @@
 namespace App\Http\Controllers;
 
 use App\DTOs\FiltroLancamentoFinanceiroDTO;
+use App\Exports\LancamentosFinanceirosExport;
 use App\Http\Requests\Financeiro\LancamentoFinanceiroIndexRequest;
 use App\Http\Requests\Financeiro\LancamentoFinanceiroStoreRequest;
 use App\Http\Requests\Financeiro\LancamentoFinanceiroUpdateRequest;
 use App\Http\Resources\LancamentoFinanceiroResource;
 use App\Models\LancamentoFinanceiro;
 use App\Services\LancamentoFinanceiroService;
+use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Response;
+use Maatwebsite\Excel\Facades\Excel;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 class LancamentoFinanceiroController extends Controller
 {
@@ -75,5 +80,29 @@ class LancamentoFinanceiroController extends Controller
         return response()->json([
             'data' => $this->service->totais($dto),
         ]);
+    }
+
+    public function exportExcel(LancamentoFinanceiroIndexRequest $request): BinaryFileResponse
+    {
+        $dto = new FiltroLancamentoFinanceiroDTO($request->validated());
+
+        return Excel::download(
+            new LancamentosFinanceirosExport($this->service->listarParaExportacao($dto)),
+            'lancamentos_financeiros.xlsx'
+        );
+    }
+
+    public function exportPdf(LancamentoFinanceiroIndexRequest $request): Response
+    {
+        $dto = new FiltroLancamentoFinanceiroDTO($request->validated());
+        $lancamentos = $this->service->listarParaExportacao($dto);
+
+        $pdf = Pdf::loadView('pdf.financeiro-lancamentos', [
+            'lancamentos' => $lancamentos,
+            'totais' => $this->service->totais($dto),
+            'gerado_em' => now()->format('d/m/Y H:i'),
+        ])->setPaper('a4', 'landscape');
+
+        return $pdf->download('lancamentos_financeiros.pdf');
     }
 }

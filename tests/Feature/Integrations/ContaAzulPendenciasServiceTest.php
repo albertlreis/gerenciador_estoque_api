@@ -7,9 +7,11 @@ use App\Integrations\ContaAzul\ContaAzulEntityType;
 use App\Integrations\ContaAzul\Models\ContaAzulMapeamento;
 use App\Integrations\ContaAzul\Services\ConciliacaoContaAzulService;
 use App\Integrations\ContaAzul\Services\ContaAzulLocalCreationService;
+use App\Models\Usuario;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
+use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
 class ContaAzulPendenciasServiceTest extends TestCase
@@ -73,6 +75,18 @@ class ContaAzulPendenciasServiceTest extends TestCase
             'created_at' => now(),
             'updated_at' => now(),
         ]);
+    }
+
+    private function autenticar(): void
+    {
+        $usuario = Usuario::create([
+            'nome' => 'Usuario Conta Azul Teste',
+            'email' => 'conta-azul-' . uniqid() . '@teste.local',
+            'senha' => 'secret',
+            'ativo' => true,
+        ]);
+
+        Sanctum::actingAs($usuario);
     }
 
     private function createPedido(int $clienteId, array $overrides = []): int
@@ -443,6 +457,7 @@ class ContaAzulPendenciasServiceTest extends TestCase
 
     public function test_cria_conta_receber_com_baixa_parcial_a_partir_de_titulo(): void
     {
+        $this->autenticar();
         $contaFinanceiraId = $this->createContaFinanceira();
         $id = $this->insertStaging('stg_conta_azul_financeiro', 'titulo-criar-receber-1', [
             'descricao' => 'Parcela Conta Azul',
@@ -479,15 +494,32 @@ class ContaAzulPendenciasServiceTest extends TestCase
             'valor' => '120.00',
             'conta_financeira_id' => $contaFinanceiraId,
         ]);
+        $this->assertDatabaseHas('lancamentos_financeiros', [
+            'referencia_type' => 'App\Models\ContaReceber',
+            'referencia_id' => $resultado['id_local'],
+            'tipo' => 'receita',
+            'valor' => '120.00',
+            'conta_id' => $contaFinanceiraId,
+            'status' => 'confirmado',
+        ]);
         $this->assertDatabaseHas('conta_azul_mapeamentos', [
             'tipo_entidade' => ContaAzulEntityType::TITULO,
             'id_local' => $resultado['id_local'],
             'id_externo' => 'titulo-criar-receber-1',
         ]);
+
+        $this->getJson('/api/v1/financeiro/contas-receber?busca=Parcela%20Conta%20Azul')
+            ->assertOk()
+            ->assertJsonFragment(['descricao' => 'Parcela Conta Azul']);
+        $this->getJson('/api/v1/financeiro/lancamentos?q=Recebimento%20Conta%20a%20Receber')
+            ->assertOk()
+            ->assertJsonFragment(['tipo' => 'receita'])
+            ->assertJsonFragment(['valor' => '120.00']);
     }
 
     public function test_cria_conta_pagar_com_fornecedor_e_baixa_total(): void
     {
+        $this->autenticar();
         $contaFinanceiraId = $this->createContaFinanceira();
         $id = $this->insertStaging('stg_conta_azul_contas_pagar', 'titulo-criar-pagar-1', [
             'descricao' => 'Conta fornecedor',
@@ -531,6 +563,14 @@ class ContaAzulPendenciasServiceTest extends TestCase
             'valor' => '180.00',
             'conta_financeira_id' => $contaFinanceiraId,
         ]);
+        $this->assertDatabaseHas('lancamentos_financeiros', [
+            'referencia_type' => 'App\Models\ContaPagar',
+            'referencia_id' => $resultado['id_local'],
+            'tipo' => 'despesa',
+            'valor' => '180.00',
+            'conta_id' => $contaFinanceiraId,
+            'status' => 'confirmado',
+        ]);
         $this->assertDatabaseHas('conta_azul_mapeamentos', [
             'tipo_entidade' => ContaAzulEntityType::CONTA_PAGAR,
             'id_local' => $resultado['id_local'],
@@ -540,6 +580,14 @@ class ContaAzulPendenciasServiceTest extends TestCase
             'tipo_entidade' => ContaAzulEntityType::FORNECEDOR,
             'id_externo' => 'fornecedor-ca-1',
         ]);
+
+        $this->getJson('/api/v1/financeiro/contas-pagar?busca=Conta%20fornecedor')
+            ->assertOk()
+            ->assertJsonFragment(['descricao' => 'Conta fornecedor']);
+        $this->getJson('/api/v1/financeiro/lancamentos?q=Pagamento%20Conta%20a%20Pagar')
+            ->assertOk()
+            ->assertJsonFragment(['tipo' => 'despesa'])
+            ->assertJsonFragment(['valor' => '180.00']);
     }
 
     public function test_bloqueia_criacao_financeira_paga_sem_conta_financeira_e_forma(): void
@@ -561,5 +609,215 @@ class ContaAzulPendenciasServiceTest extends TestCase
                 'valor_bruto' => '100.00',
             ],
         ]);
+    }
+
+    public function test_cria_conta_receber_em_aberto_visivel_sem_lancamento_financeiro(): void
+    {
+        $this->autenticar();
+        $id = $this->insertStaging('stg_conta_azul_financeiro', 'titulo-aberto-visivel-1', [
+            'descricao' => 'Titulo Aberto Visivel',
+            'numero' => 'REC-ABERTO-001',
+            'dataVencimento' => '2026-05-25',
+            'valor' => '210.00',
+        ]);
+
+        $resultado = app(ContaAzulLocalCreationService::class)->criarLocal('titulo', $id, null, [
+            'tipo_local' => 'conta_receber',
+            'dados' => [
+                'descricao' => 'Titulo Aberto Visivel',
+                'numero_documento' => 'REC-ABERTO-001',
+                'data_vencimento' => '2026-05-25',
+                'valor_bruto' => '210.00',
+            ],
+        ]);
+
+        $this->assertDatabaseHas('contas_receber', [
+            'id' => $resultado['id_local'],
+            'descricao' => 'Titulo Aberto Visivel',
+            'status' => 'ABERTA',
+        ]);
+        $this->assertDatabaseMissing('lancamentos_financeiros', [
+            'referencia_type' => 'App\Models\ContaReceber',
+            'referencia_id' => $resultado['id_local'],
+        ]);
+
+        $this->getJson('/api/v1/financeiro/contas-receber?busca=Titulo%20Aberto%20Visivel')
+            ->assertOk()
+            ->assertJsonFragment(['descricao' => 'Titulo Aberto Visivel']);
+        $this->getJson('/api/v1/financeiro/lancamentos?q=Titulo%20Aberto%20Visivel')
+            ->assertOk()
+            ->assertJsonMissing(['descricao' => 'Titulo Aberto Visivel']);
+    }
+
+    public function test_cria_lote_misto_com_entidades_importadas_da_conta_azul(): void
+    {
+        $this->autenticar();
+        $pessoaId = $this->insertStaging('stg_conta_azul_pessoas', 'pessoa-lote-1', [
+            'nome' => 'Cliente Lote',
+            'documento' => '12345678901',
+        ]);
+        $produtoId = $this->insertStaging('stg_conta_azul_produtos', 'produto-lote-1', [
+            'nome' => 'Produto Lote',
+            'codigo' => 'SKU-LOTE-1',
+            'preco' => '99.90',
+        ]);
+        $contaFinanceiraId = $this->insertStaging('stg_conta_azul_contas_financeiras', 'conta-lote-1', [
+            'nome' => 'Banco Lote',
+            'tipo' => 'banco',
+        ]);
+        $categoriaId = $this->insertStaging('stg_conta_azul_categorias_financeiras', 'categoria-lote-1', [
+            'nome' => 'Receitas Lote',
+            'tipo' => 'receita',
+        ]);
+        $centroId = $this->insertStaging('stg_conta_azul_centros_custo', 'centro-lote-1', [
+            'nome' => 'Centro Lote',
+        ]);
+        $formaId = $this->insertStaging('stg_conta_azul_formas_pagamento', 'pix-lote', [
+            'codigo' => 'PIX',
+            'nome' => 'PIX',
+        ]);
+        $vendaId = $this->insertStaging('stg_conta_azul_vendas', 'venda-lote-1', [
+            'numero' => 'VENDA-LOTE-1',
+            'data' => '2026-05-13',
+            'valorTotal' => '99.90',
+            'cliente' => ['nome' => 'Cliente Venda Lote', 'documento' => '10987654321'],
+            'itens' => [[
+                'idProduto' => 'produto-venda-lote-1',
+                'nome' => 'Produto Venda Lote',
+                'codigo' => 'SKU-VENDA-1',
+                'quantidade' => 1,
+                'valorUnitario' => '99.90',
+            ]],
+        ]);
+        $tituloId = $this->insertStaging('stg_conta_azul_financeiro', 'titulo-lote-1', [
+            'descricao' => 'Titulo Lote',
+            'dataVencimento' => '2026-05-20',
+            'valor' => '100.00',
+            'valorPago' => '40.00',
+        ]);
+        $contaPagarId = $this->insertStaging('stg_conta_azul_contas_pagar', 'pagar-lote-1', [
+            'descricao' => 'Conta Pagar Lote',
+            'dataVencimento' => '2026-05-22',
+            'valor' => '80.00',
+            'fornecedor' => ['nome' => 'Fornecedor Lote'],
+        ]);
+        $parcelaId = $this->insertStaging('stg_conta_azul_parcelas', 'parcela-lote-1', [
+            'idEvento' => 'titulo-lote-1',
+            'tipoEvento' => 'titulo',
+        ]);
+        $baixaId = $this->insertStaging('stg_conta_azul_baixas', 'baixa-lote-1', [
+            'idEvento' => 'titulo-lote-1',
+            'tipoEvento' => 'titulo',
+            'idContaFinanceira' => 'conta-lote-1',
+            'dataPagamento' => '2026-05-21',
+            'valor' => '20.00',
+            'metodoPagamento' => 'PIX',
+        ]);
+        $saldoId = $this->insertStaging('stg_conta_azul_saldos_contas_financeiras', 'conta-lote-1', [
+            'saldoAtual' => '1234.56',
+        ]);
+        $notaId = $this->insertStaging('stg_conta_azul_notas', 'nota-lote-erro', [
+            'numero' => 'NF-1',
+        ]);
+
+        $resultado = app(ContaAzulLocalCreationService::class)->criarLocalLote([
+            ['entidade' => 'pessoa', 'id' => $pessoaId],
+            ['entidade' => 'produto', 'id' => $produtoId],
+            ['entidade' => 'conta_financeira', 'id' => $contaFinanceiraId],
+            ['entidade' => 'categoria_financeira', 'id' => $categoriaId],
+            ['entidade' => 'centro_custo', 'id' => $centroId],
+            ['entidade' => 'forma_pagamento', 'id' => $formaId],
+            ['entidade' => 'venda', 'id' => $vendaId],
+            ['entidade' => 'titulo', 'id' => $tituloId],
+            ['entidade' => 'conta_pagar', 'id' => $contaPagarId],
+            ['entidade' => 'parcela', 'id' => $parcelaId],
+            ['entidade' => 'baixa', 'id' => $baixaId],
+            ['entidade' => 'saldo_conta_financeira', 'id' => $saldoId],
+            ['entidade' => 'nota', 'id' => $notaId],
+        ], null);
+
+        $this->assertSame(13, $resultado['total']);
+        $this->assertCount(10, $resultado['criados']);
+        $this->assertCount(1, $resultado['atualizados']);
+        $this->assertCount(1, $resultado['vinculados']);
+        $this->assertCount(1, $resultado['erros']);
+        $this->assertSame(1, $resultado['visibilidade_financeira']['contas_receber']);
+        $this->assertSame(1, $resultado['visibilidade_financeira']['contas_pagar']);
+        $this->assertSame(2, $resultado['visibilidade_financeira']['lancamentos_financeiros']);
+        $this->assertSame(2, $resultado['visibilidade_financeira']['contas_financeiras']);
+        $this->assertSame(1, $resultado['visibilidade_financeira']['categorias_financeiras']);
+        $this->assertSame(1, $resultado['visibilidade_financeira']['centros_custo']);
+        $this->assertSame(1, $resultado['visibilidade_financeira']['formas_pagamento']);
+        $this->assertDatabaseHas('clientes', ['nome' => 'Cliente Lote']);
+        $this->assertDatabaseHas('produtos', ['nome' => 'Produto Lote']);
+        $this->assertDatabaseHas('pedidos', ['numero_externo' => 'VENDA-LOTE-1']);
+        $this->assertDatabaseHas('contas_receber', ['descricao' => 'Titulo Lote']);
+        $this->assertDatabaseHas('contas_pagar', ['descricao' => 'Conta Pagar Lote']);
+        $this->assertDatabaseHas('contas_receber_pagamentos', ['valor' => '40.00']);
+        $this->assertDatabaseHas('contas_receber_pagamentos', ['valor' => '20.00']);
+        $this->assertDatabaseHas('lancamentos_financeiros', ['tipo' => 'receita', 'valor' => '40.00']);
+        $this->assertDatabaseHas('lancamentos_financeiros', ['tipo' => 'receita', 'valor' => '20.00']);
+        $this->assertDatabaseHas('contas_financeiras', ['nome' => 'Banco Lote', 'saldo_atual' => '1234.56']);
+        $this->assertDatabaseHas('categorias_financeiras', ['nome' => 'Receitas Lote']);
+        $this->assertDatabaseHas('centros_custo', ['nome' => 'Centro Lote']);
+        $this->assertDatabaseHas('formas_pagamento', ['slug' => 'pix']);
+        $this->assertDatabaseHas('stg_conta_azul_notas', [
+            'id' => $notaId,
+            'status_conciliacao' => 'novo',
+        ]);
+
+        $this->getJson('/api/v1/financeiro/contas-receber?busca=Titulo%20Lote')
+            ->assertOk()
+            ->assertJsonFragment(['descricao' => 'Titulo Lote']);
+        $this->getJson('/api/v1/financeiro/contas-pagar?busca=Conta%20Pagar%20Lote')
+            ->assertOk()
+            ->assertJsonFragment(['descricao' => 'Conta Pagar Lote']);
+        $this->getJson('/api/v1/financeiro/lancamentos?q=Conta%20a%20Receber')
+            ->assertOk()
+            ->assertJsonFragment(['valor' => '40.00'])
+            ->assertJsonFragment(['valor' => '20.00']);
+        $this->getJson('/api/v1/financeiro/contas-financeiras')
+            ->assertOk()
+            ->assertJsonFragment(['nome' => 'Banco Lote']);
+        $this->getJson('/api/v1/financeiro/categorias-financeiras')
+            ->assertOk()
+            ->assertJsonFragment(['nome' => 'Receitas Lote']);
+        $this->getJson('/api/v1/financeiro/centros-custo')
+            ->assertOk()
+            ->assertJsonFragment(['nome' => 'Centro Lote']);
+        $this->getJson('/api/v1/financeiro/formas-pagamento')
+            ->assertOk()
+            ->assertJsonFragment(['nome' => 'PIX']);
+    }
+
+    public function test_cria_lote_por_filtro_respeitando_entidade_e_status(): void
+    {
+        $this->insertStaging('stg_conta_azul_pessoas', 'pessoa-filtro-1', [
+            'nome' => 'Pessoa Filtro 1',
+            'documento' => '11111111111',
+        ]);
+        $this->insertStaging('stg_conta_azul_pessoas', 'pessoa-filtro-2', [
+            'nome' => 'Pessoa Filtro 2',
+            'documento' => '22222222222',
+        ], 'pendente');
+        $this->insertStaging('stg_conta_azul_pessoas', 'pessoa-filtro-ignorada', [
+            'nome' => 'Pessoa Ignorada',
+        ], 'ignorado');
+        $this->insertStaging('stg_conta_azul_produtos', 'produto-fora-filtro', [
+            'nome' => 'Produto Fora Filtro',
+        ]);
+
+        $resultado = app(ContaAzulLocalCreationService::class)->criarLocalLotePorFiltro([
+            'entidade' => 'pessoa',
+            'status' => 'novo,pendente',
+            'bucket' => '',
+        ], null);
+
+        $this->assertSame(2, $resultado['total']);
+        $this->assertCount(2, $resultado['criados']);
+        $this->assertDatabaseHas('clientes', ['nome' => 'Pessoa Filtro 1']);
+        $this->assertDatabaseHas('clientes', ['nome' => 'Pessoa Filtro 2']);
+        $this->assertDatabaseMissing('clientes', ['nome' => 'Pessoa Ignorada']);
+        $this->assertDatabaseMissing('produtos', ['nome' => 'Produto Fora Filtro']);
     }
 }

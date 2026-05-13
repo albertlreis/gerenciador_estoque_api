@@ -35,14 +35,14 @@
         <tr>
             <td>{{ $conta->id }}</td>
             <td>{{ $conta->pedido->cliente->nome ?? '-' }}</td>
-            <td>{{ $conta->pedido->numero ?? '-' }}</td>
+            <td>{{ $conta->pedido->numero_externo ?? '-' }}</td>
             <td>{{ $conta->descricao }}</td>
             <td>{{ optional($conta->data_emissao)->format('d/m/Y') }}</td>
             <td>{{ optional($conta->data_vencimento)->format('d/m/Y') }}</td>
             <td>{{ number_format($conta->valor_liquido, 2, ',', '.') }}</td>
             <td>{{ number_format($conta->valor_recebido, 2, ',', '.') }}</td>
             <td>{{ number_format($conta->saldo_aberto, 2, ',', '.') }}</td>
-            <td>{{ $conta->status }}</td>
+            <td>{{ $conta->status?->value ?? $conta->status }}</td>
         </tr>
     @endforeach
     </tbody>

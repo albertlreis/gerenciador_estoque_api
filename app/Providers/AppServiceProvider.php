@@ -25,8 +25,13 @@ use App\Integrations\ContaAzul\Services\ContaAzulLocalCreationService;
 use App\Integrations\ContaAzul\Services\ExportacaoContaAzulService;
 use App\Integrations\ContaAzul\Services\ImportacaoContaAzulService;
 use App\Integrations\ContaAzul\Services\ReconciliacaoContaAzulService;
+use App\Integrations\GoogleCalendar\Auth\GoogleCalendarOAuthService;
+use App\Integrations\GoogleCalendar\Clients\GoogleCalendarClient;
+use App\Integrations\GoogleCalendar\Services\GoogleCalendarConnectionService;
+use App\Integrations\GoogleCalendar\Services\GoogleCalendarEventService;
 use App\Repositories\Contracts\ContaPagarRepository;
 use App\Repositories\Eloquent\ContaPagarRepositoryEloquent;
+use App\Services\FinanceiroLedgerService;
 use Illuminate\Database\QueryException;
 use Illuminate\Filesystem\Filesystem;
 use Illuminate\Support\Facades\DB;
@@ -95,8 +100,13 @@ class AppServiceProvider extends ServiceProvider
             );
         });
 
-        $this->app->singleton(ContaAzulAutoMatchService::class, fn () => new ContaAzulAutoMatchService());
-        $this->app->singleton(ContaAzulLocalCreationService::class, fn () => new ContaAzulLocalCreationService());
+        $this->app->singleton(ContaAzulAutoMatchService::class, fn ($app) => new ContaAzulAutoMatchService(
+            $app->make(FinanceiroLedgerService::class)
+        ));
+        $this->app->singleton(ContaAzulLocalCreationService::class, fn ($app) => new ContaAzulLocalCreationService(
+            $app->make(ContaAzulAutoMatchService::class),
+            $app->make(FinanceiroLedgerService::class)
+        ));
 
         $this->app->singleton(ConciliacaoContaAzulService::class, function ($app) {
             return new ConciliacaoContaAzulService($app->make(ContaAzulAutoMatchService::class));
@@ -119,6 +129,30 @@ class AppServiceProvider extends ServiceProvider
             return new ReconciliacaoContaAzulService(
                 $app->make(ImportacaoContaAzulService::class),
                 $app->make(ConciliacaoContaAzulService::class)
+            );
+        });
+
+        $this->app->singleton(GoogleCalendarClient::class, function ($app) {
+            return new GoogleCalendarClient($app['config']->get('google_calendar', []));
+        });
+
+        $this->app->singleton(GoogleCalendarOAuthService::class, function ($app) {
+            return new GoogleCalendarOAuthService($app['config']->get('google_calendar', []));
+        });
+
+        $this->app->singleton(GoogleCalendarConnectionService::class, function ($app) {
+            return new GoogleCalendarConnectionService(
+                $app['config']->get('google_calendar', []),
+                $app->make(GoogleCalendarOAuthService::class),
+                $app->make(GoogleCalendarClient::class)
+            );
+        });
+
+        $this->app->singleton(GoogleCalendarEventService::class, function ($app) {
+            return new GoogleCalendarEventService(
+                $app['config']->get('google_calendar', []),
+                $app->make(GoogleCalendarConnectionService::class),
+                $app->make(GoogleCalendarClient::class)
             );
         });
     }

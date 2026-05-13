@@ -17,6 +17,7 @@ use App\Integrations\ContaAzul\Services\ReconciliacaoContaAzulService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 class ContaAzulIntegracaoController extends Controller
 {
@@ -405,6 +406,46 @@ class ContaAzulIntegracaoController extends Controller
 
         try {
             $resultado = $this->criacaoLocal->criarLocal($entidade, $id, $this->lojaId($request), $dados);
+        } catch (ContaAzulException $e) {
+            return response()->json([
+                'ok' => false,
+                'mensagem' => $e->getMessage(),
+                'reason' => $e->reason,
+            ], 422);
+        }
+
+        return response()->json(['ok' => true, 'resultado' => $resultado]);
+    }
+
+    public function criarRegistrosLocaisLote(Request $request): JsonResponse
+    {
+        if ($response = $this->autorizar('conta_azul.conciliar')) {
+            return $response;
+        }
+
+        $modo = (string) $request->input('modo', 'itens');
+        $dados = $request->validate([
+            'modo' => ['nullable', 'in:itens,filtro'],
+            'itens' => [$modo === 'itens' ? 'required' : 'nullable', 'array', 'min:1', 'max:100'],
+            'itens.*.entidade' => ['required', 'string', 'max:80'],
+            'itens.*.id' => ['required', 'integer', 'min:1'],
+            'filtros' => [$modo === 'filtro' ? 'required' : 'nullable', 'array'],
+            'filtros.status' => ['nullable'],
+            'filtros.entidade' => ['nullable', 'string', 'max:80'],
+            'filtros.bucket' => ['nullable', 'string', 'max:40'],
+            'filtros.loja_id' => ['nullable', 'integer', 'min:1'],
+            'loja_id' => ['nullable', 'integer', 'min:1'],
+        ]);
+
+        try {
+            $lojaId = $modo === 'filtro' && isset($dados['filtros']['loja_id'])
+                ? (int) $dados['filtros']['loja_id']
+                : $this->lojaId($request);
+            $resultado = $modo === 'filtro'
+                ? $this->criacaoLocal->criarLocalLotePorFiltro((array) ($dados['filtros'] ?? []), $lojaId)
+                : $this->criacaoLocal->criarLocalLote($dados['itens'], $lojaId);
+        } catch (ValidationException $e) {
+            throw $e;
         } catch (ContaAzulException $e) {
             return response()->json([
                 'ok' => false,

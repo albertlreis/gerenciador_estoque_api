@@ -68,6 +68,8 @@ use App\Http\Controllers\Assistencia\{
 use App\Http\Controllers\AssistenciaRelatorioController;
 use App\Http\Controllers\Integrations\ContaAzulIntegracaoController;
 use App\Http\Controllers\Integrations\ContaAzulOAuthController;
+use App\Http\Controllers\Integrations\GoogleCalendarController;
+use App\Http\Controllers\Integrations\GoogleCalendarOAuthController;
 
 Route::get('v1/health', fn () => response()->json([
     'status' => 'ok',
@@ -75,6 +77,7 @@ Route::get('v1/health', fn () => response()->json([
 ]));
 
 Route::get('v1/integrations/conta-azul/callback', [ContaAzulOAuthController::class, 'callback']);
+Route::get('v1/integrations/google-calendar/callback', [GoogleCalendarOAuthController::class, 'callback']);
 
 Route::middleware(['auth:sanctum', 'senha.nao_obrigatoria'])
     ->prefix('v1')
@@ -490,6 +493,7 @@ Route::middleware(['auth:sanctum', 'senha.nao_obrigatoria'])
         Route::prefix('financeiro')->group(function () {
             Route::get('dashboard', [FinanceiroDashboardController::class, 'show']);
             Route::get('extrato/export/pdf', [FinanceiroExtratoController::class, 'exportPdf']);
+            Route::get('extrato/export/excel', [FinanceiroExtratoController::class, 'exportExcel']);
 
             Route::apiResource('categorias-financeiras', CategoriaFinanceiraController::class)
                 ->parameters(['categorias-financeiras' => 'categoria_financeira'])
@@ -513,6 +517,8 @@ Route::middleware(['auth:sanctum', 'senha.nao_obrigatoria'])
                 ->except(['create', 'edit']);
 
             Route::get('lancamentos/totais', [LancamentoFinanceiroController::class, 'totais']);
+            Route::get('lancamentos/export/excel', [LancamentoFinanceiroController::class, 'exportExcel']);
+            Route::get('lancamentos/export/pdf', [LancamentoFinanceiroController::class, 'exportPdf']);
             Route::apiResource('lancamentos', LancamentoFinanceiroController::class)->except(['create', 'edit']);
 
             Route::prefix('contas-pagar')->group(function () {
@@ -567,6 +573,7 @@ Route::middleware(['auth:sanctum', 'senha.nao_obrigatoria'])
             Route::get('pendencias', [ContaAzulIntegracaoController::class, 'pendencias']);
             Route::get('pendencias/detalhes', [ContaAzulIntegracaoController::class, 'pendenciasDetalhadas']);
             Route::get('pendencias/{entidade}/{id}/criacao-local/preview', [ContaAzulIntegracaoController::class, 'previewCriacaoLocal']);
+            Route::post('pendencias/criar-local-lote', [ContaAzulIntegracaoController::class, 'criarRegistrosLocaisLote']);
             Route::post('pendencias/{entidade}/{id}/criar-local', [ContaAzulIntegracaoController::class, 'criarRegistroLocal']);
             Route::post('pendencias/{entidade}/{id}/resolver', [ContaAzulIntegracaoController::class, 'resolverPendencia']);
             Route::post('manual-token', [ContaAzulIntegracaoController::class, 'registrarTokenManual']);
@@ -579,6 +586,24 @@ Route::middleware(['auth:sanctum', 'senha.nao_obrigatoria'])
             Route::post('conciliar/{entidade}', [ContaAzulIntegracaoController::class, 'conciliarEntidade']);
             Route::post('reconciliar', [ContaAzulIntegracaoController::class, 'reconciliar']);
             Route::post('reconciliar-todos', [ContaAzulIntegracaoController::class, 'reconciliarTodos']);
+        });
+
+        Route::prefix('integrations/google-calendar')->group(function () {
+            Route::get('oauth/authorize', [GoogleCalendarOAuthController::class, 'redirect']);
+            Route::get('status', [GoogleCalendarController::class, 'status']);
+            Route::get('calendars', [GoogleCalendarController::class, 'calendars']);
+            Route::post('calendars/{calendarId}/enable', [GoogleCalendarController::class, 'enableCalendar'])
+                ->where('calendarId', '[^/]+');
+            Route::post('calendars/{calendarId}/disable', [GoogleCalendarController::class, 'disableCalendar'])
+                ->where('calendarId', '[^/]+');
+            Route::get('events', [GoogleCalendarController::class, 'events']);
+            Route::post('events', [GoogleCalendarController::class, 'store']);
+            Route::match(['put', 'patch'], 'events/{eventId}', [GoogleCalendarController::class, 'update'])
+                ->where('eventId', '[^/]+');
+            Route::delete('events/{eventId}', [GoogleCalendarController::class, 'destroy'])
+                ->where('eventId', '[^/]+');
+            Route::get('contacts', [GoogleCalendarController::class, 'contacts']);
+            Route::get('logs', [GoogleCalendarController::class, 'logs']);
         });
 
         Route::prefix('comunicacao')->group(function () {

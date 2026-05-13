@@ -3,6 +3,7 @@
 namespace App\Integrations\ContaAzul\Services;
 
 use App\Enums\ContaStatus;
+use App\Enums\LancamentoTipo;
 use App\Integrations\ContaAzul\ContaAzulEntityType;
 use App\Integrations\ContaAzul\Models\ContaAzulMapeamento;
 use App\Models\CategoriaFinanceira;
@@ -17,6 +18,7 @@ use App\Models\FormaPagamento;
 use App\Models\Pedido;
 use App\Models\Produto;
 use App\Models\ProdutoVariacao;
+use App\Services\FinanceiroLedgerService;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Str;
@@ -25,6 +27,13 @@ class ContaAzulAutoMatchService
 {
     public const AUTO_SCORE = 95;
     public const SUGGESTION_SCORE = 80;
+
+    private readonly FinanceiroLedgerService $ledger;
+
+    public function __construct(?FinanceiroLedgerService $ledger = null)
+    {
+        $this->ledger = $ledger ?? app(FinanceiroLedgerService::class);
+    }
 
     /**
      * @return array{status:string, id_local?:int, observacao?:string, codigo_externo?:string, candidato?:array<string, mixed>, candidatos?:array<int, array<string, mixed>>}
@@ -330,7 +339,14 @@ class ContaAzulAutoMatchService
             return $this->conflict($candidate['candidates'], 'Mais de um pagamento com mesmo titulo, data, valor e conta financeira');
         }
         if ($candidate['candidate']) {
-            return $this->auto($candidate['candidate']);
+            $pagamento = $this->paymentModel($target['tipo'], (int) $candidate['candidate']['id_local']);
+            $result = $this->auto($candidate['candidate']);
+            if ($pagamento) {
+                $lancamento = $this->criarLancamentoPagamento($target['tipo'], $pagamento);
+                $result['lancamento_financeiro_id'] = (int) $lancamento->id;
+            }
+
+            return $result;
         }
 
         $forma = $this->paymentMethodCode($payload) ?: 'OUTROS';
@@ -343,8 +359,11 @@ class ContaAzulAutoMatchService
             'conta_financeira_id' => $contaFinanceiraId,
         ]);
         $this->syncPaymentStatus($target['tipo'], $target['id_local']);
+        $lancamento = $this->criarLancamentoPagamento($target['tipo'], $pagamento);
 
-        return $this->auto($this->candidate((int) $pagamento->id, 100, 'Criado a partir da baixa Conta Azul', 'Pagamento #' . $pagamento->id));
+        return $this->auto($this->candidate((int) $pagamento->id, 100, 'Criado a partir da baixa Conta Azul', 'Pagamento #' . $pagamento->id)) + [
+            'lancamento_financeiro_id' => (int) $lancamento->id,
+        ];
     }
 
     public function matchParcela(object $row, array $payload, ?int $lojaId): array
@@ -596,6 +615,46 @@ class ContaAzulAutoMatchService
         }
 
         return ContaReceberPagamento::create($payload + ['conta_receber_id' => $contaId]);
+    }
+
+    private function paymentModel(string $tipo, int $pagamentoId): ContaPagarPagamento|ContaReceberPagamento|null
+    {
+        return $tipo === 'pagar'
+            ? ContaPagarPagamento::query()->find($pagamentoId)
+            : ContaReceberPagamento::query()->find($pagamentoId);
+    }
+
+    private function criarLancamentoPagamento(string $tipo, ContaPagarPagamento|ContaReceberPagamento $pagamento)
+    {
+        if ($tipo === 'pagar') {
+            $conta = ContaPagar::query()->findOrFail($pagamento->conta_pagar_id);
+
+            return $this->ledger->criarLancamentoPorPagamento(
+                tipo: LancamentoTipo::DESPESA->value,
+                descricao: "Pagamento Conta a Pagar #{$conta->id} - {$conta->descricao}",
+                valor: (float) $pagamento->valor,
+                contaFinanceiraId: (int) $pagamento->conta_financeira_id,
+                categoriaId: $conta->categoria_id ? (int) $conta->categoria_id : null,
+                centroCustoId: $conta->centro_custo_id ? (int) $conta->centro_custo_id : null,
+                dataMovimento: $pagamento->data_pagamento,
+                referencia: $conta,
+                pagamento: $pagamento,
+            );
+        }
+
+        $conta = ContaReceber::query()->findOrFail($pagamento->conta_receber_id);
+
+        return $this->ledger->criarLancamentoPorPagamento(
+            tipo: LancamentoTipo::RECEITA->value,
+            descricao: "Recebimento Conta a Receber #{$conta->id} - {$conta->descricao}",
+            valor: (float) $pagamento->valor,
+            contaFinanceiraId: (int) $pagamento->conta_financeira_id,
+            categoriaId: $conta->categoria_id ? (int) $conta->categoria_id : null,
+            centroCustoId: $conta->centro_custo_id ? (int) $conta->centro_custo_id : null,
+            dataMovimento: $pagamento->data_pagamento,
+            referencia: $conta,
+            pagamento: $pagamento,
+        );
     }
 
     private function syncPaymentStatus(string $tipo, int $contaId): void

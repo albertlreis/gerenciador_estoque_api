@@ -2,85 +2,54 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\ContaReceber;
-use App\Http\Resources\ContaReceberResource;
+use App\Exports\ContasReceberExport;
+use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Response;
-use Illuminate\Support\Facades\Storage;
-use PhpOffice\PhpSpreadsheet\Spreadsheet;
-use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
-use PDF;
+use Illuminate\Http\Response;
+use Maatwebsite\Excel\Facades\Excel;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 class ContaReceberExportController extends Controller
 {
     /**
-     * Exporta os resultados filtrados em Excel
+     * Exporta os resultados filtrados em Excel.
      */
-    public function exportarExcel(Request $request)
+    public function exportarExcel(Request $request): BinaryFileResponse
     {
-        $contas = $this->filtrarContas($request)->get();
-
-        $spreadsheet = new Spreadsheet();
-        $sheet = $spreadsheet->getActiveSheet();
-        $sheet->setTitle('Contas a Receber');
-
-        $sheet->fromArray([
-            ['ID', 'Cliente', 'Pedido', 'Descrição', 'Emissão', 'Vencimento', 'Valor Líquido', 'Recebido', 'Saldo', 'Status']
-        ]);
-
-        $linha = 2;
-        foreach ($contas as $conta) {
-            $sheet->fromArray([
-                $conta->id,
-                $conta->pedido->cliente->nome ?? '-',
-                $conta->pedido->numero ?? '-',
-                $conta->descricao,
-                optional($conta->data_emissao)->format('d/m/Y'),
-                optional($conta->data_vencimento)->format('d/m/Y'),
-                number_format($conta->valor_liquido, 2, ',', '.'),
-                number_format($conta->valor_recebido, 2, ',', '.'),
-                number_format($conta->saldo_aberto, 2, ',', '.'),
-                $conta->status
-            ], null, "A{$linha}");
-            $linha++;
-        }
-
-        $filePath = storage_path('app/public/contas_receber.xlsx');
-        (new Xlsx($spreadsheet))->save($filePath);
-
-        return response()->download($filePath)->deleteFileAfterSend(true);
+        return Excel::download(new ContasReceberExport($request->all()), 'contas_receber.xlsx');
     }
 
     /**
-     * Exporta em PDF
+     * Exporta os resultados filtrados em PDF.
      */
-    public function exportarPdf(Request $request)
+    public function exportarPdf(Request $request): Response
     {
-        $contas = $this->filtrarContas($request)->get();
+        $contas = ContasReceberExport::queryFromRequest($request)->get();
 
-        $pdf = PDF::loadView('pdf.contas-receber', [
+        $pdf = Pdf::loadView('pdf.contas-receber', [
             'contas' => $contas,
-            'dataGeracao' => now()->format('d/m/Y H:i')
+            'dataGeracao' => now()->format('d/m/Y H:i'),
         ])->setPaper('a4', 'landscape');
 
         return $pdf->download('contas_receber.pdf');
     }
 
     /**
-     * KPIs principais do módulo
+     * KPIs principais do modulo.
      */
     public function kpis(Request $request)
     {
-        $query = $this->filtrarContas($request);
+        $query = ContasReceberExport::queryFromRequest($request)->reorder();
 
-        $total = (clone $query)->sum('valor_liquido');
-        $recebido = (clone $query)->sum('valor_recebido');
-        $aberto = (clone $query)->sum('saldo_aberto');
+        $total = (clone $query)->get()->sum(fn ($conta) => (float) $conta->valor_liquido);
+        $recebido = (clone $query)->get()->sum(fn ($conta) => (float) $conta->valor_recebido);
+        $aberto = (clone $query)->get()->sum(fn ($conta) => (float) $conta->saldo_aberto);
 
         $vencidas = (clone $query)
             ->where('status', '!=', 'PAGA')
-            ->where('data_vencimento', '<', now())
-            ->sum('saldo_aberto');
+            ->whereDate('data_vencimento', '<', now()->toDateString())
+            ->get()
+            ->sum(fn ($conta) => (float) $conta->saldo_aberto);
 
         $porcentagemRecebido = $total > 0 ? round(($recebido / $total) * 100, 2) : 0;
 
@@ -91,32 +60,5 @@ class ContaReceberExportController extends Controller
             'total_vencido' => $vencidas,
             'percentual_recebido' => $porcentagemRecebido,
         ]);
-    }
-
-    /**
-     * Aplica os filtros padrão da listagem (reutilizável)
-     */
-    private function filtrarContas(Request $request)
-    {
-        $query = ContaReceber::with(['pedido.cliente']);
-
-        if ($request->filled('status')) {
-            $query->where('status', $request->status);
-        }
-
-        if ($request->filled('cliente')) {
-            $query->whereHas('pedido.cliente', fn($q) =>
-            $q->where('nome', 'like', "%{$request->cliente}%"));
-        }
-
-        if ($request->filled('data_inicio') && $request->filled('data_fim')) {
-            $query->whereBetween('data_vencimento', [$request->data_inicio, $request->data_fim]);
-        }
-
-        if ($request->filled('forma_recebimento')) {
-            $query->where('forma_recebimento', $request->forma_recebimento);
-        }
-
-        return $query;
     }
 }

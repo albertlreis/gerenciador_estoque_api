@@ -28,6 +28,7 @@ class ContaAzulManualTokenEndpointTest extends TestCase
         ]);
 
         Sanctum::actingAs($usuario);
+        Cache::put('perfis_usuario_' . $usuario->id, ['Desenvolvedor'], now()->addHour());
         Cache::put('permissoes_usuario_' . $usuario->id, [
             'conta_azul.visualizar',
             'conta_azul.configurar',

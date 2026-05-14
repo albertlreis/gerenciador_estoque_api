@@ -24,7 +24,7 @@ class ContaAzulOAuthController extends Controller
 
     public function redirect(Request $request): JsonResponse|RedirectResponse
     {
-        if (!AuthHelper::hasPermissao('conta_azul.configurar')) {
+        if (!AuthHelper::podeAutenticarContaAzul()) {
             return response()->json(['message' => 'Sem permissao para configurar a integracao Conta Azul.'], 403);
         }
 

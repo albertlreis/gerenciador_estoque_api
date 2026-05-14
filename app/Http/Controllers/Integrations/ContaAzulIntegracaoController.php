@@ -32,7 +32,7 @@ class ContaAzulIntegracaoController extends Controller
 
     public function status(Request $request): JsonResponse
     {
-        if ($response = $this->autorizar('conta_azul.visualizar')) {
+        if ($response = $this->autorizar('auth')) {
             return $response;
         }
 
@@ -54,7 +54,7 @@ class ContaAzulIntegracaoController extends Controller
 
     public function pendencias(Request $request): JsonResponse
     {
-        if ($response = $this->autorizar('conta_azul.visualizar')) {
+        if ($response = $this->autorizar('operacao')) {
             return $response;
         }
 
@@ -67,7 +67,7 @@ class ContaAzulIntegracaoController extends Controller
 
     public function pendenciasDetalhadas(Request $request): JsonResponse
     {
-        if ($response = $this->autorizar('conta_azul.visualizar')) {
+        if ($response = $this->autorizar('operacao')) {
             return $response;
         }
 
@@ -102,7 +102,7 @@ class ContaAzulIntegracaoController extends Controller
 
     public function testarConexao(Request $request): JsonResponse
     {
-        if ($response = $this->autorizar('conta_azul.configurar')) {
+        if ($response = $this->autorizar('auth')) {
             return $response;
         }
 
@@ -141,7 +141,7 @@ class ContaAzulIntegracaoController extends Controller
 
     public function batches(Request $request): JsonResponse
     {
-        if ($response = $this->autorizar('conta_azul.auditar')) {
+        if ($response = $this->autorizar('operacao')) {
             return $response;
         }
 
@@ -161,7 +161,7 @@ class ContaAzulIntegracaoController extends Controller
 
     public function syncLogs(Request $request): JsonResponse
     {
-        if ($response = $this->autorizar('conta_azul.auditar')) {
+        if ($response = $this->autorizar('operacao')) {
             return $response;
         }
 
@@ -190,7 +190,7 @@ class ContaAzulIntegracaoController extends Controller
 
     public function batchDetalhe(Request $request, int $id): JsonResponse
     {
-        if ($response = $this->autorizar('conta_azul.auditar')) {
+        if ($response = $this->autorizar('operacao')) {
             return $response;
         }
 
@@ -208,7 +208,7 @@ class ContaAzulIntegracaoController extends Controller
 
     public function localLookup(Request $request): JsonResponse
     {
-        if ($response = $this->autorizar('conta_azul.visualizar')) {
+        if ($response = $this->autorizar('operacao')) {
             return $response;
         }
 
@@ -247,7 +247,7 @@ class ContaAzulIntegracaoController extends Controller
 
     public function registrarTokenManual(ContaAzulManualTokenRequest $request): JsonResponse
     {
-        if ($response = $this->autorizar('conta_azul.configurar')) {
+        if ($response = $this->autorizar('auth')) {
             return $response;
         }
 
@@ -272,7 +272,7 @@ class ContaAzulIntegracaoController extends Controller
 
     public function importar(Request $request, string $entidade): JsonResponse
     {
-        if ($response = $this->autorizar('conta_azul.importar')) {
+        if ($response = $this->autorizar('operacao')) {
             return $response;
         }
 
@@ -295,7 +295,7 @@ class ContaAzulIntegracaoController extends Controller
 
     public function conciliar(Request $request): JsonResponse
     {
-        if ($response = $this->autorizar('conta_azul.conciliar')) {
+        if ($response = $this->autorizar('operacao')) {
             return $response;
         }
 
@@ -307,7 +307,7 @@ class ContaAzulIntegracaoController extends Controller
 
     public function conciliarEntidade(Request $request, string $entidade): JsonResponse
     {
-        if ($response = $this->autorizar('conta_azul.conciliar')) {
+        if ($response = $this->autorizar('operacao')) {
             return $response;
         }
 
@@ -338,7 +338,7 @@ class ContaAzulIntegracaoController extends Controller
 
     public function resolverPendencia(Request $request, string $entidade, int $id): JsonResponse
     {
-        if ($response = $this->autorizar('conta_azul.conciliar')) {
+        if ($response = $this->autorizar('operacao')) {
             return $response;
         }
 
@@ -373,7 +373,7 @@ class ContaAzulIntegracaoController extends Controller
 
     public function previewCriacaoLocal(Request $request, string $entidade, int $id): JsonResponse
     {
-        if ($response = $this->autorizar('conta_azul.visualizar')) {
+        if ($response = $this->autorizar('operacao')) {
             return $response;
         }
 
@@ -392,7 +392,7 @@ class ContaAzulIntegracaoController extends Controller
 
     public function criarRegistroLocal(Request $request, string $entidade, int $id): JsonResponse
     {
-        if ($response = $this->autorizar('conta_azul.conciliar')) {
+        if ($response = $this->autorizar('operacao')) {
             return $response;
         }
 
@@ -419,7 +419,7 @@ class ContaAzulIntegracaoController extends Controller
 
     public function criarRegistrosLocaisLote(Request $request): JsonResponse
     {
-        if ($response = $this->autorizar('conta_azul.conciliar')) {
+        if ($response = $this->autorizar('operacao')) {
             return $response;
         }
 
@@ -459,7 +459,7 @@ class ContaAzulIntegracaoController extends Controller
 
     public function reconciliar(Request $request): JsonResponse
     {
-        if ($response = $this->autorizar('conta_azul.conciliar')) {
+        if ($response = $this->autorizar('operacao')) {
             return $response;
         }
 
@@ -477,7 +477,7 @@ class ContaAzulIntegracaoController extends Controller
 
     public function reconciliarTodos(Request $request): JsonResponse
     {
-        if ($response = $this->autorizar('conta_azul.conciliar')) {
+        if ($response = $this->autorizar('operacao')) {
             return $response;
         }
 
@@ -492,9 +492,15 @@ class ContaAzulIntegracaoController extends Controller
         return response()->json(['ok' => true]);
     }
 
-    private function autorizar(string $permissao): ?JsonResponse
+    private function autorizar(string $escopo): ?JsonResponse
     {
-        if (AuthHelper::hasPermissao($permissao)) {
+        $permitido = match ($escopo) {
+            'auth' => AuthHelper::podeAutenticarContaAzul(),
+            'operacao' => AuthHelper::podeOperarContaAzul(),
+            default => false,
+        };
+
+        if ($permitido) {
             return null;
         }
 

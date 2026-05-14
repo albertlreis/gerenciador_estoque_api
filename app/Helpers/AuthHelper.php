@@ -226,6 +226,23 @@ class AuthHelper
     }
 
     /**
+     * Libera somente a area de conexao/autenticacao da Conta Azul.
+     */
+    public static function podeAutenticarContaAzul(): bool
+    {
+        return self::hasAnyPerfilNormalizado(['Desenvolvedor', 'Administrador', 'Financeiro']);
+    }
+
+    /**
+     * Libera fluxos operacionais da Conta Azul: importacao, conciliacao,
+     * pendencias, cadastros locais, batches e logs.
+     */
+    public static function podeOperarContaAzul(): bool
+    {
+        return self::hasAnyPerfilNormalizado(['Desenvolvedor']);
+    }
+
+    /**
      * Identifica perfil administrador/vendedor sem depender de outro servico.
      * Usa cache e protege cenarios de teste onde tabelas de acesso nao existem.
      */
@@ -246,5 +263,31 @@ class AuthHelper
 
         return $perfisNormalizados->contains(Str::lower('Administrador'))
             || $perfisNormalizados->contains(Str::lower('Vendedor'));
+    }
+
+    private static function hasAnyPerfilNormalizado(array $perfis): bool
+    {
+        if (!auth()->check()) {
+            return false;
+        }
+
+        $esperados = collect($perfis)
+            ->filter(fn ($nome) => is_string($nome))
+            ->map(fn ($nome) => self::normalizarPerfil($nome))
+            ->values();
+
+        if ($esperados->isEmpty()) {
+            return false;
+        }
+
+        return collect(self::getPerfis())
+            ->filter(fn ($nome) => is_string($nome))
+            ->map(fn ($nome) => self::normalizarPerfil($nome))
+            ->contains(fn ($nome) => $esperados->contains($nome));
+    }
+
+    private static function normalizarPerfil(string $nome): string
+    {
+        return Str::lower(trim(Str::ascii($nome)));
     }
 }

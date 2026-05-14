@@ -4,6 +4,7 @@ namespace App\Helpers;
 
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 
@@ -132,9 +133,16 @@ class AuthHelper
         $userId = auth()->id();
         $cacheKey = 'permissoes_usuario_' . $userId;
 
-        if (Cache::has($cacheKey)) {
-            $cached = Cache::get($cacheKey, []);
-            return is_array($cached) ? $cached : [];
+        try {
+            if (Cache::has($cacheKey)) {
+                $cached = Cache::get($cacheKey, []);
+                return is_array($cached) ? $cached : [];
+            }
+        } catch (\Throwable $e) {
+            Log::warning('Falha ao ler cache de permissoes do usuario; usando banco.', [
+                'usuario_id' => $userId,
+                'message' => $e->getMessage(),
+            ]);
         }
 
         if (!Schema::hasTable('acesso_usuario_perfil')
@@ -152,7 +160,14 @@ class AuthHelper
             ->values()
             ->all();
 
-        Cache::put($cacheKey, $permissoes, now()->addHours(6));
+        try {
+            Cache::put($cacheKey, $permissoes, now()->addHours(6));
+        } catch (\Throwable $e) {
+            Log::warning('Falha ao gravar cache de permissoes do usuario; seguindo sem cache.', [
+                'usuario_id' => $userId,
+                'message' => $e->getMessage(),
+            ]);
+        }
 
         return $permissoes;
     }
@@ -169,9 +184,16 @@ class AuthHelper
         $userId = auth()->id();
         $cacheKey = 'perfis_usuario_' . $userId;
 
-        if (Cache::has($cacheKey)) {
-            $cached = Cache::get($cacheKey, []);
-            return is_array($cached) ? $cached : [];
+        try {
+            if (Cache::has($cacheKey)) {
+                $cached = Cache::get($cacheKey, []);
+                return is_array($cached) ? $cached : [];
+            }
+        } catch (\Throwable $e) {
+            Log::warning('Falha ao ler cache de perfis do usuario; usando banco.', [
+                'usuario_id' => $userId,
+                'message' => $e->getMessage(),
+            ]);
         }
 
         if (!Schema::hasTable('acesso_usuario_perfil') || !Schema::hasTable('acesso_perfis')) {
@@ -186,7 +208,14 @@ class AuthHelper
             ->values()
             ->all();
 
-        Cache::put($cacheKey, $perfis, now()->addHours(6));
+        try {
+            Cache::put($cacheKey, $perfis, now()->addHours(6));
+        } catch (\Throwable $e) {
+            Log::warning('Falha ao gravar cache de perfis do usuario; seguindo sem cache.', [
+                'usuario_id' => $userId,
+                'message' => $e->getMessage(),
+            ]);
+        }
 
         return $perfis;
     }

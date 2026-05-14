@@ -3,9 +3,11 @@
 namespace Tests\Feature\Integrations;
 
 use App\Integrations\ContaAzul\Auth\ContaAzulOAuthService;
+use App\Helpers\AuthHelper;
 use App\Models\Usuario;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Laravel\Sanctum\Sanctum;
 use Mockery;
 use Tests\TestCase;
@@ -94,6 +96,36 @@ class ContaAzulPermissionsTest extends TestCase
             ->assertOk();
     }
 
+    public function test_falha_ao_gravar_cache_de_perfis_nao_bloqueia_regra_por_perfil(): void
+    {
+        $usuario = $this->actingWithAcessoDb(['Desenvolvedor']);
+
+        Cache::shouldReceive('has')
+            ->with('perfis_usuario_' . $usuario->id)
+            ->andReturn(false);
+        Cache::shouldReceive('put')
+            ->with('perfis_usuario_' . $usuario->id, ['Desenvolvedor'], Mockery::any())
+            ->andThrow(new \RuntimeException('cache indisponivel'));
+
+        $this->getJson('/api/v1/integrations/conta-azul/status?loja_id=999999')
+            ->assertOk()
+            ->assertJsonPath('conectado', false);
+    }
+
+    public function test_falha_ao_gravar_cache_de_permissoes_nao_bloqueia_permissoes_do_banco(): void
+    {
+        $usuario = $this->actingWithAcessoDb(['Desenvolvedor'], ['pedidos.visualizar']);
+
+        Cache::shouldReceive('has')
+            ->with('permissoes_usuario_' . $usuario->id)
+            ->andReturn(false);
+        Cache::shouldReceive('put')
+            ->with('permissoes_usuario_' . $usuario->id, ['pedidos.visualizar'], Mockery::any())
+            ->andThrow(new \RuntimeException('cache indisponivel'));
+
+        $this->assertTrue(AuthHelper::hasPermissao('pedidos.visualizar'));
+    }
+
     /**
      * @dataProvider perfisSomenteAutenticacaoProvider
      */
@@ -155,6 +187,53 @@ class ContaAzulPermissionsTest extends TestCase
             Cache::put('permissoes_usuario_' . $usuario->id, $permissoes, now()->addHour());
         } else {
             Cache::forget('permissoes_usuario_' . $usuario->id);
+        }
+
+        return $usuario;
+    }
+
+    private function actingWithAcessoDb(array $perfis, array $permissoes = []): Usuario
+    {
+        $usuario = Usuario::create([
+            'nome' => 'Usuario Conta Azul Banco',
+            'email' => 'conta-azul-banco+' . uniqid() . '@example.com',
+            'senha' => 'senha',
+            'ativo' => true,
+        ]);
+
+        Sanctum::actingAs($usuario);
+
+        foreach ($perfis as $perfilNome) {
+            $perfilId = DB::table('acesso_perfis')->insertGetId([
+                'nome' => $perfilNome,
+                'descricao' => null,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+
+            DB::table('acesso_usuario_perfil')->insert([
+                'id_usuario' => $usuario->id,
+                'id_perfil' => $perfilId,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+
+            foreach ($permissoes as $slug) {
+                $permissaoId = DB::table('acesso_permissoes')->insertGetId([
+                    'slug' => $slug,
+                    'nome' => $slug,
+                    'descricao' => null,
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]);
+
+                DB::table('acesso_perfil_permissao')->insert([
+                    'id_perfil' => $perfilId,
+                    'id_permissao' => $permissaoId,
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]);
+            }
         }
 
         return $usuario;

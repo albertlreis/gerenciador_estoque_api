@@ -103,10 +103,12 @@ jobs:
 
       - name: Trigger deploy on droplet
         run: |
-          remote_command="cd /home/docker/acadsoft/sierra-estoque && repo_git_dir=\$(find . -maxdepth 3 -type d -name .git -print -quit) && repo_dir=\${repo_git_dir%/.git} && if [ -n \"\${repo_dir}\" ]; then git -C \"\${repo_dir}\" fetch origin master && git -C \"\${repo_dir}\" reset --hard origin/master && git -C \"\${repo_dir}\" clean -fd; fi && ./deploy.sh"
+          deploy_args=""
 
           if [ "${RUN_MIGRATIONS}" = "true" ]; then
-            remote_command="${remote_command} --migrate"
+            deploy_args="--migrate"
           fi
+
+          remote_command="cd /home/docker/acadsoft/sierra-estoque && repo_git_dir=\$(find . -maxdepth 3 -type d -name .git -print -quit) && repo_dir=\${repo_git_dir%/.git} && if [ -n \"\${repo_dir}\" ]; then git -C \"\${repo_dir}\" fetch origin master && git -C \"\${repo_dir}\" reset --hard origin/master && git -C \"\${repo_dir}\" clean -fd; fi && ./deploy.sh ${deploy_args} && docker exec sierra_estoque_app sh -lc 'mkdir -p /var/www/html/storage/framework/cache/data /var/www/html/storage/logs /var/www/html/bootstrap/cache && chown -R www-data:www-data /var/www/html/storage/framework/cache /var/www/html/storage/logs /var/www/html/bootstrap/cache && chmod -R ug+rwX /var/www/html/storage/framework/cache /var/www/html/storage/logs /var/www/html/bootstrap/cache'"
 
           ssh -p "${{ secrets.DEPLOY_PORT }}" "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" "${remote_command}"

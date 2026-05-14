@@ -38,17 +38,20 @@ class ContaAzulIntegracaoController extends Controller
 
         $lojaId = $this->lojaId($request);
         $conexao = $this->connections->latestForLoja($lojaId);
+        $permissoes = $this->permissoesContaAzul();
 
         if (!$conexao) {
             return response()->json([
                 'conectado' => false,
                 'conexao' => null,
+                'permissoes' => $permissoes,
             ]);
         }
 
         return response()->json([
             'conectado' => $conexao->status === 'ativa',
             'conexao' => $conexao->only(['id', 'status', 'loja_id', 'ultimo_healthcheck_em', 'ultimo_erro', 'nome_externo', 'ambiente']),
+            'permissoes' => $permissoes,
         ]);
     }
 
@@ -505,6 +508,20 @@ class ContaAzulIntegracaoController extends Controller
         }
 
         return response()->json(['message' => 'Sem permissao para acessar a integracao Conta Azul.'], 403);
+    }
+
+    /**
+     * @return array{auth: bool, operacao: bool, auditoria: bool}
+     */
+    private function permissoesContaAzul(): array
+    {
+        $podeOperar = AuthHelper::podeOperarContaAzul();
+
+        return [
+            'auth' => AuthHelper::podeAutenticarContaAzul(),
+            'operacao' => $podeOperar,
+            'auditoria' => $podeOperar,
+        ];
     }
 
     /**

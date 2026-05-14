@@ -111,7 +111,27 @@ class ContaAzulPermissionsTest extends TestCase
 
         $this->getJson('/api/v1/integrations/conta-azul/status?loja_id=999999')
             ->assertOk()
-            ->assertJsonPath('conectado', false);
+            ->assertJsonPath('conectado', false)
+            ->assertJsonPath('permissoes.auth', true)
+            ->assertJsonPath('permissoes.operacao', true)
+            ->assertJsonPath('permissoes.auditoria', true);
+    }
+
+    /**
+     * @dataProvider perfisAutenticacaoProvider
+     */
+    public function test_status_retorna_capacidades_conta_azul_por_perfil(string $perfil): void
+    {
+        $this->actingWithAcesso([$perfil]);
+
+        $podeOperar = $perfil === 'Desenvolvedor';
+
+        $this->getJson('/api/v1/integrations/conta-azul/status?loja_id=999999')
+            ->assertOk()
+            ->assertJsonPath('conectado', false)
+            ->assertJsonPath('permissoes.auth', true)
+            ->assertJsonPath('permissoes.operacao', $podeOperar)
+            ->assertJsonPath('permissoes.auditoria', $podeOperar);
     }
 
     public function test_falha_ao_gravar_cache_de_permissoes_nao_bloqueia_permissoes_do_banco(): void

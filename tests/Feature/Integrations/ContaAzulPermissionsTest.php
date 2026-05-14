@@ -6,8 +6,10 @@ use App\Integrations\ContaAzul\Auth\ContaAzulOAuthService;
 use App\Helpers\AuthHelper;
 use App\Models\Usuario;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
+use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Laravel\Sanctum\Sanctum;
 use Mockery;
 use Tests\TestCase;
@@ -194,6 +196,8 @@ class ContaAzulPermissionsTest extends TestCase
 
     private function actingWithAcessoDb(array $perfis, array $permissoes = []): Usuario
     {
+        $this->ensureAcessoTablesForCacheFallbackTest();
+
         $usuario = Usuario::create([
             'nome' => 'Usuario Conta Azul Banco',
             'email' => 'conta-azul-banco+' . uniqid() . '@example.com',
@@ -237,5 +241,47 @@ class ContaAzulPermissionsTest extends TestCase
         }
 
         return $usuario;
+    }
+
+    private function ensureAcessoTablesForCacheFallbackTest(): void
+    {
+        if (!Schema::hasTable('acesso_perfis')) {
+            Schema::create('acesso_perfis', function (Blueprint $table) {
+                $table->id();
+                $table->string('nome', 100)->unique();
+                $table->text('descricao')->nullable();
+                $table->timestamps();
+            });
+        }
+
+        if (!Schema::hasTable('acesso_permissoes')) {
+            Schema::create('acesso_permissoes', function (Blueprint $table) {
+                $table->id();
+                $table->string('slug', 100)->unique();
+                $table->string('nome', 100);
+                $table->text('descricao')->nullable();
+                $table->timestamps();
+            });
+        }
+
+        if (!Schema::hasTable('acesso_usuario_perfil')) {
+            Schema::create('acesso_usuario_perfil', function (Blueprint $table) {
+                $table->id();
+                $table->unsignedBigInteger('id_usuario');
+                $table->unsignedBigInteger('id_perfil');
+                $table->timestamps();
+                $table->unique(['id_usuario', 'id_perfil'], 'uq_usuario_perfil');
+            });
+        }
+
+        if (!Schema::hasTable('acesso_perfil_permissao')) {
+            Schema::create('acesso_perfil_permissao', function (Blueprint $table) {
+                $table->id();
+                $table->unsignedBigInteger('id_perfil');
+                $table->unsignedBigInteger('id_permissao');
+                $table->timestamps();
+                $table->unique(['id_perfil', 'id_permissao'], 'uq_perfil_permissao');
+            });
+        }
     }
 }

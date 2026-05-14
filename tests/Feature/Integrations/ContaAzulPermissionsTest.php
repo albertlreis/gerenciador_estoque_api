@@ -208,33 +208,33 @@ class ContaAzulPermissionsTest extends TestCase
         Sanctum::actingAs($usuario);
 
         foreach ($perfis as $perfilNome) {
-            $perfilId = DB::table('acesso_perfis')->insertGetId([
-                'nome' => $perfilNome,
+            DB::table('acesso_perfis')->updateOrInsert(['nome' => $perfilNome], [
                 'descricao' => null,
-                'created_at' => now(),
                 'updated_at' => now(),
             ]);
 
-            DB::table('acesso_usuario_perfil')->insert([
+            $perfilId = DB::table('acesso_perfis')->where('nome', $perfilNome)->value('id');
+
+            DB::table('acesso_usuario_perfil')->updateOrInsert([
                 'id_usuario' => $usuario->id,
                 'id_perfil' => $perfilId,
-                'created_at' => now(),
+            ], [
                 'updated_at' => now(),
             ]);
 
             foreach ($permissoes as $slug) {
-                $permissaoId = DB::table('acesso_permissoes')->insertGetId([
-                    'slug' => $slug,
+                DB::table('acesso_permissoes')->updateOrInsert(['slug' => $slug], [
                     'nome' => $slug,
                     'descricao' => null,
-                    'created_at' => now(),
                     'updated_at' => now(),
                 ]);
 
-                DB::table('acesso_perfil_permissao')->insert([
+                $permissaoId = DB::table('acesso_permissoes')->where('slug', $slug)->value('id');
+
+                DB::table('acesso_perfil_permissao')->updateOrInsert([
                     'id_perfil' => $perfilId,
                     'id_permissao' => $permissaoId,
-                    'created_at' => now(),
+                ], [
                     'updated_at' => now(),
                 ]);
             }

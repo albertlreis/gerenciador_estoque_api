@@ -35,9 +35,9 @@ class EstoqueRepository
             ->whereColumn('e.id_variacao', 'produto_variacoes.id');
 
         $subqueryDiasSemVenda = DB::table('estoque as e')
-            ->selectRaw('DATEDIFF(CURDATE(), DATE(e.ultima_venda_em))')
+            ->selectRaw('DATEDIFF(CURDATE(), DATE(COALESCE(e.ultima_venda_em, e.data_entrada_estoque_atual)))')
             ->whereColumn('e.id_variacao', 'produto_variacoes.id')
-            ->whereNotNull('e.ultima_venda_em');
+            ->whereRaw('COALESCE(e.ultima_venda_em, e.data_entrada_estoque_atual) IS NOT NULL');
 
         if ($filtros->deposito) {
             $subqueryDataEntrada->where('e.id_deposito', $filtros->deposito);
@@ -60,7 +60,7 @@ class EstoqueRepository
             ->limit(1);
 
         $subqueryDiasSemVenda
-            ->orderByDesc('e.ultima_venda_em')
+            ->orderByRaw('COALESCE(e.ultima_venda_em, e.data_entrada_estoque_atual) DESC')
             ->limit(1);
 
         $query = ProdutoVariacao::query()
@@ -77,7 +77,9 @@ class EstoqueRepository
                     }
                 }],
                 'quantidade'
-            );
+            )
+            ->withSum('outlets as quantidade_outlet', 'quantidade')
+            ->withSum('outlets as quantidade_outlet_restante', 'quantidade_restante');
 
         if ($filtros->categoria) {
             $query->whereHas('produto', fn ($q) => $q->where('id_categoria', $filtros->categoria));
@@ -178,6 +180,10 @@ class EstoqueRepository
             $query->havingRaw('quantidade_estoque > ?', [0]);
         } elseif ($filtros->zerados) {
             $query->havingRaw('(quantidade_estoque IS NULL OR quantidade_estoque = ?)', [0]);
+        }
+
+        if ($filtros->diasSemVendaMin !== null) {
+            $query->havingRaw('dias_sem_venda >= ?', [$filtros->diasSemVendaMin]);
         }
 
         return $query;

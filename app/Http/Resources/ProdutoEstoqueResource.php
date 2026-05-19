@@ -36,10 +36,13 @@ class ProdutoEstoqueResource extends JsonResource
         $dataEntradaAtual = $estoque?->data_entrada_estoque_atual ?? $this->data_entrada_estoque_atual ?? null;
         $ultimaVendaEm = $estoque?->ultima_venda_em ?? $this->ultima_venda_em ?? null;
         $diasSemVenda = $this->dias_sem_venda ?? null;
+        $estoqueOutletTotal = (int) ($this->quantidade_outlet ?? $this->estoque_outlet_total ?? 0);
+        $outletRestanteTotal = (int) ($this->quantidade_outlet_restante ?? $this->outlet_restante_total ?? 0);
 
-        if ($diasSemVenda === null && $ultimaVendaEm) {
+        if ($diasSemVenda === null && ($ultimaVendaEm || $dataEntradaAtual)) {
             $timezone = config('app.timezone', 'America/Belem');
-            $diasSemVenda = CarbonImmutable::parse($ultimaVendaEm, $timezone)
+            $baseDiasSemVenda = $ultimaVendaEm ?: $dataEntradaAtual;
+            $diasSemVenda = CarbonImmutable::parse($baseDiasSemVenda, $timezone)
                 ->startOfDay()
                 ->diffInDays(CarbonImmutable::now($timezone)->startOfDay());
         }
@@ -70,6 +73,9 @@ class ProdutoEstoqueResource extends JsonResource
             'deposito_nome' => $deposito?->nome ?? '—',
             'deposito_id'   => $deposito?->id ?? '—',
             'quantidade'    => (int) ($this->quantidade_estoque ?? 0),
+            'estoque_outlet_total' => $estoqueOutletTotal,
+            'outlet_restante_total' => $outletRestanteTotal,
+            'is_outlet' => $outletRestanteTotal > 0,
             'custo_unitario' => $custoUnitario !== null ? (float) $custoUnitario : null,
             'data_entrada_estoque_atual' => $dataEntradaAtual ? CarbonImmutable::parse($dataEntradaAtual)->toDateString() : null,
             'ultima_venda_em' => $ultimaVendaEm ? CarbonImmutable::parse($ultimaVendaEm)->toDateString() : null,

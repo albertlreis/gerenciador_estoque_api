@@ -37,6 +37,9 @@ class ProdutoVariacaoOutletController extends Controller
     public function store(StoreProdutoVariacaoOutletRequest $request, int $id): JsonResponse
     {
         $variacao = ProdutoVariacao::with(['estoques', 'outlets'])->findOrFail($id);
+        if ($erro = $this->validarFormasPagamentoUnicas($request->input('formas_pagamento', []))) {
+            return $erro;
+        }
 
         $estoqueTotal = (int) $variacao->estoques->sum('quantidade');
         $totalOutletJaRegistrado = (int)$variacao->outlets->sum('quantidade');
@@ -118,6 +121,12 @@ class ProdutoVariacaoOutletController extends Controller
             'formas_pagamento.*.max_parcelas'       => 'nullable|integer|min:1|max:36',
         ]);
 
+        if ($request->has('formas_pagamento')) {
+            if ($erro = $this->validarFormasPagamentoUnicas($data['formas_pagamento'] ?? [])) {
+                return $erro;
+            }
+        }
+
         $outlet->update([
             'quantidade' => $data['quantidade'],
             'motivo_id'  => (int)$data['motivo_id'],
@@ -168,6 +177,34 @@ class ProdutoVariacaoOutletController extends Controller
         }
 
         return response()->json(['message' => 'Sem permiss??o para esta a????o.'], 403);
+    }
+
+    private function validarFormasPagamentoUnicas(array $formasPagamento): ?JsonResponse
+    {
+        $vistos = [];
+
+        foreach ($formasPagamento as $fp) {
+            $formaId = $fp['forma_pagamento_id'] ?? null;
+            if (!$formaId && !empty($fp['forma_pagamento'])) {
+                $formaId = OutletFormaPagamento::where('slug', $fp['forma_pagamento'])->value('id');
+            }
+
+            $desconto = isset($fp['percentual_desconto'])
+                ? number_format((float) $fp['percentual_desconto'], 2, '.', '')
+                : '';
+            $parcelas = $fp['max_parcelas'] ?? null;
+            $chave = implode('|', [(string) $formaId, $desconto, $parcelas === null ? 'null' : (string) $parcelas]);
+
+            if (isset($vistos[$chave])) {
+                return response()->json([
+                    'message' => 'Forma de pagamento duplicada com o mesmo desconto e parcelas.',
+                ], 422);
+            }
+
+            $vistos[$chave] = true;
+        }
+
+        return null;
     }
 
 }

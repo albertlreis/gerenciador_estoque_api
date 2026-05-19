@@ -28,6 +28,17 @@ class ContaAzulOperationalEndpointsTest extends TestCase
         ]);
 
         Sanctum::actingAs($usuario);
+
+        DB::table('acesso_perfis')->updateOrInsert(['nome' => 'Desenvolvedor'], [
+            'descricao' => null,
+            'updated_at' => now(),
+        ]);
+        $perfilId = DB::table('acesso_perfis')->where('nome', 'Desenvolvedor')->value('id');
+        DB::table('acesso_usuario_perfil')->updateOrInsert([
+            'id_usuario' => $usuario->id,
+            'id_perfil' => $perfilId,
+        ], ['updated_at' => now()]);
+
         Cache::put('perfis_usuario_' . $usuario->id, ['Desenvolvedor'], now()->addHour());
         Cache::put('permissoes_usuario_' . $usuario->id, [
             'conta_azul.visualizar',

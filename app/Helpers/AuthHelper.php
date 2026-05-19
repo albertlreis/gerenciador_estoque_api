@@ -330,20 +330,28 @@ class AuthHelper
             return false;
         }
 
-        return collect(self::getPerfisAtuaisDoBanco())
+        $perfisDb = self::getPerfisAtuaisDoBanco();
+
+        // Tabelas de acesso ausentes (ex.: ambiente de teste sem schema completo):
+        // cai no cache como fallback
+        if ($perfisDb === null) {
+            return self::hasAnyPerfilNormalizado($perfis);
+        }
+
+        return collect($perfisDb)
             ->filter(fn ($nome) => is_string($nome))
             ->map(fn ($nome) => self::normalizarPerfil($nome))
             ->contains(fn ($nome) => $esperados->contains($nome));
     }
 
-    private static function getPerfisAtuaisDoBanco(): array
+    private static function getPerfisAtuaisDoBanco(): ?array
     {
         if (!auth()->check()) {
-            return [];
+            return null;
         }
 
         if (!Schema::hasTable('acesso_usuario_perfil') || !Schema::hasTable('acesso_perfis')) {
-            return [];
+            return null;
         }
 
         return DB::table('acesso_usuario_perfil')

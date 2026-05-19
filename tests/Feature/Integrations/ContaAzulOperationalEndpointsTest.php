@@ -6,7 +6,6 @@ use App\Integrations\ContaAzul\ContaAzulEntityType;
 use App\Integrations\ContaAzul\Models\ContaAzulImportBatch;
 use App\Integrations\ContaAzul\Models\ContaAzulSyncLog;
 use App\Models\Usuario;
-use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -31,34 +30,19 @@ class ContaAzulOperationalEndpointsTest extends TestCase
 
         Sanctum::actingAs($usuario);
 
-        if (!Schema::hasTable('acesso_perfis')) {
-            Schema::create('acesso_perfis', function (Blueprint $table) {
-                $table->id();
-                $table->string('nome', 100)->unique();
-                $table->text('descricao')->nullable();
-                $table->timestamps();
-            });
+        // Se as tabelas de acesso já existirem (criadas por ContaAzulPermissionsTest),
+        // insere o perfil no banco; caso contrário, AuthHelper cai no cache como fallback.
+        if (Schema::hasTable('acesso_perfis') && Schema::hasTable('acesso_usuario_perfil')) {
+            DB::table('acesso_perfis')->updateOrInsert(['nome' => 'Desenvolvedor'], [
+                'descricao' => null,
+                'updated_at' => now(),
+            ]);
+            $perfilId = DB::table('acesso_perfis')->where('nome', 'Desenvolvedor')->value('id');
+            DB::table('acesso_usuario_perfil')->updateOrInsert([
+                'id_usuario' => $usuario->id,
+                'id_perfil' => $perfilId,
+            ], ['updated_at' => now()]);
         }
-
-        if (!Schema::hasTable('acesso_usuario_perfil')) {
-            Schema::create('acesso_usuario_perfil', function (Blueprint $table) {
-                $table->id();
-                $table->unsignedBigInteger('id_usuario');
-                $table->unsignedBigInteger('id_perfil');
-                $table->timestamps();
-                $table->unique(['id_usuario', 'id_perfil'], 'uq_usuario_perfil');
-            });
-        }
-
-        DB::table('acesso_perfis')->updateOrInsert(['nome' => 'Desenvolvedor'], [
-            'descricao' => null,
-            'updated_at' => now(),
-        ]);
-        $perfilId = DB::table('acesso_perfis')->where('nome', 'Desenvolvedor')->value('id');
-        DB::table('acesso_usuario_perfil')->updateOrInsert([
-            'id_usuario' => $usuario->id,
-            'id_perfil' => $perfilId,
-        ], ['updated_at' => now()]);
 
         Cache::put('perfis_usuario_' . $usuario->id, ['Desenvolvedor'], now()->addHour());
         Cache::put('permissoes_usuario_' . $usuario->id, [

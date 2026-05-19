@@ -32,6 +32,18 @@ final class ProdutoUpsertService
         'dimensao_3',
     ];
 
+    private const DIMENSION_ATTRIBUTE_TARGETS = [
+        'dimensao_1' => 'dimensao_1',
+        'largura_cm' => 'dimensao_1',
+        'comprimento_cm' => 'dimensao_1',
+        'diametro_cm' => 'dimensao_1',
+        'dimensao_2' => 'dimensao_2',
+        'profundidade_cm' => 'dimensao_2',
+        'espessura_cm' => 'dimensao_2',
+        'dimensao_3' => 'dimensao_3',
+        'altura_cm' => 'dimensao_3',
+    ];
+
     public function __construct(
         private readonly ProdutoVariacaoService $variacaoService
     ) {}
@@ -43,6 +55,7 @@ final class ProdutoUpsertService
 
     public function localizarVariacaoPorIdentidade(array $payload, ?Produto $produto = null): ?ProdutoVariacao
     {
+        $payload = $this->promoverDimensoesDosAtributos($payload);
         $variacao = $this->localizarVariacaoExistente($payload);
         if ($variacao) {
             return $variacao;
@@ -75,12 +88,14 @@ final class ProdutoUpsertService
     public function upsertProdutoVariacao(array $payload): array
     {
         return DB::transaction(function () use ($payload) {
+            $payload = $this->promoverDimensoesDosAtributos($payload);
             $produtoCriado = false;
             $variacaoCriada = false;
             $codigosHistoricosCriados = 0;
 
             $attrs = (array) ($payload['atributos'] ?? []);
             $normalizedAttrs = $this->normalizeAttrs($attrs);
+            $persistableAttrs = $this->filterPersistableAttrs($normalizedAttrs);
 
             $variacaoExistente = $this->localizarVariacaoExistente($payload);
             $produto = $variacaoExistente?->produto;
@@ -114,7 +129,7 @@ final class ProdutoUpsertService
             if ($variacao) {
                 $variacao->fill($this->payloadVariacao($payload, $variacao, $produto->id));
                 $variacao->save();
-                $this->syncAtributos($variacao->id, $normalizedAttrs);
+                $this->syncAtributos($variacao->id, $persistableAttrs);
                 $codigosHistoricosCriados = $this->syncCodigosHistoricos($variacao, $payload);
 
                 return [
@@ -132,7 +147,7 @@ final class ProdutoUpsertService
                 ...$this->payloadVariacao($payload, null, $produto->id),
             ]);
 
-            foreach ($normalizedAttrs as $k => $v) {
+            foreach ($persistableAttrs as $k => $v) {
                 ProdutoVariacaoAtributo::create([
                     'id_variacao' => $variacao->id,
                     'atributo' => $k,
@@ -266,11 +281,12 @@ final class ProdutoUpsertService
             )
             ->toArray();
 
-        $normalizedArray = $normalizedAttrs->sortKeys()->toArray();
+        $normalizedArray = $this->attrsIdentidadeComCamposEstruturados($normalizedAttrs, $payload);
         $compareKeys = array_keys($normalizedArray);
 
         foreach ($variacoes as $variacao) {
             $map = $attrsPorVariacao[(int) $variacao->id] ?? [];
+            $map = $this->attrsIdentidadeDaVariacao($variacao, $map);
 
             if (!empty($compareKeys)) {
                 $filtered = [];
@@ -374,6 +390,88 @@ final class ProdutoUpsertService
                 return [$normalizedKey => $normalizedValue];
             })
             ->sortKeys();
+    }
+
+    private function filterPersistableAttrs($normalizedAttrs)
+    {
+        return $normalizedAttrs
+            ->reject(fn ($valor, $chave) => $this->isDimensionAttributeKey((string) $chave))
+            ->sortKeys();
+    }
+
+    private function promoverDimensoesDosAtributos(array $payload): array
+    {
+        $attrs = $this->normalizeAttrs((array) ($payload['atributos'] ?? []));
+
+        foreach ($attrs as $chave => $valor) {
+            $campo = $this->dimensionAttributeTarget((string) $chave);
+            if ($campo === null) {
+                continue;
+            }
+
+            // Atributos dimensionais legados vencem o campo estruturado.
+            $payload[$campo] = $valor;
+        }
+
+        return $payload;
+    }
+
+    private function attrsIdentidadeComCamposEstruturados($normalizedAttrs, array $payload): array
+    {
+        $attrs = $this->filterPersistableAttrs($normalizedAttrs)->sortKeys()->toArray();
+
+        foreach ([
+            'dimensao_1' => $payload['dimensao_1'] ?? $payload['w_cm'] ?? null,
+            'dimensao_2' => $payload['dimensao_2'] ?? $payload['p_cm'] ?? null,
+            'dimensao_3' => $payload['dimensao_3'] ?? $payload['a_cm'] ?? null,
+            'cor' => $payload['cor'] ?? $payload['cor_extraida'] ?? null,
+            'lado' => $payload['lado'] ?? $payload['lado_extraido'] ?? null,
+            'material_oficial' => $payload['material_oficial'] ?? null,
+            'acabamento_oficial' => $payload['acabamento_oficial'] ?? null,
+        ] as $campo => $valor) {
+            if (($attrs[$campo] ?? null) === null && $valor !== null && trim((string) $valor) !== '') {
+                $attrs[$campo] = $this->formatAttrValue($valor);
+            }
+        }
+
+        ksort($attrs);
+
+        return $attrs;
+    }
+
+    private function attrsIdentidadeDaVariacao(ProdutoVariacao $variacao, array $attrs): array
+    {
+        foreach ([
+            'dimensao_1' => $variacao->dimensao_1,
+            'dimensao_2' => $variacao->dimensao_2,
+            'dimensao_3' => $variacao->dimensao_3,
+            'cor' => $variacao->cor,
+            'lado' => $variacao->lado,
+            'material_oficial' => $variacao->material_oficial,
+            'acabamento_oficial' => $variacao->acabamento_oficial,
+        ] as $campo => $valor) {
+            if (($attrs[$campo] ?? null) === null && $valor !== null && $valor !== '') {
+                $attrs[$campo] = $this->formatAttrValue($valor);
+            }
+        }
+
+        ksort($attrs);
+
+        return $attrs;
+    }
+
+    private function dimensionAttributeTarget(string $key): ?string
+    {
+        $normalized = (string) Str::of($key)->squish()->lower()->ascii();
+        $normalized = preg_replace('/[^a-z0-9]+/', '_', $normalized);
+        $normalized = trim((string) $normalized, '_');
+
+        return self::DIMENSION_ATTRIBUTE_TARGETS[$normalized] ?? null;
+    }
+
+    private function isDimensionAttributeKey(string $key): bool
+    {
+        return $this->dimensionAttributeTarget($key) !== null;
     }
 
     private function formatAttrValue(mixed $v): string
@@ -505,7 +603,9 @@ final class ProdutoUpsertService
 
         return json_encode([
             'nome' => $nome,
-            'atributos' => $this->normalizeIdentityAttrsFromCollection($normalizedAttrs),
+            'atributos' => $this->normalizeIdentityAttrsFromArray(
+                $this->attrsIdentidadeComCamposEstruturados($normalizedAttrs, $payload)
+            ),
         ], JSON_UNESCAPED_UNICODE);
     }
 

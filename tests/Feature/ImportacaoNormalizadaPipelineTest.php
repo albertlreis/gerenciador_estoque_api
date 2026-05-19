@@ -439,6 +439,17 @@ class ImportacaoNormalizadaPipelineTest extends TestCase
         $this->assertSame(200.0, (float) $variacaoComEstoque->dimensao_1);
         $this->assertSame(90.0, (float) $variacaoComEstoque->dimensao_2);
         $this->assertSame(80.0, (float) $variacaoComEstoque->dimensao_3);
+        $this->assertDatabaseHas('produto_variacao_atributos', [
+            'id_variacao' => $variacaoComEstoque->id,
+            'atributo' => 'madeira',
+            'valor' => 'MA01',
+        ]);
+        foreach (['dimensao_1', 'dimensao_2', 'dimensao_3', 'largura_cm', 'profundidade_cm', 'altura_cm'] as $atributoDimensional) {
+            $this->assertDatabaseMissing('produto_variacao_atributos', [
+                'id_variacao' => $variacaoComEstoque->id,
+                'atributo' => $atributoDimensional,
+            ]);
+        }
 
         $this->assertSame(
             2,

@@ -1032,7 +1032,7 @@ final class ImportacaoNormalizadaPipelineService
 
         return json_encode([
             'nome' => $nome,
-            'atributos' => $this->normalizeIdentityAttrs($this->montarAtributosLegadosDaLinha($linha)),
+            'atributos' => $this->normalizeIdentityAttrs($this->montarAtributosIdentidadeDaLinha($linha)),
         ], JSON_UNESCAPED_UNICODE);
     }
 
@@ -1251,9 +1251,6 @@ final class ImportacaoNormalizadaPipelineService
             'lado' => $linha->lado,
             'material_oficial' => $linha->material_oficial,
             'acabamento_oficial' => $linha->acabamento_oficial,
-            'dimensao_1' => $linha->dimensao_1,
-            'dimensao_2' => $linha->dimensao_2,
-            'dimensao_3' => $linha->dimensao_3,
         ] as $campo => $valor) {
             if ($valor === null || trim((string) $valor) === '') {
                 continue;
@@ -1263,7 +1260,31 @@ final class ImportacaoNormalizadaPipelineService
         }
 
         foreach ($this->extrairAtributosCargaInicialDaLinha($linha) as $campo => $valor) {
+            if ($this->isAtributoDimensional((string) $campo)) {
+                continue;
+            }
+
             $atributos[$campo] = $valor;
+        }
+
+        return $atributos;
+    }
+
+    /**
+     * @return array<string,string>
+     */
+    private function montarAtributosIdentidadeDaLinha(ImportacaoNormalizadaLinha $linha): array
+    {
+        $atributos = $this->montarAtributosLegadosDaLinha($linha);
+
+        foreach ([
+            'dimensao_1' => $linha->dimensao_1,
+            'dimensao_2' => $linha->dimensao_2,
+            'dimensao_3' => $linha->dimensao_3,
+        ] as $campo => $valor) {
+            if ($valor !== null && trim((string) $valor) !== '') {
+                $atributos[$campo] = (string) $valor;
+            }
         }
 
         return $atributos;
@@ -1292,18 +1313,6 @@ final class ImportacaoNormalizadaPipelineService
             'metal / vidro' => 'metal_vidro',
             'metal/vidro' => 'metal_vidro',
             'metal vidro' => 'metal_vidro',
-            'diametro cm' => 'diametro_cm',
-            'diametro (cm)' => 'diametro_cm',
-            'largura cm' => 'largura_cm',
-            'largura (cm)' => 'largura_cm',
-            'profundidade cm' => 'profundidade_cm',
-            'profundidade (cm)' => 'profundidade_cm',
-            'altura cm' => 'altura_cm',
-            'altura (cm)' => 'altura_cm',
-            'comprimento cm' => 'comprimento_cm',
-            'comprimento (cm)' => 'comprimento_cm',
-            'espessura cm' => 'espessura_cm',
-            'espessura (cm)' => 'espessura_cm',
         ];
 
         $atributos = [];
@@ -1330,6 +1339,25 @@ final class ImportacaoNormalizadaPipelineService
         }
 
         return $atributos;
+    }
+
+    private function isAtributoDimensional(string $campo): bool
+    {
+        $normalizado = (string) Str::of($campo)->squish()->lower()->ascii();
+        $normalizado = preg_replace('/[^a-z0-9]+/', '_', $normalizado);
+        $normalizado = trim((string) $normalizado, '_');
+
+        return in_array($normalizado, [
+            'dimensao_1',
+            'largura_cm',
+            'comprimento_cm',
+            'diametro_cm',
+            'dimensao_2',
+            'profundidade_cm',
+            'espessura_cm',
+            'dimensao_3',
+            'altura_cm',
+        ], true);
     }
 
     private function resolverNomeDepositoDaLinha(ImportacaoNormalizadaLinha $linha): ?string

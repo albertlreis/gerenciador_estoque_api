@@ -6,9 +6,11 @@ use App\Integrations\ContaAzul\ContaAzulEntityType;
 use App\Integrations\ContaAzul\Models\ContaAzulImportBatch;
 use App\Integrations\ContaAzul\Models\ContaAzulSyncLog;
 use App\Models\Usuario;
+use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
@@ -28,6 +30,25 @@ class ContaAzulOperationalEndpointsTest extends TestCase
         ]);
 
         Sanctum::actingAs($usuario);
+
+        if (!Schema::hasTable('acesso_perfis')) {
+            Schema::create('acesso_perfis', function (Blueprint $table) {
+                $table->id();
+                $table->string('nome', 100)->unique();
+                $table->text('descricao')->nullable();
+                $table->timestamps();
+            });
+        }
+
+        if (!Schema::hasTable('acesso_usuario_perfil')) {
+            Schema::create('acesso_usuario_perfil', function (Blueprint $table) {
+                $table->id();
+                $table->unsignedBigInteger('id_usuario');
+                $table->unsignedBigInteger('id_perfil');
+                $table->timestamps();
+                $table->unique(['id_usuario', 'id_perfil'], 'uq_usuario_perfil');
+            });
+        }
 
         DB::table('acesso_perfis')->updateOrInsert(['nome' => 'Desenvolvedor'], [
             'descricao' => null,

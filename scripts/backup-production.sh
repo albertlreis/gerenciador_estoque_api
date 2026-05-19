@@ -143,9 +143,9 @@ upload_to_drive() {
   log "Enviando backup para $RCLONE_REMOTE/$RUN_DATE..."
   rclone mkdir "$RCLONE_REMOTE/$RUN_DATE"
   rclone copy "$DAY_DIR" "$RCLONE_REMOTE/$RUN_DATE" \
-    --include "*-$TIMESTAMP.*" \
-    --include "manifest-$TIMESTAMP.txt" \
-    --exclude "*" \
+    --filter "+ *-$TIMESTAMP.*" \
+    --filter "+ manifest-$TIMESTAMP.txt" \
+    --filter "- *" \
     --transfers 4 \
     --checkers 8
 }
@@ -163,7 +163,7 @@ prune_remote() {
   require_command rclone
 
   log "Aplicando retencao remota de $RETENTION_DAYS dias..."
-  rclone delete "$RCLONE_REMOTE" --min-age "${RETENTION_DAYS}d" --rmdirs || fail "falha ao aplicar retencao remota"
+  rclone delete "$RCLONE_REMOTE" --min-age "${RETENTION_DAYS}d" || fail "falha ao aplicar retencao remota"
   rclone rmdirs "$RCLONE_REMOTE" --leave-root || true
 }
 

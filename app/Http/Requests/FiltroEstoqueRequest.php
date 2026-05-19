@@ -36,6 +36,7 @@ class FiltroEstoqueRequest extends FormRequest
 
             'estoque_status' => ['nullable', 'in:com_estoque,sem_estoque'],
             'zerados' => ['nullable', 'boolean'], // boolean vem como 0/1 ou "true"/"false" no front
+            'dias_sem_venda_min' => ['nullable', 'integer', 'min:1'],
 
             'per_page' => ['nullable', 'integer', 'min:1', 'max:200'],
             'page' => ['nullable', 'integer', 'min:1'],
@@ -70,7 +71,7 @@ class FiltroEstoqueRequest extends FormRequest
             }
         }
 
-        foreach (['deposito', 'categoria', 'fornecedor', 'per_page', 'page'] as $k) {
+        foreach (['deposito', 'categoria', 'fornecedor', 'per_page', 'page', 'dias_sem_venda_min'] as $k) {
             if (array_key_exists($k, $input) && $input[$k] === '') {
                 $input[$k] = null;
             }

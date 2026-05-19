@@ -37,6 +37,9 @@ class FiltroEstoqueDTO
     /** Status de estoque (com_estoque | sem_estoque) */
     public ?string $estoqueStatus = null;
 
+    /** Quantidade minima de dias em estoque sem venda */
+    public ?int $diasSemVendaMin = null;
+
     /** Se deve exibir apenas produtos com estoque zerado */
     public bool $zerados = false;
 
@@ -98,6 +101,9 @@ class FiltroEstoqueDTO
         } else {
             $this->zerados = $this->estoqueStatus === 'sem_estoque' ? true : $zerados;
         }
+
+        $diasSemVendaMin = $this->toNullablePositiveInt($data['dias_sem_venda_min'] ?? null);
+        $this->diasSemVendaMin = $diasSemVendaMin !== null ? max(1, $diasSemVendaMin) : null;
 
         // sort
         $this->sortField = isset($data['sort_field']) ? trim((string) $data['sort_field']) : null;

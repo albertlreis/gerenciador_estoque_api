@@ -259,7 +259,7 @@ class AuthHelper
      */
     public static function podeAutenticarContaAzul(): bool
     {
-        return self::hasAnyPerfilNormalizado(['Desenvolvedor', 'Administrador', 'Financeiro']);
+        return self::hasAnyPerfilNormalizadoAtual(['Desenvolvedor', 'Administrador', 'Financeiro']);
     }
 
     /**
@@ -268,7 +268,7 @@ class AuthHelper
      */
     public static function podeOperarContaAzul(): bool
     {
-        return self::hasAnyPerfilNormalizado(['Desenvolvedor']);
+        return self::hasAnyPerfilNormalizadoAtual(['Desenvolvedor']);
     }
 
     /**
@@ -313,6 +313,46 @@ class AuthHelper
             ->filter(fn ($nome) => is_string($nome))
             ->map(fn ($nome) => self::normalizarPerfil($nome))
             ->contains(fn ($nome) => $esperados->contains($nome));
+    }
+
+    private static function hasAnyPerfilNormalizadoAtual(array $perfis): bool
+    {
+        if (!auth()->check()) {
+            return false;
+        }
+
+        $esperados = collect($perfis)
+            ->filter(fn ($nome) => is_string($nome))
+            ->map(fn ($nome) => self::normalizarPerfil($nome))
+            ->values();
+
+        if ($esperados->isEmpty()) {
+            return false;
+        }
+
+        return collect(self::getPerfisAtuaisDoBanco())
+            ->filter(fn ($nome) => is_string($nome))
+            ->map(fn ($nome) => self::normalizarPerfil($nome))
+            ->contains(fn ($nome) => $esperados->contains($nome));
+    }
+
+    private static function getPerfisAtuaisDoBanco(): array
+    {
+        if (!auth()->check()) {
+            return [];
+        }
+
+        if (!Schema::hasTable('acesso_usuario_perfil') || !Schema::hasTable('acesso_perfis')) {
+            return [];
+        }
+
+        return DB::table('acesso_usuario_perfil')
+            ->join('acesso_perfis', 'acesso_usuario_perfil.id_perfil', '=', 'acesso_perfis.id')
+            ->where('acesso_usuario_perfil.id_usuario', auth()->id())
+            ->pluck('acesso_perfis.nome')
+            ->unique()
+            ->values()
+            ->all();
     }
 
     private static function normalizarPerfil(string $nome): string

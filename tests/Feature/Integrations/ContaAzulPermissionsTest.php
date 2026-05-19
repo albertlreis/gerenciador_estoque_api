@@ -59,7 +59,7 @@ class ContaAzulPermissionsTest extends TestCase
      */
     public function test_perfis_autorizados_acessam_autenticacao(string $perfil): void
     {
-        $this->actingWithAcesso([$perfil]);
+        $this->actingWithAcessoDb([$perfil]);
 
         $this->getJson('/api/v1/integrations/conta-azul/status?loja_id=999999')
             ->assertOk()
@@ -87,7 +87,7 @@ class ContaAzulPermissionsTest extends TestCase
 
     public function test_apenas_desenvolvedor_acessa_fluxos_operacionais(): void
     {
-        $this->actingWithAcesso(['Desenvolvedor']);
+        $this->actingWithAcessoDb(['Desenvolvedor']);
         $importResponse = $this->postJson('/api/v1/integrations/conta-azul/import/pessoas');
         $this->assertNotSame(403, $importResponse->status());
 
@@ -98,16 +98,11 @@ class ContaAzulPermissionsTest extends TestCase
             ->assertOk();
     }
 
-    public function test_falha_ao_gravar_cache_de_perfis_nao_bloqueia_regra_por_perfil(): void
+    public function test_cache_de_perfil_desatualizado_nao_bloqueia_operacao_conta_azul(): void
     {
         $usuario = $this->actingWithAcessoDb(['Desenvolvedor']);
 
-        Cache::shouldReceive('has')
-            ->with('perfis_usuario_' . $usuario->id)
-            ->andReturn(false);
-        Cache::shouldReceive('put')
-            ->with('perfis_usuario_' . $usuario->id, ['Desenvolvedor'], Mockery::any())
-            ->andThrow(new \RuntimeException('cache indisponivel'));
+        Cache::put('perfis_usuario_' . $usuario->id, ['Financeiro'], now()->addHour());
 
         $this->getJson('/api/v1/integrations/conta-azul/status?loja_id=999999')
             ->assertOk()
@@ -122,7 +117,7 @@ class ContaAzulPermissionsTest extends TestCase
      */
     public function test_status_retorna_capacidades_conta_azul_por_perfil(string $perfil): void
     {
-        $this->actingWithAcesso([$perfil]);
+        $this->actingWithAcessoDb([$perfil]);
 
         $podeOperar = $perfil === 'Desenvolvedor';
 
@@ -153,7 +148,7 @@ class ContaAzulPermissionsTest extends TestCase
      */
     public function test_admin_e_financeiro_nao_acessam_fluxos_operacionais(string $perfil): void
     {
-        $this->actingWithAcesso([$perfil]);
+        $this->actingWithAcessoDb([$perfil]);
 
         $this->postJson('/api/v1/integrations/conta-azul/import/pessoas')
             ->assertForbidden();

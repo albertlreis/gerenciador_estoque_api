@@ -8,6 +8,7 @@ use App\Integrations\ContaAzul\Exceptions\ContaAzulException;
 use App\Integrations\ContaAzul\Import\ContaAzulImportAdapter;
 use App\Integrations\ContaAzul\Models\ContaAzulConexao;
 use App\Integrations\ContaAzul\Models\ContaAzulImportBatch;
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
@@ -52,6 +53,9 @@ class ImportacaoContaAzulService
         }
         if ($tipoEntidade === ContaAzulEntityType::FORMA_PAGAMENTO) {
             return $this->importarFormasPagamento($conexao, $lojaId);
+        }
+        if ($tipoEntidade === ContaAzulEntityType::NOTA) {
+            return $this->importarNotasPorJanelas($conexao, $lojaId);
         }
 
         $adapter = $this->adapterFor($tipoEntidade);
@@ -211,6 +215,83 @@ class ImportacaoContaAzulService
 
                     $this->upsertStagingRow('stg_conta_azul_parcelas', $lojaId, $extId, $item, $batch);
                     $lidos++;
+                }
+            }
+
+            return $this->finishBatch($batch, $lidos);
+        } catch (\Throwable $e) {
+            $this->failBatch($batch, $e);
+            throw $e;
+        }
+    }
+
+    /**
+     * @return array{batch_id:int, lidos:int}
+     */
+    private function importarNotasPorJanelas(ContaAzulConexao $conexao, ?int $lojaId): array
+    {
+        $batch = $this->startBatch($conexao, ContaAzulEntityType::NOTA, ['origem' => 'janelas_15_dias', 'loja_id' => $lojaId]);
+        $token = $this->connections->getValidAccessToken($conexao);
+        $path = (string) (($this->config['paths']['notas_list'] ?? null) ?: '/v1/notas-fiscais');
+        $pageSize = $this->validContaAzulPageSize((int) ($this->config['pagination']['page_size'] ?? 50));
+        $days = max(0, (int) ($this->config['import']['nota']['date_start_days_ago'] ?? 730));
+        $lidos = 0;
+
+        $start = CarbonImmutable::now()->subDays($days)->startOfDay();
+        $limit = CarbonImmutable::now()->endOfDay();
+
+        try {
+            for ($windowStart = $start; $windowStart->lessThanOrEqualTo($limit); $windowStart = $windowEnd->addDay()->startOfDay()) {
+                $windowEnd = $windowStart->addDays(14)->endOfDay();
+                if ($windowEnd->greaterThan($limit)) {
+                    $windowEnd = $limit;
+                }
+
+                $pagina = 1;
+                while (true) {
+                    $this->throttle($conexao->id);
+                    $query = [
+                        'data_inicial' => $windowStart->format('Y-m-d'),
+                        'data_final' => $windowEnd->format('Y-m-d'),
+                        (string) ($this->config['pagination']['page_param'] ?? 'pagina') => $pagina,
+                        (string) ($this->config['pagination']['page_size_param'] ?? 'tamanho_pagina') => $pageSize,
+                    ];
+
+                    $res = $this->client->get($path, $token, $query);
+                    if ($res['status'] === 401) {
+                        $conexao->load('token');
+                        $token = $this->connections->getValidAccessToken($conexao, true);
+                        $res = $this->client->get($path, $token, $query);
+                    }
+
+                    if ($res['status'] < 200 || $res['status'] >= 300) {
+                        throw new ContaAzulException('Falha ao importar notas HTTP ' . $res['status']);
+                    }
+
+                    $items = $this->extractItems($res['json']);
+                    if ($items === []) {
+                        break;
+                    }
+
+                    foreach ($items as $item) {
+                        $extId = $this->extractExternalId($item);
+                        if ($extId === '') {
+                            continue;
+                        }
+
+                        $this->upsertStagingRow('stg_conta_azul_notas', $lojaId, $extId, $item, $batch);
+                        $lidos++;
+                    }
+
+                    $totalPaginas = $this->resolveTotalPages($res['json'], $pageSize);
+                    if ($totalPaginas !== null && $pagina >= $totalPaginas) {
+                        break;
+                    }
+                    if ($totalPaginas === null && count($items) < $pageSize) {
+                        break;
+                    }
+
+                    $pagina++;
                 }
             }
 
@@ -627,6 +708,11 @@ class ImportacaoContaAzulService
             'CARTAO_CREDITO' => 'Cartao de credito',
             'CARTAO_DEBITO' => 'Cartao de debito',
         ][$code] ?? Str::of($code)->lower()->replace('_', ' ')->title()->toString();
+    }
+
+    private function validContaAzulPageSize(int $pageSize): int
+    {
+        return in_array($pageSize, [10, 20, 50, 100], true) ? $pageSize : 50;
     }
 
     /**

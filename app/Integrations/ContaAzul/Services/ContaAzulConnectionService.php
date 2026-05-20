@@ -116,14 +116,14 @@ class ContaAzulConnectionService
         return $conexao->fresh(['token']);
     }
 
-    public function getValidAccessToken(ContaAzulConexao $conexao): string
+    public function getValidAccessToken(ContaAzulConexao $conexao, bool $forceRefresh = false): string
     {
         $token = $conexao->token;
         if (!$token) {
             throw new ContaAzulException('Conexão sem tokens.', 'conexao_sem_token');
         }
 
-        if (!$token->isAccessTokenExpired()) {
+        if (!$forceRefresh && !$token->isAccessTokenExpired()) {
             return (string) $token->access_token;
         }
 

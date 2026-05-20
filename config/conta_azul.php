@@ -80,8 +80,6 @@ return [
             'method' => 'GET',
             'query' => [],
             'body' => [],
-            'date_start_days_ago' => (int) env('CONTA_AZUL_IMPORT_NOTA_DAYS', 730),
-            'date_query_keys' => ['data_inicial', 'data_final'],
         ],
         'conta_financeira' => [
             'method' => 'GET',

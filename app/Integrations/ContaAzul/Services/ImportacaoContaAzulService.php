@@ -185,11 +185,13 @@ class ImportacaoContaAzulService
         try {
             foreach ($this->financialEventSources($lojaId) as $source) {
                 $this->throttle($conexao->id);
-                $res = $this->client->get(
-                    $this->replacePath($pathTemplate, ['id_evento' => $source['id_evento']]),
-                    $token,
-                    []
-                );
+                $path = $this->replacePath($pathTemplate, ['id_evento' => $source['id_evento']]);
+                $res = $this->client->get($path, $token, []);
+                if ($res['status'] === 401) {
+                    $conexao->load('token');
+                    $token = $this->connections->getValidAccessToken($conexao, true);
+                    $res = $this->client->get($path, $token, []);
+                }
 
                 if ($res['status'] === 404) {
                     continue;

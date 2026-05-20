@@ -69,6 +69,13 @@ return [
             'date_start_days_ago' => (int) env('CONTA_AZUL_IMPORT_FIN_DAYS', 730),
             'date_query_keys' => ['data_vencimento_de', 'data_vencimento_ate'],
         ],
+        'conta_pagar' => [
+            'method' => env('CONTA_AZUL_IMPORT_CONTA_PAGAR_METHOD', 'GET'),
+            'query' => [],
+            'body' => [],
+            'date_start_days_ago' => (int) env('CONTA_AZUL_IMPORT_FIN_DAYS', 730),
+            'date_query_keys' => ['data_vencimento_de', 'data_vencimento_ate'],
+        ],
         'nota' => [
             'method' => 'GET',
             'query' => [],
@@ -119,6 +126,7 @@ return [
         'produtos' => env('CONTA_AZUL_PATH_PRODUTOS', '/v1/produtos'),
         'vendas_busca' => env('CONTA_AZUL_PATH_VENDAS', '/v1/venda/busca'),
         'titulos_list' => env('CONTA_AZUL_PATH_TITULOS_LIST', env('CONTA_AZUL_PATH_FINANCEIRO', '/v1/financeiro/eventos-financeiros/contas-a-receber/buscar')),
+        'contas_pagar_list' => env('CONTA_AZUL_PATH_CONTAS_PAGAR_LIST', '/v1/financeiro/eventos-financeiros/contas-a-pagar/buscar'),
         'notas_list' => env('CONTA_AZUL_PATH_NOTAS_LIST', env('CONTA_AZUL_PATH_NOTAS', '/v1/notas-fiscais')),
         'contas_financeiras' => env('CONTA_AZUL_PATH_CONTAS_FINANCEIRAS', '/v1/conta-financeira'),
         'categorias_financeiras' => env('CONTA_AZUL_PATH_CATEGORIAS_FINANCEIRAS', '/v1/categorias'),

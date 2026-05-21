@@ -415,20 +415,27 @@ class ImportacaoContaAzulService
      */
     private function importarFormasPagamento(ContaAzulConexao $conexao, ?int $lojaId): array
     {
-        if ($this->deveImportarParcelasDependentes($lojaId)) {
-            $this->importarParcelasDetalhadas($conexao, $lojaId);
-        }
-
-        $batch = $this->startBatch($conexao, ContaAzulEntityType::FORMA_PAGAMENTO, ['origem' => 'metodo_pagamento', 'loja_id' => $lojaId]);
+        $batch = $this->startBatch($conexao, ContaAzulEntityType::FORMA_PAGAMENTO, ['origem' => 'vendas_detalhadas_catalogo_documentado', 'loja_id' => $lojaId]);
+        $token = $this->connections->getValidAccessToken($conexao);
         $lidos = 0;
 
         try {
-            foreach ($this->paymentMethodCodes($lojaId) as $code) {
-                $payload = [
-                    'codigo' => $code,
-                    'nome' => $this->paymentMethodName($code),
-                    'origem' => 'metodo_pagamento',
-                ];
+            $metodos = [];
+            $this->coletarFormasPagamentoStaging($metodos, $lojaId);
+            $this->coletarFormasPagamentoVendasDetalhadas($metodos, $conexao, $token, $lojaId);
+            $this->coletarFormasPagamentoCatalogoDocumentado($metodos);
+
+            ksort($metodos);
+
+            foreach ($metodos as $code => $payload) {
+                $payload['codigo'] = $code;
+                $payload['nome'] = $this->paymentMethodName($code);
+                $payload['fontes'] = array_values(array_unique($payload['fontes'] ?? []));
+                $payload['venda_ids_exemplo'] = array_values(array_slice(array_unique($payload['venda_ids_exemplo'] ?? []), 0, 5));
+                $payload['usado_em_vendas_count'] = (int) ($payload['usado_em_vendas_count'] ?? 0);
+                $payload['origem'] = in_array('venda_detalhada', $payload['fontes'], true)
+                    ? 'venda_detalhada'
+                    : ((array) $payload['fontes'])[0];
 
                 $this->upsertStagingRow('stg_conta_azul_formas_pagamento', $lojaId, $code, $payload, $batch);
                 $lidos++;
@@ -716,16 +723,9 @@ class ImportacaoContaAzulService
     private function paymentMethodCodes(?int $lojaId): array
     {
         $codes = [];
-        foreach (['stg_conta_azul_parcelas', 'stg_conta_azul_baixas'] as $table) {
+        foreach (['stg_conta_azul_parcelas', 'stg_conta_azul_baixas', 'stg_conta_azul_vendas'] as $table) {
             foreach ($this->stagingPayloadRows($table, $lojaId) as $row) {
-                $code = $this->firstStringNested($row['payload'], [
-                    'metodo_pagamento',
-                    'metodoPagamento',
-                    'forma_pagamento',
-                    'formaPagamento',
-                    'payment_method',
-                    'paymentMethod',
-                ]);
+                $code = $this->paymentMethodCode($row['payload']);
                 if ($code !== '') {
                     $codes[$this->normalizeCode($code)] = $this->normalizeCode($code);
                 }
@@ -735,17 +735,136 @@ class ImportacaoContaAzulService
         return array_values($codes);
     }
 
+    /**
+     * @param  array<string, array<string, mixed>>  $metodos
+     */
+    private function coletarFormasPagamentoStaging(array &$metodos, ?int $lojaId): void
+    {
+        foreach ($this->paymentMethodCodes($lojaId) as $code) {
+            $this->addFormaPagamento($metodos, $code, 'staging');
+        }
+    }
+
+    /**
+     * @param  array<string, array<string, mixed>>  $metodos
+     */
+    private function coletarFormasPagamentoVendasDetalhadas(array &$metodos, ContaAzulConexao $conexao, string &$token, ?int $lojaId): void
+    {
+        $pathTemplate = (string) (($this->config['paths']['venda_detail'] ?? null) ?: '/v1/venda/{id}');
+
+        foreach ($this->stagingPayloadRows('stg_conta_azul_vendas', $lojaId) as $row) {
+            $vendaId = (string) $row['identificador_externo'];
+            if ($vendaId === '' || !$this->vendaTemCondicaoPagamento($row['payload'])) {
+                continue;
+            }
+
+            $this->throttle($conexao->id);
+            $path = $this->replacePath($pathTemplate, ['id' => $vendaId]);
+            $res = $this->client->get($path, $token, []);
+            if ($res['status'] === 401) {
+                $conexao->load('token');
+                $token = $this->connections->getValidAccessToken($conexao, true);
+                $res = $this->client->get($path, $token, []);
+            }
+
+            if ($res['status'] === 404) {
+                continue;
+            }
+            if ($res['status'] < 200 || $res['status'] >= 300) {
+                throw new ContaAzulException('Falha ao importar formas de pagamento por venda HTTP ' . $res['status']);
+            }
+
+            $json = is_array($res['json']) ? $res['json'] : [];
+            $code = $this->paymentMethodCode($json);
+            if ($code !== '') {
+                $this->addFormaPagamento($metodos, $code, 'venda_detalhada', $vendaId);
+            }
+        }
+    }
+
+    /**
+     * @param  array<string, array<string, mixed>>  $metodos
+     */
+    private function coletarFormasPagamentoCatalogoDocumentado(array &$metodos): void
+    {
+        foreach ([
+            'BOLETO_BANCARIO',
+            'CARTAO_CREDITO',
+            'CARTAO_DEBITO',
+            'DEPOSITO_BANCARIO',
+            'DINHEIRO',
+            'OUTRO',
+            'PIX_PAGAMENTO_INSTANTANEO',
+            'TRANSFERENCIA_BANCARIA',
+        ] as $code) {
+            $this->addFormaPagamento($metodos, $code, 'catalogo_documentado');
+        }
+    }
+
+    /**
+     * @param  array<string, array<string, mixed>>  $metodos
+     */
+    private function addFormaPagamento(array &$metodos, string $code, string $fonte, ?string $vendaId = null): void
+    {
+        $code = $this->normalizeCode($code);
+        if ($code === '') {
+            return;
+        }
+
+        $metodos[$code] ??= [
+            'fontes' => [],
+            'usado_em_vendas_count' => 0,
+            'venda_ids_exemplo' => [],
+        ];
+
+        $metodos[$code]['fontes'][] = $fonte;
+        if ($vendaId !== null && $vendaId !== '') {
+            $metodos[$code]['usado_em_vendas_count'] = ((int) ($metodos[$code]['usado_em_vendas_count'] ?? 0)) + 1;
+            $metodos[$code]['venda_ids_exemplo'][] = $vendaId;
+        }
+    }
+
+    private function vendaTemCondicaoPagamento(array $payload): bool
+    {
+        $condicao = $payload['condicao_pagamento'] ?? $payload['condicaoPagamento'] ?? null;
+
+        return $condicao === true || is_array($condicao);
+    }
+
+    private function paymentMethodCode(array $payload): string
+    {
+        return $this->firstStringNested($payload, [
+            'metodo_pagamento',
+            'metodoPagamento',
+            'forma_pagamento',
+            'formaPagamento',
+            'payment_method',
+            'paymentMethod',
+            'tipo_pagamento',
+            'tipoPagamento',
+            'condicao_pagamento.tipo_pagamento',
+            'condicaoPagamento.tipoPagamento',
+            'venda.condicao_pagamento.tipo_pagamento',
+            'venda.condicaoPagamento.tipoPagamento',
+        ]);
+    }
+
     private function paymentMethodName(string $code): string
     {
         return [
+            'BOLETO_BANCARIO' => 'Boleto bancario',
             'PIX' => 'PIX',
+            'PIX_PAGAMENTO_INSTANTANEO' => 'PIX',
             'BOLETO' => 'Boleto',
             'TRANSFERENCIA' => 'Transferencia',
+            'TRANSFERENCIA_BANCARIA' => 'Transferencia bancaria',
             'TED' => 'TED',
             'DOC' => 'DOC',
             'DINHEIRO' => 'Dinheiro',
             'CARTAO_CREDITO' => 'Cartao de credito',
             'CARTAO_DEBITO' => 'Cartao de debito',
+            'DEPOSITO_BANCARIO' => 'Deposito bancario',
+            'OUTRO' => 'Outro',
         ][$code] ?? Str::of($code)->lower()->replace('_', ' ')->title()->toString();
     }
 

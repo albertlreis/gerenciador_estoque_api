@@ -124,6 +124,7 @@ return [
         'pessoas' => env('CONTA_AZUL_PATH_PESSOAS', '/v1/pessoas'),
         'produtos' => env('CONTA_AZUL_PATH_PRODUTOS', '/v1/produtos'),
         'vendas_busca' => env('CONTA_AZUL_PATH_VENDAS', '/v1/venda/busca'),
+        'venda_detail' => env('CONTA_AZUL_PATH_VENDA_DETAIL', '/v1/venda/{id}'),
         'titulos_list' => env('CONTA_AZUL_PATH_TITULOS_LIST', env('CONTA_AZUL_PATH_FINANCEIRO', '/v1/financeiro/eventos-financeiros/contas-a-receber/buscar')),
         'contas_pagar_list' => env('CONTA_AZUL_PATH_CONTAS_PAGAR_LIST', '/v1/financeiro/eventos-financeiros/contas-a-pagar/buscar'),
         'notas_list' => env('CONTA_AZUL_PATH_NOTAS_LIST', env('CONTA_AZUL_PATH_NOTAS', '/v1/notas-fiscais')),

@@ -307,7 +307,9 @@ class ImportacaoContaAzulService
      */
     private function importarBaixas(ContaAzulConexao $conexao, ?int $lojaId): array
     {
-        $this->importarParcelasDetalhadas($conexao, $lojaId);
+        if ($this->deveImportarParcelasDependentes($lojaId)) {
+            $this->importarParcelasDetalhadas($conexao, $lojaId);
+        }
 
         $batch = $this->startBatch($conexao, ContaAzulEntityType::BAIXA, ['origem' => 'parcelas', 'loja_id' => $lojaId]);
         $token = $this->connections->getValidAccessToken($conexao);
@@ -413,7 +415,7 @@ class ImportacaoContaAzulService
      */
     private function importarFormasPagamento(ContaAzulConexao $conexao, ?int $lojaId): array
     {
-        if ($this->countRows('stg_conta_azul_parcelas', $lojaId) === 0) {
+        if ($this->deveImportarParcelasDependentes($lojaId)) {
             $this->importarParcelasDetalhadas($conexao, $lojaId);
         }
 
@@ -661,6 +663,34 @@ class ImportacaoContaAzulService
             ->when($lojaId !== null, fn ($q) => $q->where('loja_id', $lojaId))
             ->when($lojaId === null, fn ($q) => $q->whereNull('loja_id'))
             ->count();
+    }
+
+    private function deveImportarParcelasDependentes(?int $lojaId): bool
+    {
+        if ($this->countRows('stg_conta_azul_parcelas', $lojaId) > 0) {
+            return false;
+        }
+
+        $ultimaParcela = ContaAzulImportBatch::query()
+            ->where('tipo_entidade', ContaAzulEntityType::PARCELA)
+            ->where('status', 'concluido')
+            ->when($lojaId !== null, fn ($q) => $q->where('loja_id', $lojaId))
+            ->when($lojaId === null, fn ($q) => $q->whereNull('loja_id'))
+            ->orderByDesc('finalizado_em')
+            ->first();
+
+        if (!$ultimaParcela?->finalizado_em) {
+            return true;
+        }
+
+        $ultimaFonte = ContaAzulImportBatch::query()
+            ->whereIn('tipo_entidade', [ContaAzulEntityType::TITULO, ContaAzulEntityType::CONTA_PAGAR])
+            ->where('status', 'concluido')
+            ->when($lojaId !== null, fn ($q) => $q->where('loja_id', $lojaId))
+            ->when($lojaId === null, fn ($q) => $q->whereNull('loja_id'))
+            ->max('finalizado_em');
+
+        return $ultimaFonte !== null && $ultimaParcela->finalizado_em->lt($ultimaFonte);
     }
 
     /**

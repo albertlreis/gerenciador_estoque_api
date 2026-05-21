@@ -18,7 +18,7 @@ class ContaAzulRefreshTokensCommand extends Command
 
         foreach ($conexoes as $c) {
             try {
-                $connections->getValidAccessToken($c);
+                $connections->getValidAccessToken($c, true);
                 $this->info('Conexão ' . $c->id . ' OK');
             } catch (\Throwable $e) {
                 $this->error('Conexão ' . $c->id . ' falhou: ' . $e->getMessage());

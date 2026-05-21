@@ -328,6 +328,15 @@ class ImportacaoContaAzulService
                     $token,
                     []
                 );
+                if ($res['status'] === 401) {
+                    $conexao->load('token');
+                    $token = $this->connections->getValidAccessToken($conexao, true);
+                    $res = $this->client->get(
+                        $this->replacePath($pathTemplate, ['parcela_id' => $parcelaId]),
+                        $token,
+                        []
+                    );
+                }
 
                 if ($res['status'] === 404) {
                     continue;

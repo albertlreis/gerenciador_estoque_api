@@ -138,7 +138,7 @@ class ContaAzulConnectionService
         }
 
         $token->refresh();
-        if (!$token->isAccessTokenExpired()) {
+        if (!$forceRefresh && !$token->isAccessTokenExpired()) {
             return (string) $token->access_token;
         }
 

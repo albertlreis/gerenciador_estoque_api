@@ -181,41 +181,24 @@ class ImportacaoContaAzulService
      */
     private function importarParcelasDetalhadas(ContaAzulConexao $conexao, ?int $lojaId): array
     {
-        $batch = $this->startBatch($conexao, ContaAzulEntityType::PARCELA, ['origem' => 'eventos_financeiros', 'loja_id' => $lojaId]);
-        $token = $this->connections->getValidAccessToken($conexao);
-        $pathTemplate = (string) (($this->config['paths']['parcelas_by_evento'] ?? null) ?: '/v1/financeiro/eventos-financeiros/{id_evento}/parcelas');
+        $batch = $this->startBatch($conexao, ContaAzulEntityType::PARCELA, ['origem' => 'buscas_contas_receber_pagar', 'loja_id' => $lojaId]);
         $lidos = 0;
 
         try {
-            foreach ($this->financialEventSources($lojaId) as $source) {
-                $this->throttle($conexao->id);
-                $path = $this->replacePath($pathTemplate, ['id_evento' => $source['id_evento']]);
-                $res = $this->client->get($path, $token, []);
-                if ($res['status'] === 401) {
-                    $conexao->load('token');
-                    $token = $this->connections->getValidAccessToken($conexao, true);
-                    $res = $this->client->get($path, $token, []);
-                }
-
-                if ($res['status'] === 404) {
+            foreach ($this->parcelaSources($lojaId) as $source) {
+                $payload = $source['payload'];
+                $parcelaId = (string) $source['identificador_externo'];
+                if ($parcelaId === '') {
                     continue;
                 }
-                if ($res['status'] < 200 || $res['status'] >= 300) {
-                    throw new ContaAzulException('Falha ao importar parcelas HTTP ' . $res['status']);
-                }
 
-                foreach ($this->extractItems($res['json']) as $item) {
-                    $item['id_evento'] = $source['id_evento'];
-                    $item['evento_tipo_sierra'] = $source['tipo_evento'];
-                    $item['evento_identificador_externo'] = $source['identificador_externo'];
-                    $extId = $this->extractExternalId($item);
-                    if ($extId === '') {
-                        continue;
-                    }
+                $payload['id_parcela'] = $parcelaId;
+                $payload['evento_tipo_sierra'] = $source['tipo_evento'];
+                $payload['evento_identificador_externo'] = $parcelaId;
+                $payload['origem'] = $source['origem'];
 
-                    $this->upsertStagingRow('stg_conta_azul_parcelas', $lojaId, $extId, $item, $batch);
-                    $lidos++;
-                }
+                $this->upsertStagingRow('stg_conta_azul_parcelas', $lojaId, $parcelaId, $payload, $batch);
+                $lidos++;
             }
 
             return $this->finishBatch($batch, $lidos);
@@ -548,52 +531,30 @@ class ImportacaoContaAzulService
     }
 
     /**
-     * @return array<int, array{id_evento:string, identificador_externo:string, tipo_evento:string}>
+     * @return array<int, array{identificador_externo:string, tipo_evento:string, origem:string, payload:array<string, mixed>}>
      */
-    private function financialEventSources(?int $lojaId): array
+    private function parcelaSources(?int $lojaId): array
     {
         $sources = [];
         foreach ([
-            ['table' => 'stg_conta_azul_financeiro', 'tipo' => ContaAzulEntityType::TITULO],
-            ['table' => 'stg_conta_azul_contas_pagar', 'tipo' => ContaAzulEntityType::CONTA_PAGAR],
+            ['table' => 'stg_conta_azul_financeiro', 'tipo' => ContaAzulEntityType::TITULO, 'origem' => 'busca_contas_receber'],
+            ['table' => 'stg_conta_azul_contas_pagar', 'tipo' => ContaAzulEntityType::CONTA_PAGAR, 'origem' => 'busca_contas_pagar'],
         ] as $config) {
             if (!Schema::hasTable($config['table'])) {
                 continue;
             }
 
             foreach ($this->stagingPayloadRows($config['table'], $lojaId) as $row) {
-                $payload = $row['payload'];
-                $eventId = $this->firstStringNested($payload, ['id_evento', 'idEvento', 'id', 'uuid'])
-                    ?: (string) $row['identificador_externo'];
-                if ($eventId === '') {
+                $parcelaId = (string) $row['identificador_externo'];
+                if ($parcelaId === '') {
                     continue;
                 }
 
-                $sources[$config['tipo'] . ':' . $eventId] = [
-                    'id_evento' => $eventId,
-                    'identificador_externo' => (string) $row['identificador_externo'],
+                $sources[$config['tipo'] . ':' . $parcelaId] = [
+                    'identificador_externo' => $parcelaId,
                     'tipo_evento' => $config['tipo'],
-                ];
-            }
-        }
-
-        if (Schema::hasTable('conta_azul_mapeamentos')) {
-            $maps = DB::table('conta_azul_mapeamentos')
-                ->whereIn('tipo_entidade', [ContaAzulEntityType::TITULO, ContaAzulEntityType::CONTA_PAGAR])
-                ->whereNotNull('id_externo')
-                ->when($lojaId !== null, fn ($q) => $q->where('loja_id', $lojaId))
-                ->when($lojaId === null, fn ($q) => $q->whereNull('loja_id'))
-                ->get();
-
-            foreach ($maps as $map) {
-                $eventId = (string) $map->id_externo;
-                if ($eventId === '') {
-                    continue;
-                }
-                $sources[$map->tipo_entidade . ':' . $eventId] = [
-                    'id_evento' => $eventId,
-                    'identificador_externo' => $eventId,
-                    'tipo_evento' => (string) $map->tipo_entidade,
+                    'origem' => $config['origem'],
+                    'payload' => $row['payload'],
                 ];
             }
         }

@@ -298,12 +298,17 @@ class ImportacaoContaAzulService
         $token = $this->connections->getValidAccessToken($conexao);
         $pathTemplate = (string) (($this->config['paths']['baixas_by_parcela'] ?? null) ?: '/v1/financeiro/eventos-financeiros/parcelas/{parcela_id}/baixa');
         $lidos = 0;
+        $falhas = [];
+        $parcelasComBaixa = $this->parcelaIdsComBaixa($lojaId);
 
         try {
             foreach ($this->stagingPayloadRows('stg_conta_azul_parcelas', $lojaId) as $row) {
                 $parcela = $row['payload'];
                 $parcelaId = (string) $row['identificador_externo'];
                 if ($parcelaId === '') {
+                    continue;
+                }
+                if (isset($parcelasComBaixa[$parcelaId])) {
                     continue;
                 }
 
@@ -326,6 +331,10 @@ class ImportacaoContaAzulService
                 if ($res['status'] === 404) {
                     continue;
                 }
+                if ($res['status'] >= 500) {
+                    $falhas[] = ['parcela_id' => $parcelaId, 'status' => $res['status']];
+                    continue;
+                }
                 if ($res['status'] < 200 || $res['status'] >= 300) {
                     throw new ContaAzulException('Falha ao importar baixas HTTP ' . $res['status']);
                 }
@@ -342,10 +351,23 @@ class ImportacaoContaAzulService
 
                     $this->upsertStagingRow('stg_conta_azul_baixas', $lojaId, $extId, $item, $batch);
                     $lidos++;
+                    $parcelasComBaixa[$parcelaId] = true;
                 }
             }
 
-            return $this->finishBatch($batch, $lidos);
+            $batch->update([
+                'status' => 'concluido',
+                'total_lidos' => $lidos,
+                'total_falhas' => count($falhas),
+                'finalizado_em' => now(),
+                'resumo_json' => [
+                    'lidos' => $lidos,
+                    'falhas' => count($falhas),
+                    'falhas_exemplos' => array_slice($falhas, 0, 20),
+                ],
+            ]);
+
+            return ['batch_id' => (int) $batch->id, 'lidos' => $lidos];
         } catch (\Throwable $e) {
             $this->failBatch($batch, $e);
             throw $e;
@@ -631,6 +653,22 @@ class ImportacaoContaAzulService
             ->when($lojaId !== null, fn ($q) => $q->where('loja_id', $lojaId))
             ->when($lojaId === null, fn ($q) => $q->whereNull('loja_id'))
             ->count();
+    }
+
+    /**
+     * @return array<string, bool>
+     */
+    private function parcelaIdsComBaixa(?int $lojaId): array
+    {
+        $ids = [];
+        foreach ($this->stagingPayloadRows('stg_conta_azul_baixas', $lojaId) as $row) {
+            $parcelaId = $this->firstStringNested($row['payload'], ['idParcela', 'id_parcela', 'parcela.id', 'parcelaId']);
+            if ($parcelaId !== '') {
+                $ids[$parcelaId] = true;
+            }
+        }
+
+        return $ids;
     }
 
     private function deveImportarParcelasDependentes(?int $lojaId): bool

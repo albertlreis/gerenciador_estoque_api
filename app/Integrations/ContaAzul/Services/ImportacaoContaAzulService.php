@@ -825,7 +825,7 @@ class ImportacaoContaAzulService
      */
     private function extractExternalId(array $item): string
     {
-        foreach (['id', 'uuid', 'id_legado', 'codigo', 'legacyId', 'idEvento', 'idTitulo', 'idParcela', 'idNota', 'idConta', 'idCategoria', 'idCentroCusto'] as $key) {
+        foreach (['id', 'uuid', 'id_legado', 'codigo', 'legacyId', 'idEvento', 'idTitulo', 'idParcela', 'idNota', 'chave_acesso', 'chaveAcesso', 'numero_nota', 'numeroNota', 'idConta', 'idCategoria', 'idCentroCusto'] as $key) {
             if (!empty($item[$key])) {
                 return (string) $item[$key];
             }

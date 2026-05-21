@@ -318,6 +318,7 @@ Route::middleware(['auth:sanctum', 'senha.nao_obrigatoria'])
         Route::prefix('pedidos/{pedido}')->whereNumber('pedido')->group(function () {
             Route::get('detalhado', [PedidoController::class, 'completo']);
             Route::get('pdf/roteiro', [PedidoController::class, 'roteiroPdf']);
+            Route::patch('cancelar', [PedidoController::class, 'cancelar']);
             Route::post('xml', [PedidoController::class, 'uploadXml']);
             Route::get('xml', [PedidoController::class, 'downloadXml']);
 
@@ -389,6 +390,12 @@ Route::middleware(['auth:sanctum', 'senha.nao_obrigatoria'])
                 ->whereNumber('consignacao');
 
             Route::post('{consignacao}/devolucoes', [ConsignacaoController::class, 'registrarDevolucao'])
+                ->whereNumber('consignacao');
+
+            Route::delete('{consignacao}/devolucoes/{devolucao}', [ConsignacaoController::class, 'cancelarDevolucao'])
+                ->whereNumber(['consignacao', 'devolucao']);
+
+            Route::post('{consignacao}/cancelar-venda', [ConsignacaoController::class, 'cancelarVenda'])
                 ->whereNumber('consignacao');
 
             Route::get('{pedido}/pdf', [ConsignacaoController::class, 'gerarPdf'])->whereNumber('pedido');

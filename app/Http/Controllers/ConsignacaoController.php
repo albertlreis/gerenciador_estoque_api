@@ -8,6 +8,7 @@ use App\Http\Resources\ConsignacaoResource;
 use App\Models\AcessoUsuario;
 use App\Models\Cliente;
 use App\Models\Consignacao;
+use App\Models\ConsignacaoDevolucao;
 use App\Models\Pedido;
 use App\Services\EstoqueMovimentacaoService;
 use App\Services\PdfImageService;
@@ -36,7 +37,7 @@ class ConsignacaoController extends Controller
             'pedido.statusAtual',
             'produtoVariacao.produto',
         ])
-            ->withSum('devolucoes as devolvido_total', 'quantidade');
+            ->withSum(['devolucoes as devolvido_total' => fn ($q) => $q->whereNull('cancelada_em')], 'quantidade');
 
         if (!AuthHelper::hasPermissao('consignacoes.visualizar.todos')) {
             $query->whereHas('pedido', function ($q) {
@@ -147,6 +148,7 @@ class ConsignacaoController extends Controller
             'produtoVariacao.produto.imagemPrincipal',
             'produtoVariacao.atributos',
             'devolucoes.usuario',
+            'devolucoes.canceladaPor',
         ])
             ->where('pedido_id', $pedido_id)
             ->get();
@@ -176,7 +178,8 @@ class ConsignacaoController extends Controller
             'produtoVariacao.produto.imagemPrincipal',
             'produtoVariacao.atributos',
             'devolucoes',
-            'devolucoes.usuario'
+            'devolucoes.usuario',
+            'devolucoes.canceladaPor'
         ])->findOrFail($id);
 
         return response()->json(new ConsignacaoDetalhadaResource($consignacao));
@@ -237,7 +240,7 @@ class ConsignacaoController extends Controller
             return response()->json(['erro' => 'Não é possível registrar devolução para consignação finalizada.'], 422);
         }
 
-        $quantidadeDevolvida = $consignacao->devolucoes->sum('quantidade');
+        $quantidadeDevolvida = $consignacao->quantidadeDevolvida();
         $restante = $consignacao->quantidade - $quantidadeDevolvida;
 
         if ($request->quantidade > $restante) {
@@ -247,7 +250,7 @@ class ConsignacaoController extends Controller
         $usuarioId = AuthHelper::getUsuarioId();
 
         DB::transaction(function () use ($consignacao, $request, $quantidadeDevolvida, $usuarioId) {
-            app(EstoqueMovimentacaoService::class)->registrarMovimentacaoManual([
+            $movimentacao = app(EstoqueMovimentacaoService::class)->registrarMovimentacaoManual([
                 'id_variacao'         => (int) $consignacao->produto_variacao_id,
                 'id_deposito_origem'  => null,
                 'id_deposito_destino' => (int) $request->deposito_id,
@@ -255,12 +258,17 @@ class ConsignacaoController extends Controller
                 'quantidade'          => (int) $request->quantidade,
                 'observacao'          => $request->observacoes,
                 'data_movimentacao'   => now(),
+                'ref_type'            => 'consignacao',
+                'ref_id'              => (int) $consignacao->id,
+                'pedido_id'           => (int) $consignacao->pedido_id,
             ], (int) $usuarioId);
 
             $consignacao->devolucoes()->create([
                 'quantidade' => $request->quantidade,
                 'observacoes' => $request->observacoes,
                 'usuario_id' => AuthHelper::getUsuarioId(),
+                'estoque_movimentacao_id' => $movimentacao->id,
+                'deposito_id' => $request->deposito_id,
             ]);
 
             $novaQtdDevolvida = $quantidadeDevolvida + $request->quantidade;
@@ -274,12 +282,86 @@ class ConsignacaoController extends Controller
         return response()->json(['mensagem' => 'Devolução registrada com sucesso.']);
     }
 
+    public function cancelarDevolucao(int $consignacaoId, int $devolucaoId, Request $request): JsonResponse
+    {
+        $request->validate([
+            'motivo' => 'nullable|string',
+        ]);
+
+        $usuarioId = AuthHelper::getUsuarioId();
+        $consignacao = Consignacao::with('devolucoes')->findOrFail($consignacaoId);
+        $devolucao = ConsignacaoDevolucao::query()
+            ->where('consignacao_id', $consignacao->id)
+            ->findOrFail($devolucaoId);
+
+        if ($devolucao->cancelada_em) {
+            return response()->json(['erro' => 'Devolucao ja cancelada.'], 422);
+        }
+
+        if (!$devolucao->estoque_movimentacao_id) {
+            return response()->json([
+                'erro' => 'Esta devolucao nao possui movimentacao vinculada. Faca a correcao manual do estoque antes de cancelar.',
+            ], 422);
+        }
+
+        DB::transaction(function () use ($consignacao, $devolucao, $request, $usuarioId) {
+            app(EstoqueMovimentacaoService::class)->estornarMovimentacao(
+                (int) $devolucao->estoque_movimentacao_id,
+                (int) $usuarioId,
+                "Cancelamento da devolucao #{$devolucao->id} da consignacao #{$consignacao->id}"
+            );
+
+            $devolucao->update([
+                'cancelada_em' => now(),
+                'cancelada_por' => $usuarioId,
+                'motivo_cancelamento' => $request->motivo,
+            ]);
+
+            $this->recalcularStatusConsignacao($consignacao->fresh('devolucoes'));
+        });
+
+        return response()->json(['mensagem' => 'Devolucao cancelada com sucesso.']);
+    }
+
+    public function cancelarVenda(int $id, Request $request): JsonResponse
+    {
+        $request->validate([
+            'motivo' => 'nullable|string',
+        ]);
+
+        $consignacao = Consignacao::findOrFail($id);
+        if ($consignacao->status !== 'comprado') {
+            return response()->json(['erro' => 'Apenas itens vendidos podem ter a venda cancelada.'], 422);
+        }
+
+        $consignacao->status = 'pendente';
+        $consignacao->data_resposta = null;
+        $consignacao->save();
+
+        logAuditoria('consignacao_cancelamento_venda', "Venda da consignacao #{$consignacao->id} cancelada.", [
+            'acao' => 'cancelar_venda_item',
+            'consignacao_id' => $consignacao->id,
+            'pedido_id' => $consignacao->pedido_id,
+            'motivo' => $request->motivo,
+        ], $consignacao);
+
+        return response()->json([
+            'mensagem' => 'Venda da consignacao cancelada com sucesso.',
+            'consignacao' => new ConsignacaoDetalhadaResource($consignacao->fresh([
+                'pedido.cliente',
+                'produtoVariacao.produto',
+                'devolucoes.usuario',
+                'devolucoes.canceladaPor',
+            ])),
+        ]);
+    }
+
     /**
      * Gera o PDF do roteiro de consignação.
      *
      * Inclui: parceiro, imagem do produto, e localização de estoque.
      */
-    public function gerarPdf(int $id): Response
+    public function gerarPdf(int $id, Request $request): Response
     {
         $pedido = Pedido::with([
             'cliente.enderecoPrincipal',
@@ -303,7 +385,10 @@ class ConsignacaoController extends Controller
         });
 
         $grupos = $pedido->consignacoes->groupBy(fn($item) => $item->deposito->nome ?? 'Sem depósito');
-        $isDevolucao = $this->isRoteiroDeDevolucao($pedido);
+        $tipoRoteiro = $this->normalizarTipoRoteiro($request->query('tipo_roteiro'));
+        $isDevolucao = $tipoRoteiro
+            ? $tipoRoteiro === 'devolucao'
+            : $this->isRoteiroDeDevolucao($pedido);
         $tituloRoteiro = $isDevolucao ? 'Roteiro de devolução' : 'Roteiro de consignação';
         $filename = $isDevolucao
             ? "roteiro-de-devolucao-{$id}.pdf"
@@ -343,6 +428,33 @@ class ConsignacaoController extends Controller
             $status = strtolower((string) ($item->status ?? ''));
             return in_array($status, ['devolvido', 'comprado', 'finalizado'], true);
         });
+    }
+
+    private function recalcularStatusConsignacao(Consignacao $consignacao): void
+    {
+        $devolvido = $consignacao->quantidadeDevolvida();
+
+        if ($devolvido >= (int) $consignacao->quantidade) {
+            $consignacao->status = 'devolvido';
+            $consignacao->data_resposta = $consignacao->data_resposta ?: now();
+        } elseif ($consignacao->status === 'devolvido') {
+            $consignacao->status = 'pendente';
+            $consignacao->data_resposta = null;
+        }
+
+        $consignacao->save();
+    }
+
+    private function normalizarTipoRoteiro(mixed $tipo): ?string
+    {
+        if ($tipo === null || $tipo === '') {
+            return null;
+        }
+
+        $tipo = strtolower((string) $tipo);
+        abort_unless(in_array($tipo, ['consignacao', 'devolucao'], true), 422, 'Tipo de roteiro invalido.');
+
+        return $tipo;
     }
 
 

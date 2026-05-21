@@ -38,14 +38,23 @@ class ConsignacaoDetalhadaResource extends JsonResource
 
             // Histórico de devoluções
             'devolucoes' => $this->devolucoes->map(function ($devolucao) {
+                $cancelada = (bool) $devolucao->cancelada_em;
                 return [
                     'id' => $devolucao->id,
                     'quantidade' => $devolucao->quantidade,
                     'observacoes' => $devolucao->observacoes,
                     'data_devolucao' => optional($devolucao->data_devolucao)->format('d/m/Y H:i'),
+                    'cancelada' => $cancelada,
+                    'cancelada_em' => optional($devolucao->cancelada_em)->format('d/m/Y H:i'),
+                    'motivo_cancelamento' => $devolucao->motivo_cancelamento,
+                    'pode_cancelar' => !$cancelada,
                     'usuario' => [
                         'id' => $devolucao->usuario->id ?? null,
                         'nome' => $devolucao->usuario->nome ?? null,
+                    ],
+                    'cancelada_por' => [
+                        'id' => $devolucao->canceladaPor->id ?? null,
+                        'nome' => $devolucao->canceladaPor->nome ?? null,
                     ],
                 ];
             }),

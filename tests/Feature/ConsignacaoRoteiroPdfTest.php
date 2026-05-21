@@ -7,7 +7,9 @@ use App\Models\Categoria;
 use App\Models\Cliente;
 use App\Models\ClienteEndereco;
 use App\Models\Consignacao;
+use App\Models\ConsignacaoDevolucao;
 use App\Models\Deposito;
+use App\Models\Estoque;
 use App\Models\Pedido;
 use App\Models\PedidoItem;
 use App\Models\PedidoStatusHistorico;
@@ -52,6 +54,91 @@ class ConsignacaoRoteiroPdfTest extends TestCase
             "roteiro-de-devolucao-{$pedidoId}.pdf",
             (string) $response->headers->get('content-disposition')
         );
+    }
+
+    public function test_endpoint_de_consignacao_permite_forcar_tipo_do_roteiro(): void
+    {
+        [$pedidoId] = $this->criarPedidoConsignado('pendente', PedidoStatus::CONSIGNADO);
+
+        $response = $this->get("/api/v1/consignacoes/{$pedidoId}/pdf?tipo_roteiro=devolucao");
+
+        $response->assertOk();
+        $this->assertStringContainsString(
+            "roteiro-de-devolucao-{$pedidoId}.pdf",
+            (string) $response->headers->get('content-disposition')
+        );
+    }
+
+    public function test_roteiro_do_pedido_permite_forcar_tipo_de_consignacao(): void
+    {
+        [$pedidoId] = $this->criarPedidoConsignado('devolvido', PedidoStatus::DEVOLUCAO_CONSIGNACAO);
+
+        $response = $this->get("/api/v1/pedidos/{$pedidoId}/pdf/roteiro?tipo_roteiro=consignacao");
+
+        $response->assertOk();
+        $this->assertStringContainsString(
+            "roteiro-de-consignacao-{$pedidoId}.pdf",
+            (string) $response->headers->get('content-disposition')
+        );
+    }
+
+    public function test_cancela_venda_de_item_consignado(): void
+    {
+        [$pedidoId] = $this->criarPedidoConsignado('comprado', PedidoStatus::CONSIGNADO);
+        $consignacao = Consignacao::where('pedido_id', $pedidoId)->firstOrFail();
+
+        $response = $this->postJson("/api/v1/consignacoes/{$consignacao->id}/cancelar-venda");
+
+        $response->assertOk();
+        $consignacao->refresh();
+        $this->assertSame('pendente', $consignacao->status);
+        $this->assertNull($consignacao->data_resposta);
+    }
+
+    public function test_cancela_devolucao_especifica_estornando_estoque_e_recalculando_status(): void
+    {
+        [$pedidoId, $variacaoId] = $this->criarPedidoConsignado('pendente', PedidoStatus::CONSIGNADO);
+        $consignacao = Consignacao::where('pedido_id', $pedidoId)->firstOrFail();
+
+        $response = $this->postJson("/api/v1/consignacoes/{$consignacao->id}/devolucoes", [
+            'quantidade' => 1,
+            'deposito_id' => $consignacao->deposito_id,
+            'observacoes' => 'Retorno teste',
+        ]);
+        $response->assertOk();
+
+        $consignacao->refresh();
+        $this->assertSame('devolvido', $consignacao->status);
+        $this->assertSame(1, (int) Estoque::where('id_variacao', $variacaoId)->where('id_deposito', $consignacao->deposito_id)->value('quantidade'));
+
+        $devolucao = ConsignacaoDevolucao::where('consignacao_id', $consignacao->id)->firstOrFail();
+        $response = $this->deleteJson("/api/v1/consignacoes/{$consignacao->id}/devolucoes/{$devolucao->id}");
+
+        $response->assertOk();
+        $consignacao->refresh();
+        $this->assertSame('pendente', $consignacao->status);
+        $this->assertNull($consignacao->data_resposta);
+        $this->assertNotNull($devolucao->fresh()->cancelada_em);
+        $this->assertSame(0, (int) Estoque::where('id_variacao', $variacaoId)->where('id_deposito', $consignacao->deposito_id)->value('quantidade'));
+        $this->assertSame(0, $consignacao->fresh('devolucoes')->quantidadeDevolvida());
+    }
+
+    public function test_bloqueia_cancelamento_de_devolucao_antiga_sem_movimentacao_vinculada(): void
+    {
+        [$pedidoId] = $this->criarPedidoConsignado('devolvido', PedidoStatus::CONSIGNADO);
+        $consignacao = Consignacao::where('pedido_id', $pedidoId)->firstOrFail();
+
+        $devolucao = ConsignacaoDevolucao::create([
+            'consignacao_id' => $consignacao->id,
+            'usuario_id' => auth()->id(),
+            'quantidade' => 1,
+            'observacoes' => 'Registro antigo',
+        ]);
+
+        $response = $this->deleteJson("/api/v1/consignacoes/{$consignacao->id}/devolucoes/{$devolucao->id}");
+
+        $response->assertStatus(422);
+        $this->assertNull($devolucao->fresh()->cancelada_em);
     }
 
     public function test_view_do_roteiro_de_consignacao_renderiza_imagem_embutida(): void

@@ -18,6 +18,7 @@ enum PedidoStatus: string
     case CONSIGNADO = 'consignado';
     case DEVOLUCAO_CONSIGNACAO = 'devolucao_consignacao';
     case FINALIZADO = 'finalizado';
+    case CANCELADO = 'cancelado';
 
     public function label(): string
     {
@@ -36,6 +37,7 @@ enum PedidoStatus: string
             self::CONSIGNADO => 'Consignado',
             self::DEVOLUCAO_CONSIGNACAO => 'Devolução Consignação',
             self::FINALIZADO => 'Finalizado',
+            self::CANCELADO => 'Cancelado',
         };
     }
 }

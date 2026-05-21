@@ -48,7 +48,13 @@ class Consignacao extends Model
 
     public function quantidadeDevolvida(): int
     {
-        return $this->devolucoes->sum('quantidade');
+        $devolucoes = $this->relationLoaded('devolucoes')
+            ? $this->devolucoes
+            : $this->devolucoes()->get();
+
+        return (int) $devolucoes
+            ->whereNull('cancelada_em')
+            ->sum('quantidade');
     }
 
     public function quantidadeRestante(): int

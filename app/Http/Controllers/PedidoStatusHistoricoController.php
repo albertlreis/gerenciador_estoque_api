@@ -191,6 +191,7 @@ class PedidoStatusHistoricoController extends Controller
             'consignado' => 'pi pi-share-alt',
             'devolucao_consignacao' => 'pi pi-refresh',
             'finalizado' => 'pi pi-check-circle',
+            'cancelado' => 'pi pi-times-circle',
             default => 'pi pi-info-circle',
         };
     }
@@ -207,6 +208,7 @@ class PedidoStatusHistoricoController extends Controller
             'entrega_estoque' => '#6f42c1',
             'envio_cliente' => '#fd7e14',
             'entrega_cliente', 'finalizado' => '#198754',
+            'cancelado' => '#dc3545',
             'consignado' => '#6c757d',
             'devolucao_consignacao' => '#dc3545',
             default => '#adb5bd',

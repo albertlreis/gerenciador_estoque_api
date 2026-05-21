@@ -15,6 +15,7 @@ use App\Services\FornecedorPedidoXmlParserService;
 use App\Services\ImportacaoPedidoService;
 use App\Services\NfeXmlParserService;
 use App\Services\PedidoService;
+use App\Services\PedidoCancelamentoService;
 use App\Services\PedidoUpdateService;
 use App\Services\EstatisticaPedidoService;
 use App\Services\PedidoExportService;
@@ -110,6 +111,27 @@ class PedidoController extends Controller
         return response()->json([
             'message' => 'Pedido atualizado com sucesso.',
             'data' => new PedidoCompletoResource($pedidoCompleto),
+        ]);
+    }
+
+    public function cancelar(Request $request, Pedido $pedido, PedidoCancelamentoService $service): JsonResponse
+    {
+        if (!AuthHelper::hasPermissao('pedidos.editar')) {
+            return response()->json(['message' => 'Sem permissÃ£o para cancelar pedidos.'], 403);
+        }
+
+        $dados = $request->validate([
+            'cancelar_reservas' => 'sometimes|boolean',
+            'estornar_estoque' => 'sometimes|boolean',
+            'cancelar_financeiro' => 'sometimes|boolean',
+            'observacoes' => 'nullable|string',
+        ]);
+
+        $resultado = $service->cancelar($pedido, $dados, auth()->id());
+
+        return response()->json([
+            'message' => 'Venda cancelada com sucesso.',
+            'resultado' => $resultado,
         ]);
     }
 
@@ -380,7 +402,7 @@ class PedidoController extends Controller
     /**
      * Gera PDF de roteiro do pedido.
      */
-    public function roteiroPdf(int $pedidoId): Response
+    public function roteiroPdf(int $pedidoId, Request $request): Response
     {
         // 1) Carrega o básico + statusAtual para decidir o tipo sem puxar consignações/itens
         $pedidoBase = Pedido::with([
@@ -394,7 +416,11 @@ class PedidoController extends Controller
         // - Pedido consignado = status atual consignado (e/ou existe consignação)
         // Eu priorizo statusAtual por ser determinístico e mais barato.
         $status = $pedidoBase->statusAtual?->status?->value ?? $pedidoBase->statusAtual?->status;
+        $tipoRoteiro = $this->normalizarTipoRoteiro($request->query('tipo_roteiro'));
         $isConsignado = in_array($status, ['consignado', 'devolucao_consignacao'], true);
+        if (!$isConsignado) {
+            $isConsignado = $pedidoBase->isConsignado();
+        }
 
         // Caso queira ser "à prova de inconsistência" (status divergente),
         // você pode habilitar esse fallback (roda 1 exists()):
@@ -429,7 +455,9 @@ class PedidoController extends Controller
             });
 
             $grupos = $pedido->consignacoes->groupBy(fn($c) => $c->deposito->nome ?? 'Sem depósito');
-            $isDevolucao = $this->isRoteiroConsignacaoDevolucao($pedido);
+            $isDevolucao = $tipoRoteiro
+                ? $tipoRoteiro === 'devolucao'
+                : $this->isRoteiroConsignacaoDevolucao($pedido);
             $tituloRoteiro = $isDevolucao ? 'Roteiro de devolução' : 'Roteiro de consignação';
             $filename = $isDevolucao
                 ? "roteiro-de-devolucao-{$pedidoId}.pdf"
@@ -562,5 +590,17 @@ class PedidoController extends Controller
             $status = strtolower((string) ($item->status ?? ''));
             return in_array($status, ['devolvido', 'comprado', 'finalizado'], true);
         });
+    }
+
+    private function normalizarTipoRoteiro(mixed $tipo): ?string
+    {
+        if ($tipo === null || $tipo === '') {
+            return null;
+        }
+
+        $tipo = strtolower((string) $tipo);
+        abort_unless(in_array($tipo, ['consignacao', 'devolucao'], true), 422, 'Tipo de roteiro invalido.');
+
+        return $tipo;
     }
 }

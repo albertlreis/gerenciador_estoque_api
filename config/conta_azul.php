@@ -147,6 +147,7 @@ return [
         'importacao_ativa' => filter_var(env('CONTA_AZUL_IMPORT_ENABLED', true), FILTER_VALIDATE_BOOL),
         'exportacao_ativa' => filter_var(env('CONTA_AZUL_EXPORT_ENABLED', true), FILTER_VALIDATE_BOOL),
         'reconciliacao_ativa' => filter_var(env('CONTA_AZUL_RECONCILE_ENABLED', true), FILTER_VALIDATE_BOOL),
+        'oficializacao_ativa' => filter_var(env('CONTA_AZUL_OFFICIALIZE_ENABLED', false), FILTER_VALIDATE_BOOL),
     ],
 
 ];

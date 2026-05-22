@@ -26,7 +26,7 @@ class CategoriaFinanceiraController extends Controller
 
         // Flat
         if (!$tree) {
-            $items = CategoriaFinanceira::query()
+            $query = CategoriaFinanceira::query()
                 ->select(['id','nome','slug','tipo','ativo','padrao','categoria_pai_id','meta_json'])
                 ->when(!empty($f['tipo']), fn($q) => $q->where('tipo', $f['tipo']))
                 ->when(array_key_exists('ativo', $f) && $f['ativo'] !== null, fn($q) => $q->where('ativo', (bool)$f['ativo']))
@@ -34,8 +34,25 @@ class CategoriaFinanceiraController extends Controller
                     $term = trim((string)$f['q']);
                     $q->where(fn($w) => $w->where('nome','like',"%{$term}%")->orWhere('slug','like',"%{$term}%"));
                 })
-                ->orderBy('nome')
-                ->get();
+                ->orderBy('nome');
+
+            if ($request->has('page') || $request->has('per_page')) {
+                $perPage = (int) ($f['per_page'] ?? 10);
+                $paginator = $query->paginate($perPage);
+
+                return response()->json([
+                    'data' => CategoriaFinanceiraOptionResource::collection($paginator->items()),
+                    'meta' => [
+                        'page' => $paginator->currentPage(),
+                        'current_page' => $paginator->currentPage(),
+                        'per_page' => $paginator->perPage(),
+                        'total' => $paginator->total(),
+                        'last_page' => $paginator->lastPage(),
+                    ],
+                ]);
+            }
+
+            $items = $query->get();
 
             return response()->json([
                 'data' => CategoriaFinanceiraOptionResource::collection($items),

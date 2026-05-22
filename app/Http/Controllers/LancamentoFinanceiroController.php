@@ -28,10 +28,7 @@ class LancamentoFinanceiroController extends Controller
         return LancamentoFinanceiroResource::collection($pag)
             ->additional([
                 'meta' => [
-                    'page'      => $pag->currentPage(),
-                    'per_page'  => $pag->perPage(),
-                    'total'     => $pag->total(),
-                    'last_page' => $pag->lastPage(),
+                    'page' => $pag->currentPage(),
                 ],
             ])
             ->response();

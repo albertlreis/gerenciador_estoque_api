@@ -25,6 +25,7 @@ class ContaPagarRepositoryEloquent implements ContaPagarRepository
         }
         if ($filtro->fornecedor_id) $q->where('fornecedor_id', $filtro->fornecedor_id);
         if ($filtro->status) $q->where('status', $filtro->status);
+        if ($filtro->forma_pagamento) $q->where('forma_pagamento', $filtro->forma_pagamento);
         if ($filtro->centro_custo_id) $q->where('centro_custo_id', $filtro->centro_custo_id);
         if ($filtro->categoria_id) $q->where('categoria_id', $filtro->categoria_id);
         if ($filtro->data_ini) $q->whereDate('data_vencimento','>=',$filtro->data_ini);

@@ -312,9 +312,8 @@ class ConciliacaoContaAzulService
             ? [$this->normalizeEntidade($entidade) => $this->stagingTableFor($entidade)]
             : $this->stagingTables();
 
-        $out = [];
-        foreach ($tables as $tipo => $table) {
-            $rows = DB::table($table)
+        $buildQuery = function (string $table) use ($lojaId, $statuses, $bucket) {
+            return DB::table($table)
                 ->when($lojaId !== null, fn ($q) => $q->where('loja_id', $lojaId))
                 ->when($lojaId === null, fn ($q) => $q->whereNull('loja_id'))
                 ->whereIn('status_conciliacao', $statuses)
@@ -327,32 +326,71 @@ class ConciliacaoContaAzulService
                 ->when($bucket === 'pendente', fn ($q) => $q
                     ->whereIn('status_conciliacao', ['novo', 'pendente'])
                     ->whereNull('candidato_id_local'))
-                ->when($bucket === 'conflito', fn ($q) => $q->where('status_conciliacao', 'conflito'))
-                ->orderByRaw("FIELD(status_conciliacao, 'conflito', 'novo', 'pendente', 'ignorado', 'conciliado')")
-                ->orderByDesc('updated_at')
-                ->get();
+                ->when($bucket === 'conflito', fn ($q) => $q->where('status_conciliacao', 'conflito'));
+        };
 
-            foreach ($rows as $row) {
-                $payload = json_decode((string) $row->payload_json, true);
-                $payload = is_array($payload) ? $payload : [];
+        $queries = [];
+        $total = 0;
+        foreach ($tables as $tipo => $table) {
+            $query = $buildQuery($table);
+            $count = (int) (clone $query)->count();
+            if ($count === 0) {
+                continue;
+            }
 
-                $out[] = [
-                    'id' => (int) $row->id,
-                    'entidade' => $tipo,
-                    'loja_id' => $row->loja_id !== null ? (int) $row->loja_id : null,
-                    'identificador_externo' => (string) $row->identificador_externo,
-                    'status_conciliacao' => (string) $row->status_conciliacao,
-                    'observacao_conciliacao' => $row->observacao_conciliacao,
-                    'payload_resumo' => $this->payloadResumo($payload),
-                    'payload_json' => $payload,
-                    'candidato_id_local' => isset($row->candidato_id_local) ? (int) $row->candidato_id_local : null,
-                    'candidato_score' => isset($row->candidato_score) ? (int) $row->candidato_score : null,
-                    'candidato_motivo' => $row->candidato_motivo ?? null,
-                    'candidato' => $this->decodeCandidate($row->candidato_json ?? null),
-                    'conciliacao_origem' => $row->conciliacao_origem ?? null,
-                    'updated_at' => $row->updated_at,
-                    'created_at' => $row->created_at,
-                ];
+            $queries[] = [$tipo, $query];
+            $total += $count;
+        }
+
+        $offset = ($page - 1) * $perPage;
+        $out = [];
+        if ($offset < $total) {
+            $candidateLimit = min($total, $offset + $perPage);
+            foreach ($queries as [$tipo, $query]) {
+                $rows = $query
+                    ->select([
+                        'id',
+                        'loja_id',
+                        'identificador_externo',
+                        'payload_json',
+                        'status_conciliacao',
+                        'observacao_conciliacao',
+                        'candidato_id_local',
+                        'candidato_score',
+                        'candidato_motivo',
+                        'candidato_json',
+                        'conciliacao_origem',
+                        'updated_at',
+                        'created_at',
+                    ])
+                    ->orderByRaw("FIELD(status_conciliacao, 'conflito', 'novo', 'pendente', 'ignorado', 'conciliado')")
+                    ->orderByDesc('updated_at')
+                    ->orderBy('id')
+                    ->limit($candidateLimit)
+                    ->get();
+
+                foreach ($rows as $row) {
+                    $payload = json_decode((string) $row->payload_json, true);
+                    $payload = is_array($payload) ? $payload : [];
+
+                    $out[] = [
+                        'id' => (int) $row->id,
+                        'entidade' => $tipo,
+                        'loja_id' => $row->loja_id !== null ? (int) $row->loja_id : null,
+                        'identificador_externo' => (string) $row->identificador_externo,
+                        'status_conciliacao' => (string) $row->status_conciliacao,
+                        'observacao_conciliacao' => $row->observacao_conciliacao,
+                        'payload_resumo' => $this->payloadResumo($payload),
+                        'payload_json' => $payload,
+                        'candidato_id_local' => isset($row->candidato_id_local) ? (int) $row->candidato_id_local : null,
+                        'candidato_score' => isset($row->candidato_score) ? (int) $row->candidato_score : null,
+                        'candidato_motivo' => $row->candidato_motivo ?? null,
+                        'candidato' => $this->decodeCandidate($row->candidato_json ?? null),
+                        'conciliacao_origem' => $row->conciliacao_origem ?? null,
+                        'updated_at' => $row->updated_at,
+                        'created_at' => $row->created_at,
+                    ];
+                }
             }
         }
 
@@ -363,11 +401,19 @@ class ConciliacaoContaAzulService
                 return $statusCmp;
             }
 
-            return strcmp((string) ($b['updated_at'] ?? ''), (string) ($a['updated_at'] ?? ''));
+            $updatedCmp = strcmp((string) ($b['updated_at'] ?? ''), (string) ($a['updated_at'] ?? ''));
+            if ($updatedCmp !== 0) {
+                return $updatedCmp;
+            }
+
+            $entidadeCmp = strcmp((string) ($a['entidade'] ?? ''), (string) ($b['entidade'] ?? ''));
+            if ($entidadeCmp !== 0) {
+                return $entidadeCmp;
+            }
+
+            return ((int) ($a['id'] ?? 0)) <=> ((int) ($b['id'] ?? 0));
         });
 
-        $total = count($out);
-        $offset = ($page - 1) * $perPage;
         $data = array_slice($out, $offset, $perPage);
 
         return [

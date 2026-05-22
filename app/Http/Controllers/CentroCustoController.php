@@ -28,15 +28,32 @@ class CentroCustoController extends Controller
             })
             ->orderBy('nome');
 
-        $items = $q->get();
-
         if (!$tree) {
+            if ($request->has('page') || $request->has('per_page')) {
+                $perPage = (int) ($f['per_page'] ?? 10);
+                $paginator = $q->paginate($perPage);
+
+                return response()->json([
+                    'data' => CentroCustoResource::collection($paginator->items()),
+                    'meta' => [
+                        'page' => $paginator->currentPage(),
+                        'current_page' => $paginator->currentPage(),
+                        'per_page' => $paginator->perPage(),
+                        'total' => $paginator->total(),
+                        'last_page' => $paginator->lastPage(),
+                    ],
+                ]);
+            }
+
+            $items = $q->get();
+
             return response()->json([
                 'data' => CentroCustoResource::collection($items),
             ]);
         }
 
         // tree
+        $items = $q->get();
         $arr = $items->map(fn($c) => (new CentroCustoResource($c))->toArray($request))->values()->all();
 
         $byId = [];

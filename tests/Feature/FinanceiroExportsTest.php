@@ -9,6 +9,7 @@ use App\Models\Cliente;
 use App\Models\ContaFinanceira;
 use App\Models\ContaPagar;
 use App\Models\ContaReceber;
+use App\Models\Fornecedor;
 use App\Models\LancamentoFinanceiro;
 use App\Models\Pedido;
 use App\Models\Usuario;
@@ -47,6 +48,7 @@ class FinanceiroExportsTest extends TestCase
             'juros' => 0,
             'multa' => 0,
             'status' => 'ABERTA',
+            'forma_pagamento' => 'PIX',
         ]);
 
         ContaPagar::create([
@@ -57,12 +59,14 @@ class FinanceiroExportsTest extends TestCase
             'juros' => 0,
             'multa' => 0,
             'status' => 'PAGA',
+            'forma_pagamento' => 'BOLETO',
         ]);
 
         $params = [
             'data_ini' => now()->subDays(10)->toDateString(),
             'data_fim' => now()->toDateString(),
             'vencidas' => true,
+            'forma_pagamento' => 'PIX',
         ];
 
         $this->assertSame(1, (new ContasPagarExport($params))->collection()->count());
@@ -122,6 +126,13 @@ class FinanceiroExportsTest extends TestCase
 
         $this->assertSame(1, ContasReceberExport::query($params)->count());
 
+        $this->getJson('/api/v1/financeiro/contas-receber?' . http_build_query(['busca' => 'Receber exportavel']))
+            ->assertOk()
+            ->assertJsonPath('data.0.pedido.numero', 'PED-EXP-1')
+            ->assertJsonPath('data.0.pedido_numero', 'PED-EXP-1')
+            ->assertJsonPath('data.0.cliente_id', $clienteDentro->id)
+            ->assertJsonPath('data.0.cliente_nome', 'Cliente Exportavel');
+
         $this->get('/api/v1/financeiro/contas-receber/export/excel?' . http_build_query($params))
             ->assertOk()
             ->assertHeader('content-disposition');
@@ -129,6 +140,34 @@ class FinanceiroExportsTest extends TestCase
         $this->get('/api/v1/financeiro/contas-receber/export/pdf?' . http_build_query($params))
             ->assertOk()
             ->assertHeader('content-disposition');
+    }
+
+    public function test_contas_pagar_index_exibe_fornecedor_soft_deleted(): void
+    {
+        $fornecedor = Fornecedor::create([
+            'nome' => 'Fornecedor Historico',
+            'cnpj' => '12345678000199',
+            'status' => 1,
+        ]);
+
+        ContaPagar::create([
+            'fornecedor_id' => $fornecedor->id,
+            'descricao' => 'Conta fornecedor historico',
+            'data_vencimento' => now()->addDay()->toDateString(),
+            'valor_bruto' => 120,
+            'desconto' => 0,
+            'juros' => 0,
+            'multa' => 0,
+            'status' => 'ABERTA',
+            'forma_pagamento' => 'PIX',
+        ]);
+
+        $fornecedor->delete();
+
+        $this->getJson('/api/v1/financeiro/contas-pagar?' . http_build_query(['busca' => 'historico']))
+            ->assertOk()
+            ->assertJsonPath('data.0.fornecedor.nome', 'Fornecedor Historico')
+            ->assertJsonPath('data.0.fornecedor_nome', 'Fornecedor Historico');
     }
 
     public function test_lancamentos_exports_respeitam_filtros_e_retornam_arquivo(): void

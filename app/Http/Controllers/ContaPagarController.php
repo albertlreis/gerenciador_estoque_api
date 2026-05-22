@@ -42,6 +42,7 @@ class ContaPagarController extends Controller
 
             'busca'        => 'nullable|string|max:255',
             'fornecedor_id'=> 'nullable|integer|exists:fornecedores,id',
+            'forma_pagamento' => 'nullable|string|max:50',
 
             'centro_custo_id' => 'nullable|integer|exists:centros_custo,id',
             'categoria_id'    => 'nullable|integer|exists:categorias_financeiras,id',
@@ -57,6 +58,7 @@ class ContaPagarController extends Controller
             busca: $request->string('busca')->toString() ?: null,
             fornecedor_id: $request->integer('fornecedor_id') ?: null,
             status: $request->string('status')->toString() ?: null,
+            forma_pagamento: $request->string('forma_pagamento')->toString() ?: null,
             centro_custo_id: $request->integer('centro_custo_id') ?: null,
             categoria_id: $request->integer('categoria_id') ?: null,
             data_ini: $request->string('data_ini')->toString() ?: null,
@@ -204,6 +206,7 @@ class ContaPagarController extends Controller
         $request->validate([
             'busca'         => 'nullable|string|max:255',
             'fornecedor_id' => 'nullable|integer|exists:fornecedores,id',
+            'forma_pagamento' => 'nullable|string|max:50',
             'status'        => 'nullable|in:ABERTA,PARCIAL,PAGA,CANCELADA',
             'centro_custo_id'  => 'nullable|integer|exists:centros_custo,id',
             'categoria_id'     => 'nullable|integer|exists:categorias_financeiras,id',
@@ -216,6 +219,7 @@ class ContaPagarController extends Controller
             busca: $request->string('busca')->toString() ?: null,
             fornecedor_id: $request->integer('fornecedor_id') ?: null,
             status: $request->string('status')->toString() ?: null,
+            forma_pagamento: $request->string('forma_pagamento')->toString() ?: null,
             centro_custo_id: $request->integer('centro_custo_id') ?: null,
             categoria_id: $request->integer('categoria_id') ?: null,
             data_ini: $request->string('data_ini')->toString() ?: null,
@@ -235,6 +239,7 @@ class ContaPagarController extends Controller
 
         if ($f->fornecedor_id) $query->where('fornecedor_id', $f->fornecedor_id);
         if ($f->status)        $query->where('status', $f->status);
+        if ($f->forma_pagamento) $query->where('forma_pagamento', $f->forma_pagamento);
         if ($f->centro_custo_id)  $query->where('centro_custo_id', $f->centro_custo_id);
         if ($f->categoria_id)     $query->where('categoria_id', $f->categoria_id);
         if ($f->data_ini)      $query->whereDate('data_vencimento', '>=', $f->data_ini);

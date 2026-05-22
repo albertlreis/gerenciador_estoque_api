@@ -31,6 +31,8 @@ class CategoriaFinanceiraIndexRequest extends FormRequest
             'tipo'   => ['nullable', 'in:receita,despesa'],
             'ativo'  => ['nullable', 'boolean'],
             'tree'   => ['nullable', 'boolean'],
+            'page' => ['nullable', 'integer', 'min:1'],
+            'per_page' => ['nullable', 'integer', 'min:1', 'max:200'],
         ];
     }
 }

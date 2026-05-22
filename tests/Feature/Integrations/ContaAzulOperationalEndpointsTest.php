@@ -96,6 +96,72 @@ class ContaAzulOperationalEndpointsTest extends TestCase
             ->assertJsonPath('data.0.candidato_id_local', 10);
     }
 
+    public function test_lista_pendencias_sem_entidade_com_paginacao_global(): void
+    {
+        $now = now();
+        $lojaId = 987654;
+
+        DB::table('stg_conta_azul_pessoas')->insert([
+            [
+                'loja_id' => $lojaId,
+                'identificador_externo' => 'pessoa-conflito',
+                'payload_json' => json_encode(['nome' => 'Cliente em conflito']),
+                'hash_payload' => hash('sha256', 'pessoa-conflito'),
+                'status_conciliacao' => 'conflito',
+                'created_at' => $now->copy()->subHours(4),
+                'updated_at' => $now->copy()->subHours(4),
+            ],
+            [
+                'loja_id' => $lojaId,
+                'identificador_externo' => 'pessoa-pendente-recente',
+                'payload_json' => json_encode(['nome' => 'Cliente pendente']),
+                'hash_payload' => hash('sha256', 'pessoa-pendente-recente'),
+                'status_conciliacao' => 'pendente',
+                'created_at' => $now->copy()->addMinute(),
+                'updated_at' => $now->copy()->addMinute(),
+            ],
+        ]);
+        DB::table('stg_conta_azul_produtos')->insert([
+            'loja_id' => $lojaId,
+            'identificador_externo' => 'produto-novo-recente',
+            'payload_json' => json_encode(['descricao' => 'Produto novo']),
+            'hash_payload' => hash('sha256', 'produto-novo-recente'),
+            'status_conciliacao' => 'novo',
+            'created_at' => $now->copy(),
+            'updated_at' => $now->copy(),
+        ]);
+        DB::table('stg_conta_azul_vendas')->insert([
+            'loja_id' => $lojaId,
+            'identificador_externo' => 'venda-novo-antigo',
+            'payload_json' => json_encode(['numero' => 'VEN-1']),
+            'hash_payload' => hash('sha256', 'venda-novo-antigo'),
+            'status_conciliacao' => 'novo',
+            'created_at' => $now->copy()->subMinute(),
+            'updated_at' => $now->copy()->subMinute(),
+        ]);
+
+        $page1 = $this->getJson("/api/v1/integrations/conta-azul/pendencias/detalhes?loja_id={$lojaId}&status=novo,pendente,conflito&per_page=2&page=1");
+        $page2 = $this->getJson("/api/v1/integrations/conta-azul/pendencias/detalhes?loja_id={$lojaId}&status=novo,pendente,conflito&per_page=2&page=2");
+
+        $page1->assertOk()
+            ->assertJsonPath('meta.total', 4)
+            ->assertJsonPath('meta.per_page', 2)
+            ->assertJsonCount(2, 'data')
+            ->assertJsonPath('data.0.identificador_externo', 'pessoa-conflito')
+            ->assertJsonPath('data.1.identificador_externo', 'produto-novo-recente');
+
+        $page2->assertOk()
+            ->assertJsonPath('meta.total', 4)
+            ->assertJsonPath('meta.page', 2)
+            ->assertJsonCount(2, 'data')
+            ->assertJsonPath('data.0.identificador_externo', 'venda-novo-antigo')
+            ->assertJsonPath('data.1.identificador_externo', 'pessoa-pendente-recente');
+
+        $page1Keys = array_column($page1->json('data'), 'identificador_externo');
+        $page2Keys = array_column($page2->json('data'), 'identificador_externo');
+        $this->assertSame([], array_values(array_intersect($page1Keys, $page2Keys)));
+    }
+
     public function test_lista_batches_com_duracao_e_detalhe_do_batch(): void
     {
         $batch = ContaAzulImportBatch::create([

@@ -8,6 +8,9 @@ class ContaReceberResource extends JsonResource
 {
     public function toArray($request): array
     {
+        $pedido = $this->relationLoaded('pedido') ? $this->pedido : null;
+        $cliente = $pedido?->relationLoaded('cliente') ? $pedido->cliente : null;
+
         return [
             'id'                => $this->id,
             'parcelamento_id'   => $this->parcelamento_id ? (int) $this->parcelamento_id : null,
@@ -15,6 +18,9 @@ class ContaReceberResource extends JsonResource
             'parcelas_total'    => $this->parcelas_total !== null ? (int) $this->parcelas_total : null,
             'is_entrada'        => (bool) $this->is_entrada,
             'pedido_id'         => $this->pedido_id ? (int) $this->pedido_id : null,
+            'pedido_numero'     => $pedido?->numero_externo,
+            'cliente_id'        => $cliente?->id ? (int) $cliente->id : null,
+            'cliente_nome'      => $cliente?->nome,
             'descricao'         => $this->descricao,
             'numero_documento'  => $this->numero_documento,
             'data_emissao'      => optional($this->data_emissao)->format('Y-m-d'),
@@ -50,11 +56,16 @@ class ContaReceberResource extends JsonResource
             'observacoes'       => $this->observacoes,
 
             'pedido' => $this->whenLoaded('pedido', function () {
+                $cliente = $this->pedido?->relationLoaded('cliente') ? $this->pedido->cliente : null;
+
                 return [
                     'id' => $this->pedido->id,
-                    'numero' => $this->pedido->numero ?? null,
+                    'numero' => $this->pedido->numero_externo ?? null,
+                    'numero_externo' => $this->pedido->numero_externo ?? null,
                     'data' => optional($this->pedido->data)->format('Y-m-d'),
-                    'cliente' => $this->pedido->cliente->nome ?? null,
+                    'cliente' => $cliente?->nome,
+                    'cliente_id' => $cliente?->id ? (int) $cliente->id : null,
+                    'cliente_nome' => $cliente?->nome,
                 ];
             }),
 

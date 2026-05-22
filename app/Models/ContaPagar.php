@@ -50,7 +50,7 @@ class ContaPagar extends Model
 
     public function fornecedor(): BelongsTo
     {
-        return $this->belongsTo(Fornecedor::class, 'fornecedor_id')->withDefault();
+        return $this->belongsTo(Fornecedor::class, 'fornecedor_id')->withTrashed()->withDefault();
     }
 
     public function pagamentos(): HasMany

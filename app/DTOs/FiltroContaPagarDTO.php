@@ -8,6 +8,7 @@ class FiltroContaPagarDTO
         public readonly ?string $busca = null,
         public readonly ?int $fornecedor_id = null,
         public readonly ?string $status = null,
+        public readonly ?string $forma_pagamento = null,
         public readonly ?int $centro_custo_id = null,
         public readonly ?int $categoria_id = null,
         public readonly ?string $data_ini = null,

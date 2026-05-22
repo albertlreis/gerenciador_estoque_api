@@ -17,6 +17,7 @@ class ContaPagarResource extends JsonResource
             'parcelas_total' => $this->parcelas_total !== null ? (int) $this->parcelas_total : null,
             'is_entrada' => (bool) $this->is_entrada,
             'fornecedor_id'    => $this->fornecedor_id ? (int) $this->fornecedor_id : null,
+            'fornecedor_nome'  => $this->relationLoaded('fornecedor') ? $this->fornecedor?->nome : null,
             'categoria_id'     => $this->categoria_id ? (int) $this->categoria_id : null,
             'centro_custo_id'  => $this->centro_custo_id ? (int) $this->centro_custo_id : null,
             'descricao' => $this->descricao,

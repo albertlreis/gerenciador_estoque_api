@@ -7,9 +7,12 @@ use Illuminate\Console\Command;
 
 class ContaAzulOficializarFinanceiroCommand extends Command
 {
-    protected $signature = 'conta-azul:oficializar-financeiro {--dry-run : Mostra o plano sem gravar dados} {--loja= : ID opcional da loja}';
+    protected $signature = 'conta-azul:oficializar-financeiro
+        {--dry-run : Mostra o plano sem gravar dados}
+        {--loja= : ID opcional da loja}
+        {--confirm-production : Confirma execucao em producao quando a flag de producao estiver ativa}';
 
-    protected $description = 'Oficializa dados financeiros importados da Conta Azul somente no ambiente local';
+    protected $description = 'Oficializa dados financeiros importados da Conta Azul em ambiente permitido';
 
     public function handle(ContaAzulFinanceiroLocalOfficializationService $service): int
     {
@@ -19,13 +22,18 @@ class ContaAzulOficializarFinanceiroCommand extends Command
 
         $loja = $this->option('loja');
         $lojaId = $loja !== null && $loja !== '' ? (int) $loja : null;
+        if (app()->environment('production') && $lojaId !== null) {
+            $this->error('Em producao, execute sem --loja para usar todo o staging importado.');
+
+            return self::FAILURE;
+        }
 
         $summary = $this->option('dry-run')
             ? $service->dryRun($lojaId)
             : $service->oficializar($lojaId);
 
         $this->table(['entidade', 'criados/previstos', 'atualizados', 'ignorados', 'lancamentos'], $this->rows($summary));
-        $this->info($this->option('dry-run') ? 'Dry-run: nenhum dado foi gravado.' : 'Oficializacao financeira local concluida.');
+        $this->info($this->option('dry-run') ? 'Dry-run: nenhum dado foi gravado.' : 'Oficializacao financeira concluida.');
 
         return self::SUCCESS;
     }
@@ -52,16 +60,41 @@ class ContaAzulOficializarFinanceiroCommand extends Command
 
     private function allowed(): bool
     {
-        if (!app()->environment('local')) {
-            $this->error('Comando bloqueado: permitido apenas em APP_ENV=local.');
-            return false;
+        if (app()->environment('local')) {
+            if (!config('conta_azul.flags.oficializacao_ativa')) {
+                $this->error('Comando bloqueado: defina CONTA_AZUL_OFFICIALIZE_ENABLED=true no ambiente local.');
+
+                return false;
+            }
+
+            return true;
         }
 
-        if (!config('conta_azul.flags.oficializacao_ativa')) {
-            $this->error('Comando bloqueado: defina CONTA_AZUL_OFFICIALIZE_ENABLED=true no ambiente local.');
-            return false;
+        if (app()->environment('production')) {
+            if (!$this->option('confirm-production')) {
+                $this->error('Comando bloqueado: use --confirm-production para execucao em producao.');
+
+                return false;
+            }
+
+            if (!$this->productionFlagEnabled()) {
+                $this->error('Comando bloqueado: defina CONTA_AZUL_OFFICIALIZE_PRODUCTION_ENABLED=true somente durante a janela de producao.');
+
+                return false;
+            }
+
+            return true;
         }
 
-        return true;
+        $this->error('Comando bloqueado: ambiente nao permitido para oficializacao Conta Azul.');
+
+        return false;
+    }
+
+    private function productionFlagEnabled(): bool
+    {
+        $value = env('CONTA_AZUL_OFFICIALIZE_PRODUCTION_ENABLED', config('conta_azul.flags.oficializacao_producao_ativa', false));
+
+        return filter_var($value, FILTER_VALIDATE_BOOL);
     }
 }

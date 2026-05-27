@@ -3,8 +3,7 @@
 namespace Tests\Feature\Integrations;
 
 use App\Integrations\ContaAzul\ContaAzulEntityType;
-use App\Integrations\ContaAzul\Models\ContaAzulImportBatch;
-use App\Integrations\ContaAzul\Models\ContaAzulSyncLog;
+use App\Services\AuditoriaLogService;
 use App\Models\Usuario;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\Cache;
@@ -164,14 +163,36 @@ class ContaAzulOperationalEndpointsTest extends TestCase
 
     public function test_lista_batches_com_duracao_e_detalhe_do_batch(): void
     {
-        $batch = ContaAzulImportBatch::create([
-            'tipo_entidade' => ContaAzulEntityType::PESSOA,
+        $iniciadoEm = now()->subSeconds(75);
+        $finalizadoEm = now();
+        $batch = app(AuditoriaLogService::class)->registrar([
+            'occurred_at' => $finalizadoEm,
+            'tipo' => 'integracao',
+            'categoria' => 'integracao',
+            'nivel' => 'info',
+            'modulo' => 'conta_azul',
+            'acao' => 'import_batch',
             'status' => 'concluido',
-            'total_lidos' => 2,
-            'total_pendentes' => 1,
-            'total_falhas' => 0,
-            'iniciado_em' => now()->subSeconds(75),
-            'finalizado_em' => now(),
+            'label' => 'Batch de importacao Conta Azul',
+            'message' => 'Importacao Conta Azul pessoa: concluido (2 lidos)',
+            'context_json' => [
+                'loja_id' => null,
+                'conexao_id' => null,
+                'tipo_entidade' => ContaAzulEntityType::PESSOA,
+                'status' => 'concluido',
+                'parametros_json' => [],
+                'total_lidos' => 2,
+                'total_conciliados' => 0,
+                'total_pendentes' => 1,
+                'total_falhas' => 0,
+                'iniciado_em' => $iniciadoEm->toISOString(),
+                'finalizado_em' => $finalizadoEm->toISOString(),
+                'resumo_json' => ['lidos' => 2],
+            ],
+            'source_system' => 'estoque',
+            'source_kind' => 'import_run',
+            'source_uid' => AuditoriaLogService::sourceUid('estoque', 'import_run', 'test', uniqid()),
+            'retention_days' => 365,
         ]);
 
         DB::table('stg_conta_azul_pessoas')->insert([
@@ -181,7 +202,8 @@ class ContaAzulOperationalEndpointsTest extends TestCase
             'hash_payload' => hash('sha256', 'pessoa-batch'),
             'status_conciliacao' => 'pendente',
             'observacao_conciliacao' => 'Sem candidato',
-            'batch_id' => $batch->id,
+            'auditoria_log_id' => $batch->id,
+            'import_run_uid' => $batch->source_uid,
             'created_at' => now(),
             'updated_at' => now(),
         ]);
@@ -200,22 +222,45 @@ class ContaAzulOperationalEndpointsTest extends TestCase
 
     public function test_lista_logs_com_paginacao_e_filtros(): void
     {
-        ContaAzulSyncLog::create([
-            'tipo_entidade' => ContaAzulEntityType::PESSOA,
-            'id_externo' => 'pessoa-log',
-            'direcao' => 'import',
+        app(AuditoriaLogService::class)->registrar([
+            'occurred_at' => now(),
+            'tipo' => 'integracao',
+            'categoria' => 'integracao',
+            'nivel' => 'info',
+            'modulo' => 'conta_azul',
+            'acao' => 'import',
             'status' => 'ignorado',
-            'tentativa' => 1,
-            'erro_mensagem' => 'Sem candidato',
-            'executado_em' => now(),
+            'label' => 'Log de sincronizacao Conta Azul',
+            'message' => 'Sem candidato',
+            'entity_type' => ContaAzulEntityType::PESSOA,
+            'context_json' => [
+                'tipo_entidade' => ContaAzulEntityType::PESSOA,
+                'id_externo' => 'pessoa-log',
+                'direcao' => 'import',
+                'tentativa' => 1,
+                'erro_mensagem' => 'Sem candidato',
+            ],
+            'source_system' => 'estoque',
+            'source_kind' => 'sync',
         ]);
-        ContaAzulSyncLog::create([
-            'tipo_entidade' => ContaAzulEntityType::PRODUTO,
-            'id_externo' => 'produto-log',
-            'direcao' => 'export',
+        app(AuditoriaLogService::class)->registrar([
+            'occurred_at' => now(),
+            'tipo' => 'integracao',
+            'categoria' => 'integracao',
+            'nivel' => 'info',
+            'modulo' => 'conta_azul',
+            'acao' => 'export',
             'status' => 'sucesso',
-            'tentativa' => 1,
-            'executado_em' => now(),
+            'label' => 'Log de sincronizacao Conta Azul',
+            'entity_type' => ContaAzulEntityType::PRODUTO,
+            'context_json' => [
+                'tipo_entidade' => ContaAzulEntityType::PRODUTO,
+                'id_externo' => 'produto-log',
+                'direcao' => 'export',
+                'tentativa' => 1,
+            ],
+            'source_system' => 'estoque',
+            'source_kind' => 'sync',
         ]);
 
         $response = $this->getJson('/api/v1/integrations/conta-azul/sync-logs?status=ignorado&tipo_entidade=pessoa&direcao=import&per_page=10');

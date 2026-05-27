@@ -3,14 +3,14 @@
 namespace App\Console\Commands\ContaAzul;
 
 use App\Integrations\ContaAzul\Models\ContaAzulConexao;
-use App\Integrations\ContaAzul\Models\ContaAzulImportBatch;
+use App\Models\AuditoriaLog;
 use Illuminate\Console\Command;
 
 class ContaAzulStatusCommand extends Command
 {
     protected $signature = 'conta-azul:status {--loja=}';
 
-    protected $description = 'Mostra status resumido da integração Conta Azul';
+    protected $description = 'Mostra status resumido da integracao Conta Azul';
 
     public function handle(): int
     {
@@ -25,10 +25,15 @@ class ContaAzulStatusCommand extends Command
         }
 
         $c = $q->first();
-        $this->info('Conexão: ' . json_encode($c?->only(['id', 'status', 'ultimo_healthcheck_em', 'ultimo_erro']), JSON_UNESCAPED_UNICODE));
+        $this->info('Conexao: ' . json_encode($c?->only(['id', 'status', 'ultimo_healthcheck_em', 'ultimo_erro']), JSON_UNESCAPED_UNICODE));
 
-        $batches = ContaAzulImportBatch::query()->orderByDesc('id')->limit(5)->get();
-        $this->info('Últimos batches: ' . $batches->count());
+        $batches = AuditoriaLog::query()
+            ->where('modulo', 'conta_azul')
+            ->where('acao', 'import_batch')
+            ->orderByDesc('occurred_at')
+            ->limit(5)
+            ->get();
+        $this->info('Ultimos batches: ' . $batches->count());
 
         return self::SUCCESS;
     }

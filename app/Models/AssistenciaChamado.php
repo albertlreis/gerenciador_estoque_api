@@ -6,6 +6,7 @@ use App\Enums\AssistenciaStatus;
 use App\Enums\CustoResponsavel;
 use App\Enums\LocalReparo;
 use App\Enums\PrioridadeChamado;
+use App\Models\AuditoriaLog;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -57,7 +58,10 @@ class AssistenciaChamado extends Model
 
     public function logs(): HasMany
     {
-        return $this->hasMany(AssistenciaChamadoLog::class, 'chamado_id')->latest();
+        return $this->hasMany(AuditoriaLog::class, 'entity_id', 'id')
+            ->where('entity_type', self::class)
+            ->where('modulo', 'assistencias')
+            ->latest('occurred_at');
     }
 
     public function arquivos(): HasMany

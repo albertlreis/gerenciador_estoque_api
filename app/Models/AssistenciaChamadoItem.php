@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Enums\AprovacaoOrcamento;
 use App\Enums\AssistenciaStatus;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Model;
 
 class AssistenciaChamadoItem extends Model
@@ -91,6 +92,10 @@ class AssistenciaChamadoItem extends Model
 
     public function logs()
     {
-        return $this->hasMany(AssistenciaChamadoLog::class, 'item_id')->latest();
+        return $this->hasMany(AuditoriaLog::class, 'entity_id', 'chamado_id')
+            ->where('entity_type', AssistenciaChamado::class)
+            ->where('modulo', 'assistencias')
+            ->where('context_json->item_id', $this->id)
+            ->latest('occurred_at');
     }
 }

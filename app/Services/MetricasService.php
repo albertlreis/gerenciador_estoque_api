@@ -2,19 +2,28 @@
 
 namespace App\Services;
 
-use Illuminate\Support\Facades\DB;
-
 class MetricasService
 {
     public static function registrar(string $chave, string $origem, string $status, float $duracaoMs, ?int $usuarioId = null): void
     {
-        DB::table('logs_metricas')->insert([
-            'chave' => $chave,
-            'origem' => $origem,
+        app(AuditoriaLogService::class)->registrar([
+            'occurred_at' => now(),
+            'tipo' => 'metrica',
+            'categoria' => 'metrica',
+            'modulo' => 'monitoramento',
+            'acao' => $origem,
             'status' => $status,
-            'usuario_id' => $usuarioId,
-            'duracao_ms' => round($duracaoMs, 2),
-            'criado_em' => now(),
+            'label' => $chave,
+            'message' => "{$origem}: {$status}",
+            'actor_id' => $usuarioId,
+            'context_json' => [
+                'chave' => $chave,
+                'origem' => $origem,
+                'duracao_ms' => round($duracaoMs, 2),
+            ],
+            'source_system' => 'estoque',
+            'source_kind' => 'metric',
+            'retention_days' => 90,
         ]);
     }
 }

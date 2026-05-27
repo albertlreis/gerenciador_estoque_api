@@ -5,13 +5,13 @@ namespace App\Integrations\ContaAzul\Services;
 use App\Integrations\ContaAzul\ContaAzulEntityType;
 use App\Integrations\ContaAzul\Exceptions\ContaAzulException;
 use App\Integrations\ContaAzul\Models\ContaAzulMapeamento;
-use App\Integrations\ContaAzul\Models\ContaAzulSyncLog;
 use App\Models\Cliente;
 use App\Models\ContaReceber;
 use App\Models\ContaReceberPagamento;
 use App\Models\Pedido;
 use App\Models\Produto;
 use App\Models\ProdutoVariacao;
+use App\Services\AuditoriaLogService;
 use Illuminate\Support\Facades\DB;
 
 class ConciliacaoContaAzulService
@@ -1048,18 +1048,32 @@ class ConciliacaoContaAzulService
 
     private function logConciliacao(?int $lojaId, string $tipo, string $idExterno, string $status, ?string $msg): void
     {
-        ContaAzulSyncLog::create([
-            'loja_id' => $lojaId,
-            'tipo_entidade' => $tipo,
-            'id_local' => null,
-            'id_externo' => $idExterno,
-            'direcao' => 'import',
+        app(AuditoriaLogService::class)->registrar([
+            'occurred_at' => now(),
+            'tipo' => 'integracao',
+            'categoria' => 'integracao',
+            'nivel' => $status === 'falha' ? 'error' : 'info',
+            'modulo' => 'conta_azul',
+            'acao' => 'import',
             'status' => $status,
-            'tentativa' => 1,
-            'payload_resumo' => json_encode(['fase' => 'conciliacao'], JSON_UNESCAPED_UNICODE),
-            'resposta_resumo' => $msg,
-            'erro_mensagem' => $msg,
-            'executado_em' => now(),
+            'label' => 'Log de sincronizacao Conta Azul',
+            'message' => $msg,
+            'entity_type' => $tipo,
+            'entity_id' => null,
+            'context_json' => [
+                'loja_id' => $lojaId,
+                'tipo_entidade' => $tipo,
+                'id_local' => null,
+                'id_externo' => $idExterno,
+                'direcao' => 'import',
+                'tentativa' => 1,
+                'payload_resumo' => json_encode(['fase' => 'conciliacao'], JSON_UNESCAPED_UNICODE),
+                'resposta_resumo' => $msg,
+                'erro_mensagem' => $msg,
+            ],
+            'source_system' => 'estoque',
+            'source_kind' => 'sync',
+            'retention_days' => 365,
         ]);
     }
 

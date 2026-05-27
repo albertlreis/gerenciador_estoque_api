@@ -7,13 +7,12 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Integrations\ContaAzulManualTokenRequest;
 use App\Integrations\ContaAzul\ContaAzulEntityType;
 use App\Integrations\ContaAzul\Exceptions\ContaAzulException;
-use App\Integrations\ContaAzul\Models\ContaAzulImportBatch;
-use App\Integrations\ContaAzul\Models\ContaAzulSyncLog;
 use App\Integrations\ContaAzul\Services\ConciliacaoContaAzulService;
 use App\Integrations\ContaAzul\Services\ContaAzulConnectionService;
 use App\Integrations\ContaAzul\Services\ContaAzulLocalCreationService;
 use App\Integrations\ContaAzul\Services\ImportacaoContaAzulService;
 use App\Integrations\ContaAzul\Services\ReconciliacaoContaAzulService;
+use App\Models\AuditoriaLog;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -149,15 +148,23 @@ class ContaAzulIntegracaoController extends Controller
         }
 
         $perPage = max(1, min((int) $request->query('per_page', 10), 100));
-        $q = ContaAzulImportBatch::query()->orderByDesc('id');
+        $q = AuditoriaLog::query()
+            ->where('modulo', 'conta_azul')
+            ->where('acao', 'import_batch')
+            ->where(function ($query) {
+                $query->where('source_kind', 'import_run')
+                    ->orWhere('source_table', 'conta_azul_import_batches');
+            })
+            ->orderByDesc('occurred_at')
+            ->orderByDesc('id');
         if ($request->filled('loja_id')) {
-            $q->where('loja_id', (int) $request->query('loja_id'));
+            $q->where('context_json->loja_id', (int) $request->query('loja_id'));
         }
 
         $page = $q->paginate($perPage);
 
         return response()->json([
-            'data' => collect($page->items())->map(fn (ContaAzulImportBatch $batch) => $this->formatBatch($batch))->values(),
+            'data' => collect($page->items())->map(fn (AuditoriaLog $batch) => $this->formatBatch($batch))->values(),
             'meta' => $this->paginationMeta($page),
         ]);
     }
@@ -169,24 +176,32 @@ class ContaAzulIntegracaoController extends Controller
         }
 
         $perPage = max(1, min((int) $request->query('per_page', 10), 100));
-        $q = ContaAzulSyncLog::query()->orderByDesc('id');
+        $q = AuditoriaLog::query()
+            ->where('modulo', 'conta_azul')
+            ->where(function ($query) {
+                $query->where('source_kind', 'sync')
+                    ->orWhere('source_table', 'conta_azul_sync_logs');
+            })
+            ->orderByDesc('occurred_at')
+            ->orderByDesc('id');
+
         if ($request->filled('loja_id')) {
-            $q->where('loja_id', (int) $request->query('loja_id'));
+            $q->where('context_json->loja_id', (int) $request->query('loja_id'));
         }
         if ($request->filled('status')) {
             $q->where('status', (string) $request->query('status'));
         }
         if ($request->filled('tipo_entidade')) {
-            $q->where('tipo_entidade', (string) $request->query('tipo_entidade'));
+            $q->where('entity_type', (string) $request->query('tipo_entidade'));
         }
         if ($request->filled('direcao')) {
-            $q->where('direcao', (string) $request->query('direcao'));
+            $q->where('acao', (string) $request->query('direcao'));
         }
 
         $page = $q->paginate($perPage);
 
         return response()->json([
-            'data' => collect($page->items())->values(),
+            'data' => collect($page->items())->map(fn (AuditoriaLog $log) => $this->formatSyncLog($log))->values(),
             'meta' => $this->paginationMeta($page),
         ]);
     }
@@ -197,8 +212,14 @@ class ContaAzulIntegracaoController extends Controller
             return $response;
         }
 
-        $batch = ContaAzulImportBatch::query()
-            ->when($request->filled('loja_id'), fn ($q) => $q->where('loja_id', (int) $request->query('loja_id')))
+        $batch = AuditoriaLog::query()
+            ->where('modulo', 'conta_azul')
+            ->where('acao', 'import_batch')
+            ->where(function ($query) {
+                $query->where('source_kind', 'import_run')
+                    ->orWhere('source_table', 'conta_azul_import_batches');
+            })
+            ->when($request->filled('loja_id'), fn ($q) => $q->where('context_json->loja_id', (int) $request->query('loja_id')))
             ->findOrFail($id);
 
         return response()->json([
@@ -541,19 +562,33 @@ class ContaAzulIntegracaoController extends Controller
     /**
      * @return array<string, mixed>
      */
-    private function formatBatch(ContaAzulImportBatch $batch): array
+    private function formatBatch(AuditoriaLog $batch): array
     {
-        $data = $batch->toArray();
+        $context = $batch->context_json ?? [];
+        $iniciadoEm = data_get($context, 'iniciado_em') ?: optional($batch->occurred_at)->toISOString();
+        $finalizadoEm = data_get($context, 'finalizado_em');
         $seconds = null;
-        if ($batch->iniciado_em && $batch->finalizado_em) {
-            $seconds = max(0, $batch->iniciado_em->diffInSeconds($batch->finalizado_em));
+        if ($iniciadoEm && $finalizadoEm) {
+            $seconds = max(0, \Carbon\Carbon::parse($iniciadoEm)->diffInSeconds(\Carbon\Carbon::parse($finalizadoEm)));
         }
 
-        return $data + [
+        return [
+            'id' => (int) $batch->id,
+            'legacy_id' => $batch->source_table === 'conta_azul_import_batches' ? $batch->source_id : null,
+            'loja_id' => data_get($context, 'loja_id'),
+            'conexao_id' => data_get($context, 'conexao_id'),
+            'tipo_entidade' => data_get($context, 'tipo_entidade'),
+            'status' => $batch->status,
+            'parametros_json' => data_get($context, 'parametros_json') ?? data_get($context, 'parametros'),
+            'total_lidos' => (int) data_get($context, 'total_lidos', 0),
+            'total_conciliados' => (int) data_get($context, 'total_conciliados', 0),
+            'total_pendentes' => (int) data_get($context, 'total_pendentes', 0),
+            'total_falhas' => (int) data_get($context, 'total_falhas', 0),
+            'iniciado_em' => $iniciadoEm,
+            'finalizado_em' => $finalizadoEm,
+            'resumo_json' => data_get($context, 'resumo_json') ?? data_get($context, 'resumo'),
             'duracao_segundos' => $seconds,
             'duracao_label' => $this->durationLabel($seconds),
-            'total_falhas' => (int) ($batch->total_falhas ?? 0),
-            'total_pendentes' => (int) ($batch->total_pendentes ?? 0),
         ];
     }
 
@@ -576,7 +611,7 @@ class ContaAzulIntegracaoController extends Controller
     /**
      * @return array<int, array<string, mixed>>
      */
-    private function registrosDoBatch(ContaAzulImportBatch $batch): array
+    private function registrosDoBatch(AuditoriaLog $batch): array
     {
         $tables = [
             ContaAzulEntityType::PESSOA => 'stg_conta_azul_pessoas',
@@ -594,19 +629,28 @@ class ContaAzulIntegracaoController extends Controller
             ContaAzulEntityType::FORMA_PAGAMENTO => 'stg_conta_azul_formas_pagamento',
         ];
 
-        $table = $tables[$batch->tipo_entidade] ?? null;
+        $tipoEntidade = (string) data_get($batch->context_json ?? [], 'tipo_entidade');
+        $table = $tables[$tipoEntidade] ?? null;
         if (!$table) {
             return [];
         }
 
-        return DB::table($table)
-            ->where('batch_id', $batch->id)
+        $query = DB::table($table);
+        if (\Illuminate\Support\Facades\Schema::hasColumn($table, 'auditoria_log_id')) {
+            $query->where('auditoria_log_id', $batch->id);
+        } elseif (\Illuminate\Support\Facades\Schema::hasColumn($table, 'import_run_uid') && $batch->source_uid) {
+            $query->where('import_run_uid', $batch->source_uid);
+        } else {
+            return [];
+        }
+
+        return $query
             ->orderBy('id')
             ->limit(100)
             ->get()
             ->map(fn ($row) => [
                 'id' => (int) $row->id,
-                'entidade' => $batch->tipo_entidade,
+                'entidade' => $tipoEntidade,
                 'identificador_externo' => (string) $row->identificador_externo,
                 'status_conciliacao' => (string) $row->status_conciliacao,
                 'observacao_conciliacao' => $row->observacao_conciliacao,
@@ -887,6 +931,32 @@ class ContaAzulIntegracaoController extends Controller
             fn ($part) => is_scalar($part) ? trim((string) $part) : '',
             $parts
         ))));
+    }
+
+    /**
+     * @return array<string,mixed>
+     */
+    private function formatSyncLog(AuditoriaLog $log): array
+    {
+        $context = $log->context_json ?? [];
+
+        return [
+            'id' => (int) ($log->source_id ?: $log->id),
+            'loja_id' => data_get($context, 'loja_id'),
+            'tipo_entidade' => $log->entity_type ?: data_get($context, 'tipo_entidade'),
+            'id_local' => $log->entity_id ?: data_get($context, 'id_local'),
+            'id_externo' => data_get($context, 'id_externo'),
+            'direcao' => $log->acao,
+            'status' => $log->status,
+            'tentativa' => data_get($context, 'tentativa', 1),
+            'payload_resumo' => data_get($context, 'payload_resumo'),
+            'resposta_resumo' => data_get($context, 'resposta_resumo') ?: $log->message,
+            'erro_codigo' => data_get($context, 'erro_codigo'),
+            'erro_mensagem' => data_get($context, 'erro_mensagem'),
+            'executado_em' => optional($log->occurred_at)->toISOString(),
+            'created_at' => optional($log->created_at)->toISOString(),
+            'updated_at' => optional($log->updated_at)->toISOString(),
+        ];
     }
 
     private function lojaId(Request $request): ?int

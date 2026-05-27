@@ -8,7 +8,7 @@ use App\Enums\AssistenciaStatus;
 use App\Enums\PrioridadeChamado;
 use App\Models\Assistencia;
 use App\Models\AssistenciaChamado;
-use App\Models\AssistenciaChamadoLog;
+use App\Services\AuditoriaLogService;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 
@@ -179,14 +179,32 @@ class AssistenciaChamadoService
      */
     private function log(int $chamadoId, ?string $statusDe, ?string $statusPara, string $mensagem, array $meta = []): void
     {
-        AssistenciaChamadoLog::query()->create([
-            'chamado_id'  => $chamadoId,
-            'item_id'     => null,
-            'status_de'   => $statusDe,
-            'status_para' => $statusPara,
-            'mensagem'    => $mensagem,
-            'meta_json'   => $meta,
-            'usuario_id'  => $meta['usuario_id'] ?? null,
-        ]);
+        app(AuditoriaLogService::class)->registrar([
+            'occurred_at' => now(),
+            'tipo' => 'evento',
+            'categoria' => 'negocio',
+            'modulo' => 'assistencias',
+            'acao' => 'status',
+            'status' => $statusPara,
+            'label' => 'Log de assistencia',
+            'message' => $mensagem,
+            'actor_id' => $meta['usuario_id'] ?? null,
+            'entity_type' => AssistenciaChamado::class,
+            'entity_id' => $chamadoId,
+            'context_json' => [
+                'item_id' => null,
+                'status_de' => $statusDe,
+                'status_para' => $statusPara,
+                'meta' => $meta,
+            ],
+            'source_system' => 'estoque',
+            'source_kind' => 'business_event',
+            'retention_days' => 365,
+        ], [[
+            'campo' => 'status',
+            'old' => $statusDe,
+            'new' => $statusPara,
+            'value_type' => 'string',
+        ]]);
     }
 }

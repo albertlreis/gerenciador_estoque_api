@@ -3,12 +3,12 @@
 namespace App\Integrations\ContaAzul\Services;
 
 use App\Integrations\ContaAzul\ContaAzulEntityType;
-use App\Integrations\ContaAzul\Models\ContaAzulSyncLog;
 use App\Jobs\ContaAzul\ExportBaixaContaAzulJob;
 use App\Jobs\ContaAzul\ExportClienteContaAzulJob;
 use App\Jobs\ContaAzul\ExportPedidoContaAzulJob;
 use App\Jobs\ContaAzul\ExportProdutoContaAzulJob;
 use App\Jobs\ContaAzul\ExportTituloContaAzulJob;
+use App\Services\AuditoriaLogService;
 
 class ContaAzulExportDispatchService
 {
@@ -139,19 +139,35 @@ class ContaAzulExportDispatchService
         ?string $mensagem,
         array $contexto
     ): void {
-        ContaAzulSyncLog::create([
-            'loja_id' => $lojaId,
-            'tipo_entidade' => $tipoEntidade,
-            'id_local' => $idLocal,
-            'id_externo' => null,
-            'direcao' => 'export',
+        $payloadResumo = json_encode(array_merge(['origem' => 'disparo_automatico'], $contexto), JSON_UNESCAPED_UNICODE);
+
+        app(AuditoriaLogService::class)->registrar([
+            'occurred_at' => now(),
+            'tipo' => 'integracao',
+            'categoria' => 'integracao',
+            'nivel' => $status === 'falha' ? 'error' : 'info',
+            'modulo' => 'conta_azul',
+            'acao' => 'export',
             'status' => $status,
-            'tentativa' => 1,
-            'payload_resumo' => json_encode(array_merge(['origem' => 'disparo_automatico'], $contexto), JSON_UNESCAPED_UNICODE),
-            'resposta_resumo' => $mensagem,
-            'erro_codigo' => null,
-            'erro_mensagem' => $mensagem,
-            'executado_em' => now(),
+            'label' => 'Log de sincronizacao Conta Azul',
+            'message' => $mensagem,
+            'entity_type' => $tipoEntidade,
+            'entity_id' => $idLocal,
+            'context_json' => [
+                'loja_id' => $lojaId,
+                'tipo_entidade' => $tipoEntidade,
+                'id_local' => $idLocal,
+                'id_externo' => null,
+                'direcao' => 'export',
+                'tentativa' => 1,
+                'payload_resumo' => $payloadResumo,
+                'resposta_resumo' => $mensagem,
+                'erro_codigo' => null,
+                'erro_mensagem' => $mensagem,
+            ],
+            'source_system' => 'estoque',
+            'source_kind' => 'sync',
+            'retention_days' => 365,
         ]);
     }
 }

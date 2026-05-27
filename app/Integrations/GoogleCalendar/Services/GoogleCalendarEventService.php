@@ -6,7 +6,7 @@ use App\Integrations\GoogleCalendar\Clients\GoogleCalendarClient;
 use App\Integrations\GoogleCalendar\Exceptions\GoogleCalendarException;
 use App\Integrations\GoogleCalendar\Models\GoogleCalendarCalendar;
 use App\Integrations\GoogleCalendar\Models\GoogleCalendarConexao;
-use App\Integrations\GoogleCalendar\Models\GoogleCalendarLog;
+use App\Services\AuditoriaLogService;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
@@ -439,18 +439,34 @@ class GoogleCalendarEventService
         mixed $response,
         ?GoogleCalendarException $exception = null
     ): void {
-        GoogleCalendarLog::create([
-            'conexao_id' => $conexao->id,
-            'usuario_id' => $usuarioId,
-            'calendar_id' => $calendarId,
-            'event_id' => $eventId,
+        $requestResumo = $this->summarize($request);
+        $responseResumo = $this->summarize($response);
+
+        app(AuditoriaLogService::class)->registrar([
+            'occurred_at' => now(),
+            'tipo' => 'integracao',
+            'categoria' => 'integracao',
+            'nivel' => $status === 'erro' ? 'error' : 'info',
+            'modulo' => 'google_calendar',
             'acao' => $action,
             'status' => $status,
-            'request_resumo' => $this->summarize($request),
-            'response_resumo' => $this->summarize($response),
-            'erro_codigo' => $exception?->reason,
-            'erro_mensagem' => $exception?->getMessage(),
-            'executado_em' => now(),
+            'label' => 'Log Google Agenda',
+            'message' => $exception?->getMessage() ?: $responseResumo,
+            'actor_id' => $usuarioId,
+            'entity_type' => 'google_calendar_event',
+            'entity_id' => $eventId,
+            'context_json' => [
+                'conexao_id' => $conexao->id,
+                'calendar_id' => $calendarId,
+                'event_id' => $eventId,
+                'request_resumo' => $requestResumo,
+                'response_resumo' => $responseResumo,
+                'erro_codigo' => $exception?->reason,
+                'erro_mensagem' => $exception?->getMessage(),
+            ],
+            'source_system' => 'estoque',
+            'source_kind' => 'sync',
+            'retention_days' => 365,
         ]);
     }
 

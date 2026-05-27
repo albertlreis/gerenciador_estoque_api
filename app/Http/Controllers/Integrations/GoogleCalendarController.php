@@ -6,9 +6,9 @@ use App\Helpers\AuthHelper;
 use App\Http\Controllers\Controller;
 use App\Integrations\GoogleCalendar\Exceptions\GoogleCalendarException;
 use App\Integrations\GoogleCalendar\Models\GoogleCalendarCalendar;
-use App\Integrations\GoogleCalendar\Models\GoogleCalendarLog;
 use App\Integrations\GoogleCalendar\Services\GoogleCalendarConnectionService;
 use App\Integrations\GoogleCalendar\Services\GoogleCalendarEventService;
+use App\Models\AuditoriaLog;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -220,18 +220,46 @@ class GoogleCalendarController extends Controller
         }
 
         $perPage = max(1, min((int) $request->query('per_page', 25), 100));
-        $page = GoogleCalendarLog::query()
+        $page = AuditoriaLog::query()
+            ->where('modulo', 'google_calendar')
+            ->where('source_table', 'google_calendar_logs')
+            ->orderByDesc('occurred_at')
             ->orderByDesc('id')
             ->paginate($perPage);
 
         return response()->json([
-            'data' => collect($page->items())->values(),
+            'data' => collect($page->items())->map(fn (AuditoriaLog $log) => $this->formatGoogleLog($log))->values(),
             'meta' => [
                 'total' => (int) $page->total(),
                 'page' => (int) $page->currentPage(),
                 'per_page' => (int) $page->perPage(),
             ],
         ]);
+    }
+
+    /**
+     * @return array<string,mixed>
+     */
+    private function formatGoogleLog(AuditoriaLog $log): array
+    {
+        $context = $log->context_json ?? [];
+
+        return [
+            'id' => (int) ($log->source_id ?: $log->id),
+            'conexao_id' => data_get($context, 'conexao_id'),
+            'usuario_id' => $log->actor_id ?: data_get($context, 'usuario_id'),
+            'calendar_id' => data_get($context, 'calendar_id'),
+            'event_id' => $log->entity_id ?: data_get($context, 'event_id'),
+            'acao' => $log->acao,
+            'status' => $log->status,
+            'request_resumo' => data_get($context, 'request_resumo'),
+            'response_resumo' => data_get($context, 'response_resumo') ?: $log->message,
+            'erro_codigo' => data_get($context, 'erro_codigo'),
+            'erro_mensagem' => data_get($context, 'erro_mensagem'),
+            'executado_em' => optional($log->occurred_at)->toISOString(),
+            'created_at' => optional($log->created_at)->toISOString(),
+            'updated_at' => optional($log->updated_at)->toISOString(),
+        ];
     }
 
     private function setCalendarEnabled(string $calendarId, bool $enabled): JsonResponse

@@ -5,20 +5,20 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-class AuditoriaMudanca extends Model
+class AuditoriaLogMudanca extends Model
 {
-    protected $table = 'auditoria_mudancas';
+    protected $table = 'auditoria_log_mudancas';
 
     protected $fillable = [
-        'evento_id',
+        'auditoria_log_id',
         'campo',
         'old_value',
         'new_value',
         'value_type',
     ];
 
-    public function evento(): BelongsTo
+    public function log(): BelongsTo
     {
-        return $this->belongsTo(AuditoriaEvento::class, 'evento_id');
+        return $this->belongsTo(AuditoriaLog::class, 'auditoria_log_id');
     }
 }

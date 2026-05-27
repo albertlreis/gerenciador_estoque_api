@@ -24,11 +24,13 @@ class ContaAzulExportDispatchServiceTest extends TestCase
         $service->cliente(10, null, ['evento' => 'teste_sem_conexao']);
 
         Queue::assertNothingPushed();
-        $this->assertDatabaseHas('conta_azul_sync_logs', [
-            'tipo_entidade' => 'pessoa',
-            'id_local' => 10,
+        $this->assertDatabaseHas('auditoria_logs', [
+            'modulo' => 'conta_azul',
+            'acao' => 'export',
+            'entity_type' => 'pessoa',
+            'entity_id' => '10',
             'status' => 'ignorado',
-            'direcao' => 'export',
+            'source_kind' => 'sync',
         ]);
     }
 
@@ -52,11 +54,13 @@ class ContaAzulExportDispatchServiceTest extends TestCase
         $service->cliente(11, null, ['evento' => 'teste_conexao_inativa']);
 
         Queue::assertNothingPushed();
-        $this->assertDatabaseHas('conta_azul_sync_logs', [
-            'tipo_entidade' => 'pessoa',
-            'id_local' => 11,
+        $this->assertDatabaseHas('auditoria_logs', [
+            'modulo' => 'conta_azul',
+            'acao' => 'export',
+            'entity_type' => 'pessoa',
+            'entity_id' => '11',
             'status' => 'ignorado',
-            'direcao' => 'export',
+            'source_kind' => 'sync',
         ]);
     }
 
@@ -83,11 +87,13 @@ class ContaAzulExportDispatchServiceTest extends TestCase
             return $job->clienteId === 22;
         });
 
-        $this->assertDatabaseHas('conta_azul_sync_logs', [
-            'tipo_entidade' => 'pessoa',
-            'id_local' => 22,
+        $this->assertDatabaseHas('auditoria_logs', [
+            'modulo' => 'conta_azul',
+            'acao' => 'export',
+            'entity_type' => 'pessoa',
+            'entity_id' => '22',
             'status' => 'enfileirado',
-            'direcao' => 'export',
+            'source_kind' => 'sync',
         ]);
     }
 }

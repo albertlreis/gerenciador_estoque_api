@@ -12,13 +12,13 @@ use App\Integrations\ContaAzul\Mappers\ContaAzulProdutoMapper;
 use App\Integrations\ContaAzul\Mappers\ContaAzulTituloMapper;
 use App\Integrations\ContaAzul\Models\ContaAzulConexao;
 use App\Integrations\ContaAzul\Models\ContaAzulMapeamento;
-use App\Integrations\ContaAzul\Models\ContaAzulSyncLog;
 use App\Models\Cliente;
 use App\Models\ContaReceber;
 use App\Models\ContaReceberPagamento;
 use App\Models\Pedido;
 use App\Models\Produto;
 use App\Models\ProdutoVariacao;
+use App\Services\AuditoriaLogService;
 
 class ExportacaoContaAzulService
 {
@@ -156,19 +156,37 @@ class ExportacaoContaAzulService
         $ok = $res['status'] >= 200 && $res['status'] < 300;
         $json = is_array($res['json']) ? $res['json'] : [];
 
-        ContaAzulSyncLog::create([
-            'loja_id' => $lojaId,
-            'tipo_entidade' => $tipoEntidade,
-            'id_local' => $idLocal,
-            'id_externo' => $existing?->id_externo,
-            'direcao' => 'export',
+        $payloadResumo = json_encode(['method' => $method, 'path' => $uri], JSON_UNESCAPED_UNICODE);
+        $respostaResumo = isset($res['body']) ? mb_substr((string) $res['body'], 0, 2000) : null;
+        $erroMensagem = $ok ? null : 'HTTP ' . $res['status'];
+
+        app(AuditoriaLogService::class)->registrar([
+            'occurred_at' => now(),
+            'tipo' => 'integracao',
+            'categoria' => 'integracao',
+            'nivel' => $ok ? 'info' : 'error',
+            'modulo' => 'conta_azul',
+            'acao' => 'export',
             'status' => $ok ? 'sucesso' : 'falha',
-            'tentativa' => 1,
-            'payload_resumo' => json_encode(['method' => $method, 'path' => $uri], JSON_UNESCAPED_UNICODE),
-            'resposta_resumo' => isset($res['body']) ? mb_substr((string) $res['body'], 0, 2000) : null,
-            'erro_codigo' => $ok ? null : (string) $res['status'],
-            'erro_mensagem' => $ok ? null : 'HTTP ' . $res['status'],
-            'executado_em' => now(),
+            'label' => 'Log de sincronizacao Conta Azul',
+            'message' => $erroMensagem ?: $respostaResumo,
+            'entity_type' => $tipoEntidade,
+            'entity_id' => $idLocal,
+            'context_json' => [
+                'loja_id' => $lojaId,
+                'tipo_entidade' => $tipoEntidade,
+                'id_local' => $idLocal,
+                'id_externo' => $existing?->id_externo,
+                'direcao' => 'export',
+                'tentativa' => 1,
+                'payload_resumo' => $payloadResumo,
+                'resposta_resumo' => $respostaResumo,
+                'erro_codigo' => $ok ? null : (string) $res['status'],
+                'erro_mensagem' => $erroMensagem,
+            ],
+            'source_system' => 'estoque',
+            'source_kind' => 'sync',
+            'retention_days' => 365,
         ]);
 
         if (!$ok) {

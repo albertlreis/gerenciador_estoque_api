@@ -2,7 +2,6 @@
 
 namespace App\Services;
 
-use App\Models\FinanceiroAuditoria;
 use Illuminate\Database\Eloquent\Model;
 
 class FinanceiroAuditoriaService
@@ -20,15 +19,26 @@ class FinanceiroAuditoriaService
             $ua = $req?->userAgent();
         }
 
-        FinanceiroAuditoria::create([
-            'acao'          => $acao,
-            'entidade_type' => get_class($entidade),
-            'entidade_id'   => (int) $entidade->getKey(),
-            'antes_json'    => $this->truncateJson($antes),
-            'depois_json'   => $this->truncateJson($depois),
-            'usuario_id'    => $usuarioId,
-            'ip'            => $ip,
-            'user_agent'    => $ua ? substr($ua, 0, 2000) : null,
+        app(AuditoriaLogService::class)->registrar([
+            'occurred_at' => now(),
+            'tipo' => 'auditoria',
+            'categoria' => 'negocio',
+            'modulo' => 'financeiro',
+            'acao' => $acao,
+            'label' => 'Auditoria financeira',
+            'message' => "Financeiro: {$acao}",
+            'actor_id' => $usuarioId,
+            'entity_type' => get_class($entidade),
+            'entity_id' => (int) $entidade->getKey(),
+            'ip' => $ip,
+            'user_agent' => $ua,
+            'context_json' => [
+                'antes' => $this->truncateJson($antes),
+                'depois' => $this->truncateJson($depois),
+            ],
+            'source_system' => 'estoque',
+            'source_kind' => 'business_event',
+            'retention_days' => 365,
         ]);
     }
 

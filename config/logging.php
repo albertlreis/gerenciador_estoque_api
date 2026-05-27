@@ -61,6 +61,7 @@ return [
             'driver' => 'single',
             'path' => storage_path('logs/laravel.log'),
             'level' => env('LOG_LEVEL', 'debug'),
+            'tap' => [App\Logging\AuditoriaLogTap::class],
         ],
 
         'daily' => [
@@ -68,6 +69,7 @@ return [
             'path' => storage_path('logs/laravel.log'),
             'level' => 'debug',
             'days' => 14,
+            'tap' => [App\Logging\AuditoriaLogTap::class],
         ],
 
         'slack' => [
@@ -83,6 +85,7 @@ return [
             'path' => storage_path('logs/estoque.log'),
             'level' => 'info',
             'days' => 30,
+            'tap' => [App\Logging\AuditoriaLogTap::class],
         ],
 
         'errors' => [
@@ -90,6 +93,7 @@ return [
             'path' => storage_path('logs/errors.log'),
             'level' => 'error',
             'days' => 14,
+            'tap' => [App\Logging\AuditoriaLogTap::class],
         ],
 
         'papertrail' => [

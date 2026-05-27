@@ -7,7 +7,8 @@ use App\Integrations\ContaAzul\ContaAzulEntityType;
 use App\Integrations\ContaAzul\Exceptions\ContaAzulException;
 use App\Integrations\ContaAzul\Import\ContaAzulImportAdapter;
 use App\Integrations\ContaAzul\Models\ContaAzulConexao;
-use App\Integrations\ContaAzul\Models\ContaAzulImportBatch;
+use App\Models\AuditoriaLog;
+use App\Services\AuditoriaLogService;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -61,14 +62,7 @@ class ImportacaoContaAzulService
         $adapter = $this->adapterFor($tipoEntidade);
         $pageSize = (int) ($this->config['pagination']['page_size'] ?? 50);
 
-        $batch = ContaAzulImportBatch::create([
-            'loja_id' => $lojaId,
-            'conexao_id' => $conexao->id,
-            'tipo_entidade' => $tipoEntidade,
-            'status' => 'executando',
-            'parametros_json' => ['adapter' => get_class($adapter)],
-            'iniciado_em' => now(),
-        ]);
+        $batch = $this->startBatch($conexao, $tipoEntidade, ['adapter' => get_class($adapter), 'loja_id' => $lojaId]);
 
         $token = $this->connections->getValidAccessToken($conexao);
         $lidos = 0;
@@ -107,40 +101,7 @@ class ImportacaoContaAzulService
                         continue;
                     }
 
-                    $hash = hash('sha256', json_encode($item, JSON_UNESCAPED_UNICODE));
-
-                    DB::table($adapter->stagingTable())->upsert(
-                        [[
-                            'loja_id' => $lojaId,
-                            'identificador_externo' => $extId,
-                            'payload_json' => json_encode($item, JSON_UNESCAPED_UNICODE),
-                            'hash_payload' => $hash,
-                            'batch_id' => $batch->id,
-                            'status_conciliacao' => 'novo',
-                            'observacao_conciliacao' => null,
-                            'candidato_id_local' => null,
-                            'candidato_score' => null,
-                            'candidato_motivo' => null,
-                            'candidato_json' => null,
-                            'conciliacao_origem' => null,
-                            'created_at' => now(),
-                            'updated_at' => now(),
-                        ]],
-                        ['loja_id', 'identificador_externo'],
-                        [
-                            'payload_json',
-                            'hash_payload',
-                            'batch_id',
-                            'status_conciliacao',
-                            'observacao_conciliacao',
-                            'candidato_id_local',
-                            'candidato_score',
-                            'candidato_motivo',
-                            'candidato_json',
-                            'conciliacao_origem',
-                            'updated_at',
-                        ]
-                    );
+                    $this->upsertStagingRow($adapter->stagingTable(), $lojaId, $extId, $item, $batch);
 
                     $lidos++;
                 }
@@ -157,20 +118,9 @@ class ImportacaoContaAzulService
                 $pagina++;
             }
 
-            $batch->update([
-                'status' => 'concluido',
-                'total_lidos' => $lidos,
-                'finalizado_em' => now(),
-                'resumo_json' => ['lidos' => $lidos],
-            ]);
-
-            return ['batch_id' => (int) $batch->id, 'lidos' => $lidos];
+            return $this->finishBatch($batch, $lidos);
         } catch (\Throwable $e) {
-            $batch->update([
-                'status' => 'falhou',
-                'finalizado_em' => now(),
-                'resumo_json' => ['erro' => $e->getMessage()],
-            ]);
+            $this->failBatch($batch, $e);
 
             throw $e;
         }
@@ -355,19 +305,10 @@ class ImportacaoContaAzulService
                 }
             }
 
-            $batch->update([
-                'status' => 'concluido',
-                'total_lidos' => $lidos,
-                'total_falhas' => count($falhas),
-                'finalizado_em' => now(),
-                'resumo_json' => [
-                    'lidos' => $lidos,
-                    'falhas' => count($falhas),
-                    'falhas_exemplos' => array_slice($falhas, 0, 20),
-                ],
+            return $this->finishBatch($batch, $lidos, [
+                'falhas' => count($falhas),
+                'falhas_exemplos' => array_slice($falhas, 0, 20),
             ]);
-
-            return ['batch_id' => (int) $batch->id, 'lidos' => $lidos];
         } catch (\Throwable $e) {
             $this->failBatch($batch, $e);
             throw $e;
@@ -476,80 +417,147 @@ class ImportacaoContaAzulService
     /**
      * @param  array<string, mixed>  $params
      */
-    private function startBatch(ContaAzulConexao $conexao, string $tipoEntidade, array $params): ContaAzulImportBatch
+    private function startBatch(ContaAzulConexao $conexao, string $tipoEntidade, array $params): AuditoriaLog
     {
-        return ContaAzulImportBatch::create([
+        $context = [
             'loja_id' => $params['loja_id'] ?? null,
             'conexao_id' => $conexao->id,
             'tipo_entidade' => $tipoEntidade,
             'status' => 'executando',
             'parametros_json' => $params,
-            'iniciado_em' => now(),
-        ]);
+            'total_lidos' => 0,
+            'total_conciliados' => 0,
+            'total_pendentes' => 0,
+            'total_falhas' => 0,
+            'iniciado_em' => now()->toISOString(),
+            'finalizado_em' => null,
+            'resumo_json' => null,
+        ];
+
+        return $this->persistBatchLog(null, $context);
     }
 
     /**
      * @return array{batch_id:int, lidos:int}
      */
-    private function finishBatch(ContaAzulImportBatch $batch, int $lidos): array
+    private function finishBatch(AuditoriaLog $batch, int $lidos, array $extraResumo = []): array
     {
-        $batch->update([
-            'status' => 'concluido',
-            'total_lidos' => $lidos,
-            'finalizado_em' => now(),
-            'resumo_json' => ['lidos' => $lidos],
-        ]);
+        $context = $this->batchContext($batch);
+        $falhas = (int) ($extraResumo['falhas'] ?? 0);
+        $context['status'] = 'concluido';
+        $context['total_lidos'] = $lidos;
+        $context['total_falhas'] = $falhas;
+        $context['finalizado_em'] = now()->toISOString();
+        $context['resumo_json'] = array_merge(['lidos' => $lidos], $extraResumo);
+        $batch = $this->persistBatchLog($batch, $context);
 
         return ['batch_id' => (int) $batch->id, 'lidos' => $lidos];
     }
 
-    private function failBatch(ContaAzulImportBatch $batch, \Throwable $e): void
+    private function failBatch(AuditoriaLog $batch, \Throwable $e): void
     {
-        $batch->update([
-            'status' => 'falhou',
-            'finalizado_em' => now(),
-            'resumo_json' => ['erro' => $e->getMessage()],
-        ]);
+        $context = $this->batchContext($batch);
+        $context['status'] = 'falhou';
+        $context['finalizado_em'] = now()->toISOString();
+        $context['resumo_json'] = ['erro' => $e->getMessage()];
+        $this->persistBatchLog($batch, $context);
     }
 
     /**
      * @param  array<string, mixed>  $payload
      */
-    private function upsertStagingRow(string $table, ?int $lojaId, string $externalId, array $payload, ContaAzulImportBatch $batch): void
+    private function upsertStagingRow(string $table, ?int $lojaId, string $externalId, array $payload, AuditoriaLog $batch): void
     {
         $json = json_encode($payload, JSON_UNESCAPED_UNICODE);
+        $row = [
+            'loja_id' => $lojaId,
+            'identificador_externo' => $externalId,
+            'payload_json' => $json,
+            'hash_payload' => hash('sha256', (string) $json),
+            'status_conciliacao' => 'novo',
+            'observacao_conciliacao' => null,
+            'candidato_id_local' => null,
+            'candidato_score' => null,
+            'candidato_motivo' => null,
+            'candidato_json' => null,
+            'conciliacao_origem' => null,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ];
+        $updateColumns = [
+            'payload_json',
+            'hash_payload',
+            'status_conciliacao',
+            'observacao_conciliacao',
+            'candidato_id_local',
+            'candidato_score',
+            'candidato_motivo',
+            'candidato_json',
+            'conciliacao_origem',
+            'updated_at',
+        ];
+
+        if (Schema::hasColumn($table, 'auditoria_log_id')) {
+            $row['auditoria_log_id'] = $batch->id;
+            $updateColumns[] = 'auditoria_log_id';
+        }
+
+        if (Schema::hasColumn($table, 'import_run_uid')) {
+            $row['import_run_uid'] = $batch->source_uid;
+            $updateColumns[] = 'import_run_uid';
+        }
+
         DB::table($table)->upsert(
-            [[
-                'loja_id' => $lojaId,
-                'identificador_externo' => $externalId,
-                'payload_json' => $json,
-                'hash_payload' => hash('sha256', (string) $json),
-                'batch_id' => $batch->id,
-                'status_conciliacao' => 'novo',
-                'observacao_conciliacao' => null,
-                'candidato_id_local' => null,
-                'candidato_score' => null,
-                'candidato_motivo' => null,
-                'candidato_json' => null,
-                'conciliacao_origem' => null,
-                'created_at' => now(),
-                'updated_at' => now(),
-            ]],
+            [$row],
             ['loja_id', 'identificador_externo'],
-            [
-                'payload_json',
-                'hash_payload',
-                'batch_id',
-                'status_conciliacao',
-                'observacao_conciliacao',
-                'candidato_id_local',
-                'candidato_score',
-                'candidato_motivo',
-                'candidato_json',
-                'conciliacao_origem',
-                'updated_at',
-            ]
+            $updateColumns
         );
+    }
+
+    /**
+     * @param array<string, mixed> $context
+     */
+    private function persistBatchLog(?AuditoriaLog $batch, array $context): AuditoriaLog
+    {
+        $sourceUid = $batch?->source_uid
+            ?: AuditoriaLogService::sourceUid('estoque', 'import_run', 'conta_azul_import_run', (string) Str::uuid());
+        $status = (string) ($context['status'] ?? 'executando');
+        $tipoEntidade = (string) ($context['tipo_entidade'] ?? '');
+        $finalizadoEm = $context['finalizado_em'] ?? null;
+        $iniciadoEm = $context['iniciado_em'] ?? now();
+        $totalLidos = (int) ($context['total_lidos'] ?? 0);
+
+        $log = app(AuditoriaLogService::class)->registrar([
+            'occurred_at' => $finalizadoEm ?: $iniciadoEm,
+            'tipo' => 'integracao',
+            'categoria' => 'integracao',
+            'nivel' => $status === 'falhou' ? 'error' : 'info',
+            'modulo' => 'conta_azul',
+            'acao' => 'import_batch',
+            'status' => $status,
+            'label' => 'Batch de importacao Conta Azul',
+            'message' => "Importacao Conta Azul {$tipoEntidade}: {$status} ({$totalLidos} lidos)",
+            'context_json' => $context,
+            'source_system' => 'estoque',
+            'source_kind' => 'import_run',
+            'source_uid' => $sourceUid,
+            'retention_days' => 365,
+            'replace_existing' => true,
+        ]);
+
+        if (!$log) {
+            throw new ContaAzulException('Tabela de auditoria indisponivel para registrar a importacao Conta Azul.');
+        }
+
+        return $log;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function batchContext(AuditoriaLog $batch): array
+    {
+        return is_array($batch->context_json) ? $batch->context_json : [];
     }
 
     /**
@@ -677,26 +685,34 @@ class ImportacaoContaAzulService
             return false;
         }
 
-        $ultimaParcela = ContaAzulImportBatch::query()
-            ->where('tipo_entidade', ContaAzulEntityType::PARCELA)
-            ->where('status', 'concluido')
-            ->when($lojaId !== null, fn ($q) => $q->where('loja_id', $lojaId))
-            ->when($lojaId === null, fn ($q) => $q->whereNull('loja_id'))
-            ->orderByDesc('finalizado_em')
-            ->first();
-
-        if (!$ultimaParcela?->finalizado_em) {
+        $ultimaParcela = $this->latestFinishedImportRun(ContaAzulEntityType::PARCELA, $lojaId);
+        if (!$ultimaParcela?->occurred_at) {
             return true;
         }
 
-        $ultimaFonte = ContaAzulImportBatch::query()
-            ->whereIn('tipo_entidade', [ContaAzulEntityType::TITULO, ContaAzulEntityType::CONTA_PAGAR])
-            ->where('status', 'concluido')
-            ->when($lojaId !== null, fn ($q) => $q->where('loja_id', $lojaId))
-            ->when($lojaId === null, fn ($q) => $q->whereNull('loja_id'))
-            ->max('finalizado_em');
+        $ultimaFonte = collect([ContaAzulEntityType::TITULO, ContaAzulEntityType::CONTA_PAGAR])
+            ->map(fn (string $tipo) => $this->latestFinishedImportRun($tipo, $lojaId)?->occurred_at)
+            ->filter()
+            ->max();
 
-        return $ultimaFonte !== null && $ultimaParcela->finalizado_em->lt($ultimaFonte);
+        return $ultimaFonte !== null && $ultimaParcela->occurred_at->lt($ultimaFonte);
+    }
+
+    private function latestFinishedImportRun(string $tipoEntidade, ?int $lojaId): ?AuditoriaLog
+    {
+        if (!Schema::hasTable('auditoria_logs')) {
+            return null;
+        }
+
+        return AuditoriaLog::query()
+            ->where('modulo', 'conta_azul')
+            ->where('acao', 'import_batch')
+            ->where('status', 'concluido')
+            ->where('context_json->tipo_entidade', $tipoEntidade)
+            ->when($lojaId !== null, fn ($q) => $q->where('context_json->loja_id', $lojaId))
+            ->when($lojaId === null, fn ($q) => $q->whereNull('context_json->loja_id'))
+            ->orderByDesc('occurred_at')
+            ->first();
     }
 
     /**

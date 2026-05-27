@@ -5,6 +5,7 @@ use App\Http\Controllers\Api\V1\DashboardController as DashboardV1Controller;
 
 use App\Http\Controllers\{AreaEstoqueController,
     AniversarioController,
+    AuditoriaLogController,
     AvisoController,
     CarrinhoController,
     CarrinhoItemController,
@@ -90,7 +91,14 @@ Route::middleware(['auth:sanctum', 'senha.nao_obrigatoria'])
         Route::put('configuracoes/{chave}', [ConfiguracaoController::class, 'atualizar']);
 
         Route::get('dashboard/resumo', [DashboardController::class, 'resumo']);
+        Route::prefix('auditoria')->group(function () {
+            Route::get('logs', [AuditoriaLogController::class, 'index']);
+            Route::get('logs/{id}', [AuditoriaLogController::class, 'show'])->whereNumber('id');
+        });
+
         Route::prefix('dashboard')->group(function () {
+            Route::get('admin/preferencias', [DashboardV1Controller::class, 'adminPreferencias']);
+            Route::put('admin/preferencias', [DashboardV1Controller::class, 'atualizarAdminPreferencias']);
             Route::get('admin', [DashboardV1Controller::class, 'admin']);
             Route::get('financeiro', [DashboardV1Controller::class, 'financeiro']);
             Route::get('estoque', [DashboardV1Controller::class, 'estoque']);

@@ -28,6 +28,7 @@ class Kernel extends ConsoleKernel
 
         $schedule->command('conta-azul:refresh-tokens')->hourly()->timezone('America/Belem');
         $schedule->command('conta-azul:reconciliar --todos')->dailyAt('03:15')->timezone('America/Belem');
+        $schedule->command('auditoria:prune')->dailyAt('02:20')->timezone('America/Belem');
     }
 
     /**

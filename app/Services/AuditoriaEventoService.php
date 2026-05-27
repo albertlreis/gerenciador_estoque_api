@@ -2,7 +2,7 @@
 
 namespace App\Services;
 
-use App\Models\AuditoriaEvento;
+use App\Models\AuditoriaLog;
 use Illuminate\Database\Eloquent\Model;
 
 class AuditoriaEventoService
@@ -18,68 +18,32 @@ class AuditoriaEventoService
         ?Model $auditable = null,
         array $mudancas = [],
         array $metadata = []
-    ): AuditoriaEvento {
+    ): ?AuditoriaLog {
         $usuario = auth()->user();
         $request = request();
 
-        $evento = AuditoriaEvento::create([
-            'module' => $module,
-            'action' => $action,
+        return app(AuditoriaLogService::class)->registrar([
+            'occurred_at' => now(),
+            'tipo' => 'auditoria',
+            'categoria' => 'negocio',
+            'modulo' => $module,
+            'acao' => $action,
             'label' => $label,
+            'message' => $label,
             'actor_type' => $usuario ? get_class($usuario) : null,
             'actor_id' => $usuario?->id,
-            'actor_name' => $usuario?->nome ?? $usuario?->name,
-            'auditable_type' => $auditable ? get_class($auditable) : null,
-            'auditable_id' => $auditable?->getKey(),
+            'actor_name' => $usuario?->nome ?? $usuario?->name ?? $usuario?->email,
+            'entity_type' => $auditable ? get_class($auditable) : null,
+            'entity_id' => $auditable?->getKey(),
             'route' => $request?->path(),
             'method' => $request?->method(),
             'ip' => $request?->ip(),
             'user_agent' => $request?->userAgent(),
-            'origin' => 'API',
+            'origem' => 'API',
             'metadata_json' => empty($metadata) ? null : $metadata,
-        ]);
-
-        foreach ($mudancas as $mudanca) {
-            $old = $mudanca['old'] ?? null;
-            $new = $mudanca['new'] ?? null;
-
-            if ($old === $new) {
-                continue;
-            }
-
-            $evento->mudancas()->create([
-                'campo' => $mudanca['campo'],
-                'old_value' => $this->stringify($old),
-                'new_value' => $this->stringify($new),
-                'value_type' => $mudanca['value_type'] ?? $this->inferType($new),
-            ]);
-        }
-
-        return $evento;
-    }
-
-    private function stringify(mixed $value): ?string
-    {
-        if ($value === null) {
-            return null;
-        }
-
-        if (is_scalar($value)) {
-            return (string) $value;
-        }
-
-        return json_encode($value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-    }
-
-    private function inferType(mixed $value): string
-    {
-        return match (true) {
-            is_int($value) => 'int',
-            is_float($value) => 'float',
-            is_bool($value) => 'bool',
-            is_array($value), is_object($value) => 'json',
-            $value === null => 'null',
-            default => 'string',
-        };
+            'source_system' => 'estoque',
+            'source_kind' => 'business_event',
+            'retention_days' => 365,
+        ], $mudancas);
     }
 }

@@ -42,10 +42,12 @@ class AssistenciaRelatorioService
             ]);
 
         // Subquery de conclusão (último log em status final)
-        $subConclusao = DB::table('assistencia_chamado_logs as l')
-            ->selectRaw('l.chamado_id, MAX(l.created_at) as concluido_em')
-            ->whereIn('l.status_para', self::STATUS_FINAIS)
-            ->groupBy('l.chamado_id');
+        $subConclusao = DB::table('auditoria_logs as l')
+            ->selectRaw('l.entity_id as chamado_id, MAX(l.occurred_at) as concluido_em')
+            ->where('l.entity_type', AssistenciaChamado::class)
+            ->where('l.modulo', 'assistencias')
+            ->whereIn('l.status', self::STATUS_FINAIS)
+            ->groupBy('l.entity_id');
 
         $query->leftJoinSub($subConclusao, 'concl', function ($join) {
             $join->on('concl.chamado_id', '=', 'assistencia_chamados.id');

@@ -89,6 +89,30 @@ class EstoqueRepository
             $query->whereHas('produto', fn ($q) => $q->where('id_fornecedor', $filtros->fornecedor));
         }
 
+        if ($filtros->localizacao) {
+            $localizacaoLike = '%' . $this->escapeLike($filtros->localizacao) . '%';
+            $query->whereHas('estoques', function (Builder $estoqueQuery) use ($filtros, $localizacaoLike) {
+                if ($filtros->deposito) {
+                    $estoqueQuery->where('id_deposito', $filtros->deposito);
+                }
+
+                $estoqueQuery->whereHas('localizacao', function (Builder $localizacaoQuery) use ($localizacaoLike) {
+                    $localizacaoQuery
+                        ->whereRaw("codigo_composto LIKE ? ESCAPE '\\\\'", [$localizacaoLike])
+                        ->orWhereRaw("setor LIKE ? ESCAPE '\\\\'", [$localizacaoLike])
+                        ->orWhereRaw("coluna LIKE ? ESCAPE '\\\\'", [$localizacaoLike])
+                        ->orWhereRaw("nivel LIKE ? ESCAPE '\\\\'", [$localizacaoLike])
+                        ->orWhereRaw("observacoes LIKE ? ESCAPE '\\\\'", [$localizacaoLike])
+                        ->orWhereHas('area', fn (Builder $areaQuery) =>
+                            $areaQuery->whereRaw("nome LIKE ? ESCAPE '\\\\'", [$localizacaoLike])
+                        )
+                        ->orWhereHas('valores', fn (Builder $valorQuery) =>
+                            $valorQuery->whereRaw("valor LIKE ? ESCAPE '\\\\'", [$localizacaoLike])
+                        );
+                });
+            });
+        }
+
         if ($filtros->produto) {
             $term = trim($filtros->produto);
             $termLikeAny = '%' . $this->escapeLike($term) . '%';

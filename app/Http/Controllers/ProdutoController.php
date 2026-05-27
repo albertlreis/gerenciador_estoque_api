@@ -61,7 +61,9 @@ class ProdutoController extends Controller
     public function index(FiltrarProdutosRequest $request): JsonResponse
     {
         $view = $request->get('view', 'completa');
-        $incluirEstoque = in_array($view, ['completa', 'simplificada', 'lista']);
+        $incluirEstoque = in_array($view, ['completa', 'simplificada', 'lista'])
+            || $request->filled('deposito_id')
+            || $request->boolean('com_estoque');
         $request->merge(['incluir_estoque' => $incluirEstoque]);
 
         $produtos = $this->produtoService->listarProdutosFiltrados($request);
@@ -80,12 +82,13 @@ class ProdutoController extends Controller
     public function exportarOutlet(ExportarProdutosOutletRequest $request)
     {
         $start = microtime(true);
-        $ids = $request->validated()['ids'] ?? [];
+        $validated = $request->validated();
+        $ids = $validated['ids'] ?? [];
+        $filters = $validated['filters'] ?? [];
         $format = strtolower((string) $request->input('format', 'csv'));
         $format = in_array($format, ['csv', 'pdf'], true) ? $format : 'csv';
 
-        $produtos = Produto::query()
-            ->whereIn('id', $ids)
+        $produtosQuery = Produto::query()
             ->whereHas('variacoes.outlet')
             ->with([
                 'categoria',
@@ -93,7 +96,34 @@ class ProdutoController extends Controller
                 'variacoes.atributos',
                 'variacoes.imagem',
                 'variacoes.outlets.formasPagamento.formaPagamento',
-            ])
+            ]);
+
+        if (!empty($ids)) {
+            $produtosQuery->whereIn('id', $ids);
+        } else {
+            $categoriaIds = $filters['id_categoria'] ?? [];
+            if (is_array($categoriaIds) && count($categoriaIds) > 0) {
+                $produtosQuery->whereIn('id_categoria', $categoriaIds);
+            }
+
+            $term = trim((string) ($filters['q'] ?? ''));
+            if ($term !== '') {
+                $produtosQuery->where(function ($query) use ($term) {
+                    $like = '%' . str_replace(['\\', '%', '_'], ['\\\\', '\%', '\_'], mb_strtolower($term)) . '%';
+
+                    $query->whereRaw("LOWER(nome) COLLATE utf8mb4_0900_ai_ci LIKE ? ESCAPE '\\\\'", [$like])
+                        ->orWhereRaw("LOWER(codigo_produto) COLLATE utf8mb4_0900_ai_ci LIKE ? ESCAPE '\\\\'", [$like])
+                        ->orWhereHas('variacoes', function ($variacoes) use ($like) {
+                            $variacoes->whereRaw("LOWER(referencia) COLLATE utf8mb4_0900_ai_ci LIKE ? ESCAPE '\\\\'", [$like])
+                                ->orWhereRaw("LOWER(sku_interno) COLLATE utf8mb4_0900_ai_ci LIKE ? ESCAPE '\\\\'", [$like])
+                                ->orWhereRaw("LOWER(chave_variacao) COLLATE utf8mb4_0900_ai_ci LIKE ? ESCAPE '\\\\'", [$like]);
+                        });
+                });
+            }
+        }
+
+        $produtos = $produtosQuery
+            ->limit(2000)
             ->get();
 
         if ($produtos->isEmpty()) {
@@ -571,14 +601,17 @@ class ProdutoController extends Controller
                 ->groupBy('produto_variacoes.produto_id');
 
             $resultado = DB::table('produtos')
+                ->leftJoin('categorias', 'categorias.id', '=', 'produtos.id_categoria')
                 ->joinSub($subquery, 'estoque_total', function ($join) {
                     $join->on('produtos.id', '=', 'estoque_total.produto_id');
                 })
-                ->whereColumn('estoque_total.quantidade_total', '<', 'produtos.estoque_minimo')
+                ->whereRaw('estoque_total.quantidade_total < COALESCE(produtos.estoque_minimo, categorias.estoque_minimo, 0)')
+                ->whereRaw('COALESCE(produtos.estoque_minimo, categorias.estoque_minimo, 0) > 0')
                 ->select(
                     'produtos.id',
                     'produtos.nome',
-                    'produtos.estoque_minimo',
+                    DB::raw('COALESCE(produtos.estoque_minimo, categorias.estoque_minimo, 0) as estoque_minimo'),
+                    'categorias.nome as categoria_nome',
                     'estoque_total.quantidade_total as estoque_atual'
                 )
                 ->orderBy('estoque_total.quantidade_total', 'asc')

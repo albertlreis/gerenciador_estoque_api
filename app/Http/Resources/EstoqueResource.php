@@ -16,6 +16,8 @@ class EstoqueResource extends JsonResource
             'deposito_id' => $this->deposito_id ?? $this->id_deposito ?? null,
 
             'quantidade' => (float) ($this->quantidade ?? 0),
+            'data_entrada_estoque_atual' => optional($this->data_entrada_estoque_atual)->toDateString(),
+            'ultima_venda_em' => optional($this->ultima_venda_em)->toDateString(),
             'created_at' => optional($this->created_at)->toIso8601String(),
             'updated_at' => optional($this->updated_at)->toIso8601String(),
 

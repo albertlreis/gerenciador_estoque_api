@@ -27,6 +27,7 @@ class CategoriaUpdateRequest extends FormRequest
             'nome'            => ['sometimes', 'required', 'string', 'max:255'],
             'descricao'       => ['nullable', 'string'],
             'categoria_pai_id'=> ['nullable', 'integer', 'exists:categorias,id'],
+            'estoque_minimo'  => ['nullable', 'integer', 'min:0'],
         ];
     }
 }

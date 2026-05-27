@@ -27,7 +27,16 @@ final class ReservarEstoqueStrategy implements MovimentacaoStrategy
             $pItemId = PedidoItem::query()
                 ->where('id_pedido', $pedido->id)
                 ->where('id_carrinho_item', $cItem->id)
+                ->where('id_deposito', $depId)
+                ->where('quantidade', (int) $cItem->quantidade)
                 ->value('id');
+
+            if (!$pItemId) {
+                $pItemId = PedidoItem::query()
+                    ->where('id_pedido', $pedido->id)
+                    ->where('id_carrinho_item', $cItem->id)
+                    ->value('id');
+            }
 
             $this->reservas->reservar(
                 variacaoId: (int) $cItem->id_variacao,

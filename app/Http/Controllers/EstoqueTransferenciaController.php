@@ -48,6 +48,7 @@ class EstoqueTransferenciaController extends Controller
             'depositoDestino',
             'usuario',
             'itens.variacao.produto',
+            'itens.variacao.atributos',
         ]);
 
         $pdf = Pdf::loadView('exports.transferencia-deposito', [

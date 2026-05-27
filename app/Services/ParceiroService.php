@@ -16,6 +16,7 @@ class ParceiroService
      * @param array{
      *   q?: string|null,
      *   status?: int|string|null,
+     *   tipo?: string|null,
      *   order_by?: 'nome'|'consultor_nome'|'nivel_fidelidade'|'created_at'|'updated_at'|null,
      *   order_dir?: 'asc'|'desc'|null,
      *   per_page?: int|null,
@@ -55,6 +56,11 @@ class ParceiroService
         $status = $filtros['status'] ?? null;
         if ($status !== null && $status !== '') {
             $query->where('status', (int) $status);
+        }
+
+        $tipo = isset($filtros['tipo']) ? trim((string) $filtros['tipo']) : '';
+        if ($tipo !== '') {
+            $query->where('tipo', $tipo);
         }
 
         $orderBy = $filtros['order_by'] ?? 'nome';

@@ -75,7 +75,7 @@ class CategoriaRepository
         $query = $this->queryIndex();
         $query = $this->applySearch($query, $search);
 
-        return $query->get(['id', 'nome', 'categoria_pai_id']);
+        return $query->get(['id', 'nome', 'descricao', 'categoria_pai_id', 'estoque_minimo']);
     }
 
     /**

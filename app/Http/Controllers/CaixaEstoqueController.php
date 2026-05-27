@@ -4,8 +4,8 @@ namespace App\Http\Controllers;
 
 use App\Enums\EstoqueMovimentacaoTipo;
 use App\Models\Estoque;
-use App\Models\EstoqueLog;
 use App\Models\ProdutoVariacao;
+use App\Services\AuditoriaLogService;
 use App\Services\EstoqueMovimentacaoService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -58,13 +58,7 @@ class CaixaEstoqueController extends Controller
             $estoqueAtual = (int) ($variacao->estoque->quantidade ?? 0);
         }
 
-        EstoqueLog::create([
-            'id_usuario' => auth()->id(),
-            'acao'       => 'scan',
-            'payload'    => ['codigo' => $codigo, 'deposito_id' => $request->integer('deposito_id')],
-            'ip'         => $request->ip(),
-            'user_agent' => $request->userAgent(),
-        ]);
+        $this->registrarLogEstoque('scan', ['codigo' => $codigo, 'deposito_id' => $request->integer('deposito_id')], auth()->id());
 
         return response()->json([
             'sucesso' => true,
@@ -129,13 +123,7 @@ class CaixaEstoqueController extends Controller
             ], 422);
         }
 
-        EstoqueLog::create([
-            'id_usuario' => $usuarioId,
-            'acao'       => $tipo, // 'entrada' | 'saida'
-            'payload'    => ['deposito_id' => $depositoId, 'total' => $resultado['total_pecas'] ?? null],
-            'ip'         => request()->ip(),
-            'user_agent' => request()->userAgent(),
-        ]);
+        $this->registrarLogEstoque($tipo, ['deposito_id' => $depositoId, 'total' => $resultado['total_pecas'] ?? null], $usuarioId);
 
         return response()->json([
             'sucesso' => true,
@@ -191,17 +179,11 @@ class CaixaEstoqueController extends Controller
             ], 422);
         }
 
-        EstoqueLog::create([
-            'id_usuario' => $usuarioId,
-            'acao'       => 'transferencia',
-            'payload'    => [
-                'deposito_origem_id'  => $origemId,
-                'deposito_destino_id' => $destinoId,
-                'total_pecas' => $resultado['total_pecas'] ?? null,
-            ],
-            'ip'         => request()->ip(),
-            'user_agent' => request()->userAgent(),
-        ]);
+        $this->registrarLogEstoque('transferencia', [
+            'deposito_origem_id'  => $origemId,
+            'deposito_destino_id' => $destinoId,
+            'total_pecas' => $resultado['total_pecas'] ?? null,
+        ], $usuarioId);
 
         return response()->json([
             'sucesso' => true,
@@ -209,6 +191,29 @@ class CaixaEstoqueController extends Controller
             'movimentacoes' => $resultado['movimentacoes'] ?? [],
             'transferencia_id' => $resultado['transferencia_id'] ?? null,
             'transferencia_pdf' => $resultado['transferencia_pdf'] ?? null,
+        ]);
+    }
+
+    /**
+     * @param array<string, mixed> $payload
+     */
+    private function registrarLogEstoque(string $acao, array $payload, ?int $usuarioId): void
+    {
+        app(AuditoriaLogService::class)->registrar([
+            'occurred_at' => now(),
+            'tipo' => 'auditoria',
+            'categoria' => 'negocio',
+            'modulo' => 'estoque',
+            'acao' => $acao,
+            'label' => 'Log de estoque',
+            'message' => "Estoque: {$acao}",
+            'actor_id' => $usuarioId,
+            'ip' => request()->ip(),
+            'user_agent' => request()->userAgent(),
+            'context_json' => $payload,
+            'source_system' => 'estoque',
+            'source_kind' => 'business_event',
+            'retention_days' => 365,
         ]);
     }
 }

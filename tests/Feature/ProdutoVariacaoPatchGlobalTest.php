@@ -198,21 +198,21 @@ class ProdutoVariacaoPatchGlobalTest extends TestCase
         $response->assertOk()
             ->assertJsonPath('preco', 150);
 
-        $this->assertDatabaseHas('auditoria_eventos', [
-            'module' => 'produto_variacoes',
-            'action' => 'update',
+        $this->assertDatabaseHas('auditoria_logs', [
+            'modulo' => 'produto_variacoes',
+            'acao' => 'update',
             'label' => 'Alteração de preço no checkout',
-            'auditable_id' => $variacaoId,
+            'entity_id' => (string) $variacaoId,
         ]);
 
-        $eventoId = DB::table('auditoria_eventos')
-            ->where('module', 'produto_variacoes')
-            ->where('auditable_id', $variacaoId)
+        $eventoId = DB::table('auditoria_logs')
+            ->where('modulo', 'produto_variacoes')
+            ->where('entity_id', (string) $variacaoId)
             ->latest('id')
             ->value('id');
 
-        $this->assertDatabaseHas('auditoria_mudancas', [
-            'evento_id' => $eventoId,
+        $this->assertDatabaseHas('auditoria_log_mudancas', [
+            'auditoria_log_id' => $eventoId,
             'campo' => 'preco',
             'old_value' => '100',
             'new_value' => '150',

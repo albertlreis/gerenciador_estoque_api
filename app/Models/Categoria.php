@@ -20,6 +20,7 @@ class Categoria extends Model
         'nome',
         'descricao',
         'categoria_pai_id',
+        'estoque_minimo',
     ];
 
     /** @return HasMany<Produto> */

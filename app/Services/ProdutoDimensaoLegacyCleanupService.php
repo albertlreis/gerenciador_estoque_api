@@ -3,12 +3,11 @@
 namespace App\Services;
 
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 
 class ProdutoDimensaoLegacyCleanupService
 {
-    private const AUDIT_TABLE = 'produto_variacao_dimensao_auditorias';
-
     private const ATTRIBUTE_TARGETS = [
         'dimensao_1' => ['campo' => 'dimensao_1', 'prioridade' => 10],
         'largura_cm' => ['campo' => 'dimensao_1', 'prioridade' => 20],
@@ -31,12 +30,21 @@ class ProdutoDimensaoLegacyCleanupService
             'invalidos' => 0,
         ];
 
-        $atributosBloqueados = DB::table(self::AUDIT_TABLE)
-            ->whereIn('acao', ['bloqueado_conflito_alias', 'orfao_sem_variacao', 'valor_invalido'])
-            ->pluck('produto_variacao_atributo_id')
-            ->filter()
-            ->map(fn ($id) => (int) $id)
-            ->all();
+        $atributosBloqueados = [];
+        if (Schema::hasTable('auditoria_logs')) {
+            $atributosBloqueados = DB::table('auditoria_logs')
+                ->where('modulo', 'produto_variacoes')
+                ->whereIn('acao', ['bloqueado_conflito_alias', 'orfao_sem_variacao', 'valor_invalido'])
+                ->get(['context_json'])
+                ->map(function ($log) {
+                    $context = json_decode((string) $log->context_json, true);
+
+                    return is_array($context) ? ($context['produto_variacao_atributo_id'] ?? null) : null;
+                })
+                ->filter(fn ($id) => $id !== null && $id !== '')
+                ->map(fn ($id) => (int) $id)
+                ->all();
+        }
 
         $query = DB::table('produto_variacao_atributos')->orderBy('id');
         if (!empty($atributosBloqueados)) {
@@ -205,21 +213,36 @@ class ProdutoDimensaoLegacyCleanupService
 
     private function auditar(object $atributo, mixed $valorAnterior, mixed $valorFinal, string $acao): void
     {
-        $agora = now();
+        if (!Schema::hasTable('auditoria_logs')) {
+            return;
+        }
 
-        DB::table(self::AUDIT_TABLE)->updateOrInsert(
-            ['produto_variacao_atributo_id' => $atributo->id],
-            [
-                'variacao_id' => $atributo->id_variacao,
+        app(AuditoriaLogService::class)->registrar([
+            'occurred_at' => now(),
+            'tipo' => 'auditoria',
+            'categoria' => 'negocio',
+            'modulo' => 'produto_variacoes',
+            'acao' => $acao,
+            'label' => 'Auditoria de dimensoes de produto',
+            'message' => 'Dimensao ' . ($atributo->campo ?? 'desconhecida'),
+            'entity_type' => \App\Models\ProdutoVariacao::class,
+            'entity_id' => $atributo->id_variacao,
+            'context_json' => [
+                'produto_variacao_atributo_id' => $atributo->id,
                 'atributo_legado' => $atributo->atributo,
                 'valor_legado' => $atributo->valor,
                 'campo_destino' => $atributo->campo ?? null,
-                'valor_anterior' => $this->decimalParaBanco($this->parseDecimal($valorAnterior)),
-                'valor_final' => $this->decimalParaBanco($this->parseDecimal($valorFinal)),
-                'acao' => $acao,
-                'updated_at' => $agora,
-                'created_at' => $agora,
-            ]
-        );
+            ],
+            'source_system' => 'estoque',
+            'source_kind' => 'produto_dimensao_cleanup',
+            'source_uid' => AuditoriaLogService::sourceUid('estoque', 'produto_dimensao_cleanup', 'produto_variacao_atributo', (string) $atributo->id),
+            'retention_days' => 365,
+            'replace_existing' => true,
+        ], [[
+            'campo' => $atributo->campo ?? 'dimensao',
+            'old' => $this->decimalParaBanco($this->parseDecimal($valorAnterior)),
+            'new' => $this->decimalParaBanco($this->parseDecimal($valorFinal)),
+            'value_type' => 'decimal',
+        ]]);
     }
 }

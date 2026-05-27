@@ -26,6 +26,15 @@ class ProdutoMiniResource extends JsonResource
                     'codigo_barras' => $v->codigo_barras,
                     'nome_completo' => $v->nome_completo,
                     'imagem_url'    => $v->imagem_url,
+                    'acabamento_oficial' => $v->acabamento_oficial,
+                    'material_oficial' => $v->material_oficial,
+                    'estoque_total' => $v->relationLoaded('estoques') ? (int) $v->estoques->sum('quantidade') : 0,
+                    'atributos' => $v->relationLoaded('atributos')
+                        ? $v->atributos->map(fn ($attr) => [
+                            'atributo' => $attr->atributo,
+                            'valor' => $attr->valor,
+                        ])->values()
+                        : [],
                 ]);
             }),
         ];

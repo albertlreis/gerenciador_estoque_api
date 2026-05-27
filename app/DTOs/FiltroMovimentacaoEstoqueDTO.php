@@ -25,6 +25,8 @@ class FiltroMovimentacaoEstoqueDTO
     /** @var int|null ID do fornecedor do produto */
     public ?int $fornecedor;
 
+    public ?string $localizacao;
+
     /** @var array<int, string>|null Período da movimentação (inicial, final) */
     public ?array $periodo;
 
@@ -56,6 +58,10 @@ class FiltroMovimentacaoEstoqueDTO
         $this->deposito = $this->toNullablePositiveInt($data['deposito'] ?? null);
         $this->categoria = $this->toNullablePositiveInt($data['categoria'] ?? null);
         $this->fornecedor = $this->toNullablePositiveInt($data['fornecedor'] ?? null);
+        $this->localizacao = isset($data['localizacao']) ? trim((string) $data['localizacao']) : null;
+        if ($this->localizacao === '') {
+            $this->localizacao = null;
+        }
         $this->periodo = $data['periodo'] ?? null;
         $this->sortField = $data['sort_field'] ?? null;
         $this->sortOrder = $data['sort_order'] ?? 'desc';

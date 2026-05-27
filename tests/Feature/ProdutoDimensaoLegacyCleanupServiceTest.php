@@ -100,13 +100,19 @@ class ProdutoDimensaoLegacyCleanupServiceTest extends TestCase
             'valor' => 'AC03',
         ]);
 
-        $this->assertDatabaseHas('produto_variacao_dimensao_auditorias', [
-            'variacao_id' => $variacaoId,
-            'atributo_legado' => 'largura_cm',
-            'campo_destino' => 'dimensao_1',
-            'valor_anterior' => '99.00',
-            'valor_final' => '120.00',
-            'acao' => 'corrigido_atributo_venceu',
+        $logId = DB::table('auditoria_logs')
+            ->where('modulo', 'produto_variacoes')
+            ->where('acao', 'corrigido_atributo_venceu')
+            ->where('entity_id', (string) $variacaoId)
+            ->where('context_json->atributo_legado', 'largura_cm')
+            ->value('id');
+
+        $this->assertNotNull($logId);
+        $this->assertDatabaseHas('auditoria_log_mudancas', [
+            'auditoria_log_id' => $logId,
+            'campo' => 'dimensao_1',
+            'old_value' => '99.00',
+            'new_value' => '120.00',
         ]);
     }
 
@@ -131,12 +137,18 @@ class ProdutoDimensaoLegacyCleanupServiceTest extends TestCase
             'atributo' => 'largura_cm',
             'valor' => '130',
         ]);
-        $this->assertDatabaseHas('produto_variacao_dimensao_auditorias', [
-            'variacao_id' => $variacaoId,
-            'atributo_legado' => 'largura_cm',
-            'campo_destino' => 'dimensao_1',
-            'valor_final' => '120.00',
-            'acao' => 'bloqueado_conflito_alias',
+        $logId = DB::table('auditoria_logs')
+            ->where('modulo', 'produto_variacoes')
+            ->where('acao', 'bloqueado_conflito_alias')
+            ->where('entity_id', (string) $variacaoId)
+            ->where('context_json->atributo_legado', 'largura_cm')
+            ->value('id');
+
+        $this->assertNotNull($logId);
+        $this->assertDatabaseHas('auditoria_log_mudancas', [
+            'auditoria_log_id' => $logId,
+            'campo' => 'dimensao_1',
+            'new_value' => '120.00',
         ]);
 
         app(ProdutoDimensaoLegacyCleanupService::class)->executar();

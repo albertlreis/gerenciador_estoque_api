@@ -75,6 +75,13 @@
             $v = $item->variacao;
             $nome = $v?->nome_completo ?? ($v?->produto?->nome ?? '-');
             $ref = $v?->referencia ?? '-';
+            $acabamentos = $v && $v->relationLoaded('atributos')
+                ? $v->atributos
+                    ->filter(fn($attr) => str_contains(mb_strtolower((string)($attr->atributo ?? '')), 'acabamento') || str_contains(mb_strtolower((string)($attr->atributo ?? '')), 'material'))
+                    ->map(fn($attr) => trim((string)($attr->atributo ?? '') . ': ' . (string)($attr->valor ?? '')))
+                    ->filter()
+                    ->implode(' | ')
+                : '';
             $locParts = array_filter([$item->corredor, $item->prateleira, $item->nivel]);
             $loc = count($locParts) ? implode(' / ', $locParts) : '-';
         @endphp
@@ -88,7 +95,12 @@
                 />
             </td>
             <td style="text-align:center;"><b>{{ $item->quantidade }}</b></td>
-            <td>{{ $nome }}</td>
+            <td>
+                {{ $nome }}
+                @if($acabamentos)
+                    <br><span class="muted">{{ $acabamentos }}</span>
+                @endif
+            </td>
             <td>{{ $ref }}</td>
             <td>{{ $loc }}</td>
             <td></td>

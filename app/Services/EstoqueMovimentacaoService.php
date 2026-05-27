@@ -105,6 +105,33 @@ class EstoqueMovimentacaoService
             $query->whereHas('variacao.produto', fn (Builder $sub) => $sub->where('id_fornecedor', $fornecedorId));
         }
 
+        if (!empty($filtros->localizacao)) {
+            $localizacaoLike = '%' . $this->escapeLike($filtros->localizacao) . '%';
+            $query->whereExists(function ($sub) use ($localizacaoLike) {
+                $sub->selectRaw('1')
+                    ->from('estoque as e')
+                    ->join('localizacoes_estoque as le', 'le.estoque_id', '=', 'e.id')
+                    ->leftJoin('areas_estoque as ae', 'ae.id', '=', 'le.area_id')
+                    ->leftJoin('localizacao_valores as lv', 'lv.localizacao_id', '=', 'le.id')
+                    ->whereColumn('e.id_variacao', 'estoque_movimentacoes.id_variacao')
+                    ->where(function ($depositoQuery) {
+                        $depositoQuery
+                            ->whereColumn('e.id_deposito', 'estoque_movimentacoes.id_deposito_origem')
+                            ->orWhereColumn('e.id_deposito', 'estoque_movimentacoes.id_deposito_destino');
+                    })
+                    ->where(function ($localizacaoQuery) use ($localizacaoLike) {
+                        $localizacaoQuery
+                            ->whereRaw("le.codigo_composto LIKE ? ESCAPE '\\\\'", [$localizacaoLike])
+                            ->orWhereRaw("le.setor LIKE ? ESCAPE '\\\\'", [$localizacaoLike])
+                            ->orWhereRaw("le.coluna LIKE ? ESCAPE '\\\\'", [$localizacaoLike])
+                            ->orWhereRaw("le.nivel LIKE ? ESCAPE '\\\\'", [$localizacaoLike])
+                            ->orWhereRaw("le.observacoes LIKE ? ESCAPE '\\\\'", [$localizacaoLike])
+                            ->orWhereRaw("ae.nome LIKE ? ESCAPE '\\\\'", [$localizacaoLike])
+                            ->orWhereRaw("lv.valor LIKE ? ESCAPE '\\\\'", [$localizacaoLike]);
+                    });
+            });
+        }
+
         if (!empty($filtros->deposito)) {
             $depositoId = (int) $filtros->deposito;
             $query->where(function (Builder $q) use ($depositoId) {

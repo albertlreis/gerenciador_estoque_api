@@ -86,10 +86,10 @@ class ProdutoConjuntoCrudTest extends TestCase
             'principal_variacao_id' => $variacaoA,
         ]);
 
-        $this->assertDatabaseHas('auditoria_eventos', [
-            'module' => 'produto_conjuntos',
-            'action' => 'create',
-            'auditable_id' => $conjuntoId,
+        $this->assertDatabaseHas('auditoria_logs', [
+            'modulo' => 'produto_conjuntos',
+            'acao' => 'create',
+            'entity_id' => (string) $conjuntoId,
         ]);
 
         $variacaoC = $this->criarVariacao('Mesa', 350);
@@ -109,10 +109,10 @@ class ProdutoConjuntoCrudTest extends TestCase
             ->assertJsonPath('preco_modo', 'soma')
             ->assertJsonCount(2, 'itens');
 
-        $this->assertDatabaseHas('auditoria_eventos', [
-            'module' => 'produto_conjuntos',
-            'action' => 'update',
-            'auditable_id' => $conjuntoId,
+        $this->assertDatabaseHas('auditoria_logs', [
+            'modulo' => 'produto_conjuntos',
+            'acao' => 'update',
+            'entity_id' => (string) $conjuntoId,
         ]);
     }
 
@@ -149,10 +149,10 @@ class ProdutoConjuntoCrudTest extends TestCase
         $this->assertNotSame('', $heroPath);
         Storage::disk('public')->assertExists($heroPath);
 
-        $this->assertDatabaseHas('auditoria_eventos', [
-            'module' => 'produto_conjuntos',
-            'action' => 'upload_hero',
-            'auditable_id' => $conjunto->id,
+        $this->assertDatabaseHas('auditoria_logs', [
+            'modulo' => 'produto_conjuntos',
+            'acao' => 'upload_hero',
+            'entity_id' => (string) $conjunto->id,
         ]);
 
         $this->deleteJson("/api/v1/produto-conjuntos/{$conjunto->id}")
@@ -162,10 +162,10 @@ class ProdutoConjuntoCrudTest extends TestCase
             'id' => $conjunto->id,
         ]);
 
-        $this->assertDatabaseHas('auditoria_eventos', [
-            'module' => 'produto_conjuntos',
-            'action' => 'delete',
-            'auditable_id' => $conjunto->id,
+        $this->assertDatabaseHas('auditoria_logs', [
+            'modulo' => 'produto_conjuntos',
+            'acao' => 'delete',
+            'entity_id' => (string) $conjunto->id,
         ]);
     }
 

@@ -356,11 +356,11 @@ class ProdutoVariacaoUpdateTest extends TestCase
         $response->assertOk()
             ->assertJsonPath('message', 'Variações salvas com sucesso.');
 
-        $this->assertDatabaseHas('auditoria_eventos', [
-            'module' => 'produto_variacoes',
-            'action' => 'update',
+        $this->assertDatabaseHas('auditoria_logs', [
+            'modulo' => 'produto_variacoes',
+            'acao' => 'update',
             'label' => 'Alteração de preço no cadastro de produtos',
-            'auditable_id' => $variacaoId,
+            'entity_id' => (string) $variacaoId,
         ]);
 
         $this->assertDatabaseHas('carrinho_itens', [

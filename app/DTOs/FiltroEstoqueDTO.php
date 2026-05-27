@@ -40,6 +40,9 @@ class FiltroEstoqueDTO
     /** Quantidade minima de dias em estoque sem venda */
     public ?int $diasSemVendaMin = null;
 
+    /** Texto de busca da localizacao fisica/area do estoque */
+    public ?string $localizacao = null;
+
     /** Se deve exibir apenas produtos com estoque zerado */
     public bool $zerados = false;
 
@@ -104,6 +107,9 @@ class FiltroEstoqueDTO
 
         $diasSemVendaMin = $this->toNullablePositiveInt($data['dias_sem_venda_min'] ?? null);
         $this->diasSemVendaMin = $diasSemVendaMin !== null ? max(1, $diasSemVendaMin) : null;
+
+        $localizacao = isset($data['localizacao']) ? trim((string) $data['localizacao']) : '';
+        $this->localizacao = $localizacao !== '' ? $localizacao : null;
 
         // sort
         $this->sortField = isset($data['sort_field']) ? trim((string) $data['sort_field']) : null;

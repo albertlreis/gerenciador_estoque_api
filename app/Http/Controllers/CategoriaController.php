@@ -34,6 +34,9 @@ class CategoriaController extends Controller
         return response()->json([
             'id'    => $categoria->id,
             'nome'  => $categoria->nome,
+            'descricao' => $categoria->descricao,
+            'categoria_pai_id' => $categoria->categoria_pai_id,
+            'estoque_minimo' => $categoria->estoque_minimo,
             'label' => $categoria->nome,
             'value' => $categoria->id,
         ], 201);

@@ -7,6 +7,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Dashboard\DashboardQueryRequest;
 use App\Services\Dashboard\DashboardService;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 
 class DashboardController extends Controller
@@ -23,6 +24,36 @@ class DashboardController extends Controller
 
         return response()->json(
             $this->service->admin($request->filters(), (int) auth()->id())
+        );
+    }
+
+    public function adminPreferencias(): JsonResponse
+    {
+        if (!$this->canAccessAdmin()) {
+            return response()->json(['message' => 'Sem permissão para acessar o dashboard administrativo.'], 403);
+        }
+
+        return response()->json(
+            $this->service->adminPreferencias((int) auth()->id())
+        );
+    }
+
+    public function atualizarAdminPreferencias(Request $request): JsonResponse
+    {
+        if (!$this->canAccessAdmin()) {
+            return response()->json(['message' => 'Sem permissão para acessar o dashboard administrativo.'], 403);
+        }
+
+        $data = $request->validate([
+            'tempo_estoque_categorias_ocultas' => ['present', 'array'],
+            'tempo_estoque_categorias_ocultas.*' => ['integer', 'distinct', 'exists:categorias,id'],
+        ]);
+
+        return response()->json(
+            $this->service->atualizarAdminPreferencias(
+                (int) auth()->id(),
+                $data['tempo_estoque_categorias_ocultas']
+            )
         );
     }
 

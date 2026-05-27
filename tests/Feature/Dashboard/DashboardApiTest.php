@@ -9,6 +9,7 @@ use App\Models\Usuario;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
@@ -16,7 +17,7 @@ class DashboardApiTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_dashboard_admin_retorna_kpis_com_compare_e_shape_padrao(): void
+    public function test_dashboard_admin_retorna_resumo_operacional_e_ignora_compare(): void
     {
         $admin = $this->autenticar(['dashboard.admin', 'pedidos.visualizar.todos']);
 
@@ -25,21 +26,190 @@ class DashboardApiTest extends TestCase
 
         $pedidoAtual = $this->criarPedido($clienteId, $vendedorId, now()->subDay(), 300.00);
         $this->criarStatusPedido($pedidoAtual->id, PedidoStatus::PEDIDO_CRIADO->value, $admin->id);
+        DB::table('pedido_status_previsoes')->insert([
+            'pedido_id' => $pedidoAtual->id,
+            'status' => PedidoStatus::ENVIADO_FABRICA->value,
+            'data_prevista' => now()->subDay()->toDateString(),
+            'usuario_id' => $admin->id,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
 
         $pedidoAnterior = $this->criarPedido($clienteId, $vendedorId, now()->subMonth()->startOfMonth()->addDay(), 200.00);
         $this->criarStatusPedido($pedidoAnterior->id, PedidoStatus::FINALIZADO->value, $admin->id);
 
-        $response = $this->getJson('/api/v1/dashboard/admin?period=month&compare=1');
+        $depositoId = DB::table('depositos')->insertGetId([
+            'nome' => 'Deposito Admin',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $categoriaId = DB::table('categorias')->insertGetId([
+            'nome' => 'Categoria Admin',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $categoriaAdornosId = DB::table('categorias')->insertGetId([
+            'nome' => '  ADORNOS  ',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $subcategoriaAdornosId = DB::table('categorias')->insertGetId([
+            'nome' => 'Objetos Decorativos',
+            'categoria_pai_id' => $categoriaAdornosId,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $produtoId = DB::table('produtos')->insertGetId([
+            'nome' => 'Produto Antigo Admin',
+            'id_categoria' => $categoriaId,
+            'estoque_minimo' => 0,
+            'ativo' => 1,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $produtoAdornoId = DB::table('produtos')->insertGetId([
+            'nome' => 'Adorno Antigo Admin',
+            'id_categoria' => $categoriaAdornosId,
+            'estoque_minimo' => 0,
+            'ativo' => 1,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $produtoSubcategoriaAdornoId = DB::table('produtos')->insertGetId([
+            'nome' => 'Adorno Filho Antigo Admin',
+            'id_categoria' => $subcategoriaAdornosId,
+            'estoque_minimo' => 0,
+            'ativo' => 1,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $variacaoId = DB::table('produto_variacoes')->insertGetId([
+            'produto_id' => $produtoId,
+            'referencia' => 'ADM-OLD',
+            'nome' => 'Variação antiga',
+            'preco' => 100,
+            'custo' => 70,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $variacaoAdornoId = DB::table('produto_variacoes')->insertGetId([
+            'produto_id' => $produtoAdornoId,
+            'referencia' => 'ADM-ADORNO',
+            'nome' => 'Variação adorno antiga',
+            'preco' => 80,
+            'custo' => 40,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $variacaoSubcategoriaAdornoId = DB::table('produto_variacoes')->insertGetId([
+            'produto_id' => $produtoSubcategoriaAdornoId,
+            'referencia' => 'ADM-ADORNO-FILHO',
+            'nome' => 'Variação adorno filha antiga',
+            'preco' => 90,
+            'custo' => 45,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        DB::table('estoque')->updateOrInsert(
+            [
+                'id_variacao' => $variacaoId,
+                'id_deposito' => $depositoId,
+            ],
+            [
+                'quantidade' => 3,
+                'data_entrada_estoque_atual' => now()->subDays(95)->startOfDay(),
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]
+        );
+
+        DB::table('estoque')->updateOrInsert(
+            [
+                'id_variacao' => $variacaoAdornoId,
+                'id_deposito' => $depositoId,
+            ],
+            [
+                'quantidade' => 5,
+                'data_entrada_estoque_atual' => now()->subDays(120)->startOfDay(),
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]
+        );
+
+        DB::table('estoque')->updateOrInsert(
+            [
+                'id_variacao' => $variacaoSubcategoriaAdornoId,
+                'id_deposito' => $depositoId,
+            ],
+            [
+                'quantidade' => 7,
+                'data_entrada_estoque_atual' => now()->subDays(140)->startOfDay(),
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]
+        );
+
+        $response = $this->getJson('/api/v1/dashboard/admin?period=month&compare=1&fresh=1');
 
         $response
             ->assertOk()
             ->assertJsonStructure([
                 'meta' => ['period', 'inicio', 'fim', 'compare', 'deposito_id', 'updated_at'],
                 'kpis' => [
-                    'vendas_total' => ['value', 'previous', 'delta_abs', 'delta_pct'],
-                    'pedidos_total' => ['value', 'previous', 'delta_abs', 'delta_pct'],
-                    'ticket_medio' => ['value', 'previous', 'delta_abs', 'delta_pct'],
-                    'clientes_unicos' => ['value', 'previous', 'delta_abs', 'delta_pct'],
+                    'vendas_total' => ['value'],
+                    'pedidos_total' => ['value'],
+                    'ticket_medio' => ['value'],
+                    'clientes_unicos' => ['value'],
+                ],
+                'pedidos_resumo' => [
+                    'abertos',
+                    'atrasados',
+                    'vencem_hoje',
+                    'vencem_7_dias',
+                    'sem_previsao',
+                    'finalizados_periodo',
+                ],
+                'pedidos_prioritarios' => [
+                    [
+                        'id',
+                        'numero',
+                        'cliente',
+                        'status',
+                        'status_label',
+                        'proximo_status',
+                        'proximo_status_label',
+                        'data_prevista',
+                        'dias_para_previsao',
+                        'prioridade',
+                        'prioridade_label',
+                    ],
+                ],
+                'tempo_estoque_resumo' => [
+                    'ate_30' => ['label', 'produtos_qtd', 'quantidade_total'],
+                    'de_31_60' => ['label', 'produtos_qtd', 'quantidade_total'],
+                    'de_61_90' => ['label', 'produtos_qtd', 'quantidade_total'],
+                    'mais_90' => ['label', 'produtos_qtd', 'quantidade_total'],
+                ],
+                'tempo_estoque' => [
+                    [
+                        'variacao_id',
+                        'produto_nome',
+                        'referencia',
+                        'quantidade_total',
+                        'data_entrada',
+                        'dias_em_estoque',
+                        'faixa',
+                    ],
                 ],
                 'pendencias' => [
                     'itens_entrega_pendente_qtd',
@@ -47,10 +217,147 @@ class DashboardApiTest extends TestCase
                     'pedidos_em_aberto_qtd',
                     'pedidos_por_etapa' => ['criado', 'fabrica', 'recebimento', 'envio_cliente', 'consignacao', 'finalizado'],
                 ],
-                'series' => ['granularity', 'pedidos_serie', 'faturamento_serie'],
+                'series',
             ]);
 
-        $this->assertSame(1, (int) $response->json('meta.compare'));
+        $this->assertSame(0, (int) $response->json('meta.compare'));
+        $this->assertSame(1, (int) $response->json('pedidos_resumo.abertos'));
+        $this->assertSame(1, (int) $response->json('pedidos_resumo.atrasados'));
+        $this->assertSame('atrasado', $response->json('pedidos_prioritarios.0.prioridade'));
+        $this->assertSame(3, (int) $response->json('tempo_estoque_resumo.mais_90.produtos_qtd'));
+        $this->assertSame(15, (int) $response->json('tempo_estoque_resumo.mais_90.quantidade_total'));
+        $this->assertContains('Produto Antigo Admin', array_column($response->json('tempo_estoque'), 'produto_nome'));
+        $this->assertContains('Adorno Antigo Admin', array_column($response->json('tempo_estoque'), 'produto_nome'));
+        $this->assertContains('Adorno Filho Antigo Admin', array_column($response->json('tempo_estoque'), 'produto_nome'));
+        $this->assertSame('mais_90', $response->json('tempo_estoque.0.faixa'));
+
+        $responseComDeposito = $this->getJson('/api/v1/dashboard/admin?period=month&fresh=1&deposito_id=' . $depositoId);
+
+        $responseComDeposito->assertOk();
+        $this->assertSame($depositoId, (int) $responseComDeposito->json('meta.deposito_id'));
+        $this->assertSame(3, (int) $responseComDeposito->json('tempo_estoque_resumo.mais_90.produtos_qtd'));
+        $this->assertSame(15, (int) $responseComDeposito->json('tempo_estoque_resumo.mais_90.quantidade_total'));
+        $this->assertContains('Adorno Antigo Admin', array_column($responseComDeposito->json('tempo_estoque'), 'produto_nome'));
+        $this->assertContains('Adorno Filho Antigo Admin', array_column($responseComDeposito->json('tempo_estoque'), 'produto_nome'));
+    }
+
+    public function test_dashboard_admin_oculta_categorias_por_usuario_e_expande_subcategorias(): void
+    {
+        $admin = $this->autenticar(['dashboard.admin']);
+
+        $depositoId = DB::table('depositos')->insertGetId([
+            'nome' => 'Deposito Preferencias',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $categoriaComumId = DB::table('categorias')->insertGetId([
+            'nome' => 'Categoria Visivel',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $categoriaOcultaId = DB::table('categorias')->insertGetId([
+            'nome' => 'Adornos Preferencia',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $subcategoriaOcultaId = DB::table('categorias')->insertGetId([
+            'nome' => 'Adornos Filho Preferencia',
+            'categoria_pai_id' => $categoriaOcultaId,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $this->criarProdutoEmEstoque('Produto Visivel Preferencia', $categoriaComumId, $depositoId, 2, 95);
+        $this->criarProdutoEmEstoque('Produto Oculto Preferencia', $categoriaOcultaId, $depositoId, 3, 120);
+        $this->criarProdutoEmEstoque('Produto Oculto Filho Preferencia', $subcategoriaOcultaId, $depositoId, 4, 140);
+
+        $semPreferencia = $this->getJson('/api/v1/dashboard/admin?period=month');
+        $semPreferencia->assertOk();
+        $this->assertContains('Produto Visivel Preferencia', array_column($semPreferencia->json('tempo_estoque'), 'produto_nome'));
+        $this->assertContains('Produto Oculto Preferencia', array_column($semPreferencia->json('tempo_estoque'), 'produto_nome'));
+        $this->assertContains('Produto Oculto Filho Preferencia', array_column($semPreferencia->json('tempo_estoque'), 'produto_nome'));
+        $produtosMais90Antes = (int) $semPreferencia->json('tempo_estoque_resumo.mais_90.produtos_qtd');
+        $quantidadeMais90Antes = (int) $semPreferencia->json('tempo_estoque_resumo.mais_90.quantidade_total');
+
+        $this->getJson('/api/v1/dashboard/admin/preferencias')
+            ->assertOk()
+            ->assertJson([
+                'tempo_estoque_categorias_ocultas' => [],
+            ]);
+
+        $this->putJson('/api/v1/dashboard/admin/preferencias', [
+            'tempo_estoque_categorias_ocultas' => [$categoriaOcultaId],
+        ])
+            ->assertOk()
+            ->assertJson([
+                'tempo_estoque_categorias_ocultas' => [$categoriaOcultaId],
+            ]);
+
+        $comPreferencia = $this->getJson('/api/v1/dashboard/admin?period=month');
+        $comPreferencia->assertOk();
+
+        $nomes = array_column($comPreferencia->json('tempo_estoque'), 'produto_nome');
+        $this->assertContains('Produto Visivel Preferencia', $nomes);
+        $this->assertNotContains('Produto Oculto Preferencia', $nomes);
+        $this->assertNotContains('Produto Oculto Filho Preferencia', $nomes);
+        $this->assertSame(
+            $produtosMais90Antes - 2,
+            (int) $comPreferencia->json('tempo_estoque_resumo.mais_90.produtos_qtd')
+        );
+        $this->assertSame(
+            $quantidadeMais90Antes - 7,
+            (int) $comPreferencia->json('tempo_estoque_resumo.mais_90.quantidade_total')
+        );
+
+        $outroAdmin = $this->criarUsuario('Outro Admin Dashboard');
+        Sanctum::actingAs($outroAdmin);
+        Cache::put('permissoes_usuario_' . $outroAdmin->id, ['dashboard.admin'], now()->addHours(2));
+
+        $outroUsuario = $this->getJson('/api/v1/dashboard/admin?period=month');
+        $outroUsuario->assertOk();
+        $this->assertContains('Produto Oculto Preferencia', array_column($outroUsuario->json('tempo_estoque'), 'produto_nome'));
+        $this->assertContains('Produto Oculto Filho Preferencia', array_column($outroUsuario->json('tempo_estoque'), 'produto_nome'));
+    }
+
+    public function test_dashboard_admin_funciona_quando_tabela_de_preferencias_nao_existe(): void
+    {
+        $this->autenticar(['dashboard.admin']);
+
+        Schema::shouldReceive('hasTable')
+            ->with('usuario_preferencias')
+            ->andReturnFalse();
+
+        $this->getJson('/api/v1/dashboard/admin?period=month&fresh=1')
+            ->assertOk()
+            ->assertJson([
+                'tempo_estoque' => [],
+            ]);
+
+        $this->getJson('/api/v1/dashboard/admin/preferencias')
+            ->assertOk()
+            ->assertJson([
+                'tempo_estoque_categorias_ocultas' => [],
+            ]);
+    }
+
+    public function test_dashboard_admin_preferencias_retorna_erro_amigavel_quando_tabela_nao_existe(): void
+    {
+        $this->autenticar(['dashboard.admin']);
+
+        Schema::shouldReceive('hasTable')
+            ->with('usuario_preferencias')
+            ->andReturnFalse();
+
+        $this->putJson('/api/v1/dashboard/admin/preferencias', [
+            'tempo_estoque_categorias_ocultas' => [],
+        ])
+            ->assertStatus(503)
+            ->assertJson([
+                'message' => 'Preferências do dashboard ainda não estão disponíveis. Execute as migrations e tente novamente.',
+            ]);
     }
 
     public function test_dashboard_vendedor_respeita_escopo_quando_sem_permissao_visualizar_todos(): void
@@ -273,7 +580,7 @@ class DashboardApiTest extends TestCase
             'updated_at' => now(),
         ]);
 
-        $response = $this->getJson('/api/v1/dashboard/estoque?period=7d&deposito_id=' . $depositoId);
+        $response = $this->getJson('/api/v1/dashboard/estoque?period=7d&fresh=1&deposito_id=' . $depositoId);
 
         $response
             ->assertOk()
@@ -348,6 +655,46 @@ class DashboardApiTest extends TestCase
         Cache::put('permissoes_usuario_' . $usuario->id, $permissoes, now()->addHours(2));
 
         return $usuario;
+    }
+
+    private function criarProdutoEmEstoque(
+        string $nome,
+        int $categoriaId,
+        int $depositoId,
+        int $quantidade,
+        int $diasEmEstoque
+    ): void {
+        $produtoId = DB::table('produtos')->insertGetId([
+            'nome' => $nome,
+            'id_categoria' => $categoriaId,
+            'estoque_minimo' => 0,
+            'ativo' => 1,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $variacaoId = DB::table('produto_variacoes')->insertGetId([
+            'produto_id' => $produtoId,
+            'referencia' => 'REF-' . uniqid(),
+            'nome' => 'Variação ' . $nome,
+            'preco' => 100,
+            'custo' => 70,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        DB::table('estoque')->updateOrInsert(
+            [
+                'id_variacao' => $variacaoId,
+                'id_deposito' => $depositoId,
+            ],
+            [
+                'quantidade' => $quantidade,
+                'data_entrada_estoque_atual' => now()->subDays($diasEmEstoque)->startOfDay(),
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]
+        );
     }
 
     private function criarUsuario(string $nome): Usuario

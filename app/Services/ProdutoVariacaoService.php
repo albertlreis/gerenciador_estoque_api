@@ -11,6 +11,7 @@ use Illuminate\Contracts\Validation\Validator as ValidatorContract;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
@@ -18,8 +19,28 @@ use Illuminate\Validation\ValidationException;
 
 class ProdutoVariacaoService
 {
+    private const CAMPOS_AUDITAVEIS = [
+        'referencia',
+        'nome',
+        'preco',
+        'custo',
+        'codigo_barras',
+        'sku_interno',
+        'chave_variacao',
+        'dimensao_1',
+        'dimensao_2',
+        'dimensao_3',
+        'cor',
+        'lado',
+        'material_oficial',
+        'acabamento_oficial',
+        'conflito_codigo',
+        'status_revisao',
+    ];
+
     public function __construct(
         private readonly ContaAzulExportDispatchService $contaAzulExports,
+        private readonly AuditoriaEventoService $auditoria,
     ) {
     }
 
@@ -78,20 +99,30 @@ class ProdutoVariacaoService
                 : null;
 
             $this->makeValidator($variacaoData, $variacaoExistente)->validate();
+            if ($variacaoExistente) {
+                $this->validarMotivoAlteracaoPreco($variacaoExistente, $variacaoData);
+            }
 
             $payload = $this->prepararPayloadParaPersistencia(
                 $variacaoData,
                 $produtoId,
-                $variacaoExistente
+                $variacaoExistente,
+                parcial: $variacaoExistente !== null
             );
 
-            $variacao = ProdutoVariacao::updateOrCreate(
-                [
-                    'id' => $variacaoData['id'] ?? null,
+            if ($variacaoExistente) {
+                $variacao = $this->salvarComAuditoria(
+                    $variacaoExistente,
+                    $payload,
+                    (array) ($variacaoData['audit'] ?? []),
+                    'Atualização de variação'
+                );
+            } else {
+                $variacao = ProdutoVariacao::create([
                     'produto_id' => $produtoId,
-                ],
-                $payload
-            );
+                    ...$payload,
+                ]);
+            }
 
             $idsRecebidos[] = $variacao->id;
 
@@ -118,6 +149,7 @@ class ProdutoVariacaoService
     public function atualizarIndividual(ProdutoVariacao $variacao, array $data): ProdutoVariacao
     {
         $this->makeValidator($data, $variacao)->validate();
+        $this->validarMotivoAlteracaoPreco($variacao, $data);
 
         $updates = $this->prepararPayloadParaPersistencia(
             $data,
@@ -126,13 +158,12 @@ class ProdutoVariacaoService
             parcial: true
         );
 
-        if (!empty($updates)) {
-            $variacao->fill($updates);
-        }
-
-        if ($variacao->isDirty()) {
-            $variacao->save();
-        }
+        $variacao = $this->salvarComAuditoria(
+            $variacao,
+            $updates,
+            (array) ($data['audit'] ?? []),
+            'Atualização de variação'
+        );
 
         if (array_key_exists('atributos', $data)) {
             $this->sincronizarAtributos($variacao, $data['atributos'] ?? []);
@@ -190,13 +221,84 @@ class ProdutoVariacaoService
         return 'LEG-' . substr(sha1((string) $seed), 0, 24);
     }
 
+    public function salvarComAuditoria(
+        ProdutoVariacao $variacao,
+        array $updates,
+        array $auditInput = [],
+        string $defaultLabel = 'Atualização de variação'
+    ): ProdutoVariacao {
+        if (empty($updates)) {
+            return $variacao->fresh() ?? $variacao;
+        }
+
+        $before = $variacao->only(self::CAMPOS_AUDITAVEIS);
+        $variacao->fill($updates);
+
+        if (!$variacao->isDirty()) {
+            return $variacao->fresh() ?? $variacao;
+        }
+
+        DB::transaction(function () use ($variacao, $before, $auditInput, $defaultLabel): void {
+            $variacao->save();
+
+            if ($variacao->wasChanged('preco')) {
+                $this->sincronizarPrecoCarrinhosRascunho($variacao);
+            }
+
+            $mudancas = [];
+            foreach (self::CAMPOS_AUDITAVEIS as $campo) {
+                if (!$variacao->wasChanged($campo)) {
+                    continue;
+                }
+
+                $mudancas[] = [
+                    'campo' => $campo,
+                    'old' => $before[$campo] ?? null,
+                    'new' => $variacao->{$campo},
+                ];
+            }
+
+            $metadataExtra = (array) ($auditInput['metadata'] ?? []);
+            $metadata = array_filter([
+                'motivo' => $auditInput['motivo'] ?? null,
+                'origin' => $auditInput['origin'] ?? null,
+                'carrinho_id' => $metadataExtra['carrinho_id'] ?? null,
+            ], fn ($v) => $v !== null && $v !== '');
+
+            $this->auditoria->registrar(
+                module: 'produto_variacoes',
+                action: 'update',
+                label: (string) ($auditInput['label'] ?? $defaultLabel),
+                auditable: $variacao,
+                mudancas: $mudancas,
+                metadata: $metadata
+            );
+        });
+
+        return $variacao->refresh();
+    }
+
+    public function validarMotivoAlteracaoPreco(ProdutoVariacao $variacao, array $data): void
+    {
+        if (!$this->precoMudou($variacao, $data)) {
+            return;
+        }
+
+        $motivo = trim((string) data_get($data, 'audit.motivo', ''));
+        if ($motivo === '') {
+            throw ValidationException::withMessages([
+                'audit.motivo' => 'Informe o motivo da alteração de preço.',
+            ]);
+        }
+    }
+
     private function makeValidator(array $data, ?ProdutoVariacao $variacao = null): ValidatorContract
     {
         $ignoreId = $variacao?->id ?? ($data['id'] ?? null);
 
         return Validator::make($data, [
             'id' => 'nullable|integer|exists:produto_variacoes,id',
-            'preco' => array_key_exists('preco', $data) ? 'nullable|numeric|min:0' : 'required|numeric|min:0',
+            'preco' => 'required|numeric|min:0',
             'custo' => 'nullable|numeric|min:0',
             'referencia' => [
                 'nullable',
@@ -239,6 +341,27 @@ class ProdutoVariacaoService
             'codigo' => 'nullable|string|max:120',
             'codigo_origem' => 'nullable|string|max:120',
             'codigo_modelo' => 'nullable|string|max:120',
+            'audit' => 'sometimes|array',
+            'audit.label' => 'sometimes|nullable|string|max:255',
+            'audit.motivo' => 'sometimes|nullable|string|max:500',
+            'audit.origin' => 'sometimes|nullable|in:checkout,cadastro,importacao',
+            'audit.metadata' => 'sometimes|array',
+            'audit.metadata.carrinho_id' => 'sometimes|nullable|integer|min:1',
+        ], [
+            'preco.required' => 'Informe o preço da variação.',
+            'preco.numeric' => 'Informe um preço válido para a variação.',
+            'preco.min' => 'O preço da variação não pode ser negativo.',
+            'custo.numeric' => 'Informe um custo válido para a variação.',
+            'custo.min' => 'O custo da variação não pode ser negativo.',
+            'referencia.max' => 'A referência pode ter no máximo 100 caracteres.',
+            'referencia.unique' => 'Esta referência já está em uso em outra variação.',
+            'sku_interno.max' => 'O SKU interno pode ter no máximo 120 caracteres.',
+            'sku_interno.unique' => 'Este SKU interno já está em uso em outra variação.',
+            'chave_variacao.max' => 'A chave da variação pode ter no máximo 255 caracteres.',
+            'chave_variacao.unique' => 'Esta chave de variação já está em uso.',
+            'codigo_barras.max' => 'O código de barras pode ter no máximo 255 caracteres.',
+            'audit.motivo.max' => 'O motivo pode ter no máximo 500 caracteres.',
+            'audit.origin.in' => 'A origem da alteração de preço é inválida.',
         ]);
     }
 
@@ -289,6 +412,41 @@ class ProdutoVariacaoService
         }
 
         return $payload;
+    }
+
+    private function precoMudou(ProdutoVariacao $variacao, array $data): bool
+    {
+        if (!array_key_exists('preco', $data)) {
+            return false;
+        }
+
+        if ($data['preco'] === null || $data['preco'] === '') {
+            return false;
+        }
+
+        return $this->formatarPrecoParaComparacao($variacao->preco)
+            !== $this->formatarPrecoParaComparacao($data['preco']);
+    }
+
+    private function formatarPrecoParaComparacao(mixed $valor): string
+    {
+        return number_format((float) $valor, 2, '.', '');
+    }
+
+    private function sincronizarPrecoCarrinhosRascunho(ProdutoVariacao $variacao): void
+    {
+        $novoPreco = number_format((float) $variacao->preco, 2, '.', '');
+
+        DB::table('carrinho_itens as ci')
+            ->join('carrinhos as c', 'c.id', '=', 'ci.id_carrinho')
+            ->where('ci.id_variacao', $variacao->id)
+            ->whereNull('ci.outlet_id')
+            ->where('c.status', 'rascunho')
+            ->update([
+                'ci.preco_unitario' => $novoPreco,
+                'ci.subtotal' => DB::raw("ci.quantidade * {$novoPreco}"),
+                'ci.updated_at' => now(),
+            ]);
     }
 
     private function sincronizarAtributos(ProdutoVariacao $variacao, ?array $atributosRecebidos): void

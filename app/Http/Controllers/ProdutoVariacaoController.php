@@ -8,12 +8,10 @@ use App\Http\Resources\ProdutoSimplificadoResource;
 use App\Http\Resources\ProdutoVariacaoResource;
 use App\Models\Produto;
 use App\Models\ProdutoVariacao;
-use App\Services\AuditoriaEventoService;
 use App\Services\ProdutoVariacaoService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 use Throwable;
 
@@ -21,10 +19,7 @@ class ProdutoVariacaoController extends Controller
 {
     protected ProdutoVariacaoService $service;
 
-    public function __construct(
-        ProdutoVariacaoService $service,
-        private readonly AuditoriaEventoService $auditoria
-    )
+    public function __construct(ProdutoVariacaoService $service)
     {
         $this->service = $service;
     }
@@ -83,7 +78,7 @@ class ProdutoVariacaoController extends Controller
         $dados = $request->all();
 
         if (!is_array($dados)) {
-            return response()->json(['message' => 'Formato inv??lido.'], 400);
+            return response()->json(['message' => 'Não foi possível ler os dados enviados. Atualize a página e tente novamente.'], 400);
         }
 
         $isList = array_is_list($dados);
@@ -91,15 +86,15 @@ class ProdutoVariacaoController extends Controller
         try {
             if ($isList) {
                 $service->atualizarLote($produto->id, $dados);
-                return response()->json(['message' => 'Varia????es atualizadas com sucesso.']);
+                return response()->json(['message' => 'Variações salvas com sucesso.']);
             }
 
             if (!$variacao) {
-                return response()->json(['message' => 'Formato inv??lido.'], 400);
+                return response()->json(['message' => 'Não foi possível identificar a variação que será atualizada.'], 400);
             }
 
             if ($variacao->produto_id !== $produto->id) {
-                return response()->json(['error' => 'Varia????o n??o pertence a este produto'], 404);
+                return response()->json(['message' => 'Esta variação não pertence ao produto informado.'], 404);
             }
 
             $variacaoAtualizada = $service->atualizarIndividual($variacao, $dados);
@@ -109,7 +104,7 @@ class ProdutoVariacaoController extends Controller
             throw $e;
         } catch (Throwable $e) {
             report($e);
-            return response()->json(['message' => 'Erro inesperado.'], 500);
+            return response()->json(['message' => 'Não foi possível salvar as variações agora. Tente novamente.'], 500);
         }
     }
 
@@ -183,7 +178,7 @@ class ProdutoVariacaoController extends Controller
 
         $payload = $request->all();
         if (!is_array($payload)) {
-            return response()->json(['message' => 'Formato inválido.'], 400);
+            return response()->json(['message' => 'Não foi possível ler os dados enviados. Atualize a página e tente novamente.'], 400);
         }
 
         $camposPermitidos = [
@@ -208,7 +203,7 @@ class ProdutoVariacaoController extends Controller
         $naoPermitidos = array_values(array_diff($camposRecebidos, $camposPermitidos));
         if (!empty($naoPermitidos)) {
             return response()->json([
-                'message' => 'Campos não permitidos no PATCH.',
+                'message' => 'Alguns campos enviados não podem ser alterados por esta tela.',
                 'fields' => $naoPermitidos,
             ], 422);
         }
@@ -236,20 +231,30 @@ class ProdutoVariacaoController extends Controller
             'audit.origin' => 'sometimes|nullable|in:checkout,cadastro,importacao',
             'audit.metadata' => 'sometimes|array',
             'audit.metadata.carrinho_id' => 'sometimes|nullable|integer|min:1',
+        ], [
+            'preco.numeric' => 'Informe um preço válido para a variação.',
+            'preco.min' => 'O preço da variação não pode ser negativo.',
+            'custo.numeric' => 'Informe um custo válido para a variação.',
+            'custo.min' => 'O custo da variação não pode ser negativo.',
+            'referencia.unique' => 'Esta referência já está em uso em outra variação.',
+            'sku_interno.unique' => 'Este SKU interno já está em uso em outra variação.',
+            'chave_variacao.unique' => 'Esta chave de variação já está em uso.',
+            'audit.motivo.max' => 'O motivo pode ter no máximo 500 caracteres.',
+            'audit.origin.in' => 'A origem da alteração de preço é inválida.',
         ]);
 
         $validator->after(function ($validator) use ($payload): void {
             if (array_key_exists('preco', $payload)) {
                 $motivo = trim((string) data_get($payload, 'audit.motivo', ''));
                 if ($motivo === '') {
-                    $validator->errors()->add('audit.motivo', 'O motivo é obrigatório para alteração de preço.');
+                    $validator->errors()->add('audit.motivo', 'Informe o motivo da alteração de preço.');
                 }
             }
         });
 
         if ($validator->fails()) {
             return response()->json([
-                'message' => 'Dados inválidos.',
+                'message' => 'Revise os campos destacados e tente novamente.',
                 'errors' => $validator->errors(),
             ], 422);
         }
@@ -272,62 +277,14 @@ class ProdutoVariacaoController extends Controller
             return response()->json($variacao->fresh());
         }
 
-        $before = $variacao->only($camposPermitidos);
-        $variacao->fill($updates);
+        $variacaoAtualizada = $this->service->salvarComAuditoria(
+            $variacao,
+            $updates,
+            $auditInput,
+            'Atualização de variação'
+        );
 
-        if (!$variacao->isDirty()) {
-            return response()->json($variacao->fresh());
-        }
-
-        DB::transaction(function () use ($variacao, $camposPermitidos, $before, $auditInput): void {
-            $variacao->save();
-
-            if ($variacao->wasChanged('preco')) {
-                $novoPreco = (float) $variacao->preco;
-
-                DB::table('carrinho_itens as ci')
-                    ->join('carrinhos as c', 'c.id', '=', 'ci.id_carrinho')
-                    ->where('ci.id_variacao', $variacao->id)
-                    ->whereNull('ci.outlet_id')
-                    ->where('c.status', 'rascunho')
-                    ->update([
-                        'ci.preco_unitario' => $novoPreco,
-                        'ci.subtotal' => DB::raw("ci.quantidade * {$novoPreco}"),
-                        'ci.updated_at' => now(),
-                    ]);
-            }
-
-            $mudancas = [];
-            foreach ($camposPermitidos as $campo) {
-                if (!$variacao->wasChanged($campo)) {
-                    continue;
-                }
-
-                $mudancas[] = [
-                    'campo' => $campo,
-                    'old' => $before[$campo] ?? null,
-                    'new' => $variacao->{$campo},
-                ];
-            }
-
-            $metadataExtra = (array) ($auditInput['metadata'] ?? []);
-            $metadata = array_filter([
-                'motivo' => $auditInput['motivo'] ?? null,
-                'origin' => $auditInput['origin'] ?? null,
-                'carrinho_id' => $metadataExtra['carrinho_id'] ?? null,
-            ], fn ($v) => $v !== null && $v !== '');
-
-            $this->auditoria->registrar(
-                module: 'produto_variacoes',
-                action: 'update',
-                label: (string) ($auditInput['label'] ?? 'Atualização de variação'),
-                auditable: $variacao,
-                mudancas: $mudancas,
-                metadata: $metadata
-            );
-        });
-
-        return response()->json($variacao->fresh());
+        return response()->json($variacaoAtualizada);
     }
 
 

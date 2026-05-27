@@ -102,6 +102,10 @@ class ProdutoVariacaoUpdateTest extends TestCase
                 'custo' => 60,
                 'referencia' => 'REF-NEW-1',
                 'codigo_barras' => '123',
+                'audit' => [
+                    'motivo' => 'Ajuste de tabela',
+                    'origin' => 'cadastro',
+                ],
             ],
             [
                 'id' => $variacaoId2,
@@ -109,6 +113,10 @@ class ProdutoVariacaoUpdateTest extends TestCase
                 'custo' => 90,
                 'referencia' => 'REF-NEW-2',
                 'codigo_barras' => '456',
+                'audit' => [
+                    'motivo' => 'Ajuste de tabela',
+                    'origin' => 'cadastro',
+                ],
             ],
         ];
 
@@ -157,6 +165,10 @@ class ProdutoVariacaoUpdateTest extends TestCase
             'preco' => 120,
             'custo' => 55,
             'codigo_barras' => '789',
+            'audit' => [
+                'motivo' => 'Correção de cadastro',
+                'origin' => 'cadastro',
+            ],
         ];
 
         $response = $this->putJson("/api/v1/produtos/{$produtoId}/variacoes/{$variacaoId}", $payload);
@@ -175,5 +187,234 @@ class ProdutoVariacaoUpdateTest extends TestCase
             'custo' => 55,
             'codigo_barras' => '789',
         ]);
+    }
+
+    public function test_post_variacao_rejeita_preco_vazio_e_aceita_zero(): void
+    {
+        $usuario = $this->criarUsuario();
+        Sanctum::actingAs($usuario);
+        Cache::put('permissoes_usuario_' . $usuario->id, ['produto_variacoes.criar'], now()->addHour());
+
+        [$produtoId] = $this->criarProdutoBase();
+
+        $this->postJson("/api/v1/produtos/{$produtoId}/variacoes", [
+            'referencia' => 'REF-SEM-PRECO',
+            'preco' => null,
+        ])->assertStatus(422)
+            ->assertJsonValidationErrors(['preco'])
+            ->assertJsonFragment(['Informe o preço da variação.']);
+
+        $this->postJson("/api/v1/produtos/{$produtoId}/variacoes", [
+            'referencia' => 'REF-PRECO-ZERO',
+            'preco' => 0,
+        ])->assertCreated()
+            ->assertJsonPath('data.preco', 0);
+    }
+
+    public function test_patch_variacoes_bulk_exige_motivo_quando_preco_muda(): void
+    {
+        $usuario = $this->criarUsuario();
+        Sanctum::actingAs($usuario);
+        Cache::put('permissoes_usuario_' . $usuario->id, ['produto_variacoes.editar'], now()->addHour());
+
+        [$produtoId, $now] = $this->criarProdutoBase();
+
+        $variacaoId = DB::table('produto_variacoes')->insertGetId([
+            'produto_id' => $produtoId,
+            'referencia' => 'REF-MOTIVO-OLD',
+            'nome' => 'Variacao motivo',
+            'preco' => 100,
+            'custo' => 50,
+            'codigo_barras' => null,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ]);
+
+        $response = $this->patchJson("/api/v1/produtos/{$produtoId}/variacoes/bulk", [[
+            'id' => $variacaoId,
+            'referencia' => 'REF-MOTIVO-OLD',
+            'preco' => 120,
+            'custo' => 50,
+        ]]);
+
+        $response->assertStatus(422)
+            ->assertJsonValidationErrors(['audit.motivo'])
+            ->assertJsonFragment(['Informe o motivo da alteração de preço.']);
+    }
+
+    public function test_patch_variacoes_bulk_com_motivo_audita_e_sincroniza_carrinho_rascunho(): void
+    {
+        $usuario = $this->criarUsuario();
+        Sanctum::actingAs($usuario);
+        Cache::put('permissoes_usuario_' . $usuario->id, ['produto_variacoes.editar'], now()->addHour());
+
+        [$produtoId, $now] = $this->criarProdutoBase();
+
+        $variacaoId = DB::table('produto_variacoes')->insertGetId([
+            'produto_id' => $produtoId,
+            'referencia' => 'REF-BULK-CARRINHO',
+            'nome' => 'Variacao carrinho',
+            'preco' => 100,
+            'custo' => 50,
+            'codigo_barras' => null,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ]);
+
+        $usuarioCarrinho = DB::table('acesso_usuarios')->insertGetId([
+            'nome' => 'Usuario Carrinho Bulk',
+            'email' => 'usuario.carrinho.bulk.' . uniqid() . '@example.test',
+            'senha' => Hash::make('SenhaForte123'),
+            'ativo' => 1,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ]);
+
+        $carrinhoRascunhoId = DB::table('carrinhos')->insertGetId([
+            'status' => 'rascunho',
+            'id_usuario' => $usuarioCarrinho,
+            'id_cliente' => null,
+            'id_parceiro' => null,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ]);
+
+        $carrinhoFinalizadoId = DB::table('carrinhos')->insertGetId([
+            'status' => 'finalizado',
+            'id_usuario' => $usuarioCarrinho,
+            'id_cliente' => null,
+            'id_parceiro' => null,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ]);
+
+        $motivoOutletId = DB::table('outlet_motivos')->insertGetId([
+            'nome' => 'Outlet Bulk',
+            'slug' => 'outlet-bulk-' . uniqid(),
+            'created_at' => $now,
+            'updated_at' => $now,
+        ]);
+
+        $outletId = DB::table('produto_variacao_outlets')->insertGetId([
+            'produto_variacao_id' => $variacaoId,
+            'motivo_id' => $motivoOutletId,
+            'quantidade' => 1,
+            'quantidade_restante' => 1,
+            'usuario_id' => $usuarioCarrinho,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ]);
+
+        DB::table('carrinho_itens')->insert([
+            [
+                'id_carrinho' => $carrinhoRascunhoId,
+                'id_variacao' => $variacaoId,
+                'outlet_id' => null,
+                'id_deposito' => null,
+                'quantidade' => 2,
+                'preco_unitario' => 100,
+                'subtotal' => 200,
+                'created_at' => $now,
+                'updated_at' => $now,
+            ],
+            [
+                'id_carrinho' => $carrinhoFinalizadoId,
+                'id_variacao' => $variacaoId,
+                'outlet_id' => null,
+                'id_deposito' => null,
+                'quantidade' => 2,
+                'preco_unitario' => 100,
+                'subtotal' => 200,
+                'created_at' => $now,
+                'updated_at' => $now,
+            ],
+            [
+                'id_carrinho' => $carrinhoRascunhoId,
+                'id_variacao' => $variacaoId,
+                'outlet_id' => $outletId,
+                'id_deposito' => null,
+                'quantidade' => 1,
+                'preco_unitario' => 100,
+                'subtotal' => 100,
+                'created_at' => $now,
+                'updated_at' => $now,
+            ],
+        ]);
+
+        $response = $this->patchJson("/api/v1/produtos/{$produtoId}/variacoes/bulk", [[
+            'id' => $variacaoId,
+            'referencia' => 'REF-BULK-CARRINHO',
+            'preco' => 150,
+            'custo' => 50,
+            'audit' => [
+                'label' => 'Alteração de preço no cadastro de produtos',
+                'motivo' => 'Ajuste de tabela',
+                'origin' => 'cadastro',
+            ],
+        ]]);
+
+        $response->assertOk()
+            ->assertJsonPath('message', 'Variações salvas com sucesso.');
+
+        $this->assertDatabaseHas('auditoria_eventos', [
+            'module' => 'produto_variacoes',
+            'action' => 'update',
+            'label' => 'Alteração de preço no cadastro de produtos',
+            'auditable_id' => $variacaoId,
+        ]);
+
+        $this->assertDatabaseHas('carrinho_itens', [
+            'id_carrinho' => $carrinhoRascunhoId,
+            'id_variacao' => $variacaoId,
+            'outlet_id' => null,
+            'preco_unitario' => 150,
+            'subtotal' => 300,
+        ]);
+
+        $this->assertDatabaseHas('carrinho_itens', [
+            'id_carrinho' => $carrinhoFinalizadoId,
+            'id_variacao' => $variacaoId,
+            'outlet_id' => null,
+            'preco_unitario' => 100,
+            'subtotal' => 200,
+        ]);
+
+        $this->assertDatabaseHas('carrinho_itens', [
+            'id_carrinho' => $carrinhoRascunhoId,
+            'id_variacao' => $variacaoId,
+            'outlet_id' => $outletId,
+            'preco_unitario' => 100,
+            'subtotal' => 100,
+        ]);
+    }
+
+    public function test_put_variacao_individual_exige_motivo_quando_preco_muda(): void
+    {
+        $usuario = $this->criarUsuario();
+        Sanctum::actingAs($usuario);
+        Cache::put('permissoes_usuario_' . $usuario->id, ['produto_variacoes.editar'], now()->addHour());
+
+        [$produtoId, $now] = $this->criarProdutoBase();
+
+        $variacaoId = DB::table('produto_variacoes')->insertGetId([
+            'produto_id' => $produtoId,
+            'referencia' => 'REF-PUT-MOTIVO',
+            'nome' => 'Variacao put motivo',
+            'preco' => 100,
+            'custo' => 40,
+            'codigo_barras' => null,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ]);
+
+        $response = $this->putJson("/api/v1/produtos/{$produtoId}/variacoes/{$variacaoId}", [
+            'referencia' => 'REF-PUT-MOTIVO',
+            'preco' => 130,
+            'custo' => 40,
+        ]);
+
+        $response->assertStatus(422)
+            ->assertJsonValidationErrors(['audit.motivo'])
+            ->assertJsonFragment(['Informe o motivo da alteração de preço.']);
     }
 }

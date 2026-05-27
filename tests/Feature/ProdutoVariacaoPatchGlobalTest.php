@@ -175,7 +175,7 @@ class ProdutoVariacaoPatchGlobalTest extends TestCase
 
         $response->assertStatus(422)
             ->assertJsonValidationErrors(['audit.motivo'])
-            ->assertJsonFragment(['O motivo é obrigatório para alteração de preço.']);
+            ->assertJsonFragment(['Informe o motivo da alteração de preço.']);
     }
 
     public function test_patch_preco_cria_auditoria_e_sincroniza_carrinho_rascunho(): void

@@ -87,6 +87,11 @@ class Pedido extends Model
         return $this->hasMany(PedidoStatusHistorico::class);
     }
 
+    public function statusPrevisoes(): HasMany
+    {
+        return $this->hasMany(PedidoStatusPrevisao::class);
+    }
+
     public function statusAtual(): HasOne
     {
         return $this->hasOne(PedidoStatusHistorico::class, 'pedido_id')->latestOfMany();

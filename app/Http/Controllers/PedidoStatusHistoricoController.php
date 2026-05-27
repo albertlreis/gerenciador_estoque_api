@@ -8,14 +8,25 @@ use App\Helpers\PedidoHelper;
 use App\Services\Comunicacao\ComunicacaoApiClient;
 use App\Models\Pedido;
 use App\Models\PedidoStatusHistorico;
+use App\Models\PedidoStatusPrevisao;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
 
 class PedidoStatusHistoricoController extends Controller
 {
     const STATUS_CRITICOS = [
         PedidoStatus::ENTREGA_CLIENTE,
         PedidoStatus::FINALIZADO,
+    ];
+
+    private const STATUS_PREVISAO_EDITAVEIS = [
+        'previsao_embarque_fabrica',
+        'embarque_fabrica',
+        'previsao_entrega_estoque',
+        'entrega_estoque',
+        'finalizado',
     ];
 
 
@@ -32,6 +43,12 @@ class PedidoStatusHistoricoController extends Controller
         $historico = $pedido->historicoStatus()
             ->with('usuario')
             ->get();
+        $previsoesManuais = $pedido->statusPrevisoes()
+            ->get()
+            ->mapWithKeys(fn ($item) => [
+                ($item->status instanceof PedidoStatus ? $item->status->value : (string) $item->status) => $item->data_prevista?->toDateString(),
+            ])
+            ->toArray();
 
         $fluxo = PedidoHelper::fluxoPorTipo($pedido);
         $ordemMap = array_values(array_map(fn($s) => $s->value, $fluxo));
@@ -42,7 +59,7 @@ class PedidoStatusHistoricoController extends Controller
         ])->toArray();
 
         $prazos = ConfiguracaoHelper::prazos();
-        $previsoes = PedidoHelper::previsoes($datas, $prazos);
+        $previsoes = PedidoHelper::previsoes($datas, $prazos, $previsoesManuais);
 
         // Formata o histórico existente
         $historicoFormatado = $historico->map(function ($item) use ($usuario) {
@@ -74,9 +91,10 @@ class PedidoStatusHistoricoController extends Controller
                 'icone' => self::iconePorStatus($status),
                 'cor' => '#adb5bd',
                 'data_status' => $data,
-                'observacoes' => 'Previsão automática',
+                'observacoes' => isset($previsoesManuais[$status]) ? 'Previsao manual' : 'Previsão automática',
                 'usuario' => null,
                 'ehPrevisao' => true,
+                'origem_previsao' => isset($previsoesManuais[$status]) ? 'manual' : 'automatica',
             ]);
 
         // Junta tudo e ordena de forma decrescente pelo fluxo
@@ -103,14 +121,109 @@ class PedidoStatusHistoricoController extends Controller
         return response()->json($resultadoFinal);
     }
 
-    public function atualizarStatus(Request $request, Pedido $pedido, ComunicacaoApiClient $comms): JsonResponse
+    public function previsoes(Pedido $pedido): JsonResponse
     {
-        $request->validate([
-            'status' => 'required|string',
-            'observacoes' => 'nullable|string'
+        $historico = $pedido->historicoStatus()->get();
+        $datas = $historico->mapWithKeys(fn ($item) => [
+            $item->getRawOriginal('status') => $item->data_status,
+        ])->toArray();
+
+        $previsoesManuais = $pedido->statusPrevisoes()
+            ->get()
+            ->mapWithKeys(fn ($item) => [
+                ($item->status instanceof PedidoStatus ? $item->status->value : (string) $item->status) => $item,
+            ]);
+
+        $prazos = ConfiguracaoHelper::prazos();
+        $previsoesCalculadas = PedidoHelper::previsoes($datas, $prazos);
+        $registrados = $historico->map(fn ($item) => (string) $item->getRawOriginal('status'))->unique();
+
+        $items = collect(PedidoHelper::fluxoPorTipo($pedido))
+            ->reject(fn (PedidoStatus $status) => $registrados->contains($status->value))
+            ->map(function (PedidoStatus $status) use ($previsoesManuais, $previsoesCalculadas) {
+                /** @var PedidoStatusPrevisao|null $manual */
+                $manual = $previsoesManuais->get($status->value);
+                $dataManual = $manual?->data_prevista?->toDateString();
+                $dataCalculada = isset($previsoesCalculadas[$status->value]) && $previsoesCalculadas[$status->value]
+                    ? $previsoesCalculadas[$status->value]->toDateString()
+                    : null;
+
+                return [
+                    'status' => $status->value,
+                    'label' => $status->label(),
+                    'data_prevista' => $dataManual ?? $dataCalculada,
+                    'data_calculada' => $dataCalculada,
+                    'manual' => $dataManual !== null,
+                ];
+            })
+            ->values();
+
+        return response()->json($items);
+    }
+
+    public function salvarPrevisoes(Request $request, Pedido $pedido): JsonResponse
+    {
+        $statusPermitidos = array_map(fn (PedidoStatus $status) => $status->value, PedidoHelper::fluxoPorTipo($pedido));
+
+        $dados = $request->validate([
+            'previsoes' => ['required', 'array'],
+            'previsoes.*.status' => ['required', 'string', Rule::in($statusPermitidos)],
+            'previsoes.*.data_prevista' => ['nullable', 'date_format:Y-m-d'],
         ]);
 
-        $novoStatus = $request->status;
+        $usuarioId = auth()->id();
+        $salvas = [];
+
+        foreach ($dados['previsoes'] as $previsao) {
+            $status = $previsao['status'];
+            $dataPrevista = $previsao['data_prevista'] ?? null;
+
+            if ($dataPrevista === null || $dataPrevista === '') {
+                $pedido->statusPrevisoes()->where('status', $status)->delete();
+                continue;
+            }
+
+            $salvas[] = $pedido->statusPrevisoes()->updateOrCreate(
+                ['status' => $status],
+                [
+                    'data_prevista' => $dataPrevista,
+                    'usuario_id' => $usuarioId,
+                ]
+            );
+        }
+
+        logAuditoria('pedido_status_previsao', "Previsoes de status atualizadas no Pedido #{$pedido->id}.", [
+            'acao' => 'atualizar_previsoes',
+            'pedido_id' => $pedido->id,
+            'total' => count($salvas),
+        ], $pedido);
+
+        return response()->json([
+            'message' => 'Previsoes atualizadas com sucesso.',
+            'data' => $salvas,
+        ]);
+    }
+
+    public function atualizarStatus(Request $request, Pedido $pedido, ComunicacaoApiClient $comms): JsonResponse
+    {
+        $dados = $request->validate([
+            'status' => ['required', 'string'],
+            'observacoes' => ['nullable', 'string'],
+            'data_prevista' => ['nullable', 'date_format:Y-m-d'],
+        ]);
+
+        $novoStatus = $dados['status'];
+        $exigePrevisao = in_array($novoStatus, self::STATUS_PREVISAO_EDITAVEIS, true);
+
+        if ($exigePrevisao && empty($dados['data_prevista'])) {
+            return response()->json([
+                'message' => 'Informe a previsão para este status.',
+                'errors' => [
+                    'data_prevista' => ['Informe a previsão para este status.'],
+                ],
+            ], 422);
+        }
+
         $fluxo = PedidoHelper::fluxoPorTipo($pedido);
 
         if ($pedido->historicoStatus()->where('status', $novoStatus)->exists()) {
@@ -124,25 +237,39 @@ class PedidoStatusHistoricoController extends Controller
 
         $ultimoStatus = $pedido->historicoStatus()->latest('data_status')->first();
         if ($ultimoStatus) {
-            $posAtual = array_search($ultimoStatus->status, array_map(fn($s) => $s->value, $fluxo));
+            $posAtual = array_search($ultimoStatus->getRawOriginal('status'), array_map(fn($s) => $s->value, $fluxo));
             if ($posAtual !== false && $posNovo < $posAtual) {
                 return response()->json(['message' => 'Não é permitido regredir o status.'], 422);
             }
         }
 
-        // Salvar o novo status
-        $pedido->historicoStatus()->create([
-            'status' => $novoStatus,
-            'observacoes' => $request->observacoes,
-            'data_status' => now(),
-            'usuario_id' => auth()->id(),
-        ]);
+        $previsaoSalva = null;
 
-        logAuditoria('pedido_status', "Status atualizado para '$novoStatus' no Pedido #$pedido->id.", [
-            'acao' => 'atualizacao',
-            'nivel' => 'info',
-            'status_novo' => $novoStatus,
-        ], $pedido);
+        DB::transaction(function () use ($pedido, $novoStatus, $dados, $exigePrevisao, &$previsaoSalva) {
+            $pedido->historicoStatus()->create([
+                'status' => $novoStatus,
+                'observacoes' => $dados['observacoes'] ?? null,
+                'data_status' => now(),
+                'usuario_id' => auth()->id(),
+            ]);
+
+            if ($exigePrevisao) {
+                $previsaoSalva = $pedido->statusPrevisoes()->updateOrCreate(
+                    ['status' => $novoStatus],
+                    [
+                        'data_prevista' => $dados['data_prevista'],
+                        'usuario_id' => auth()->id(),
+                    ]
+                );
+            }
+
+            logAuditoria('pedido_status', "Status atualizado para '$novoStatus' no Pedido #$pedido->id.", [
+                'acao' => 'atualizacao',
+                'nivel' => 'info',
+                'status_novo' => $novoStatus,
+                'data_prevista' => $exigePrevisao ? $dados['data_prevista'] : null,
+            ], $pedido);
+        });
 
         try {
             $comms->enviarStatusPedido($pedido->fresh(['cliente']), $novoStatus);
@@ -155,7 +282,10 @@ class PedidoStatusHistoricoController extends Controller
             ]);
         }
 
-        return response()->json(['message' => 'Status atualizado com sucesso.']);
+        return response()->json([
+            'message' => 'Status atualizado com sucesso.',
+            'data_prevista' => $previsaoSalva?->data_prevista?->toDateString(),
+        ]);
     }
 
     public function cancelarStatus(PedidoStatusHistorico $statusHistorico): JsonResponse

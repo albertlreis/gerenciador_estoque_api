@@ -447,6 +447,20 @@ class PedidoController extends Controller
                 'consignacoes.produtoVariacao.estoquesComLocalizacao.localizacao.area',
             ])->findOrFail($pedidoId);
 
+            $consignacaoIds = collect((array) $request->query('consignacao_ids', []))
+                ->merge((array) $request->query('consignacoes', []))
+                ->map(fn ($id) => (int) $id)
+                ->filter(fn ($id) => $id > 0)
+                ->unique()
+                ->values();
+
+            if ($consignacaoIds->isNotEmpty()) {
+                $pedido->setRelation(
+                    'consignacoes',
+                    $pedido->consignacoes->whereIn('id', $consignacaoIds)->values()
+                );
+            }
+
             $pedido->consignacoes->each(function ($consignacao) use ($pdfImageService) {
                 $consignacao->setAttribute(
                     'pdf_imagem_data_uri',
@@ -494,6 +508,20 @@ class PedidoController extends Controller
             // localização
             'itens.variacao.estoquesComLocalizacao.localizacao.area',
         ])->findOrFail($pedidoId);
+
+        $itemIds = collect((array) $request->query('item_ids', []))
+            ->merge((array) $request->query('itens', []))
+            ->map(fn ($id) => (int) $id)
+            ->filter(fn ($id) => $id > 0)
+            ->unique()
+            ->values();
+
+        if ($itemIds->isNotEmpty()) {
+            $pedido->setRelation(
+                'itens',
+                $pedido->itens->whereIn('id', $itemIds)->values()
+            );
+        }
 
         $pedido->itens->each(function ($item) use ($pdfImageService) {
             $item->setAttribute(

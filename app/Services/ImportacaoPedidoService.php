@@ -11,6 +11,7 @@ use App\Models\ProdutoVariacao;
 use App\Models\ProdutoVariacaoAtributo;
 use App\Models\ProdutoVariacaoCodigoHistorico;
 use App\Models\PedidoImportacao;
+use App\Models\PedidoImportacaoItem;
 use App\Models\Categoria;
 use App\Enums\EstrategiaVinculoImportacao;
 use App\Enums\PedidoStatus;
@@ -32,6 +33,8 @@ use Illuminate\Validation\ValidationException;
  */
 class ImportacaoPedidoService
 {
+    private const PRAZO_IMPORTACAO_PADRAO_DIAS_UTEIS = 60;
+
     private ?int $categoriaPadraoId = null;
 
     /**
@@ -56,7 +59,7 @@ class ImportacaoPedidoService
 
             'cliente.id'           => 'nullable|numeric|min:1',
 
-            'pedido.numero_externo'=> 'nullable|string|max:50|unique:pedidos,numero_externo',
+            'pedido.numero_externo'=> 'required|string|max:50|unique:pedidos,numero_externo',
             'pedido.total'         => 'nullable|numeric',
             'pedido.observacoes'   => 'nullable|string',
             'pedido.data_pedido'   => 'nullable|string',
@@ -92,6 +95,7 @@ class ImportacaoPedidoService
         ], [
             'itens.required' => 'Adicione ao menos um item ao pedido antes de confirmar.',
             'itens.min' => 'Adicione ao menos um item ao pedido (inserção manual) antes de confirmar.',
+            'pedido.numero_externo.required' => 'Informe o número do pedido antes de confirmar.',
             'pedido.numero_externo.max' => 'Número do pedido deve ter no máximo 50 caracteres.',
             'itens.*.nome.required' => 'Informe o nome do produto.',
             'itens.*.nome.max' => 'O nome do produto deve ter no máximo 255 caracteres.',
@@ -272,10 +276,13 @@ class ImportacaoPedidoService
                 'data_entrega'
             );
 
-            if (!$previsaoTipo && !$dataPrevista && !$entregue && $this->hasValue($dataEntregaPedidoLegado)) {
-                $previsaoTipo = 'DATA';
-                $dataPrevista = DateNormalizer::normalizeDate($dataEntregaPedidoLegado, 'pedido.data_entrega');
-                $dataEntrega = null;
+            if (!$previsaoTipo) {
+                $previsaoTipo = 'DIAS_UTEIS';
+                $diasUteisPrevistos = self::PRAZO_IMPORTACAO_PADRAO_DIAS_UTEIS;
+                $diasCorridosPrevistos = null;
+                $dataPrevista = null;
+            } elseif ($previsaoTipo === 'DIAS_UTEIS' && $diasUteisPrevistos === null) {
+                $diasUteisPrevistos = self::PRAZO_IMPORTACAO_PADRAO_DIAS_UTEIS;
             }
 
             if ($entregue && !$dataEntrega) {
@@ -460,7 +467,7 @@ class ImportacaoPedidoService
 
                 $this->registrarCodigoHistoricoPedido($variacao, $item['ref'] ?? null);
 
-                PedidoItem::create([
+                $pedidoItem = PedidoItem::create([
                     'id_pedido'      => $pedido->id,
                     'id_variacao'    => $variacao->id,
                     'quantidade'     => $quantidade,
@@ -469,6 +476,29 @@ class ImportacaoPedidoService
                     'subtotal'       => (float)$quantidade * (float)$valorUnit,
                     'id_deposito'    => $item['id_deposito'] ?? null,
                     'observacoes'    => $item['atributos']['observacao'] ?? null,
+                ]);
+
+                PedidoImportacaoItem::create([
+                    'pedido_importacao_id' => $importacaoId ? (int) $importacaoId : null,
+                    'pedido_id' => $pedido->id,
+                    'pedido_item_id' => $pedidoItem->id,
+                    'produto_id' => $variacao->produto_id,
+                    'produto_variacao_id' => $variacao->id,
+                    'acao' => $forcarProdutoNovo ? 'criado' : 'vinculado',
+                    'dados_importados_json' => $item,
+                    'dados_confirmados_json' => [
+                        'pedido_item_id' => $pedidoItem->id,
+                        'produto_id' => $variacao->produto_id,
+                        'produto_variacao_id' => $variacao->id,
+                        'nome_produto' => $variacao->produto?->nome,
+                        'nome_completo' => $variacao->nome_completo,
+                        'referencia' => $variacao->referencia,
+                        'sku_interno' => $variacao->sku_interno,
+                        'quantidade' => $quantidade,
+                        'preco_unitario' => $valorUnit,
+                        'custo_unitario' => $custoUnit,
+                        'id_deposito' => $item['id_deposito'] ?? null,
+                    ],
                 ]);
             }
 

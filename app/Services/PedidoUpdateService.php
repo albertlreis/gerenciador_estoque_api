@@ -13,6 +13,7 @@ use Carbon\Carbon;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
+use Throwable;
 
 class PedidoUpdateService
 {
@@ -69,11 +70,26 @@ class PedidoUpdateService
             ]);
 
             if ($pedido->isVenda() && !$pedido->isConsignado()) {
-                $this->contaAzulExports->pedido((int) $pedido->id, null, ['evento' => 'pedido_atualizado']);
+                $this->exportarContaAzulBestEffort((int) $pedido->id, 'pedido_atualizado');
             }
 
             return $pedido;
         });
+    }
+
+    private function exportarContaAzulBestEffort(int $pedidoId, string $evento): void
+    {
+        try {
+            DB::afterCommit(function () use ($pedidoId, $evento) {
+                try {
+                    $this->contaAzulExports->pedido($pedidoId, null, ['evento' => $evento]);
+                } catch (Throwable $e) {
+                    report($e);
+                }
+            });
+        } catch (Throwable $e) {
+            report($e);
+        }
     }
 
     /**

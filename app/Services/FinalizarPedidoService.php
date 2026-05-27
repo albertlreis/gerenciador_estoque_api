@@ -96,24 +96,29 @@ final class FinalizarPedidoService
         }
 
         // 1) Mapa bruto vindo da UI
-        $depositosMapBruto = collect($request->input('depositos_por_item', []))
-            ->keyBy('id_carrinho_item')
+        $depositosPorItemInput = collect($request->input('depositos_por_item', []))
+            ->keyBy('id_carrinho_item');
+
+        $itensFinalizacao = $this->aplicarAlocacoesPorDeposito($carrinho->itens, $depositosPorItemInput);
+
+        $depositosMapBruto = $depositosPorItemInput
+            ->filter(fn($r) => empty($r['alocacoes']))
             ->map(fn($r) => $r['id_deposito'] ?? null)
             ->all();
 
         // 2) Mapa RESOLVIDO usando o service (mapa > item.id_deposito > null)
-        $depositosResolvidos = $this->resolverDepositosPorItem($carrinho->itens, $depositosMapBruto);
+        $depositosResolvidos = $this->resolverDepositosPorItem($itensFinalizacao, $depositosMapBruto);
 
         $registrarMov  = $request->boolean('registrar_movimentacao');
         $emConsignacao = $request->boolean('modo_consignacao');
 
         // Validação quando for movimentar (aplica a normal e consignado)
         if ($registrarMov) {
-            $this->validator->validarAntesDeMovimentar($carrinho->itens, $depositosResolvidos);
+            $this->validator->validarAntesDeMovimentar($itensFinalizacao, $depositosResolvidos);
         }
 
-        return DB::transaction(function () use ($request, $carrinho, $idUsuarioFinal, $depositosResolvidos, $registrarMov, $emConsignacao) {
-            $total        = $carrinho->itens->sum('subtotal');
+        return DB::transaction(function () use ($request, $carrinho, $itensFinalizacao, $idUsuarioFinal, $depositosResolvidos, $registrarMov, $emConsignacao) {
+            $total        = $itensFinalizacao->sum('subtotal');
             $dataPedido   = Carbon::now('America/Belem');
             $prazoPadrao  = (int) config('orders.prazo_padrao_dias_uteis', 60);
             $prazoUteis   = (int) ($request->input('prazo_dias_uteis') ?? $prazoPadrao);
@@ -135,7 +140,7 @@ final class FinalizarPedidoService
                 'prazo_dias_uteis' => $prazoUteis,
             ]);
 
-            $this->pedidoFactory->criarItens($pedido, $carrinho->itens);
+            $this->pedidoFactory->criarItens($pedido, $itensFinalizacao);
             $this->pedidoFactory->registrarStatus($pedido, PedidoStatus::PEDIDO_CRIADO, $idUsuarioFinal);
 
             // Consignação (registros + status)
@@ -144,15 +149,15 @@ final class FinalizarPedidoService
                 $prazoData  = Carbon::now('America/Belem')->addDays($prazoDias);
 
                 // Usa o mapa resolvido para definir depósito das consignações
-                $this->consignacaoFactory->criarLote($pedido, $carrinho->itens, $depositosResolvidos, $prazoData);
+                $this->consignacaoFactory->criarLote($pedido, $itensFinalizacao, $depositosResolvidos, $prazoData);
                 $this->pedidoFactory->registrarStatus($pedido, PedidoStatus::CONSIGNADO, $idUsuarioFinal);
             }
 
             // Movimentação OU Reserva (ambos usam o mapa resolvido)
             if ($registrarMov) {
-                $this->movimentarStrategy->processar($pedido, $carrinho->itens, $depositosResolvidos, $idUsuarioFinal);
+                $this->movimentarStrategy->processar($pedido, $itensFinalizacao, $depositosResolvidos, $idUsuarioFinal);
             } else {
-                $this->reservarStrategy->processar($pedido, $carrinho->itens, $depositosResolvidos, $idUsuarioFinal);
+                $this->reservarStrategy->processar($pedido, $itensFinalizacao, $depositosResolvidos, $idUsuarioFinal);
             }
 
             // Data limite
@@ -169,7 +174,7 @@ final class FinalizarPedidoService
             }
 
             if (!$emConsignacao && $pedido->isVenda()) {
-                $this->contaAzulExports->pedido((int) $pedido->id, null, ['evento' => 'pedido_finalizado']);
+                $this->exportarContaAzulBestEffort((int) $pedido->id, 'pedido_finalizado');
             }
 
             // Finaliza carrinho
@@ -181,6 +186,58 @@ final class FinalizarPedidoService
                 'pedido'  => $pedido->load('itens.variacao'),
             ], 201);
         });
+    }
+
+    private function aplicarAlocacoesPorDeposito(Collection $itensCarrinho, Collection $depositosPorItemInput): Collection
+    {
+        return $itensCarrinho->flatMap(function ($item) use ($depositosPorItemInput) {
+            $linha = $depositosPorItemInput->get($item->id);
+            $alocacoes = is_array($linha['alocacoes'] ?? null) ? $linha['alocacoes'] : [];
+
+            if (empty($alocacoes)) {
+                return [$item];
+            }
+
+            $totalAlocado = collect($alocacoes)->sum(fn ($alocacao) => (int) ($alocacao['quantidade'] ?? 0));
+            if ($totalAlocado !== (int) $item->quantidade) {
+                throw ValidationException::withMessages([
+                    'depositos_por_item' => ["A soma das alocações do item {$item->id} deve ser igual à quantidade do carrinho."],
+                ]);
+            }
+
+            return collect($alocacoes)->map(function ($alocacao) use ($item) {
+                $quantidade = (int) ($alocacao['quantidade'] ?? 0);
+                $depositoId = (int) ($alocacao['id_deposito'] ?? 0);
+
+                if ($quantidade <= 0 || $depositoId <= 0) {
+                    throw ValidationException::withMessages([
+                        'depositos_por_item' => ["Informe depósito e quantidade válidos para o item {$item->id}."],
+                    ]);
+                }
+
+                $clone = clone $item;
+                $clone->setAttribute('quantidade', $quantidade);
+                $clone->setAttribute('id_deposito', $depositoId);
+                $clone->setAttribute('subtotal', round($quantidade * (float) $item->preco_unitario, 2));
+
+                return $clone;
+            });
+        })->values();
+    }
+
+    private function exportarContaAzulBestEffort(int $pedidoId, string $evento): void
+    {
+        try {
+            DB::afterCommit(function () use ($pedidoId, $evento) {
+                try {
+                    $this->contaAzulExports->pedido($pedidoId, null, ['evento' => $evento]);
+                } catch (Throwable $e) {
+                    report($e);
+                }
+            });
+        } catch (Throwable $e) {
+            report($e);
+        }
     }
 
     /**

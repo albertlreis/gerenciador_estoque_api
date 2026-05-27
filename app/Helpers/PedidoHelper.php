@@ -16,9 +16,9 @@ class PedidoHelper
      * @param array $prazos
      * @return array<string, Carbon|null>
      */
-    public static function previsoes(array $datas, array $prazos): array
+    public static function previsoes(array $datas, array $prazos, array $previsoesManuais = []): array
     {
-        return [
+        $previsoes = [
             PedidoStatus::ENVIADO_FABRICA->value =>
                 isset($datas[PedidoStatus::PEDIDO_CRIADO->value])
                     ? Carbon::parse($datas[PedidoStatus::PEDIDO_CRIADO->value])->addDays($prazos['prazo_envio_fabrica'] ?? 5)
@@ -49,6 +49,14 @@ class PedidoHelper
                     ? Carbon::parse($datas[PedidoStatus::CONSIGNADO->value])->addDays($prazos['prazo_consignacao'] ?? 15)
                     : null,
         ];
+
+        foreach ($previsoesManuais as $status => $dataPrevista) {
+            if ($dataPrevista) {
+                $previsoes[$status] = Carbon::parse($dataPrevista);
+            }
+        }
+
+        return $previsoes;
     }
 
     /**
@@ -129,6 +137,14 @@ class PedidoHelper
 
         if (!$statusAtual || !$dataUltimoStatus || !$proximoStatus) {
             return null;
+        }
+
+        $previsaoManual = $pedido->relationLoaded('statusPrevisoes')
+            ? $pedido->statusPrevisoes->first(fn ($previsao) => ($previsao->status?->value ?? $previsao->status) === $proximoStatus->value)
+            : $pedido->statusPrevisoes()->where('status', $proximoStatus->value)->first();
+
+        if ($previsaoManual?->data_prevista) {
+            return Carbon::parse($previsaoManual->data_prevista);
         }
 
         $prazos = Configuracao::pegarTodosComoArray();

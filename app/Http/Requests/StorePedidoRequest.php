@@ -26,6 +26,9 @@ class StorePedidoRequest extends FormRequest
             'depositos_por_item'                  => 'sometimes|array',
             'depositos_por_item.*.id_carrinho_item' => 'required_with:depositos_por_item|exists:carrinho_itens,id',
             'depositos_por_item.*.id_deposito'      => 'nullable|exists:depositos,id',
+            'depositos_por_item.*.alocacoes'         => 'nullable|array|min:1',
+            'depositos_por_item.*.alocacoes.*.id_deposito' => 'required_with:depositos_por_item.*.alocacoes|exists:depositos,id',
+            'depositos_por_item.*.alocacoes.*.quantidade' => 'required_with:depositos_por_item.*.alocacoes|integer|min:1',
 
             'registrar_movimentacao' => 'sometimes|boolean',
         ];

@@ -20,14 +20,17 @@ class PedidoRepository
      */
     public function comFiltros(Request $request): Builder
     {
-        $query = Pedido::with(['cliente', 'parceiro', 'usuario', 'statusAtual', 'historicoStatus', 'devolucoes:id,pedido_id',]);
+        $query = Pedido::with(['cliente', 'parceiro', 'usuario', 'statusAtual', 'statusPrevisoes', 'historicoStatus', 'devolucoes:id,pedido_id',]);
 
         if (!AuthHelper::podeVisualizarPedidosDeTodos()) {
             $query->where('id_usuario', auth()->id());
         }
 
         if (!$request->boolean('incluir_consignacoes')) {
-            $query->whereDoesntHave('consignacoes');
+            $query->where(function (Builder $q) {
+                $q->whereDoesntHave('consignacoes')
+                    ->orWhereHas('consignacoes', fn (Builder $sub) => $sub->where('status', 'comprado'));
+            });
         }
 
         if ($request->filled('status')) {

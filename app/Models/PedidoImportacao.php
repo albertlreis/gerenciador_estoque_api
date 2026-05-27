@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class PedidoImportacao extends Model
 {
@@ -32,5 +33,10 @@ class PedidoImportacao extends Model
     public function usuario(): BelongsTo
     {
         return $this->belongsTo(Usuario::class, 'usuario_id');
+    }
+
+    public function itens(): HasMany
+    {
+        return $this->hasMany(PedidoImportacaoItem::class, 'pedido_importacao_id');
     }
 }

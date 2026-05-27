@@ -16,6 +16,8 @@ class ConsignacaoDetalhadaResource extends JsonResource
 
             'quantidade' => $this->quantidade,
             'quantidade_disponivel' => $this->quantidadeRestante(),
+            'quantidade_comprada' => $this->quantidadeComprada(),
+            'quantidade_devolvida' => $this->quantidadeDevolvida(),
 
             'data_envio' => optional($this->data_envio)->format('d/m/Y'),
             'prazo_resposta' => optional($this->prazo_resposta)->format('d/m/Y'),
@@ -57,6 +59,38 @@ class ConsignacaoDetalhadaResource extends JsonResource
                         'nome' => $devolucao->canceladaPor->nome ?? null,
                     ],
                 ];
+            }),
+            'compras' => $this->compras->map(function ($compra) {
+                $cancelada = (bool) $compra->cancelada_em;
+                return [
+                    'id' => $compra->id,
+                    'quantidade' => $compra->quantidade,
+                    'observacoes' => $compra->observacoes,
+                    'data_compra' => optional($compra->data_compra)->format('d/m/Y H:i'),
+                    'cancelada' => $cancelada,
+                    'cancelada_em' => optional($compra->cancelada_em)->format('d/m/Y H:i'),
+                    'motivo_cancelamento' => $compra->motivo_cancelamento,
+                    'usuario' => [
+                        'id' => $compra->usuario->id ?? null,
+                        'nome' => $compra->usuario->nome ?? null,
+                    ],
+                    'cancelada_por' => [
+                        'id' => $compra->canceladaPor->id ?? null,
+                        'nome' => $compra->canceladaPor->nome ?? null,
+                    ],
+                ];
+            }),
+            'movimentacoes' => $this->whenLoaded('movimentacoes', function () {
+                return $this->movimentacoes->map(fn ($movimentacao) => [
+                    'id' => $movimentacao->id,
+                    'tipo' => $movimentacao->tipo,
+                    'quantidade' => $movimentacao->quantidade,
+                    'data_movimentacao' => optional($movimentacao->data_movimentacao)->format('d/m/Y H:i'),
+                    'deposito_origem_nome' => $movimentacao->depositoOrigem?->nome,
+                    'deposito_destino_nome' => $movimentacao->depositoDestino?->nome,
+                    'observacao' => $movimentacao->observacao,
+                    'usuario_nome' => $movimentacao->usuario?->nome,
+                ])->values();
             }),
         ];
     }

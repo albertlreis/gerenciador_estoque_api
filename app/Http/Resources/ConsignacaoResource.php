@@ -15,12 +15,13 @@ class ConsignacaoResource extends JsonResource
         $temPendente = $itens->contains('status', 'pendente');
         $temComprado = $itens->contains('status', 'comprado');
         $temDevolvido = $itens->contains('status', 'devolvido');
+        $temParcial = $itens->contains('status', 'parcial');
 
         if ($temPendente) {
             if ($itens->where('status', 'pendente')->pluck('prazo_resposta')->contains(fn($prazo) => $prazo && $hoje->gt($prazo))) {
                 $statusPedido = 'vencido';
             }
-        } elseif ($temComprado && $temDevolvido) {
+        } elseif ($temParcial || ($temComprado && $temDevolvido)) {
             $statusPedido = 'parcial';
         } elseif ($temComprado) {
             $statusPedido = 'comprado';

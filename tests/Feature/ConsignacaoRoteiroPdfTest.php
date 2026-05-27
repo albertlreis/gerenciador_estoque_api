@@ -7,6 +7,7 @@ use App\Models\Categoria;
 use App\Models\Cliente;
 use App\Models\ClienteEndereco;
 use App\Models\Consignacao;
+use App\Models\ConsignacaoCompra;
 use App\Models\ConsignacaoDevolucao;
 use App\Models\Deposito;
 use App\Models\Estoque;
@@ -20,6 +21,7 @@ use App\Models\ProdutoVariacaoImagem;
 use App\Models\Usuario;
 use App\Services\PdfImageService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Storage;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
@@ -82,9 +84,23 @@ class ConsignacaoRoteiroPdfTest extends TestCase
         );
     }
 
-    public function test_cancela_venda_de_item_consignado(): void
+    public function test_bloqueia_cancelamento_de_venda_para_usuario_nao_adm(): void
     {
         [$pedidoId] = $this->criarPedidoConsignado('comprado', PedidoStatus::CONSIGNADO);
+        $consignacao = Consignacao::where('pedido_id', $pedidoId)->firstOrFail();
+        $dataRespostaAnterior = $consignacao->data_resposta;
+
+        $response = $this->postJson("/api/v1/consignacoes/{$consignacao->id}/cancelar-venda");
+
+        $response->assertStatus(403);
+        $consignacao->refresh();
+        $this->assertSame('comprado', $consignacao->status);
+        $this->assertEquals($dataRespostaAnterior, $consignacao->data_resposta);
+    }
+
+    public function test_admin_cancela_venda_de_item_consignado(): void
+    {
+        [$pedidoId] = $this->criarPedidoConsignado('comprado', PedidoStatus::CONSIGNADO, ['Administrador']);
         $consignacao = Consignacao::where('pedido_id', $pedidoId)->firstOrFail();
 
         $response = $this->postJson("/api/v1/consignacoes/{$consignacao->id}/cancelar-venda");
@@ -139,6 +155,224 @@ class ConsignacaoRoteiroPdfTest extends TestCase
 
         $response->assertStatus(422);
         $this->assertNull($devolucao->fresh()->cancelada_em);
+    }
+
+    public function test_registra_devolucoes_em_massa_com_quantidades_por_item(): void
+    {
+        [$pedidoId] = $this->criarPedidoConsignado('pendente', PedidoStatus::CONSIGNADO);
+        $consignacaoA = Consignacao::where('pedido_id', $pedidoId)->firstOrFail();
+        $consignacaoA->update(['quantidade' => 3]);
+        $consignacaoB = $this->criarConsignacaoParaPedido($pedidoId, $consignacaoA->deposito_id, 2);
+
+        $response = $this->postJson("/api/v1/consignacoes/pedidos/{$pedidoId}/devolucoes-em-massa", [
+            'deposito_id' => $consignacaoA->deposito_id,
+            'observacoes' => 'Devolucao em massa',
+            'itens' => [
+                ['consignacao_id' => $consignacaoA->id, 'quantidade' => 2],
+                ['consignacao_id' => $consignacaoB->id, 'quantidade' => 1],
+            ],
+        ]);
+
+        $response->assertOk()
+            ->assertJsonPath('processados', 2);
+
+        $this->assertSame(2, ConsignacaoDevolucao::where('consignacao_id', $consignacaoA->id)->value('quantidade'));
+        $this->assertSame(1, ConsignacaoDevolucao::where('consignacao_id', $consignacaoB->id)->value('quantidade'));
+        $this->assertSame('pendente', $consignacaoA->fresh()->status);
+        $this->assertSame('pendente', $consignacaoB->fresh()->status);
+        $this->assertSame(2, (int) Estoque::where('id_variacao', $consignacaoA->produto_variacao_id)->where('id_deposito', $consignacaoA->deposito_id)->value('quantidade'));
+        $this->assertSame(1, (int) Estoque::where('id_variacao', $consignacaoB->produto_variacao_id)->where('id_deposito', $consignacaoB->deposito_id)->value('quantidade'));
+    }
+
+    public function test_devolucao_em_massa_nao_processa_parcialmente_quando_item_invalido(): void
+    {
+        [$pedidoId] = $this->criarPedidoConsignado('pendente', PedidoStatus::CONSIGNADO);
+        $consignacaoA = Consignacao::where('pedido_id', $pedidoId)->firstOrFail();
+        $consignacaoA->update(['quantidade' => 2]);
+        $consignacaoB = $this->criarConsignacaoParaPedido($pedidoId, $consignacaoA->deposito_id, 2);
+
+        $response = $this->postJson("/api/v1/consignacoes/pedidos/{$pedidoId}/devolucoes-em-massa", [
+            'deposito_id' => $consignacaoA->deposito_id,
+            'itens' => [
+                ['consignacao_id' => $consignacaoA->id, 'quantidade' => 1],
+                ['consignacao_id' => $consignacaoB->id, 'quantidade' => 99],
+            ],
+        ]);
+
+        $response->assertStatus(422)
+            ->assertJsonStructure(['message', 'itens_invalidos']);
+
+        $this->assertSame(0, ConsignacaoDevolucao::count());
+        $this->assertSame('pendente', $consignacaoA->fresh()->status);
+        $this->assertSame('pendente', $consignacaoB->fresh()->status);
+        $this->assertSame(0, (int) Estoque::where('id_variacao', $consignacaoA->produto_variacao_id)->where('id_deposito', $consignacaoA->deposito_id)->value('quantidade'));
+        $this->assertSame(0, (int) Estoque::where('id_variacao', $consignacaoB->produto_variacao_id)->where('id_deposito', $consignacaoB->deposito_id)->value('quantidade'));
+    }
+
+    public function test_devolucao_em_massa_bloqueia_item_de_outro_pedido(): void
+    {
+        [$pedidoId] = $this->criarPedidoConsignado('pendente', PedidoStatus::CONSIGNADO);
+        [$outroPedidoId] = $this->criarPedidoConsignado('pendente', PedidoStatus::CONSIGNADO);
+        $consignacaoA = Consignacao::where('pedido_id', $pedidoId)->firstOrFail();
+        $consignacaoOutroPedido = Consignacao::where('pedido_id', $outroPedidoId)->firstOrFail();
+
+        $response = $this->postJson("/api/v1/consignacoes/pedidos/{$pedidoId}/devolucoes-em-massa", [
+            'deposito_id' => $consignacaoA->deposito_id,
+            'itens' => [
+                ['consignacao_id' => $consignacaoA->id, 'quantidade' => 1],
+                ['consignacao_id' => $consignacaoOutroPedido->id, 'quantidade' => 1],
+            ],
+        ]);
+
+        $response->assertStatus(422);
+        $this->assertSame(0, ConsignacaoDevolucao::count());
+        $this->assertSame('pendente', $consignacaoA->fresh()->status);
+        $this->assertSame('pendente', $consignacaoOutroPedido->fresh()->status);
+    }
+
+    public function test_confirmar_compras_em_massa_finaliza_itens_e_pedido(): void
+    {
+        [$pedidoId] = $this->criarPedidoConsignado('pendente', PedidoStatus::CONSIGNADO);
+        $consignacaoA = Consignacao::where('pedido_id', $pedidoId)->firstOrFail();
+        $consignacaoB = $this->criarConsignacaoParaPedido($pedidoId, $consignacaoA->deposito_id, 1);
+
+        $response = $this->patchJson("/api/v1/consignacoes/pedidos/{$pedidoId}/compras-em-massa", [
+            'consignacao_ids' => [$consignacaoA->id, $consignacaoB->id],
+        ]);
+
+        $response->assertOk()
+            ->assertJsonPath('processados', 2);
+
+        $this->assertSame('comprado', $consignacaoA->fresh()->status);
+        $this->assertSame('comprado', $consignacaoB->fresh()->status);
+        $this->assertNotNull($consignacaoA->fresh()->data_resposta);
+        $this->assertDatabaseHas('pedido_status_historico', [
+            'pedido_id' => $pedidoId,
+            'status' => PedidoStatus::FINALIZADO->value,
+        ]);
+    }
+
+    public function test_compras_em_massa_bloqueia_itens_finalizados_sem_alterar_validos(): void
+    {
+        [$pedidoId] = $this->criarPedidoConsignado('pendente', PedidoStatus::CONSIGNADO);
+        $consignacaoA = Consignacao::where('pedido_id', $pedidoId)->firstOrFail();
+        $consignacaoB = $this->criarConsignacaoParaPedido($pedidoId, $consignacaoA->deposito_id, 1, 'devolvido');
+
+        $response = $this->patchJson("/api/v1/consignacoes/pedidos/{$pedidoId}/compras-em-massa", [
+            'consignacao_ids' => [$consignacaoA->id, $consignacaoB->id],
+        ]);
+
+        $response->assertStatus(422)
+            ->assertJsonStructure(['message', 'itens_invalidos']);
+
+        $this->assertSame('pendente', $consignacaoA->fresh()->status);
+        $this->assertSame('devolvido', $consignacaoB->fresh()->status);
+        $this->assertDatabaseMissing('pedido_status_historico', [
+            'pedido_id' => $pedidoId,
+            'status' => PedidoStatus::FINALIZADO->value,
+        ]);
+    }
+
+    public function test_compras_em_massa_registra_quantidades_por_item_sem_finalizar_saldo_restante(): void
+    {
+        [$pedidoId] = $this->criarPedidoConsignado('pendente', PedidoStatus::CONSIGNADO);
+        $consignacaoA = Consignacao::where('pedido_id', $pedidoId)->firstOrFail();
+        $consignacaoA->update(['quantidade' => 3]);
+        $consignacaoB = $this->criarConsignacaoParaPedido($pedidoId, $consignacaoA->deposito_id, 2);
+
+        $response = $this->patchJson("/api/v1/consignacoes/pedidos/{$pedidoId}/compras-em-massa", [
+            'observacoes' => 'Venda parcial',
+            'itens' => [
+                ['consignacao_id' => $consignacaoA->id, 'quantidade' => 2],
+                ['consignacao_id' => $consignacaoB->id, 'quantidade' => 1],
+            ],
+        ]);
+
+        $response->assertOk()
+            ->assertJsonPath('processados', 2);
+
+        $this->assertSame(2, ConsignacaoCompra::where('consignacao_id', $consignacaoA->id)->value('quantidade'));
+        $this->assertSame(1, ConsignacaoCompra::where('consignacao_id', $consignacaoB->id)->value('quantidade'));
+        $this->assertSame('pendente', $consignacaoA->fresh(['compras', 'devolucoes'])->status);
+        $this->assertSame(1, $consignacaoA->fresh(['compras', 'devolucoes'])->quantidadeRestante());
+        $this->assertSame('pendente', $consignacaoB->fresh(['compras', 'devolucoes'])->status);
+        $this->assertSame(1, $consignacaoB->fresh(['compras', 'devolucoes'])->quantidadeRestante());
+        $this->assertDatabaseHas('pedido_status_historico', [
+            'pedido_id' => $pedidoId,
+            'status' => PedidoStatus::FINALIZADO->value,
+        ]);
+    }
+
+    public function test_compras_em_massa_bloqueia_quantidade_maior_que_disponivel(): void
+    {
+        [$pedidoId] = $this->criarPedidoConsignado('pendente', PedidoStatus::CONSIGNADO);
+        $consignacao = Consignacao::where('pedido_id', $pedidoId)->firstOrFail();
+        $consignacao->update(['quantidade' => 2]);
+
+        $response = $this->patchJson("/api/v1/consignacoes/pedidos/{$pedidoId}/compras-em-massa", [
+            'itens' => [
+                ['consignacao_id' => $consignacao->id, 'quantidade' => 3],
+            ],
+        ]);
+
+        $response->assertStatus(422)
+            ->assertJsonStructure(['message', 'itens_invalidos']);
+
+        $this->assertSame(0, ConsignacaoCompra::count());
+        $this->assertSame('pendente', $consignacao->fresh()->status);
+    }
+
+    public function test_compra_e_devolucao_zerando_saldo_finalizam_item_como_parcial(): void
+    {
+        [$pedidoId] = $this->criarPedidoConsignado('pendente', PedidoStatus::CONSIGNADO);
+        $consignacao = Consignacao::where('pedido_id', $pedidoId)->firstOrFail();
+        $consignacao->update(['quantidade' => 3]);
+
+        $this->patchJson("/api/v1/consignacoes/pedidos/{$pedidoId}/compras-em-massa", [
+            'itens' => [
+                ['consignacao_id' => $consignacao->id, 'quantidade' => 1],
+            ],
+        ])->assertOk();
+
+        $this->postJson("/api/v1/consignacoes/pedidos/{$pedidoId}/devolucoes-em-massa", [
+            'deposito_id' => $consignacao->deposito_id,
+            'itens' => [
+                ['consignacao_id' => $consignacao->id, 'quantidade' => 2],
+            ],
+        ])->assertOk();
+
+        $consignacao->refresh();
+        $consignacao->load(['compras', 'devolucoes']);
+        $this->assertSame('parcial', $consignacao->status);
+        $this->assertSame(1, $consignacao->quantidadeComprada());
+        $this->assertSame(2, $consignacao->quantidadeDevolvida());
+        $this->assertSame(0, $consignacao->quantidadeRestante());
+    }
+
+    public function test_admin_cancela_venda_parcial_e_recalcula_saldo(): void
+    {
+        [$pedidoId] = $this->criarPedidoConsignado('pendente', PedidoStatus::CONSIGNADO, ['Administrador']);
+        $consignacao = Consignacao::where('pedido_id', $pedidoId)->firstOrFail();
+        $consignacao->update(['quantidade' => 2]);
+
+        $this->patchJson("/api/v1/consignacoes/pedidos/{$pedidoId}/compras-em-massa", [
+            'itens' => [
+                ['consignacao_id' => $consignacao->id, 'quantidade' => 1],
+            ],
+        ])->assertOk();
+
+        $response = $this->postJson("/api/v1/consignacoes/{$consignacao->id}/cancelar-venda", [
+            'motivo' => 'Teste cancelamento parcial',
+        ]);
+
+        $response->assertOk();
+        $consignacao->refresh();
+        $consignacao->load(['compras', 'devolucoes']);
+        $this->assertSame('pendente', $consignacao->status);
+        $this->assertNull($consignacao->data_resposta);
+        $this->assertSame(0, $consignacao->quantidadeComprada());
+        $this->assertSame(2, $consignacao->quantidadeRestante());
+        $this->assertNotNull(ConsignacaoCompra::where('consignacao_id', $consignacao->id)->value('cancelada_em'));
     }
 
     public function test_view_do_roteiro_de_consignacao_renderiza_imagem_embutida(): void
@@ -231,7 +465,7 @@ class ConsignacaoRoteiroPdfTest extends TestCase
         $this->assertStringContainsString('CEP 66000202', $html);
     }
 
-    private function criarPedidoConsignado(string $statusConsignacao, PedidoStatus $statusPedido): array
+    private function criarPedidoConsignado(string $statusConsignacao, PedidoStatus $statusPedido, array $perfis = []): array
     {
         $usuario = Usuario::create([
             'nome' => 'Usuario PDF',
@@ -241,6 +475,9 @@ class ConsignacaoRoteiroPdfTest extends TestCase
         ]);
 
         Sanctum::actingAs($usuario);
+        if ($perfis !== []) {
+            Cache::put('perfis_usuario_' . $usuario->id, $perfis, now()->addHour());
+        }
 
         $cliente = Cliente::create([
             'nome' => 'Cliente PDF',
@@ -307,6 +544,39 @@ class ConsignacaoRoteiroPdfTest extends TestCase
         ]);
 
         return [$pedido->id, $variacao->id];
+    }
+
+    private function criarConsignacaoParaPedido(
+        int $pedidoId,
+        int $depositoId,
+        int $quantidade = 1,
+        string $status = 'pendente'
+    ): Consignacao {
+        $categoria = Categoria::create(['nome' => 'Categoria Consignacao ' . uniqid()]);
+        $produto = Produto::create([
+            'nome' => 'Produto Consignacao ' . uniqid(),
+            'descricao' => 'Desc',
+            'id_categoria' => $categoria->id,
+            'ativo' => true,
+        ]);
+
+        $variacao = ProdutoVariacao::create([
+            'produto_id' => $produto->id,
+            'referencia' => 'CON-' . uniqid(),
+            'nome' => 'Variacao Consignacao',
+            'preco' => 150,
+            'custo' => 90,
+        ]);
+
+        return Consignacao::create([
+            'pedido_id' => $pedidoId,
+            'produto_variacao_id' => $variacao->id,
+            'deposito_id' => $depositoId,
+            'quantidade' => $quantidade,
+            'data_envio' => now()->toDateString(),
+            'prazo_resposta' => now()->addDays(15),
+            'status' => $status,
+        ]);
     }
 
     private function criarPedidoComItem(): array

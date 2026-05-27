@@ -46,20 +46,58 @@ class Consignacao extends Model
         return $this->hasMany(ConsignacaoDevolucao::class);
     }
 
+    public function compras(): HasMany
+    {
+        return $this->hasMany(ConsignacaoCompra::class);
+    }
+
+    public function movimentacoes(): HasMany
+    {
+        return $this->hasMany(EstoqueMovimentacao::class, 'ref_id')
+            ->where('ref_type', 'consignacao');
+    }
+
     public function quantidadeDevolvida(): int
     {
-        $devolucoes = $this->relationLoaded('devolucoes')
-            ? $this->devolucoes
-            : $this->devolucoes()->get();
+        if (!$this->relationLoaded('devolucoes')) {
+            return (int) $this->devolucoes()
+                ->whereNull('consignacao_devolucoes.cancelada_em')
+                ->sum('quantidade');
+        }
 
-        return (int) $devolucoes
+        return (int) $this->devolucoes
             ->whereNull('cancelada_em')
             ->sum('quantidade');
     }
 
     public function quantidadeRestante(): int
     {
-        return $this->quantidade - $this->quantidadeDevolvida();
+        return max(0, $this->quantidade - $this->quantidadeDevolvida() - $this->quantidadeComprada());
+    }
+
+    public function quantidadeComprada(): int
+    {
+        if (!$this->relationLoaded('compras')) {
+            $comprada = (int) $this->compras()
+                ->whereNull('consignacao_compras.cancelada_em')
+                ->sum('quantidade');
+
+            if ($comprada === 0 && $this->status === 'comprado') {
+                return max(0, (int) $this->quantidade - $this->quantidadeDevolvida());
+            }
+
+            return $comprada;
+        }
+
+        $comprada = (int) $this->compras
+            ->whereNull('cancelada_em')
+            ->sum('quantidade');
+
+        if ($comprada === 0 && $this->status === 'comprado') {
+            return max(0, (int) $this->quantidade - $this->quantidadeDevolvida());
+        }
+
+        return $comprada;
     }
 
     public function deposito(): BelongsTo

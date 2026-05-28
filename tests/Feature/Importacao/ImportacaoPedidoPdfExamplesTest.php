@@ -14,11 +14,11 @@ class ImportacaoPedidoPdfExamplesTest extends TestCase
     public static function fornecedorXmlExamplesProvider(): array
     {
         return [
-            'SIERRABELM__730759.xml' => ['SIERRABELM__730759.xml', 1, '780'],
-            'SIERRABELM__738588.xml' => ['SIERRABELM__738588.xml', 7, '787'],
-            'SIERRABELM__738589.xml' => ['SIERRABELM__738589.xml', 2, '788'],
-            'SIERRABELM__730256.xml' => ['SIERRABELM__730256.xml', 8, '776'],
-            'SIERRABELM__738599.xml' => ['SIERRABELM__738599.xml', 3, '794'],
+            'SIERRABELM__730759.xml' => ['SIERRABELM__730759.xml', 1],
+            'SIERRABELM__738588.xml' => ['SIERRABELM__738588.xml', 7],
+            'SIERRABELM__738589.xml' => ['SIERRABELM__738589.xml', 2],
+            'SIERRABELM__730256.xml' => ['SIERRABELM__730256.xml', 8],
+            'SIERRABELM__738599.xml' => ['SIERRABELM__738599.xml', 3],
         ];
     }
 
@@ -27,8 +27,7 @@ class ImportacaoPedidoPdfExamplesTest extends TestCase
      */
     public function test_importa_todos_exemplos_xml_de_fornecedores_com_contagem_exata(
         string $fileName,
-        int $expectedItems,
-        string $expectedNumero
+        int $expectedItems
     ): void {
         $usuario = Usuario::create([
             'nome' => 'Usuario XML Fornecedor',
@@ -50,7 +49,7 @@ class ImportacaoPedidoPdfExamplesTest extends TestCase
 
         $response->assertStatus(200);
         $response->assertJsonPath('sucesso', true);
-        $response->assertJsonPath('dados.pedido.numero_externo', $expectedNumero);
+        $response->assertJsonPath('dados.pedido.numero_externo', '');
 
         $itens = $response->json('dados.itens') ?? [];
         $this->assertCount($expectedItems, $itens, 'Contagem de itens divergente para ' . $fileName);

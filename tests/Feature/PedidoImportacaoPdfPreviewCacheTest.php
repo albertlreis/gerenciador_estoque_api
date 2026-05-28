@@ -71,7 +71,8 @@ class PedidoImportacaoPdfPreviewCacheTest extends TestCase
 
         $response->assertStatus(200);
         $response->assertJsonPath('mensagem', 'Arquivo processado com sucesso.');
-        $response->assertJsonPath('dados.pedido.numero_externo', 'REPROC-001');
+        $response->assertJsonPath('dados.pedido.numero_externo', '');
+        $this->assertNull(PedidoImportacao::query()->latest('id')->first()?->numero_externo);
         $response->assertJsonCount(1, 'dados.itens');
     }
 }

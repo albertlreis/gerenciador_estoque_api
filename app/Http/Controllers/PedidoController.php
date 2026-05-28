@@ -300,8 +300,10 @@ class PedidoController extends Controller
                 'endereco' => '',
             ];
 
+            $numeroExtraido = trim((string) ($pedido['numero_pedido'] ?? ''));
+
             $pedidoFormatado = [
-                'numero_externo' => $pedido['numero_pedido'] ?? '',
+                'numero_externo' => '',
                 'data_pedido' => $pedido['data_pedido'] ?? null,
                 'data_inclusao' => $pedido['data_inclusao'] ?? null,
                 'data_entrega' => $pedido['data_entrega'] ?? null,
@@ -333,7 +335,7 @@ class PedidoController extends Controller
             $importacao = PedidoImportacao::create([
                 'arquivo_hash' => $hash,
                 'arquivo_nome' => $arquivo->getClientOriginalName(),
-                'numero_externo' => $pedidoFormatado['numero_externo'] ?: null,
+                'numero_externo' => null,
                 'usuario_id' => auth()->id(),
                 'status' => 'extraido',
                 'dados_json' => $payload,
@@ -348,7 +350,7 @@ class PedidoController extends Controller
                 'tipo_importacao' => $tipoImportacao,
                 'estrategia_vinculo' => $estrategiaVinculo,
                 'itens_total' => count($itens),
-                'numero_externo' => $pedidoFormatado['numero_externo'] ?? null,
+                'numero_extraido' => $numeroExtraido ?: null,
                 'tempo_ms' => (int) ((microtime(true) - $inicioImportacao) * 1000),
             ]);
 

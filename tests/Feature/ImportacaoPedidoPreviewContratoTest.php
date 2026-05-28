@@ -84,7 +84,8 @@ class ImportacaoPedidoPreviewContratoTest extends TestCase
         $response->assertJsonPath('dados.requer_insercao_manual', true);
         $this->assertNotEmpty($response->json('dados.avisos'));
         $response->assertJsonPath('dados.itens', []);
-        $response->assertJsonPath('dados.pedido.numero_externo', '12345');
+        $response->assertJsonPath('dados.pedido.numero_externo', '');
+        $this->assertNull(PedidoImportacao::query()->latest('id')->first()?->numero_externo);
     }
 
     public function test_confirmar_sem_itens_retorna_422(): void
@@ -119,5 +120,32 @@ class ImportacaoPedidoPreviewContratoTest extends TestCase
 
         $response->assertStatus(422);
         $response->assertJsonValidationErrors('itens');
+    }
+
+    public function test_confirmar_sem_numero_retorna_422(): void
+    {
+        $usuario = Usuario::create([
+            'nome' => 'Usuario Numero',
+            'email' => 'confirm-numero@example.com',
+            'senha' => 'teste',
+            'ativo' => 1,
+        ]);
+
+        $response = $this->actingAs($usuario, 'sanctum')
+            ->postJson('/api/v1/pedidos/import/pdf/confirm', [
+                'pedido' => ['tipo' => 'reposicao', 'numero_externo' => '', 'total' => 100],
+                'cliente' => [],
+                'itens' => [
+                    [
+                        'nome' => 'Produto Teste',
+                        'quantidade' => 1,
+                        'valor' => 100,
+                        'id_categoria' => 1,
+                    ],
+                ],
+            ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors('pedido.numero_externo');
     }
 }

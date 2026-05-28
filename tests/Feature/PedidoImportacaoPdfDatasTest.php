@@ -5,8 +5,11 @@ namespace Tests\Feature;
 use App\Enums\PedidoStatus;
 use App\Models\Categoria;
 use App\Models\Deposito;
+use App\Models\Estoque;
 use App\Models\Pedido;
 use App\Models\PedidoStatusHistorico;
+use App\Models\Produto;
+use App\Models\ProdutoVariacao;
 use App\Models\Usuario;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -165,6 +168,25 @@ class PedidoImportacaoPdfDatasTest extends TestCase
 
         $categoria = Categoria::create(['nome' => 'Categoria Entrega']);
         $deposito = Deposito::create(['nome' => 'Deposito Importacao Entregue']);
+        $produto = Produto::create([
+            'nome' => 'Produto Entregue',
+            'id_categoria' => $categoria->id,
+            'ativo' => true,
+        ]);
+        $variacao = ProdutoVariacao::create([
+            'produto_id' => $produto->id,
+            'referencia' => 'REF-ENT-1',
+            'nome' => 'Produto Entregue',
+            'preco' => 100,
+            'custo' => 100,
+        ]);
+        Estoque::updateOrCreate(
+            [
+                'id_variacao' => $variacao->id,
+                'id_deposito' => $deposito->id,
+            ],
+            ['quantidade' => 10]
+        );
         $numeroExterno = 'IMP-' . Str::random(8);
 
         $payload = [
@@ -186,6 +208,7 @@ class PedidoImportacaoPdfDatasTest extends TestCase
                     'valor' => 100,
                     'preco_unitario' => 100,
                     'id_categoria' => $categoria->id,
+                    'id_variacao' => $variacao->id,
                     'id_deposito' => $deposito->id,
                 ],
             ],

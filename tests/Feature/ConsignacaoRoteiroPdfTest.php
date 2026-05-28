@@ -511,11 +511,13 @@ class ConsignacaoRoteiroPdfTest extends TestCase
 
         $deposito = Deposito::create(['nome' => 'Deposito PDF']);
 
-        Estoque::create([
-            'id_variacao' => $variacao->id,
-            'id_deposito' => $deposito->id,
-            'quantidade' => 10,
-        ]);
+        Estoque::updateOrCreate(
+            [
+                'id_variacao' => $variacao->id,
+                'id_deposito' => $deposito->id,
+            ],
+            ['quantidade' => 10]
+        );
 
         $pedido = Pedido::create([
             'id_cliente' => $cliente->id,
@@ -574,11 +576,13 @@ class ConsignacaoRoteiroPdfTest extends TestCase
             'custo' => 90,
         ]);
 
-        Estoque::create([
-            'id_variacao' => $variacao->id,
-            'id_deposito' => $depositoId,
-            'quantidade' => 10,
-        ]);
+        Estoque::updateOrCreate(
+            [
+                'id_variacao' => $variacao->id,
+                'id_deposito' => $depositoId,
+            ],
+            ['quantidade' => 10]
+        );
 
         return Consignacao::create([
             'pedido_id' => $pedidoId,

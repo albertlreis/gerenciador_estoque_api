@@ -3,10 +3,14 @@
 namespace Tests\Feature;
 
 use App\Enums\ContaStatus;
+use App\Models\Categoria;
 use App\Models\Cliente;
+use App\Models\Fornecedor;
 use App\Models\Pedido;
 use App\Models\AcessoUsuario;
+use App\Models\Produto;
 use App\Models\ProdutoEntregaItem;
+use App\Models\ProdutoVariacao;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
@@ -36,12 +40,27 @@ class ComunicacaoSierraTest extends TestCase
             'valor_total' => 100.0,
             'prazo_dias_uteis' => 10,
         ]);
+        $categoria = Categoria::create(['nome' => 'Categoria Comunicacao']);
+        $fornecedor = Fornecedor::create(['nome' => 'Fornecedor Comunicacao', 'status' => 1]);
+        $produto = Produto::create([
+            'nome' => 'Produto Comunicacao',
+            'id_categoria' => $categoria->id,
+            'id_fornecedor' => $fornecedor->id,
+            'ativo' => true,
+        ]);
+        $variacao = ProdutoVariacao::create([
+            'produto_id' => $produto->id,
+            'referencia' => 'COMM-001',
+            'nome' => 'Variacao Comunicacao',
+            'preco' => 100,
+            'custo' => 50,
+        ]);
 
         ProdutoEntregaItem::create([
             'tipo_origem' => ProdutoEntregaItem::ORIGEM_PEDIDO,
             'origem_id' => $pedido->id,
             'pedido_id' => $pedido->id,
-            'id_variacao' => null,
+            'id_variacao' => $variacao->id,
             'quantidade_total' => 1,
             'quantidade_reservada' => 1,
             'quantidade_expedida' => 1,

@@ -8,6 +8,8 @@ use App\Integrations\ContaAzul\Services\ContaAzulConnectionService;
 use App\Models\Usuario;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Laravel\Sanctum\Sanctum;
 use Mockery;
 use Tests\TestCase;
@@ -28,6 +30,20 @@ class ContaAzulManualTokenEndpointTest extends TestCase
         ]);
 
         Sanctum::actingAs($usuario);
+
+        if (Schema::hasTable('acesso_perfis') && Schema::hasTable('acesso_usuario_perfil')) {
+            DB::table('acesso_perfis')->updateOrInsert(['nome' => 'Desenvolvedor'], [
+                'descricao' => null,
+                'updated_at' => now(),
+            ]);
+
+            $perfilId = DB::table('acesso_perfis')->where('nome', 'Desenvolvedor')->value('id');
+            DB::table('acesso_usuario_perfil')->updateOrInsert([
+                'id_usuario' => $usuario->id,
+                'id_perfil' => $perfilId,
+            ], ['updated_at' => now()]);
+        }
+
         Cache::put('perfis_usuario_' . $usuario->id, ['Desenvolvedor'], now()->addHour());
         Cache::put('permissoes_usuario_' . $usuario->id, [
             'conta_azul.visualizar',

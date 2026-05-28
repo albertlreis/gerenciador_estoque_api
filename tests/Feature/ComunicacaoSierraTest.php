@@ -6,6 +6,7 @@ use App\Enums\ContaStatus;
 use App\Models\Cliente;
 use App\Models\Pedido;
 use App\Models\AcessoUsuario;
+use App\Models\ProdutoEntregaItem;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
@@ -34,6 +35,17 @@ class ComunicacaoSierraTest extends TestCase
             'data_pedido' => now(),
             'valor_total' => 100.0,
             'prazo_dias_uteis' => 10,
+        ]);
+
+        ProdutoEntregaItem::create([
+            'tipo_origem' => ProdutoEntregaItem::ORIGEM_PEDIDO,
+            'origem_id' => $pedido->id,
+            'pedido_id' => $pedido->id,
+            'id_variacao' => null,
+            'quantidade_total' => 1,
+            'quantidade_reservada' => 1,
+            'quantidade_expedida' => 1,
+            'status' => ProdutoEntregaItem::STATUS_EXPEDIDO,
         ]);
 
         $this->actingAs($user, 'sanctum');
@@ -127,4 +139,3 @@ class ComunicacaoSierraTest extends TestCase
         });
     }
 }
-

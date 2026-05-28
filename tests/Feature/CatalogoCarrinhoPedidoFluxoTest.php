@@ -15,6 +15,7 @@ use App\Models\Fornecedor;
 use App\Models\OutletMotivo;
 use App\Models\Pedido;
 use App\Models\Produto;
+use App\Models\ProdutoEntregaItem;
 use App\Models\ProdutoVariacao;
 use App\Models\ProdutoVariacaoOutlet;
 use App\Models\Usuario;
@@ -375,7 +376,7 @@ class CatalogoCarrinhoPedidoFluxoTest extends TestCase
         $this->assertDatabaseMissing('carrinho_itens', ['id' => $item->id]);
     }
 
-    public function test_finaliza_carrinho_como_venda_registrando_movimentacao(): void
+    public function test_finaliza_carrinho_como_venda_criando_demanda_e_reserva(): void
     {
         $usuario = $this->autenticar(['carrinhos.finalizar'], ['Vendedor']);
         $cliente = $this->criarCliente();
@@ -411,12 +412,19 @@ class CatalogoCarrinhoPedidoFluxoTest extends TestCase
             ->where('id_deposito', $deposito->id)
             ->firstOrFail();
 
-        $this->assertSame(8, (int) $estoque->quantidade);
-        $this->assertDatabaseHas('estoque_movimentacoes', [
+        $this->assertSame(10, (int) $estoque->quantidade);
+        $this->assertDatabaseHas('produto_entrega_itens', [
+            'pedido_id' => $pedido->id,
+            'id_variacao' => $variacao->id,
+            'pedido_item_id' => $pedido->itens()->firstOrFail()->id,
+            'quantidade_total' => 2,
+            'quantidade_reservada' => 2,
+            'status' => ProdutoEntregaItem::STATUS_RESERVADO,
+        ]);
+        $this->assertDatabaseMissing('estoque_movimentacoes', [
             'pedido_id' => $pedido->id,
             'id_variacao' => $variacao->id,
             'id_deposito_origem' => $deposito->id,
-            'quantidade' => 2,
         ]);
         $this->assertDatabaseMissing('consignacoes', ['pedido_id' => $pedido->id]);
     }

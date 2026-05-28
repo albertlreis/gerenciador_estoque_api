@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Enums\PedidoStatus;
 use App\Models\Categoria;
+use App\Models\Deposito;
 use App\Models\Pedido;
 use App\Models\PedidoStatusHistorico;
 use App\Models\Usuario;
@@ -163,6 +164,7 @@ class PedidoImportacaoPdfDatasTest extends TestCase
         ]);
 
         $categoria = Categoria::create(['nome' => 'Categoria Entrega']);
+        $deposito = Deposito::create(['nome' => 'Deposito Importacao Entregue']);
         $numeroExterno = 'IMP-' . Str::random(8);
 
         $payload = [
@@ -184,6 +186,7 @@ class PedidoImportacaoPdfDatasTest extends TestCase
                     'valor' => 100,
                     'preco_unitario' => 100,
                     'id_categoria' => $categoria->id,
+                    'id_deposito' => $deposito->id,
                 ],
             ],
         ];

@@ -81,11 +81,14 @@ return new class extends Migration
         });
 
         Schema::table($table, function (Blueprint $blueprint) use ($table): void {
-            if (Schema::hasColumn($table, 'auditoria_log_id')) {
-                $blueprint->index('auditoria_log_id', $this->indexName($table, 'audit_log'));
+            $auditLogIndex = $this->indexName($table, 'audit_log');
+            if (Schema::hasColumn($table, 'auditoria_log_id') && !$this->indexExists($table, $auditLogIndex)) {
+                $blueprint->index('auditoria_log_id', $auditLogIndex);
             }
-            if (Schema::hasColumn($table, 'import_run_uid')) {
-                $blueprint->index('import_run_uid', $this->indexName($table, 'run_uid'));
+
+            $runUidIndex = $this->indexName($table, 'run_uid');
+            if (Schema::hasColumn($table, 'import_run_uid') && !$this->indexExists($table, $runUidIndex)) {
+                $blueprint->index('import_run_uid', $runUidIndex);
             }
         });
     }
@@ -172,5 +175,18 @@ return new class extends Migration
     private function indexName(string $table, string $suffix): string
     {
         return 'idx_' . substr(md5($table), 0, 12) . '_' . $suffix;
+    }
+
+    private function indexExists(string $table, string $indexName): bool
+    {
+        if (DB::connection()->getDriverName() !== 'mysql') {
+            return false;
+        }
+
+        return DB::table('information_schema.STATISTICS')
+            ->whereRaw('TABLE_SCHEMA = DATABASE()')
+            ->where('TABLE_NAME', $table)
+            ->where('INDEX_NAME', $indexName)
+            ->exists();
     }
 };

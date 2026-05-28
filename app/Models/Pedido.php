@@ -72,6 +72,11 @@ class Pedido extends Model
         return $this->hasMany(PedidoItem::class, 'id_pedido');
     }
 
+    public function entregaItens(): HasMany
+    {
+        return $this->hasMany(ProdutoEntregaItem::class, 'pedido_id');
+    }
+
     public function consignacoes(): HasMany
     {
         return $this->hasMany(Consignacao::class);

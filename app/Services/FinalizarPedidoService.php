@@ -7,8 +7,6 @@ use App\Helpers\AuthHelper;
 use App\Integrations\ContaAzul\Services\ContaAzulExportDispatchService;
 use App\Http\Requests\StorePedidoRequest;
 use App\Models\Carrinho;
-use App\Services\Movimentacao\MovimentarEstoqueStrategy;
-use App\Services\Movimentacao\ReservarEstoqueStrategy;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Collection;
@@ -43,10 +41,8 @@ final class FinalizarPedidoService
         private readonly PedidoFactory $pedidoFactory,
         private readonly ConsignacaoFactory $consignacaoFactory,
         private readonly PedidoPrazoService $prazoService,
-        private readonly PedidoFinalizacaoValidator $validator,
         private readonly DepositoResolver $resolver,
-        private readonly MovimentarEstoqueStrategy $movimentarStrategy,
-        private readonly ReservarEstoqueStrategy $reservarStrategy,
+        private readonly EntregaProdutoService $entregaProdutoService,
         private readonly ContaReceberService $contaReceberService,
         private readonly ContaAzulExportDispatchService $contaAzulExports,
     ) {}
@@ -109,15 +105,10 @@ final class FinalizarPedidoService
         // 2) Mapa RESOLVIDO usando o service (mapa > item.id_deposito > null)
         $depositosResolvidos = $this->resolverDepositosPorItem($itensFinalizacao, $depositosMapBruto);
 
-        $registrarMov  = $request->boolean('registrar_movimentacao');
         $emConsignacao = $request->boolean('modo_consignacao');
 
         // Validação quando for movimentar (aplica a normal e consignado)
-        if ($registrarMov) {
-            $this->validator->validarAntesDeMovimentar($itensFinalizacao, $depositosResolvidos);
-        }
-
-        return DB::transaction(function () use ($request, $carrinho, $itensFinalizacao, $idUsuarioFinal, $depositosResolvidos, $registrarMov, $emConsignacao) {
+        return DB::transaction(function () use ($request, $carrinho, $itensFinalizacao, $idUsuarioFinal, $depositosResolvidos, $emConsignacao) {
             $total        = $itensFinalizacao->sum('subtotal');
             $dataPedido   = Carbon::now('America/Belem');
             $prazoPadrao  = (int) config('orders.prazo_padrao_dias_uteis', 60);
@@ -154,10 +145,13 @@ final class FinalizarPedidoService
             }
 
             // Movimentação OU Reserva (ambos usam o mapa resolvido)
-            if ($registrarMov) {
-                $this->movimentarStrategy->processar($pedido, $itensFinalizacao, $depositosResolvidos, $idUsuarioFinal);
-            } else {
-                $this->reservarStrategy->processar($pedido, $itensFinalizacao, $depositosResolvidos, $idUsuarioFinal);
+            $this->entregaProdutoService->criarDemandaPedido($pedido, $idUsuarioFinal, true);
+
+            if ($emConsignacao) {
+                $pedido->load('consignacoes');
+                foreach ($pedido->consignacoes as $consignacao) {
+                    $this->entregaProdutoService->criarDemandaConsignacao($consignacao, $idUsuarioFinal);
+                }
             }
 
             // Data limite

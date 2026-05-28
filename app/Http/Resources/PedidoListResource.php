@@ -35,6 +35,7 @@ class PedidoListResource extends JsonResource
      */
     public function toArray($request): array
     {
+        $entregaResumo = app(\App\Services\EntregaProdutoService::class)->resumoPedido($this->resource);
         $statusAtualEnum  = $this->getStatusAtualEnum($this->resource);
         $statusAtualRaw   = $this->statusAtual?->getRawOriginal('status');
         $statusAtualValue = $statusAtualEnum?->value ?? (is_string($statusAtualRaw) ? $statusAtualRaw : null);
@@ -89,6 +90,7 @@ class PedidoListResource extends JsonResource
             'dias_atraso'            => $diasAtraso,
             'dias_uteis_restantes'   => $diasUteisRestantes, // null quando nao se aplica
             'atrasado_entrega'       => $atrasadoEntrega,
+            'entrega_produtos'        => $entregaResumo,
 
             'observacoes'            => $this->observacoes,
             'tem_devolucao'          => $this->devolucoes->isNotEmpty(),

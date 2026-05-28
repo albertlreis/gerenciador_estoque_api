@@ -13,7 +13,9 @@ use App\Models\ConsignacaoCompra;
 use App\Models\ConsignacaoDevolucao;
 use App\Models\Pedido;
 use App\Models\PedidoStatusHistorico;
+use App\Models\ProdutoEntregaEvento;
 use App\Services\EstoqueMovimentacaoService;
+use App\Services\EntregaProdutoService;
 use App\Services\PdfImageService;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\JsonResponse;
@@ -211,6 +213,12 @@ class ConsignacaoController extends Controller
 
         $consignacao = Consignacao::with(['pedido', 'devolucoes', 'compras'])->findOrFail($id);
 
+        if ($request->status === 'devolvido') {
+            return response()->json([
+                'erro' => 'Registre a devolucao informando deposito para que o estoque passe pelo fluxo central.',
+            ], 422);
+        }
+
         // Se já finalizada, não permitir alteração
         if (in_array($consignacao->status, ['comprado', 'devolvido'])) {
             return response()->json(['erro' => 'Consignação já finalizada.'], 422);
@@ -229,6 +237,7 @@ class ConsignacaoController extends Controller
                     'usuario_id' => AuthHelper::getUsuarioId(),
                 ]);
 
+                $this->registrarVendaCentralConsignacao($consignacao, $restante, AuthHelper::getUsuarioId(), null);
                 $this->recalcularStatusConsignacao($consignacao->fresh(['devolucoes', 'compras']));
                 $this->marcarPedidoConsignacaoComoVendido($consignacao->pedido);
             } else {
@@ -285,26 +294,29 @@ class ConsignacaoController extends Controller
         $usuarioId = AuthHelper::getUsuarioId();
 
         DB::transaction(function () use ($consignacao, $request, $usuarioId) {
-            $movimentacao = app(EstoqueMovimentacaoService::class)->registrarMovimentacaoManual([
-                'id_variacao'         => (int) $consignacao->produto_variacao_id,
-                'id_deposito_origem'  => null,
-                'id_deposito_destino' => (int) $request->deposito_id,
-                'tipo'                => 'consignacao_devolucao',
-                'quantidade'          => (int) $request->quantidade,
-                'observacao'          => $request->observacoes,
-                'data_movimentacao'   => now(),
-                'ref_type'            => 'consignacao',
-                'ref_id'              => (int) $consignacao->id,
-                'pedido_id'           => (int) $consignacao->pedido_id,
-            ], (int) $usuarioId);
-
-            $consignacao->devolucoes()->create([
+            $devolucao = $consignacao->devolucoes()->create([
                 'quantidade' => $request->quantidade,
                 'observacoes' => $request->observacoes,
                 'usuario_id' => AuthHelper::getUsuarioId(),
-                'estoque_movimentacao_id' => $movimentacao->id,
+                'estoque_movimentacao_id' => null,
                 'deposito_id' => $request->deposito_id,
             ]);
+
+            $entregas = app(EntregaProdutoService::class);
+            $central = $entregas->criarDemandaConsignacao($consignacao, $usuarioId ? (int) $usuarioId : null);
+            $key = "consignacao-devolucao:{$devolucao->id}";
+            $entregas->receberItem(
+                $central,
+                (int) $request->deposito_id,
+                (int) $request->quantidade,
+                $usuarioId ? (int) $usuarioId : null,
+                $request->observacoes,
+                $key,
+                ProdutoEntregaEvento::RETORNADO_CONSIGNACAO
+            );
+
+            $evento = ProdutoEntregaEvento::query()->where('idempotency_key', $key)->first();
+            $devolucao->update(['estoque_movimentacao_id' => $evento?->estoque_movimentacao_id]);
 
             $this->recalcularStatusConsignacao($consignacao->fresh(['devolucoes', 'compras']));
         });
@@ -394,26 +406,29 @@ class ConsignacaoController extends Controller
                 /** @var Consignacao $consignacao */
                 $consignacao = $consignacoes->get($consignacaoId);
                 $quantidade = (int) $itensPayload->get($consignacaoId);
-                $movimentacao = app(EstoqueMovimentacaoService::class)->registrarMovimentacaoManual([
-                    'id_variacao' => (int) $consignacao->produto_variacao_id,
-                    'id_deposito_origem' => null,
-                    'id_deposito_destino' => $depositoId,
-                    'tipo' => 'consignacao_devolucao',
-                    'quantidade' => $quantidade,
-                    'observacao' => $observacoes,
-                    'data_movimentacao' => now(),
-                    'ref_type' => 'consignacao',
-                    'ref_id' => (int) $consignacao->id,
-                    'pedido_id' => (int) $consignacao->pedido_id,
-                ], (int) $usuarioId);
-
-                $consignacao->devolucoes()->create([
+                $devolucao = $consignacao->devolucoes()->create([
                     'quantidade' => $quantidade,
                     'observacoes' => $observacoes,
                     'usuario_id' => $usuarioId,
-                    'estoque_movimentacao_id' => $movimentacao->id,
+                    'estoque_movimentacao_id' => null,
                     'deposito_id' => $depositoId,
                 ]);
+
+                $entregas = app(EntregaProdutoService::class);
+                $central = $entregas->criarDemandaConsignacao($consignacao, $usuarioId ? (int) $usuarioId : null);
+                $key = "consignacao-devolucao:{$devolucao->id}";
+                $entregas->receberItem(
+                    $central,
+                    $depositoId,
+                    $quantidade,
+                    $usuarioId ? (int) $usuarioId : null,
+                    $observacoes,
+                    $key,
+                    ProdutoEntregaEvento::RETORNADO_CONSIGNACAO
+                );
+
+                $evento = ProdutoEntregaEvento::query()->where('idempotency_key', $key)->first();
+                $devolucao->update(['estoque_movimentacao_id' => $evento?->estoque_movimentacao_id]);
 
                 $this->recalcularStatusConsignacao($consignacao->fresh(['devolucoes', 'compras']));
             }
@@ -540,6 +555,7 @@ class ConsignacaoController extends Controller
                     'usuario_id' => $usuarioId,
                 ]);
 
+                $this->registrarVendaCentralConsignacao($consignacao, $quantidades[$consignacaoId], $usuarioId, $observacoes);
                 $this->recalcularStatusConsignacao($consignacao->fresh(['devolucoes', 'compras']));
             }
 
@@ -592,11 +608,15 @@ class ConsignacaoController extends Controller
         }
 
         DB::transaction(function () use ($consignacao, $devolucao, $request, $usuarioId) {
-            app(EstoqueMovimentacaoService::class)->estornarMovimentacao(
-                (int) $devolucao->estoque_movimentacao_id,
-                (int) $usuarioId,
-                "Cancelamento da devolucao #{$devolucao->id} da consignacao #{$consignacao->id}"
-            );
+            $observacao = "Cancelamento da devolucao #{$devolucao->id} da consignacao #{$consignacao->id}";
+
+            if (!$this->estornarEventoCentralPorMovimentacao((int) $devolucao->estoque_movimentacao_id, $usuarioId, $observacao)) {
+                app(EstoqueMovimentacaoService::class)->estornarMovimentacao(
+                    (int) $devolucao->estoque_movimentacao_id,
+                    $usuarioId ? (int) $usuarioId : null,
+                    $observacao
+                );
+            }
 
             $devolucao->update([
                 'cancelada_em' => now(),
@@ -626,6 +646,9 @@ class ConsignacaoController extends Controller
         }
 
         DB::transaction(function () use ($consignacao, $request) {
+            $usuarioId = AuthHelper::getUsuarioId();
+            $this->estornarVendaCentralConsignacao($consignacao, $usuarioId ? (int) $usuarioId : null, $request->motivo);
+
             $comprasCanceladas = ConsignacaoCompra::query()
                 ->where('consignacao_id', $consignacao->id)
                 ->whereNull('cancelada_em')
@@ -752,6 +775,74 @@ class ConsignacaoController extends Controller
             $status = strtolower((string) ($item->status ?? ''));
             return in_array($status, ['devolvido', 'comprado', 'finalizado'], true);
         });
+    }
+
+    private function registrarVendaCentralConsignacao(Consignacao $consignacao, int $quantidade, ?int $usuarioId, ?string $observacoes): void
+    {
+        if ($quantidade <= 0) {
+            return;
+        }
+
+        $entregas = app(EntregaProdutoService::class);
+        $central = $entregas->criarDemandaConsignacao($consignacao, $usuarioId);
+        $marcador = $consignacao->quantidadeComprada();
+
+        $entregas->expedirItem(
+            $central,
+            $consignacao->deposito_id,
+            $quantidade,
+            $usuarioId,
+            $observacoes ?: "Venda de consignacao #{$consignacao->id}",
+            ProdutoEntregaEvento::ENVIADO_CONSIGNACAO,
+            "consignacao:{$consignacao->id}:venda:{$marcador}:expedicao"
+        );
+
+        $entregas->entregarItem(
+            $central,
+            $quantidade,
+            $usuarioId,
+            $observacoes ?: "Venda de consignacao entregue #{$consignacao->id}",
+            "consignacao:{$consignacao->id}:venda:{$marcador}:entrega"
+        );
+    }
+
+    private function estornarEventoCentralPorMovimentacao(int $movimentacaoId, ?int $usuarioId, string $observacao): bool
+    {
+        $evento = ProdutoEntregaEvento::query()
+            ->where('estoque_movimentacao_id', $movimentacaoId)
+            ->where('tipo_evento', ProdutoEntregaEvento::RETORNADO_CONSIGNACAO)
+            ->first();
+
+        if (!$evento) {
+            return false;
+        }
+
+        app(EntregaProdutoService::class)->estornarEvento($evento, $usuarioId, $observacao);
+
+        return true;
+    }
+
+    private function estornarVendaCentralConsignacao(Consignacao $consignacao, ?int $usuarioId, ?string $motivo): void
+    {
+        $eventos = ProdutoEntregaEvento::query()
+            ->whereHas('item', function ($query) use ($consignacao) {
+                $query->where('tipo_origem', 'consignacao')
+                    ->where('consignacao_id', $consignacao->id);
+            })
+            ->whereIn('tipo_evento', [
+                ProdutoEntregaEvento::ENTREGUE_CLIENTE,
+                ProdutoEntregaEvento::ENVIADO_CONSIGNACAO,
+            ])
+            ->orderByDesc('id')
+            ->get();
+
+        foreach ($eventos as $evento) {
+            app(EntregaProdutoService::class)->estornarEvento(
+                $evento,
+                $usuarioId,
+                $motivo ?: "Cancelamento da venda da consignacao #{$consignacao->id}"
+            );
+        }
     }
 
     private function recalcularStatusConsignacao(Consignacao $consignacao): void

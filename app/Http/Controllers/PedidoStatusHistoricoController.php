@@ -9,6 +9,7 @@ use App\Services\Comunicacao\ComunicacaoApiClient;
 use App\Models\Pedido;
 use App\Models\PedidoStatusHistorico;
 use App\Models\PedidoStatusPrevisao;
+use App\Services\EntregaProdutoService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
@@ -243,6 +244,10 @@ class PedidoStatusHistoricoController extends Controller
             }
         }
 
+        if ($bloqueio = $this->validarStatusOperacionalCentral($pedido, $novoStatus)) {
+            return $bloqueio;
+        }
+
         $previsaoSalva = null;
 
         DB::transaction(function () use ($pedido, $novoStatus, $dados, $exigePrevisao, &$previsaoSalva) {
@@ -305,6 +310,46 @@ class PedidoStatusHistoricoController extends Controller
         ], $pedido);
 
         return response()->json(['message' => 'Status removido com sucesso.']);
+    }
+
+    private function validarStatusOperacionalCentral(Pedido $pedido, string $novoStatus): ?JsonResponse
+    {
+        if ($novoStatus === PedidoStatus::CANCELADO->value) {
+            return response()->json([
+                'message' => 'Use o cancelamento do pedido para cancelar reservas e movimentacoes no fluxo central.',
+            ], 422);
+        }
+
+        $statusExpedicao = [PedidoStatus::ENVIO_CLIENTE->value];
+        $statusEntrega = [PedidoStatus::ENTREGA_CLIENTE->value, PedidoStatus::FINALIZADO->value];
+
+        if (!in_array($novoStatus, [...$statusExpedicao, ...$statusEntrega], true)) {
+            return null;
+        }
+
+        $pedido->loadMissing('entregaItens');
+        $resumo = app(EntregaProdutoService::class)->resumoPedido($pedido);
+        $total = (int) ($resumo['quantidade_total'] ?? 0);
+
+        if ($total <= 0) {
+            return response()->json([
+                'message' => 'Pedido ainda nao possui demanda no fluxo central de entrega.',
+            ], 422);
+        }
+
+        if (in_array($novoStatus, $statusExpedicao, true) && (int) $resumo['quantidade_expedida'] < $total) {
+            return response()->json([
+                'message' => 'Registre a expedicao pelo fluxo central antes de marcar envio ao cliente.',
+            ], 422);
+        }
+
+        if (in_array($novoStatus, $statusEntrega, true) && (int) $resumo['quantidade_entregue'] < $total) {
+            return response()->json([
+                'message' => 'Registre a entrega pelo fluxo central antes de marcar entrega ou finalizacao.',
+            ], 422);
+        }
+
+        return null;
     }
 
     private static function iconePorStatus(string $status): string

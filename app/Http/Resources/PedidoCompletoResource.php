@@ -13,6 +13,7 @@ class PedidoCompletoResource extends JsonResource
 
     public function toArray($request): array
     {
+        $entregaResumo = app(\App\Services\EntregaProdutoService::class)->resumoPedido($this->resource);
         $agoraBelem = Carbon::now('America/Belem');
         $dataLimite = $this->data_limite_entrega ? Carbon::parse($this->data_limite_entrega) : null;
         $dataLimiteCalculada = null;
@@ -82,6 +83,7 @@ class PedidoCompletoResource extends JsonResource
             'data_limite_entrega_calculada' => $dataLimiteCalculada,
             'dias_uteis_restantes' => $diasUteisRestantes, // null quando não se aplica
             'atrasado_entrega'     => $atrasadoEntrega,
+            'entrega_produtos'      => $entregaResumo,
 
             'itens'      => PedidoItemResource::collection($this->itens),
             'historico'  => PedidoStatusResource::collection(

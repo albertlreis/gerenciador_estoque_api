@@ -4,23 +4,19 @@ namespace App\Services;
 
 use App\Helpers\AuthHelper;
 use App\Integrations\ContaAzul\Services\ContaAzulExportDispatchService;
-use App\Models\EstoqueMovimentacao;
 use App\Models\Pedido;
 use App\Models\PedidoItem;
-use App\Models\EstoqueReserva;
 use App\Models\ProdutoVariacao;
 use Carbon\Carbon;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Validation\ValidationException;
 use Throwable;
 
 class PedidoUpdateService
 {
     public function __construct(
         private readonly PedidoPrazoService $prazoService,
-        private readonly ReservaEstoqueService $reservaService,
-        private readonly EstoqueMovimentacaoService $movimentacaoService,
+        private readonly EntregaProdutoService $entregaProdutoService,
         private readonly ContaAzulExportDispatchService $contaAzulExports,
     ) {}
 
@@ -52,8 +48,10 @@ class PedidoUpdateService
             }
 
             if (is_array($itensInput)) {
-                $this->ajustarReservasSeNecessario($pedido, $itensNovos);
-                $this->ajustarMovimentacoesSeNecessario($pedido, $diffs);
+                $this->entregaProdutoService->reconciliarPedidoEditado(
+                    $pedido,
+                    AuthHelper::getUsuarioId() ? (int) AuthHelper::getUsuarioId() : null
+                );
             }
 
             $pedido = $pedido->fresh([
@@ -295,96 +293,4 @@ class PedidoUpdateService
         return $variacaoId . '|' . $depositoId;
     }
 
-    /**
-     * @param Pedido $pedido
-     * @param array<int,PedidoItem>|null $itens
-     * @return void
-     */
-    private function ajustarReservasSeNecessario(Pedido $pedido, ?array $itens): void
-    {
-        if (!$itens) return;
-
-        $temReservasAtivas = EstoqueReserva::query()
-            ->where('pedido_id', $pedido->id)
-            ->where('status', 'ativa')
-            ->exists();
-
-        if (!$temReservasAtivas) return;
-
-        foreach ($itens as $item) {
-            if (empty($item->id_deposito)) {
-                throw ValidationException::withMessages([
-                    'itens' => ['Informe o deposito para atualizar reservas.'],
-                ]);
-            }
-        }
-
-        $usuarioId = (int) (AuthHelper::getUsuarioId() ?? 0);
-
-        $this->reservaService->cancelarPorPedido((int) $pedido->id, $usuarioId, 'pedido_editado');
-
-        foreach ($itens as $item) {
-            $this->reservaService->reservar(
-                variacaoId: (int) $item->id_variacao,
-                depositoId: (int) $item->id_deposito,
-                quantidade: (int) $item->quantidade,
-                pedidoId: (int) $pedido->id,
-                pedidoItemId: (int) $item->id,
-                usuarioId: $usuarioId,
-                motivo: 'pedido_editado'
-            );
-        }
-    }
-
-    /**
-     * @param Pedido $pedido
-     * @param array<string,int>|null $diffs
-     * @return void
-     */
-    private function ajustarMovimentacoesSeNecessario(Pedido $pedido, ?array $diffs): void
-    {
-        if (!$diffs) return;
-
-        $temMovimentacoes = EstoqueMovimentacao::query()
-            ->where('pedido_id', $pedido->id)
-            ->exists();
-
-        if (!$temMovimentacoes) return;
-
-        $usuarioId = (int) (AuthHelper::getUsuarioId() ?? 0);
-
-        foreach ($diffs as $key => $diff) {
-            if ($diff === 0) continue;
-
-            [$variacaoId, $depositoId] = array_map('intval', explode('|', $key));
-            if ($depositoId <= 0) {
-                throw ValidationException::withMessages([
-                    'itens' => ['Informe o deposito para ajustar estoque.'],
-                ]);
-            }
-
-            if ($diff > 0) {
-                $this->movimentacaoService->registrarSaidaPedido(
-                    variacaoId: $variacaoId,
-                    depositoSaidaId: $depositoId,
-                    quantidade: $diff,
-                    usuarioId: $usuarioId,
-                    observacao: "Ajuste de edicao do pedido #{$pedido->id}",
-                    pedidoId: (int) $pedido->id,
-                    pedidoItemId: null,
-                );
-            } else {
-                $this->movimentacaoService->registrarMovimentacaoManual([
-                    'id_variacao' => $variacaoId,
-                    'id_deposito_origem' => null,
-                    'id_deposito_destino' => $depositoId,
-                    'tipo' => 'entrada',
-                    'quantidade' => abs($diff),
-                    'id_usuario' => $usuarioId,
-                    'observacao' => "Ajuste de edicao do pedido #{$pedido->id}",
-                    'pedido_id' => (int) $pedido->id,
-                ]);
-            }
-        }
-    }
 }

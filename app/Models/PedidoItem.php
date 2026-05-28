@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 /**
  * Model PedidoItem
@@ -42,6 +43,11 @@ class PedidoItem extends Model
     public function variacao(): BelongsTo
     {
         return $this->belongsTo(ProdutoVariacao::class, 'id_variacao');
+    }
+
+    public function entregaItem(): HasOne
+    {
+        return $this->hasOne(ProdutoEntregaItem::class, 'pedido_item_id');
     }
 
     /**

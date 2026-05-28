@@ -291,6 +291,21 @@ class ImportacaoPedidoService
                 ]);
             }
 
+            if ($entregue) {
+                $itensSemDeposito = collect($itens)
+                    ->filter(fn ($item) => empty($item['id_deposito']))
+                    ->keys()
+                    ->map(fn ($index) => 'Item ' . ((int) $index + 1))
+                    ->values()
+                    ->all();
+
+                if ($itensSemDeposito !== []) {
+                    throw ValidationException::withMessages([
+                        'itens' => ['Informe deposito para pedidos importados marcados como entregues: ' . implode(', ', $itensSemDeposito) . '.'],
+                    ]);
+                }
+            }
+
             if ($previsaoTipo === 'DATA' && !$dataPrevista) {
                 throw ValidationException::withMessages([
                     'data_prevista' => ['Informe a data prevista quando o tipo de previsão for DATA.'],
@@ -516,6 +531,14 @@ class ImportacaoPedidoService
                 'importacao_id' => $importacaoId,
                 'itens_total' => count($itens),
             ]);
+
+            $entregas = app(EntregaProdutoService::class);
+            $entregas->criarDemandaPedido($pedido, $usuario->id, true);
+
+            if ($entregue) {
+                $entregas->expedirPedido($pedido, $usuario->id);
+                $entregas->entregarPedido($pedido, $usuario->id);
+            }
 
             $itensConfirmados = $pedido->itens()
                 ->with('variacao.produto', 'variacao.atributos')

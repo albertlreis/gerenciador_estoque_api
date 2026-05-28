@@ -57,4 +57,16 @@ class ReservaEstoqueService
                 'updated_at' => now(),
             ]);
     }
+
+    public function cancelarPorPedidoItem(int $pedidoItemId, ?int $usuarioId = null, ?string $motivo = null): void
+    {
+        EstoqueReserva::query()
+            ->where('pedido_item_id', $pedidoItemId)
+            ->where('status', 'ativa')
+            ->update([
+                'status' => 'cancelada',
+                'motivo' => $motivo ?? 'pedido_item_cancelado',
+                'updated_at' => now(),
+            ]);
+    }
 }

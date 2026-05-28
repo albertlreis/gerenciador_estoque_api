@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Devolucao;
 use App\Models\Credito;
 use App\Models\Estoque;
+use App\Models\ProdutoEntregaEvento;
 use Exception;
 use Illuminate\Support\Facades\DB;
 
@@ -13,6 +14,10 @@ use Illuminate\Support\Facades\DB;
  */
 class DevolucaoService
 {
+    public function __construct(
+        private readonly EntregaProdutoService $entregaProdutoService,
+    ) {}
+
     /**
      * Inicia uma devolução ou troca para um pedido.
      *
@@ -45,6 +50,8 @@ class DevolucaoService
                     'pedido_item_id' => $item['pedido_item_id'],
                     'quantidade'     => $item['quantidade'],
                 ]);
+
+                $this->entregaProdutoService->criarDemandaDevolucaoItem($devItem);
 
                 if ($data['tipo'] === 'troca') {
                     foreach ($item['trocas'] as $t) {
@@ -87,7 +94,16 @@ class DevolucaoService
 
             foreach ($dev->itens as $dItem) {
                 $origVar = $dItem->pedidoItem->variacao;
-                $this->ajustarEstoque($origVar->id, $dItem->quantidade, +1);
+                $central = $this->entregaProdutoService->criarDemandaDevolucaoItem($dItem);
+                $this->entregaProdutoService->receberItem(
+                    $central,
+                    $dItem->pedidoItem->id_deposito ?: (int) config('app.deposito_padrao'),
+                    (int) $dItem->quantidade,
+                    null,
+                    "Devolucao #{$dev->id} recebida.",
+                    "devolucao-item:{$dItem->id}:recebida",
+                    ProdutoEntregaEvento::DEVOLUCAO_RECEBIDA
+                );
 
                 if ($dev->tipo === 'troca') {
                     $totalOrig = $origVar->preco * $dItem->quantidade;

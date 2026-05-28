@@ -47,6 +47,7 @@ use App\Http\Controllers\{AreaEstoqueController,
     PedidoItemController,
     PedidosRelatorioController,
     PedidoStatusHistoricoController,
+    ProdutoEntregaController,
     ProdutoController,
     ProdutoConjuntoController,
     ProdutoImagemController,
@@ -93,6 +94,7 @@ Route::middleware(['auth:sanctum', 'senha.nao_obrigatoria'])
         Route::get('dashboard/resumo', [DashboardController::class, 'resumo']);
         Route::prefix('auditoria')->group(function () {
             Route::get('logs', [AuditoriaLogController::class, 'index']);
+            Route::get('logs/filtros', [AuditoriaLogController::class, 'filters']);
             Route::get('logs/{id}', [AuditoriaLogController::class, 'show'])->whereNumber('id');
         });
 
@@ -311,6 +313,19 @@ Route::middleware(['auth:sanctum', 'senha.nao_obrigatoria'])
 
         Route::post('avisos/{aviso}/ler', [AvisoController::class, 'marcarComoLido'])
             ->whereNumber('aviso');
+
+        /* ============================================================
+         * ENTREGAS CENTRALIZADAS
+         * ============================================================ */
+        Route::prefix('entregas')->group(function () {
+            Route::get('itens', [ProdutoEntregaController::class, 'index']);
+            Route::post('itens/{item}/reservar', [ProdutoEntregaController::class, 'reservar'])->whereNumber('item');
+            Route::post('itens/{item}/receber', [ProdutoEntregaController::class, 'receber'])->whereNumber('item');
+            Route::post('itens/{item}/expedir', [ProdutoEntregaController::class, 'expedir'])->whereNumber('item');
+            Route::post('itens/{item}/entregar', [ProdutoEntregaController::class, 'entregar'])->whereNumber('item');
+            Route::post('itens/{item}/cancelar', [ProdutoEntregaController::class, 'cancelar'])->whereNumber('item');
+            Route::post('eventos/{evento}/estornar', [ProdutoEntregaController::class, 'estornar'])->whereNumber('evento');
+        });
 
         /* ============================================================
          * PEDIDOS / ITENS / STATUS / ESTOQUE DO PEDIDO

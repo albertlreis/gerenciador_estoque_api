@@ -10,6 +10,7 @@ use App\Models\PedidoFabrica;
 use App\Models\PedidoFabricaEntrega;
 use App\Models\PedidoFabricaItem;
 use App\Models\PedidoFabricaStatusHistorico;
+use App\Models\ProdutoEntregaItem;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -17,6 +18,10 @@ use Illuminate\Support\Facades\DB;
  */
 class PedidoFabricaService
 {
+    public function __construct(
+        private readonly EntregaProdutoService $entregaProdutoService,
+    ) {}
+
     /**
      * Cria um pedido com itens.
      *
@@ -36,13 +41,15 @@ class PedidoFabricaService
             ]);
 
             foreach ($data['itens'] as $item) {
-                $pedido->itens()->create([
+                $pedidoItem = $pedido->itens()->create([
                     'produto_variacao_id' => $item['produto_variacao_id'],
                     'quantidade'          => $item['quantidade'],
                     'deposito_id'         => $item['deposito_id'] ?? null,
                     'pedido_venda_id'     => $item['pedido_venda_id'] ?? null,
                     'observacoes'         => $item['observacoes'] ?? null,
                 ]);
+
+                $this->entregaProdutoService->criarDemandaFabricaItem($pedidoItem, $request->user()?->id);
             }
 
             $this->registrarHistorico($pedido, 'pendente', $request->user()?->id, 'Criação do pedido.');
@@ -67,17 +74,29 @@ class PedidoFabricaService
                 'observacoes'           => $data['observacoes'] ?? null,
             ]);
 
+            foreach ($pedido->itens()->get() as $itemAntigo) {
+                $central = ProdutoEntregaItem::query()
+                    ->where('pedido_fabrica_item_id', $itemAntigo->id)
+                    ->first();
+
+                if ($central) {
+                    $this->entregaProdutoService->cancelarItem($central, null, 'Item de fabrica substituido.');
+                }
+            }
+
             // substitui itens
             $pedido->itens()->delete();
 
             foreach ($data['itens'] as $item) {
-                $pedido->itens()->create([
+                $pedidoItem = $pedido->itens()->create([
                     'produto_variacao_id' => $item['produto_variacao_id'],
                     'quantidade'          => $item['quantidade'],
                     'deposito_id'         => $item['deposito_id'] ?? null,
                     'pedido_venda_id'     => $item['pedido_venda_id'] ?? null,
                     'observacoes'         => $item['observacoes'] ?? null,
                 ]);
+
+                $this->entregaProdutoService->criarDemandaFabricaItem($pedidoItem);
             }
 
             // manter status atual; não cria histórico aqui
@@ -170,7 +189,7 @@ class PedidoFabricaService
         $item->update(['quantidade_entregue' => $novoEntregue]);
 
         // Cria registro de entrega
-        PedidoFabricaEntrega::create([
+        $entrega = PedidoFabricaEntrega::create([
             'pedido_fabrica_id'     => $pedido->id,
             'pedido_fabrica_item_id'=> $item->id,
             'deposito_id'           => $depositoId ?: $item->deposito_id,
@@ -178,6 +197,16 @@ class PedidoFabricaService
             'usuario_id'            => $usuarioId,
             'observacao'            => $observacao,
         ]);
+
+        $central = $this->entregaProdutoService->criarDemandaFabricaItem($item->fresh());
+        $this->entregaProdutoService->receberItem(
+            $central,
+            $entrega->deposito_id,
+            $delta,
+            $usuarioId,
+            $observacao ?: "Recebimento de fabrica #{$pedido->id}",
+            "pedido-fabrica-entrega:{$entrega->id}"
+        );
     }
 
     /** Recalcula status do pedido após entregas. */

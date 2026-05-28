@@ -12,8 +12,9 @@ use App\Enums\AssistenciaStatus;
 use App\Models\AssistenciaChamado;
 use App\Models\AssistenciaChamadoItem;
 use App\Models\PedidoItem;
+use App\Models\ProdutoEntregaEvento;
 use App\Services\AuditoriaLogService;
-use App\Services\EstoqueMovimentacaoService;
+use App\Services\EntregaProdutoService;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 
@@ -21,7 +22,7 @@ class AssistenciaItemService
 {
     public function __construct(
         protected AssistenciaChamadoService $chamadoService,
-        protected EstoqueMovimentacaoService $estoqueMovimentacaoService
+        protected EntregaProdutoService $entregaProdutoService
     ) {}
 
     /**
@@ -57,6 +58,8 @@ class AssistenciaItemService
             ]);
 
             $this->log($chamado->id, $item->id, null, AssistenciaStatus::ABERTO->value, 'Item adicionado ao chamado', ['usuario_id' => $usuarioId]);
+
+            $this->entregaProdutoService->criarDemandaAssistencia($item, $usuarioId);
 
             // Ajuste de SLA do chamado (se tiver regra futura)
             // $this->chamadoService->recalcularSLA($chamado);
@@ -140,12 +143,11 @@ class AssistenciaItemService
             }
 
             // Movimentação de estoque (origem -> depósito destino)
-            $this->estoqueMovimentacaoService->registrarEnvioAssistencia(
-                variacaoId: $item->variacao_id,
-                depositoOrigemId: $item->deposito_origem_id,
-                depositoAssistenciaId: $dto->depositoAssistenciaId,
-                quantidade: 1,
-                usuarioId: $usuarioId,
+            $central = $this->entregaProdutoService->criarDemandaAssistencia($item, $usuarioId);
+            $this->entregaProdutoService->enviarAssistenciaItem(
+                $central,
+                $dto->depositoAssistenciaId,
+                $usuarioId,
                 observacao: "Envio p/ assistência – Chamado #{$chamado->numero} / Item {$item->id}"
             );
 
@@ -287,12 +289,15 @@ class AssistenciaItemService
             }
 
             // Movimentação de retorno
-            $this->estoqueMovimentacaoService->registrarRetornoAssistencia(
-                variacaoId: $item->variacao_id,
-                depositoAssistenciaId: $item->deposito_assistencia_id,
-                depositoRetornoId: $dto->depositoRetornoId,
-                quantidade: 1,
-                usuarioId: $usuarioId,
+            $central = $this->entregaProdutoService->criarDemandaAssistencia($item, $usuarioId);
+            $this->entregaProdutoService->receberItem(
+                $central,
+                $dto->depositoRetornoId,
+                1,
+                $usuarioId,
+                idempotencyKey: "assistencia-item:{$item->id}:retorno",
+                tipoEvento: ProdutoEntregaEvento::RETORNADO_ASSISTENCIA,
+                depositoOrigemId: $item->deposito_assistencia_id,
                 observacao: "Retorno de assistência – Chamado #{$item->chamado->numero} / Item {$item->id}"
             );
 
@@ -353,11 +358,14 @@ class AssistenciaItemService
                 if (empty($depositoEntradaId)) throw new InvalidArgumentException('Depósito de entrada obrigatório para reparo no depósito.');
 
                 // mov. de entrada no depósito local (qtd 1)
-                $this->estoqueMovimentacaoService->registrarEntradaDeposito(
-                    variacaoId: $item->variacao_id,
-                    depositoEntradaId: $depositoEntradaId,
-                    quantidade: 1,
-                    usuarioId: $usuarioId,
+                $central = $this->entregaProdutoService->criarDemandaAssistencia($item, $usuarioId);
+                $this->entregaProdutoService->receberItem(
+                    $central,
+                    $depositoEntradaId,
+                    1,
+                    $usuarioId,
+                    idempotencyKey: "assistencia-item:{$item->id}:entrada-local",
+                    tipoEvento: ProdutoEntregaEvento::RETORNADO_ASSISTENCIA,
                     observacao: "Entrada para reparo local – Chamado #{$chamado->numero} / Item {$item->id}"
                 );
 
@@ -551,12 +559,23 @@ class AssistenciaItemService
             }
 
             // baixa do estoque (depósito -> cliente)
-            $this->estoqueMovimentacaoService->registrarSaidaEntregaCliente(
-                variacaoId: $item->variacao_id,
-                depositoSaidaId: $depositoSaidaId,
-                quantidade: 1,
-                usuarioId: $usuarioId,
+            $central = $this->entregaProdutoService->criarDemandaAssistencia($item, $usuarioId);
+            $this->entregaProdutoService->expedirItem(
+                $central,
+                $depositoSaidaId,
+                1,
+                $usuarioId,
+                tipoEvento: ProdutoEntregaEvento::EXPEDIDO_CLIENTE,
+                idempotencyKey: "assistencia-item:{$item->id}:entrega-expedicao",
                 observacao: "Entrega ao cliente – Chamado #{$item->chamado->numero} / Item {$item->id}"
+            );
+
+            $this->entregaProdutoService->entregarItem(
+                $central,
+                1,
+                $usuarioId,
+                $observacao ?: "Entrega ao cliente - Chamado #{$item->chamado->numero} / Item {$item->id}",
+                "assistencia-item:{$item->id}:entrega-cliente"
             );
 
             $item->update([

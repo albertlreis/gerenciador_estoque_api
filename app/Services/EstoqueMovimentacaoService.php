@@ -754,61 +754,87 @@ class EstoqueMovimentacaoService
         int $variacaoId,
         int $depositoSaidaId,
         int $quantidade,
-        int $usuarioId,
+        ?int $usuarioId,
         string $observacao,
         ?int $pedidoId = null,
         ?int $pedidoItemId = null,
         ?string $loteId = null,
-        ?int $reservaId = null
-    ): void {
-        DB::transaction(function () use (
+        ?int $reservaId = null,
+        string $tipoMovimentacao = EstoqueMovimentacaoTipo::SAIDA_ENTREGA_CLIENTE->value
+    ): EstoqueMovimentacao {
+        return DB::transaction(function () use (
             $variacaoId, $depositoSaidaId, $quantidade, $usuarioId, $observacao,
-            $pedidoId, $pedidoItemId, $loteId, $reservaId
+            $pedidoId, $pedidoItemId, $loteId, $reservaId, $tipoMovimentacao
         ) {
-            // 1) Se não veio reservaId, tenta achar reserva ativa vinculada ao pedido/pedido_item
-            if (!$reservaId && $pedidoId) {
-                $query = EstoqueReserva::query()
-                    ->where('pedido_id', $pedidoId)
+            // 1) Consome reservas ativas vinculadas ao pedido/pedido_item antes da baixa fisica.
+            if ($reservaId || $pedidoId) {
+                $baseQuery = EstoqueReserva::query()
                     ->where('status', 'ativa')
-                    ->where('id_variacao', $variacaoId)
-                    ->when($depositoSaidaId, fn($q) => $q->where('id_deposito', $depositoSaidaId))
-                    ->when($pedidoItemId, fn($q) => $q->where('pedido_item_id', $pedidoItemId))
                     ->where(function ($q) {
                         $q->whereNull('data_expira')
                             ->orWhere('data_expira', '>', now());
-                    })
-                    ->orderBy('id', 'asc');
+                    });
 
-                /** @var EstoqueReserva|null $res */
-                $res = $query->lockForUpdate()->first();
+                if ($reservaId) {
+                    $reservas = (clone $baseQuery)
+                        ->where('id', $reservaId)
+                        ->lockForUpdate()
+                        ->get();
+                } else {
+                    $reservas = collect();
+                }
 
-                if ($res) {
-                    $reservaId = (int) $res->id;
+                if ($pedidoId) {
+                    $reservas = $reservas
+                        ->merge(
+                            (clone $baseQuery)
+                                ->where('pedido_id', $pedidoId)
+                                ->where('id_variacao', $variacaoId)
+                                ->when($depositoSaidaId, fn($q) => $q->where('id_deposito', $depositoSaidaId))
+                                ->when($pedidoItemId, fn($q) => $q->where('pedido_item_id', $pedidoItemId))
+                                ->when($reservaId, fn($q) => $q->where('id', '<>', $reservaId))
+                                ->orderBy('id', 'asc')
+                                ->lockForUpdate()
+                                ->get()
+                        )
+                        ->unique('id')
+                        ->values();
+                }
 
-                    // 1.1) Consome a reserva (total ou parcial)
-                    $restante = max(0, (int)$res->quantidade - (int)$res->quantidade_consumida);
-                    $consumir = min($restante, $quantidade);
+                $restanteMovimentacao = $quantidade;
 
-                    if ($consumir > 0) {
-                        $res->quantidade_consumida = (int)$res->quantidade_consumida + $consumir;
-
-                        // Se consumiu tudo, marca como consumida
-                        if ($res->quantidade_consumida >= (int)$res->quantidade) {
-                            $res->status = 'consumida';
-                        }
-
-                        $res->id_usuario = $usuarioId;
-                        $res->save();
+                foreach ($reservas as $res) {
+                    if ($restanteMovimentacao <= 0) {
+                        break;
                     }
+
+                    $reservaId ??= (int) $res->id;
+
+                    $restanteReserva = max(0, (int) $res->quantidade - (int) $res->quantidade_consumida);
+                    $consumir = min($restanteReserva, $restanteMovimentacao);
+
+                    if ($consumir <= 0) {
+                        continue;
+                    }
+
+                    $res->quantidade_consumida = (int) $res->quantidade_consumida + $consumir;
+
+                    if ($res->quantidade_consumida >= (int) $res->quantidade) {
+                        $res->status = 'consumida';
+                    }
+
+                    $res->id_usuario = $usuarioId;
+                    $res->save();
+                    $restanteMovimentacao -= $consumir;
                 }
             }
 
             // 2) Movimenta (origem depósito → destino null) com refs preenchidas
-            $this->movimentar([
+            return $this->movimentar([
                 'id_variacao'         => $variacaoId,
                 'id_deposito_origem'  => $depositoSaidaId,
                 'id_deposito_destino' => null,
-                'tipo'                => EstoqueMovimentacaoTipo::SAIDA_ENTREGA_CLIENTE->value,
+                'tipo'                => $tipoMovimentacao,
                 'quantidade'          => $quantidade,
                 'id_usuario'          => $usuarioId,
                 'observacao'          => $observacao,

@@ -113,6 +113,7 @@ class PedidoService
             'itens.variacao.produto.imagens',
             'itens.variacao.atributos',
             'historicoStatus.usuario:id,nome',
+            'entregaItens',
             'devolucoes.itens.pedidoItem.variacao.produto',
             'devolucoes.itens.trocaItens.variacaoNova.produto',
             'devolucoes.credito',

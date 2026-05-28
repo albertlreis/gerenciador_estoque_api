@@ -17,6 +17,7 @@ final class PedidoCancelamentoService
     public function __construct(
         private readonly ReservaEstoqueService $reservas,
         private readonly EstoqueMovimentacaoService $movimentacoes,
+        private readonly EntregaProdutoService $entregaProdutoService,
     ) {}
 
     public function cancelar(Pedido $pedido, array $opcoes, ?int $usuarioId): array
@@ -38,6 +39,7 @@ final class PedidoCancelamentoService
                 'reservas_canceladas' => 0,
                 'movimentacoes_estornadas' => 0,
                 'contas_canceladas' => 0,
+                'entrega_itens_cancelados' => 0,
             ];
 
             if (!empty($opcoes['cancelar_reservas'])) {
@@ -51,6 +53,8 @@ final class PedidoCancelamentoService
             if (!empty($opcoes['cancelar_financeiro'])) {
                 $resultado['contas_canceladas'] = $this->cancelarContasReceber($pedido);
             }
+
+            $resultado['entrega_itens_cancelados'] = $this->cancelarEntregasCentrais($pedido, $usuarioId, $opcoes['observacoes'] ?? null);
 
             $pedido->historicoStatus()->create([
                 'status' => PedidoStatus::CANCELADO,
@@ -151,5 +155,18 @@ final class PedidoCancelamentoService
         }
 
         return $canceladas;
+    }
+
+    private function cancelarEntregasCentrais(Pedido $pedido, ?int $usuarioId, ?string $observacao): int
+    {
+        $itens = $pedido->entregaItens()
+            ->whereNotIn('status', ['cancelado', 'entregue'])
+            ->get();
+
+        foreach ($itens as $item) {
+            $this->entregaProdutoService->cancelarItem($item, $usuarioId, $observacao ?: 'Pedido cancelado.');
+        }
+
+        return $itens->count();
     }
 }

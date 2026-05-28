@@ -20,7 +20,7 @@ class PedidoRepository
      */
     public function comFiltros(Request $request): Builder
     {
-        $query = Pedido::with(['cliente', 'parceiro', 'usuario', 'statusAtual', 'statusPrevisoes', 'historicoStatus', 'devolucoes:id,pedido_id',]);
+        $query = Pedido::with(['cliente', 'parceiro', 'usuario', 'statusAtual', 'statusPrevisoes', 'historicoStatus', 'devolucoes:id,pedido_id', 'entregaItens']);
 
         if (!AuthHelper::podeVisualizarPedidosDeTodos()) {
             $query->where('id_usuario', auth()->id());

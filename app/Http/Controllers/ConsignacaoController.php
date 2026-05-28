@@ -12,8 +12,10 @@ use App\Models\Consignacao;
 use App\Models\ConsignacaoCompra;
 use App\Models\ConsignacaoDevolucao;
 use App\Models\Pedido;
+use App\Models\PedidoItem;
 use App\Models\PedidoStatusHistorico;
 use App\Models\ProdutoEntregaEvento;
+use App\Models\ProdutoVariacao;
 use App\Services\EstoqueMovimentacaoService;
 use App\Services\EntregaProdutoService;
 use App\Services\PdfImageService;
@@ -182,6 +184,117 @@ class ConsignacaoController extends Controller
             ],
             'consignacoes' => ConsignacaoDetalhadaResource::collection($consignacoes)
         ]);
+    }
+
+    public function adicionarItensAoPedido(Pedido $pedido, Request $request): JsonResponse
+    {
+        if (!AuthHelper::hasPermissao('consignacoes.gerenciar')) {
+            return response()->json(['message' => 'Sem permissao para gerenciar consignacoes.'], 403);
+        }
+
+        $validated = $request->validate([
+            'prazo_resposta' => 'required|date_format:Y-m-d',
+            'itens' => 'required|array|min:1',
+            'itens.*.id_variacao' => 'required|integer|exists:produto_variacoes,id',
+            'itens.*.quantidade' => 'required|integer|min:1',
+            'itens.*.preco_unitario' => 'required|numeric|min:0',
+            'itens.*.id_deposito' => 'required|integer|exists:depositos,id',
+            'itens.*.observacoes' => 'nullable|string|max:1000',
+        ]);
+
+        $usuarioId = AuthHelper::getUsuarioId();
+
+        DB::transaction(function () use ($pedido, $validated, $usuarioId) {
+            /** @var Pedido $pedidoAtual */
+            $pedidoAtual = Pedido::query()
+                ->with(['statusAtual', 'consignacoes'])
+                ->lockForUpdate()
+                ->findOrFail($pedido->id);
+
+            $statusAtual = $pedidoAtual->statusAtual?->status?->value ?? $pedidoAtual->statusAtual?->status;
+            if ($statusAtual === PedidoStatus::CANCELADO->value) {
+                abort(422, 'Nao e possivel adicionar produtos a um pedido cancelado.');
+            }
+
+            if (!$pedidoAtual->consignacoes->count()) {
+                abort(422, 'Pedido sem consignacoes para receber novos produtos.');
+            }
+
+            $prazoResposta = (string) $validated['prazo_resposta'];
+            $consignacoesCriadas = [];
+            $totalAdicionar = 0.0;
+
+            foreach ($validated['itens'] as $item) {
+                $quantidade = (int) $item['quantidade'];
+                $preco = (float) $item['preco_unitario'];
+                $subtotal = round($quantidade * $preco, 2);
+                $totalAdicionar += $subtotal;
+
+                /** @var ProdutoVariacao $variacao */
+                $variacao = ProdutoVariacao::query()->findOrFail((int) $item['id_variacao']);
+
+                PedidoItem::query()->create([
+                    'id_pedido' => $pedidoAtual->id,
+                    'id_variacao' => $variacao->id,
+                    'quantidade' => $quantidade,
+                    'preco_unitario' => $preco,
+                    'subtotal' => $subtotal,
+                    'id_deposito' => (int) $item['id_deposito'],
+                    'observacoes' => $item['observacoes'] ?? null,
+                ]);
+
+                $consignacao = Consignacao::query()->create([
+                    'pedido_id' => $pedidoAtual->id,
+                    'produto_variacao_id' => $variacao->id,
+                    'deposito_id' => (int) $item['id_deposito'],
+                    'quantidade' => $quantidade,
+                    'data_envio' => now('America/Belem')->toDateString(),
+                    'prazo_resposta' => $prazoResposta,
+                    'status' => 'pendente',
+                ]);
+
+                $consignacoesCriadas[] = $consignacao;
+            }
+
+            $pedidoAtual->valor_total = round((float) $pedidoAtual->valor_total + $totalAdicionar, 2);
+            $pedidoAtual->save();
+
+            app(EntregaProdutoService::class)->reconciliarPedidoEditado(
+                $pedidoAtual,
+                $usuarioId ? (int) $usuarioId : null
+            );
+
+            foreach ($consignacoesCriadas as $consignacao) {
+                app(EntregaProdutoService::class)->criarDemandaConsignacao(
+                    $consignacao,
+                    $usuarioId ? (int) $usuarioId : null
+                );
+            }
+
+            if ($statusAtual !== PedidoStatus::CONSIGNADO->value) {
+                PedidoStatusHistorico::query()->create([
+                    'pedido_id' => $pedidoAtual->id,
+                    'status' => PedidoStatus::CONSIGNADO,
+                    'data_status' => now('America/Belem'),
+                    'usuario_id' => $usuarioId,
+                    'observacoes' => 'Produtos adicionados a consignacao.',
+                ]);
+            }
+        });
+
+        $consignacoes = $this->carregarConsignacoesDetalhadasDoPedido((int) $pedido->id);
+        $pedidoAtualizado = Pedido::with('cliente')->findOrFail($pedido->id);
+
+        return response()->json([
+            'mensagem' => 'Produtos adicionados a consignacao com sucesso.',
+            'pedido' => [
+                'id' => $pedidoAtualizado->id,
+                'numero_externo' => $pedidoAtualizado->numero_externo,
+                'cliente' => $pedidoAtualizado->cliente->nome ?? '-',
+                'data_envio' => optional($pedidoAtualizado->data_envio)->format('d/m/Y'),
+            ],
+            'consignacoes' => ConsignacaoDetalhadaResource::collection($consignacoes),
+        ], 201);
     }
 
     public function show($id): JsonResponse
@@ -775,6 +888,24 @@ class ConsignacaoController extends Controller
             $status = strtolower((string) ($item->status ?? ''));
             return in_array($status, ['devolvido', 'comprado', 'finalizado'], true);
         });
+    }
+
+    private function carregarConsignacoesDetalhadasDoPedido(int $pedidoId)
+    {
+        return Consignacao::with([
+            'pedido.cliente',
+            'produtoVariacao.produto.imagemPrincipal',
+            'produtoVariacao.atributos',
+            'compras.usuario',
+            'compras.canceladaPor',
+            'devolucoes.usuario',
+            'devolucoes.canceladaPor',
+            'movimentacoes.usuario',
+            'movimentacoes.depositoOrigem',
+            'movimentacoes.depositoDestino',
+        ])
+            ->where('pedido_id', $pedidoId)
+            ->get();
     }
 
     private function registrarVendaCentralConsignacao(Consignacao $consignacao, int $quantidade, ?int $usuarioId, ?string $observacoes): void

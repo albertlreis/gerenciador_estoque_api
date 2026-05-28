@@ -15,6 +15,7 @@ use App\Models\Pedido;
 use App\Models\PedidoItem;
 use App\Models\PedidoStatusHistorico;
 use App\Models\Produto;
+use App\Models\ProdutoEntregaItem;
 use App\Models\ProdutoImagem;
 use App\Models\ProdutoVariacao;
 use App\Models\ProdutoVariacaoImagem;
@@ -471,6 +472,130 @@ class ConsignacaoRoteiroPdfTest extends TestCase
         $this->assertStringContainsString('CEP 66000202', $html);
     }
 
+    public function test_adiciona_produto_a_consignacao_criando_item_e_demandas(): void
+    {
+        [$pedidoId] = $this->criarPedidoConsignado('pendente', PedidoStatus::CONSIGNADO);
+        Cache::put('permissoes_usuario_' . auth()->id(), ['consignacoes.gerenciar'], now()->addHour());
+        [$variacao, $deposito] = $this->criarVariacaoComEstoque();
+
+        $response = $this->postJson("/api/v1/consignacoes/pedidos/{$pedidoId}/itens", [
+            'prazo_resposta' => now()->addDays(7)->toDateString(),
+            'itens' => [[
+                'id_variacao' => $variacao->id,
+                'quantidade' => 2,
+                'preco_unitario' => 250.50,
+                'id_deposito' => $deposito->id,
+                'observacoes' => 'Produto extra',
+            ]],
+        ]);
+
+        $response->assertCreated()
+            ->assertJsonPath('mensagem', 'Produtos adicionados a consignacao com sucesso.');
+
+        $this->assertDatabaseHas('pedido_itens', [
+            'id_pedido' => $pedidoId,
+            'id_variacao' => $variacao->id,
+            'quantidade' => 2,
+            'id_deposito' => $deposito->id,
+            'observacoes' => 'Produto extra',
+        ]);
+        $this->assertDatabaseHas('consignacoes', [
+            'pedido_id' => $pedidoId,
+            'produto_variacao_id' => $variacao->id,
+            'deposito_id' => $deposito->id,
+            'quantidade' => 2,
+            'status' => 'pendente',
+        ]);
+        $this->assertSame(651.0, (float) Pedido::findOrFail($pedidoId)->valor_total);
+
+        $novaConsignacao = Consignacao::where('pedido_id', $pedidoId)
+            ->where('produto_variacao_id', $variacao->id)
+            ->firstOrFail();
+
+        $this->assertDatabaseHas('produto_entrega_itens', [
+            'tipo_origem' => ProdutoEntregaItem::ORIGEM_CONSIGNACAO,
+            'consignacao_id' => $novaConsignacao->id,
+            'pedido_id' => $pedidoId,
+            'id_variacao' => $variacao->id,
+            'quantidade_total' => 2,
+        ]);
+        $this->assertDatabaseHas('produto_entrega_itens', [
+            'tipo_origem' => ProdutoEntregaItem::ORIGEM_PEDIDO,
+            'pedido_id' => $pedidoId,
+            'id_variacao' => $variacao->id,
+            'quantidade_total' => 2,
+        ]);
+    }
+
+    public function test_adicionar_produto_a_consignacao_bloqueia_usuario_sem_permissao(): void
+    {
+        [$pedidoId] = $this->criarPedidoConsignado('pendente', PedidoStatus::CONSIGNADO);
+        [$variacao, $deposito] = $this->criarVariacaoComEstoque();
+
+        $response = $this->postJson("/api/v1/consignacoes/pedidos/{$pedidoId}/itens", [
+            'prazo_resposta' => now()->addDays(7)->toDateString(),
+            'itens' => [[
+                'id_variacao' => $variacao->id,
+                'quantidade' => 1,
+                'preco_unitario' => 100,
+                'id_deposito' => $deposito->id,
+            ]],
+        ]);
+
+        $response->assertForbidden();
+    }
+
+    public function test_vendedor_com_permissao_adiciona_produto_em_pedido_de_outro_vendedor(): void
+    {
+        [$pedidoId] = $this->criarPedidoConsignado('pendente', PedidoStatus::CONSIGNADO);
+        [$variacao, $deposito] = $this->criarVariacaoComEstoque();
+
+        $outroVendedor = Usuario::create([
+            'nome' => 'Outro Vendedor',
+            'email' => uniqid('outro-vendedor-', true) . '@test.com',
+            'senha' => 'senha',
+            'ativo' => true,
+        ]);
+        Sanctum::actingAs($outroVendedor);
+        Cache::put('permissoes_usuario_' . $outroVendedor->id, ['consignacoes.gerenciar'], now()->addHour());
+
+        $response = $this->postJson("/api/v1/consignacoes/pedidos/{$pedidoId}/itens", [
+            'prazo_resposta' => now()->addDays(8)->toDateString(),
+            'itens' => [[
+                'id_variacao' => $variacao->id,
+                'quantidade' => 1,
+                'preco_unitario' => 100,
+                'id_deposito' => $deposito->id,
+            ]],
+        ]);
+
+        $response->assertCreated();
+        $this->assertDatabaseHas('consignacoes', [
+            'pedido_id' => $pedidoId,
+            'produto_variacao_id' => $variacao->id,
+            'quantidade' => 1,
+        ]);
+    }
+
+    public function test_adicionar_produto_rejeita_pedido_sem_consignacao(): void
+    {
+        [$pedidoId] = $this->criarPedidoComItem();
+        Cache::put('permissoes_usuario_' . auth()->id(), ['consignacoes.gerenciar'], now()->addHour());
+        [$variacao, $deposito] = $this->criarVariacaoComEstoque();
+
+        $response = $this->postJson("/api/v1/consignacoes/pedidos/{$pedidoId}/itens", [
+            'prazo_resposta' => now()->addDays(7)->toDateString(),
+            'itens' => [[
+                'id_variacao' => $variacao->id,
+                'quantidade' => 1,
+                'preco_unitario' => 100,
+                'id_deposito' => $deposito->id,
+            ]],
+        ]);
+
+        $response->assertStatus(422);
+    }
+
     private function criarPedidoConsignado(string $statusConsignacao, PedidoStatus $statusPedido, array $perfis = []): array
     {
         $usuario = Usuario::create([
@@ -594,6 +719,35 @@ class ConsignacaoRoteiroPdfTest extends TestCase
             ],
             ['quantidade' => $quantidade]
         );
+    }
+
+    private function criarVariacaoComEstoque(int $quantidade = 10): array
+    {
+        $categoria = Categoria::create(['nome' => 'Categoria Extra ' . uniqid()]);
+        $produto = Produto::create([
+            'nome' => 'Produto Extra ' . uniqid(),
+            'descricao' => 'Desc',
+            'id_categoria' => $categoria->id,
+            'ativo' => true,
+        ]);
+        $variacao = ProdutoVariacao::create([
+            'produto_id' => $produto->id,
+            'referencia' => 'EXT-' . uniqid(),
+            'nome' => 'Variacao Extra',
+            'preco' => 250.50,
+            'custo' => 120,
+        ]);
+        $deposito = Deposito::create(['nome' => 'Deposito Extra ' . uniqid()]);
+
+        Estoque::updateOrCreate(
+            [
+                'id_variacao' => $variacao->id,
+                'id_deposito' => $deposito->id,
+            ],
+            ['quantidade' => $quantidade]
+        );
+
+        return [$variacao, $deposito];
     }
 
     private function criarPedidoComItem(): array

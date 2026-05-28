@@ -403,6 +403,8 @@ Route::middleware(['auth:sanctum', 'senha.nao_obrigatoria'])
             Route::get('/', [ConsignacaoController::class, 'index']);
 
             Route::get('pedidos/{pedido}', [ConsignacaoController::class, 'porPedido'])->whereNumber('pedido');
+            Route::post('pedidos/{pedido}/itens', [ConsignacaoController::class, 'adicionarItensAoPedido'])
+                ->whereNumber('pedido');
             Route::post('pedidos/{pedido}/devolucoes-em-massa', [ConsignacaoController::class, 'registrarDevolucoesEmMassa'])
                 ->whereNumber('pedido');
             Route::patch('pedidos/{pedido}/compras-em-massa', [ConsignacaoController::class, 'confirmarComprasEmMassa'])

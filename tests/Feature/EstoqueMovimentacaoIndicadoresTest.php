@@ -3,9 +3,13 @@
 namespace Tests\Feature;
 
 use App\Enums\EstoqueMovimentacaoTipo;
+use App\Models\AreaEstoque;
 use App\Models\Categoria;
 use App\Models\Deposito;
 use App\Models\Estoque;
+use App\Models\LocalizacaoDimensao;
+use App\Models\LocalizacaoEstoque;
+use App\Models\LocalizacaoValor;
 use App\Models\Produto;
 use App\Models\ProdutoVariacao;
 use App\Models\Usuario;
@@ -20,9 +24,11 @@ class EstoqueMovimentacaoIndicadoresTest extends TestCase
 
     private function criarCenarioBase(): array
     {
+        $suffix = uniqid('', true);
+
         $usuario = Usuario::create([
             'nome' => 'Usuario Estoque',
-            'email' => 'usuario_estoque_indicadores@example.com',
+            'email' => 'usuario_estoque_indicadores_' . $suffix . '@example.com',
             'senha' => 'teste',
             'ativo' => 1,
         ]);
@@ -158,5 +164,112 @@ class EstoqueMovimentacaoIndicadoresTest extends TestCase
 
         $referencias = collect($response->json('data'))->pluck('produto_referencia')->filter()->all();
         $this->assertContains('VENDA/001', $referencias);
+    }
+
+    public function test_filtra_movimentacoes_por_localizacao_do_estoque(): void
+    {
+        $suffix = uniqid('', true);
+
+        $usuario = Usuario::create([
+            'nome' => 'Usuario Localizacao',
+            'email' => 'usuario_localizacao_movimentacoes_' . $suffix . '@example.com',
+            'senha' => 'teste',
+            'ativo' => 1,
+        ]);
+        Sanctum::actingAs($usuario);
+
+        $categoria = Categoria::create(['nome' => 'Categoria Localizacao']);
+        $deposito = Deposito::create(['nome' => 'Deposito Localizacao']);
+        $areaAlvo = AreaEstoque::create(['nome' => 'Showroom Norte']);
+        $areaOutra = AreaEstoque::create(['nome' => 'Estoque Sul']);
+        $dimensao = LocalizacaoDimensao::create([
+            'nome' => 'Rua',
+            'placeholder' => 'Rua',
+            'ordem' => 1,
+            'ativo' => true,
+        ]);
+
+        $produtoAlvo = Produto::create([
+            'nome' => 'Produto Localizacao Alvo',
+            'descricao' => 'Teste',
+            'id_categoria' => $categoria->id,
+            'ativo' => true,
+        ]);
+        $produtoOutro = Produto::create([
+            'nome' => 'Produto Localizacao Outro',
+            'descricao' => 'Teste',
+            'id_categoria' => $categoria->id,
+            'ativo' => true,
+        ]);
+
+        $variacaoAlvo = ProdutoVariacao::create([
+            'produto_id' => $produtoAlvo->id,
+            'referencia' => 'LOC-ALVO',
+            'nome' => 'Variacao Localizacao Alvo',
+            'preco' => 120,
+            'custo' => 55,
+        ]);
+        $variacaoOutra = ProdutoVariacao::create([
+            'produto_id' => $produtoOutro->id,
+            'referencia' => 'LOC-OUTRA',
+            'nome' => 'Variacao Localizacao Outra',
+            'preco' => 120,
+            'custo' => 55,
+        ]);
+
+        $estoqueAlvo = Estoque::updateOrCreate(
+            ['id_variacao' => $variacaoAlvo->id, 'id_deposito' => $deposito->id],
+            ['quantidade' => 0]
+        );
+        $estoqueOutro = Estoque::updateOrCreate(
+            ['id_variacao' => $variacaoOutra->id, 'id_deposito' => $deposito->id],
+            ['quantidade' => 0]
+        );
+
+        $localizacaoAlvo = LocalizacaoEstoque::create([
+            'estoque_id' => $estoqueAlvo->id,
+            'area_id' => $areaAlvo->id,
+            'setor' => 'A',
+            'coluna' => '01',
+            'nivel' => '02',
+            'codigo_composto' => 'A-01-02',
+            'observacoes' => 'Perto da entrada',
+        ]);
+        LocalizacaoEstoque::create([
+            'estoque_id' => $estoqueOutro->id,
+            'area_id' => $areaOutra->id,
+            'setor' => 'B',
+            'coluna' => '09',
+            'nivel' => '01',
+            'codigo_composto' => 'B-09-01',
+        ]);
+        LocalizacaoValor::create([
+            'localizacao_id' => $localizacaoAlvo->id,
+            'dimensao_id' => $dimensao->id,
+            'valor' => 'Corredor Especial',
+        ]);
+
+        $service = app(EstoqueMovimentacaoService::class);
+        $service->registrarMovimentacaoManual([
+            'id_variacao' => $variacaoAlvo->id,
+            'id_deposito_destino' => $deposito->id,
+            'tipo' => EstoqueMovimentacaoTipo::ENTRADA->value,
+            'quantidade' => 2,
+            'data_movimentacao' => '2026-02-10 08:00:00',
+        ], $usuario->id);
+        $service->registrarMovimentacaoManual([
+            'id_variacao' => $variacaoOutra->id,
+            'id_deposito_destino' => $deposito->id,
+            'tipo' => EstoqueMovimentacaoTipo::ENTRADA->value,
+            'quantidade' => 2,
+            'data_movimentacao' => '2026-02-11 08:00:00',
+        ], $usuario->id);
+
+        $response = $this->getJson('/api/v1/estoque/movimentacoes?localizacao=' . urlencode('Corredor Especial'));
+        $response->assertOk();
+
+        $referencias = collect($response->json('data'))->pluck('produto_referencia')->all();
+        $this->assertContains('LOC-ALVO', $referencias);
+        $this->assertNotContains('LOC-OUTRA', $referencias);
     }
 }

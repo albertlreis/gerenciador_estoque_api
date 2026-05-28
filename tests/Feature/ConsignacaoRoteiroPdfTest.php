@@ -235,6 +235,8 @@ class ConsignacaoRoteiroPdfTest extends TestCase
         [$pedidoId] = $this->criarPedidoConsignado('pendente', PedidoStatus::CONSIGNADO);
         $consignacaoA = Consignacao::where('pedido_id', $pedidoId)->firstOrFail();
         $consignacaoB = $this->criarConsignacaoParaPedido($pedidoId, $consignacaoA->deposito_id, 1);
+        $this->garantirEstoqueConsignacao($consignacaoA);
+        $this->garantirEstoqueConsignacao($consignacaoB);
 
         $response = $this->patchJson("/api/v1/consignacoes/pedidos/{$pedidoId}/compras-em-massa", [
             'consignacao_ids' => [$consignacaoA->id, $consignacaoB->id],
@@ -279,6 +281,8 @@ class ConsignacaoRoteiroPdfTest extends TestCase
         $consignacaoA = Consignacao::where('pedido_id', $pedidoId)->firstOrFail();
         $consignacaoA->update(['quantidade' => 3]);
         $consignacaoB = $this->criarConsignacaoParaPedido($pedidoId, $consignacaoA->deposito_id, 2);
+        $this->garantirEstoqueConsignacao($consignacaoA);
+        $this->garantirEstoqueConsignacao($consignacaoB);
 
         $response = $this->patchJson("/api/v1/consignacoes/pedidos/{$pedidoId}/compras-em-massa", [
             'observacoes' => 'Venda parcial',
@@ -327,6 +331,7 @@ class ConsignacaoRoteiroPdfTest extends TestCase
         [$pedidoId] = $this->criarPedidoConsignado('pendente', PedidoStatus::CONSIGNADO);
         $consignacao = Consignacao::where('pedido_id', $pedidoId)->firstOrFail();
         $consignacao->update(['quantidade' => 3]);
+        $this->garantirEstoqueConsignacao($consignacao);
 
         $this->patchJson("/api/v1/consignacoes/pedidos/{$pedidoId}/compras-em-massa", [
             'itens' => [
@@ -354,6 +359,7 @@ class ConsignacaoRoteiroPdfTest extends TestCase
         [$pedidoId] = $this->criarPedidoConsignado('pendente', PedidoStatus::CONSIGNADO, ['Administrador']);
         $consignacao = Consignacao::where('pedido_id', $pedidoId)->firstOrFail();
         $consignacao->update(['quantidade' => 2]);
+        $this->garantirEstoqueConsignacao($consignacao);
 
         $this->patchJson("/api/v1/consignacoes/pedidos/{$pedidoId}/compras-em-massa", [
             'itens' => [
@@ -511,14 +517,6 @@ class ConsignacaoRoteiroPdfTest extends TestCase
 
         $deposito = Deposito::create(['nome' => 'Deposito PDF']);
 
-        Estoque::updateOrCreate(
-            [
-                'id_variacao' => $variacao->id,
-                'id_deposito' => $deposito->id,
-            ],
-            ['quantidade' => 10]
-        );
-
         $pedido = Pedido::create([
             'id_cliente' => $cliente->id,
             'id_usuario' => $usuario->id,
@@ -576,14 +574,6 @@ class ConsignacaoRoteiroPdfTest extends TestCase
             'custo' => 90,
         ]);
 
-        Estoque::updateOrCreate(
-            [
-                'id_variacao' => $variacao->id,
-                'id_deposito' => $depositoId,
-            ],
-            ['quantidade' => 10]
-        );
-
         return Consignacao::create([
             'pedido_id' => $pedidoId,
             'produto_variacao_id' => $variacao->id,
@@ -593,6 +583,17 @@ class ConsignacaoRoteiroPdfTest extends TestCase
             'prazo_resposta' => now()->addDays(15),
             'status' => $status,
         ]);
+    }
+
+    private function garantirEstoqueConsignacao(Consignacao $consignacao, int $quantidade = 10): void
+    {
+        Estoque::updateOrCreate(
+            [
+                'id_variacao' => $consignacao->produto_variacao_id,
+                'id_deposito' => $consignacao->deposito_id,
+            ],
+            ['quantidade' => $quantidade]
+        );
     }
 
     private function criarPedidoComItem(): array

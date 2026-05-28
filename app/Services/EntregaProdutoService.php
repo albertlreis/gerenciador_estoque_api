@@ -970,6 +970,10 @@ class EntregaProdutoService
             return ProdutoEntregaItem::STATUS_ENTREGUE;
         }
 
+        if ((int) $itens->sum('quantidade_entregue') > 0) {
+            return ProdutoEntregaItem::STATUS_ENTREGUE_PARCIAL;
+        }
+
         if ((int) $itens->sum('quantidade_expedida') > 0) {
             return (int) $itens->sum('quantidade_expedida') >= $total
                 ? ProdutoEntregaItem::STATUS_EXPEDIDO

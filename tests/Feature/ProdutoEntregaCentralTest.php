@@ -136,6 +136,95 @@ class ProdutoEntregaCentralTest extends TestCase
         ]);
     }
 
+    public function test_entrega_parcial_projeta_status_e_filtro_entregaveis_sem_nova_baixa(): void
+    {
+        [$usuario, $pedido, $variacao, $deposito] = $this->criarPedidoComItem(3);
+
+        Sanctum::actingAs($usuario);
+        Cache::put('permissoes_usuario_' . $usuario->id, ['pedidos.editar']);
+
+        Estoque::updateOrCreate(
+            ['id_variacao' => $variacao->id, 'id_deposito' => $deposito->id],
+            ['quantidade' => 3]
+        );
+
+        $service = app(EntregaProdutoService::class);
+        $service->criarDemandaPedido($pedido, $usuario->id, true);
+        $service->expedirPedido($pedido, $usuario->id);
+
+        $entrega = ProdutoEntregaItem::query()->where('pedido_id', $pedido->id)->firstOrFail();
+        $service->entregarItem($entrega, 1, $usuario->id, 'Entrega parcial teste', 'entrega-parcial-1');
+        $service->entregarItem($entrega, 1, $usuario->id, 'Entrega parcial teste', 'entrega-parcial-1');
+
+        $entrega = $entrega->fresh();
+        $this->assertSame(ProdutoEntregaItem::STATUS_ENTREGUE_PARCIAL, $entrega->status);
+        $this->assertSame(1, (int) $entrega->quantidade_entregue);
+        $this->assertSame(0, (int) Estoque::query()->where('id_variacao', $variacao->id)->where('id_deposito', $deposito->id)->value('quantidade'));
+        $this->assertSame(1, EstoqueMovimentacao::query()->where('pedido_id', $pedido->id)->count());
+        $this->assertSame(1, ProdutoEntregaEvento::query()->where('idempotency_key', 'entrega-parcial-1')->count());
+        $this->assertSame(ProdutoEntregaItem::STATUS_ENTREGUE_PARCIAL, $service->resumoPedido($pedido->fresh())['status']);
+
+        $this->getJson('/api/v1/entregas/itens?entregaveis=1&per_page=10')
+            ->assertOk()
+            ->assertJsonFragment([
+                'id' => $entrega->id,
+                'quantidade_pendente_entrega' => 2,
+            ]);
+
+        $this->patchJson("/api/v1/pedidos/{$pedido->id}/status", [
+            'status' => PedidoStatus::FINALIZADO->value,
+            'data_prevista' => now()->toDateString(),
+        ])->assertStatus(422)
+            ->assertJsonPath('message', 'Registre a entrega pelo fluxo central antes de marcar entrega ou finalizacao.');
+
+        $service->entregarItem($entrega, 2, $usuario->id, 'Entrega restante teste', 'entrega-parcial-restante');
+
+        $this->getJson('/api/v1/entregas/itens?entregaveis=1&per_page=10')
+            ->assertOk()
+            ->assertJsonMissing(['id' => $entrega->id]);
+    }
+
+    public function test_listagem_de_entregas_filtra_por_busca_deposito_bloqueio_e_previsao(): void
+    {
+        [$usuario, $pedido, $variacao, $deposito] = $this->criarPedidoComItem(2);
+
+        Sanctum::actingAs($usuario);
+
+        $service = app(EntregaProdutoService::class);
+        $service->criarDemandaPedido($pedido, $usuario->id, false);
+
+        $entrega = ProdutoEntregaItem::query()->where('pedido_id', $pedido->id)->firstOrFail();
+        $entrega->update([
+            'status' => ProdutoEntregaItem::STATUS_BLOQUEADO_REVISAO,
+            'previsao_entrega' => now()->addDays(2)->toDateString(),
+            'bloqueio_motivo' => 'Deposito pendente para teste',
+        ]);
+
+        $this->getJson('/api/v1/entregas/itens?per_page=10&q=Cliente%20Entrega')
+            ->assertOk()
+            ->assertJsonFragment(['id' => $entrega->id]);
+
+        $this->getJson('/api/v1/entregas/itens?per_page=10&q=sem-resultado-para-este-item')
+            ->assertOk()
+            ->assertJsonMissing(['id' => $entrega->id]);
+
+        $this->getJson('/api/v1/entregas/itens?per_page=10&deposito_id=' . $deposito->id)
+            ->assertOk()
+            ->assertJsonFragment(['id' => $entrega->id]);
+
+        $this->getJson('/api/v1/entregas/itens?per_page=10&bloqueados=1')
+            ->assertOk()
+            ->assertJsonFragment(['id' => $entrega->id]);
+
+        $this->getJson('/api/v1/entregas/itens?per_page=10&previsao_inicio=' . now()->toDateString() . '&previsao_fim=' . now()->addDays(3)->toDateString())
+            ->assertOk()
+            ->assertJsonFragment(['id' => $entrega->id]);
+
+        $this->getJson('/api/v1/entregas/itens?per_page=10&previsao_inicio=' . now()->addDays(10)->toDateString())
+            ->assertOk()
+            ->assertJsonMissing(['id' => $entrega->id]);
+    }
+
     private function criarPedidoComItem(int $quantidade): array
     {
         $usuario = Usuario::create([

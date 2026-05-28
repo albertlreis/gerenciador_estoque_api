@@ -15,6 +15,22 @@ class ProdutoEntregaController extends Controller
 
     public function index(Request $request): JsonResponse
     {
+        $filtros = $request->validate([
+            'status' => ['nullable', 'string'],
+            'pedido_id' => ['nullable', 'integer'],
+            'tipo_origem' => ['nullable', 'string'],
+            'q' => ['nullable', 'string', 'max:120'],
+            'deposito_id' => ['nullable', 'integer'],
+            'bloqueados' => ['nullable', 'boolean'],
+            'previsao_inicio' => ['nullable', 'date_format:Y-m-d'],
+            'previsao_fim' => ['nullable', 'date_format:Y-m-d'],
+            'pendentes' => ['nullable', 'boolean'],
+            'entregaveis' => ['nullable', 'boolean'],
+            'per_page' => ['nullable', 'integer', 'min:1'],
+        ]);
+
+        $busca = trim((string) ($filtros['q'] ?? ''));
+
         $query = ProdutoEntregaItem::query()
             ->with([
                 'pedido.cliente:id,nome',
@@ -24,9 +40,43 @@ class ProdutoEntregaController extends Controller
                 'depositoOrigem:id,nome',
                 'depositoDestino:id,nome',
             ])
-            ->when($request->filled('status'), fn ($q) => $q->where('status', $request->input('status')))
-            ->when($request->filled('pedido_id'), fn ($q) => $q->where('pedido_id', $request->integer('pedido_id')))
-            ->when($request->filled('tipo_origem'), fn ($q) => $q->where('tipo_origem', $request->input('tipo_origem')))
+            ->when(! empty($filtros['status']), fn ($q) => $q->where('status', $filtros['status']))
+            ->when(! empty($filtros['pedido_id']), fn ($q) => $q->where('pedido_id', (int) $filtros['pedido_id']))
+            ->when(! empty($filtros['tipo_origem']), fn ($q) => $q->where('tipo_origem', $filtros['tipo_origem']))
+            ->when(! empty($filtros['deposito_id']), function ($q) use ($filtros) {
+                $depositoId = (int) $filtros['deposito_id'];
+
+                $q->where(function ($depositos) use ($depositoId) {
+                    $depositos
+                        ->where('id_deposito_origem', $depositoId)
+                        ->orWhere('id_deposito_destino', $depositoId);
+                });
+            })
+            ->when($request->boolean('bloqueados'), fn ($q) => $q->where('status', ProdutoEntregaItem::STATUS_BLOQUEADO_REVISAO))
+            ->when(! empty($filtros['previsao_inicio']), fn ($q) => $q->whereDate('previsao_entrega', '>=', $filtros['previsao_inicio']))
+            ->when(! empty($filtros['previsao_fim']), fn ($q) => $q->whereDate('previsao_entrega', '<=', $filtros['previsao_fim']))
+            ->when($busca !== '', function ($q) use ($busca) {
+                $like = '%' . str_replace(['%', '_'], ['\\%', '\\_'], $busca) . '%';
+
+                $q->where(function ($query) use ($busca, $like) {
+                    if (ctype_digit($busca)) {
+                        $query
+                            ->orWhere('pedido_id', (int) $busca)
+                            ->orWhere('origem_id', (int) $busca);
+                    }
+
+                    $query
+                        ->orWhereHas('pedido', fn ($pedido) => $pedido->where('numero_externo', 'like', $like))
+                        ->orWhereHas('pedido.cliente', fn ($cliente) => $cliente->where('nome', 'like', $like))
+                        ->orWhereHas('variacao', function ($variacao) use ($like) {
+                            $variacao
+                                ->where('nome', 'like', $like)
+                                ->orWhere('referencia', 'like', $like);
+                        })
+                        ->orWhereHas('variacao.produto', fn ($produto) => $produto->where('nome', 'like', $like))
+                        ->orWhereHas('pedidoItem.variacao.produto', fn ($produto) => $produto->where('nome', 'like', $like));
+                });
+            })
             ->when($request->boolean('pendentes'), function ($q) {
                 $q->whereIn('status', [
                     ProdutoEntregaItem::STATUS_AGUARDANDO_ESTOQUE,
@@ -34,6 +84,13 @@ class ProdutoEntregaController extends Controller
                     ProdutoEntregaItem::STATUS_PRONTO_EXPEDICAO,
                     ProdutoEntregaItem::STATUS_BLOQUEADO_REVISAO,
                 ]);
+            })
+            ->when($request->boolean('entregaveis'), function ($q) {
+                $q->whereIn('status', [
+                    ProdutoEntregaItem::STATUS_EXPEDIDO,
+                    ProdutoEntregaItem::STATUS_EXPEDIDO_PARCIAL,
+                    ProdutoEntregaItem::STATUS_ENTREGUE_PARCIAL,
+                ])->whereColumn('quantidade_expedida', '>', 'quantidade_entregue');
             })
             ->orderByDesc('updated_at');
 

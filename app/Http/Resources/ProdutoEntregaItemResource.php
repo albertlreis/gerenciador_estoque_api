@@ -24,6 +24,8 @@ class ProdutoEntregaItemResource extends JsonResource
             'quantidade_recebida' => $this->quantidade_recebida,
             'quantidade_expedida' => $this->quantidade_expedida,
             'quantidade_entregue' => $this->quantidade_entregue,
+            'quantidade_pendente_expedicao' => max(0, (int) $this->quantidade_total - (int) $this->quantidade_expedida),
+            'quantidade_pendente_entrega' => max(0, (int) $this->quantidade_expedida - (int) $this->quantidade_entregue),
             'id_deposito_origem' => $this->id_deposito_origem,
             'id_deposito_destino' => $this->id_deposito_destino,
             'status' => $this->status,

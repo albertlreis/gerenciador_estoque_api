@@ -16,6 +16,9 @@ class ProdutoMiniResource extends JsonResource
             'nome'          => $this->nome,
             'codigo_produto' => $this->codigo_produto,
             'categoria'     => $this->categoria?->nome,
+            'altura'        => $this->altura !== null ? (float) $this->altura : null,
+            'largura'       => $this->largura !== null ? (float) $this->largura : null,
+            'profundidade'  => $this->profundidade !== null ? (float) $this->profundidade : null,
             'imagem'        => $this->imagemPrincipal?->url_completa,
             'variacoes'     => $this->whenLoaded('variacoes', function () {
                 return $this->variacoes->map(fn($v) => [
@@ -26,6 +29,9 @@ class ProdutoMiniResource extends JsonResource
                     'codigo_barras' => $v->codigo_barras,
                     'nome_completo' => $v->nome_completo,
                     'imagem_url'    => $v->imagem_url,
+                    'altura'        => $v->dimensao_3,
+                    'largura'       => $v->dimensao_1,
+                    'profundidade'  => $v->dimensao_2,
                     'acabamento_oficial' => $v->acabamento_oficial,
                     'material_oficial' => $v->material_oficial,
                     'estoque_total' => $v->relationLoaded('estoques') ? (int) $v->estoques->sum('quantidade') : 0,

@@ -9,12 +9,30 @@ use App\Models\OutletFormaPagamento;
 use App\Models\OutletMotivo;
 use App\Models\ProdutoVariacao;
 use App\Models\ProdutoVariacaoOutlet;
+use App\Services\ProdutoVariacaoService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 
 class ProdutoVariacaoOutletController extends Controller
 {
+    private const PRECO_OUTLET_AUDIT = [
+        'label' => 'Alteração de preço pela modal outlet',
+        'motivo' => 'Alteração de preço original realizada na modal outlet.',
+        'origin' => 'cadastro',
+    ];
+
+    private const CUSTO_OUTLET_AUDIT = [
+        'label' => 'Alteração de custo pela modal outlet',
+        'motivo' => 'Alteração de custo original realizada na modal outlet.',
+        'origin' => 'cadastro',
+    ];
+
+    public function __construct(private readonly ProdutoVariacaoService $variacaoService)
+    {
+    }
+
     /**
      * Lista todos os registros de outlet de uma variação.
      */
@@ -65,27 +83,34 @@ class ProdutoVariacaoOutletController extends Controller
             ], 422);
         }
 
-        $outlet = new ProdutoVariacaoOutlet([
-            'motivo_id' => $request->motivo_id,
-            'quantidade' => $quantidadeNova,
-            'quantidade_restante' => $quantidadeNova,
-            'usuario_id' => Auth::id(),
-        ]);
+        $outlet = DB::transaction(function () use ($request, $variacao, $quantidadeNova) {
+            $variacao = $this->sincronizarPrecoOriginalSeNecessario($variacao, $request);
+            $variacao = $this->sincronizarCustoOriginalSeNecessario($variacao, $request);
 
-        $variacao->outlets()->save($outlet);
+            $outlet = new ProdutoVariacaoOutlet([
+                'motivo_id' => $request->motivo_id,
+                'quantidade' => $quantidadeNova,
+                'quantidade_restante' => $quantidadeNova,
+                'usuario_id' => Auth::id(),
+            ]);
 
-        foreach ($request->formas_pagamento as $fp) {
-            $formaId = $fp['forma_pagamento_id'] ?? null;
-            if (!$formaId && !empty($fp['forma_pagamento'])) {
-                $formaId = OutletFormaPagamento::where('slug',$fp['forma_pagamento'])->value('id');
+            $variacao->outlets()->save($outlet);
+
+            foreach ($request->formas_pagamento as $fp) {
+                $formaId = $fp['forma_pagamento_id'] ?? null;
+                if (!$formaId && !empty($fp['forma_pagamento'])) {
+                    $formaId = OutletFormaPagamento::where('slug',$fp['forma_pagamento'])->value('id');
+                }
+
+                $outlet->formasPagamento()->create([
+                    'forma_pagamento_id' => $formaId,
+                    'percentual_desconto' => $fp['percentual_desconto'],
+                    'max_parcelas' => $fp['max_parcelas'] ?? null,
+                ]);
             }
 
-            $outlet->formasPagamento()->create([
-                'forma_pagamento_id' => $formaId,
-                'percentual_desconto' => $fp['percentual_desconto'],
-                'max_parcelas' => $fp['max_parcelas'] ?? null,
-            ]);
-        }
+            return $outlet;
+        });
 
         $outlet->load(['usuario','motivo','formasPagamento.formaPagamento']);
 
@@ -115,6 +140,8 @@ class ProdutoVariacaoOutletController extends Controller
         $data = $request->validate([
             'quantidade' => 'required|integer|min:1',
             'motivo_id'  => 'required|exists:outlet_motivos,id',
+            'preco_original' => 'sometimes|numeric|min:0',
+            'custo_original' => 'sometimes|numeric|min:0',
             'formas_pagamento' => 'sometimes|array|min:1',
             'formas_pagamento.*.forma_pagamento_id' => 'required_with:formas_pagamento|exists:outlet_formas_pagamento,id',
             'formas_pagamento.*.percentual_desconto'=> 'required_with:formas_pagamento|numeric|min:0|max:100',
@@ -127,21 +154,26 @@ class ProdutoVariacaoOutletController extends Controller
             }
         }
 
-        $outlet->update([
-            'quantidade' => $data['quantidade'],
-            'motivo_id'  => (int)$data['motivo_id'],
-        ]);
+        DB::transaction(function () use ($request, $variacao, $outlet, $data): void {
+            $variacao = $this->sincronizarPrecoOriginalSeNecessario($variacao, $request);
+            $this->sincronizarCustoOriginalSeNecessario($variacao, $request);
 
-        if ($request->has('formas_pagamento')) {
-            $outlet->formasPagamento()->delete();
-            foreach ($data['formas_pagamento'] as $fp) {
-                $outlet->formasPagamento()->create([
-                    'forma_pagamento_id' => (int)$fp['forma_pagamento_id'],
-                    'percentual_desconto'=> $fp['percentual_desconto'],
-                    'max_parcelas'       => $fp['max_parcelas'] ?? null,
-                ]);
+            $outlet->update([
+                'quantidade' => $data['quantidade'],
+                'motivo_id'  => (int)$data['motivo_id'],
+            ]);
+
+            if ($request->has('formas_pagamento')) {
+                $outlet->formasPagamento()->delete();
+                foreach ($data['formas_pagamento'] as $fp) {
+                    $outlet->formasPagamento()->create([
+                        'forma_pagamento_id' => (int)$fp['forma_pagamento_id'],
+                        'percentual_desconto'=> $fp['percentual_desconto'],
+                        'max_parcelas'       => $fp['max_parcelas'] ?? null,
+                    ]);
+                }
             }
-        }
+        });
 
         $outlet->load(['usuario','motivo','formasPagamento.formaPagamento']);
         return new ProdutoVariacaoOutletResource($outlet);
@@ -205,6 +237,48 @@ class ProdutoVariacaoOutletController extends Controller
         }
 
         return null;
+    }
+
+    private function sincronizarPrecoOriginalSeNecessario(ProdutoVariacao $variacao, Request $request): ProdutoVariacao
+    {
+        if (!$request->has('preco_original')) {
+            return $variacao;
+        }
+
+        $precoOriginal = round((float) $request->input('preco_original'), 2);
+        $precoAtual = round((float) ($variacao->preco ?? 0), 2);
+
+        if ($precoOriginal === $precoAtual) {
+            return $variacao;
+        }
+
+        return $this->variacaoService->salvarComAuditoria(
+            $variacao,
+            ['preco' => $precoOriginal],
+            self::PRECO_OUTLET_AUDIT,
+            self::PRECO_OUTLET_AUDIT['label']
+        );
+    }
+
+    private function sincronizarCustoOriginalSeNecessario(ProdutoVariacao $variacao, Request $request): ProdutoVariacao
+    {
+        if (!$request->has('custo_original')) {
+            return $variacao;
+        }
+
+        $custoOriginal = round((float) $request->input('custo_original'), 2);
+        $custoAtual = round((float) ($variacao->custo ?? 0), 2);
+
+        if ($custoOriginal === $custoAtual) {
+            return $variacao;
+        }
+
+        return $this->variacaoService->salvarComAuditoria(
+            $variacao,
+            ['custo' => $custoOriginal],
+            self::CUSTO_OUTLET_AUDIT,
+            self::CUSTO_OUTLET_AUDIT['label']
+        );
     }
 
 }

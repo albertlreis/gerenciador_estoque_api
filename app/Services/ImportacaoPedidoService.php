@@ -59,7 +59,7 @@ class ImportacaoPedidoService
 
             'cliente.id'           => 'nullable|numeric|min:1',
 
-            'pedido.numero_externo'=> 'required|string|max:50|unique:pedidos,numero_externo',
+            'pedido.numero_externo'=> 'required|string|max:50',
             'pedido.total'         => 'nullable|numeric',
             'pedido.observacoes'   => 'nullable|string',
             'pedido.data_pedido'   => 'nullable|string',
@@ -72,6 +72,7 @@ class ImportacaoPedidoService
             'pedido.dias_corridos_previstos' => 'nullable|integer|min:0|max:3650',
 
             'entregue'             => 'nullable|boolean',
+            'movimentar_estoque'    => 'nullable|boolean',
             'data_entrega'         => 'nullable|string',
             'previsao_tipo'        => 'nullable|in:DATA,DIAS_UTEIS,DIAS_CORRIDOS',
             'data_prevista'        => 'nullable|string',
@@ -269,6 +270,9 @@ class ImportacaoPedidoService
             );
 
             $entregue = $this->toBoolean($request->input('entregue', $dadosPedido['entregue'] ?? false));
+            $movimentarEstoque = $request->has('movimentar_estoque')
+                ? $this->toBoolean($request->input('movimentar_estoque'))
+                : true;
             $dataEntregaTopLevel = $request->input('data_entrega');
             $dataEntregaPedidoLegado = $dadosPedido['data_entrega'] ?? null;
             $dataEntrega = DateNormalizer::normalizeDate(
@@ -366,10 +370,12 @@ class ImportacaoPedidoService
                 'usuario_id'  => $usuario->id,
             ]);
 
-            if ($entregue) {
+            if ($entregue && $movimentarEstoque) {
                 PedidoStatusHistorico::create([
                     'pedido_id'   => $pedido->id,
-                    'status'      => PedidoStatus::ENTREGA_CLIENTE,
+                    'status'      => $tipo === Pedido::TIPO_REPOSICAO
+                        ? PedidoStatus::ENTREGA_ESTOQUE
+                        : PedidoStatus::ENTREGA_CLIENTE,
                     'data_status' => $dataEntrega?->toDateTimeString(),
                     'usuario_id'  => $usuario->id,
                     'observacoes' => 'Status aplicado na confirmação da importação PDF.',
@@ -533,11 +539,19 @@ class ImportacaoPedidoService
             ]);
 
             $entregas = app(EntregaProdutoService::class);
-            $entregas->criarDemandaPedido($pedido, $usuario->id, true);
+            $entregas->criarDemandaPedido(
+                $pedido,
+                $usuario->id,
+                $movimentarEstoque && $tipo === Pedido::TIPO_VENDA
+            );
 
-            if ($entregue) {
-                $entregas->expedirPedido($pedido, $usuario->id);
-                $entregas->entregarPedido($pedido, $usuario->id);
+            if ($movimentarEstoque && $entregue) {
+                if ($tipo === Pedido::TIPO_REPOSICAO) {
+                    $entregas->receberPedido($pedido, $usuario->id, 'Recebimento de reposicao importada.');
+                } else {
+                    $entregas->expedirPedido($pedido, $usuario->id);
+                    $entregas->entregarPedido($pedido, $usuario->id);
+                }
             }
 
             $itensConfirmados = $pedido->itens()

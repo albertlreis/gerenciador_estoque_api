@@ -14,11 +14,9 @@ class UpdatePedidoRequest extends FormRequest
 
     public function rules(): array
     {
-        $pedidoId = $this->route('pedido')?->id ?? null;
-
         $rules = [
             'tipo' => ['nullable', 'in:venda,reposicao'],
-            'numero_externo' => ['nullable', 'string', 'max:50', 'unique:pedidos,numero_externo,' . $pedidoId],
+            'numero_externo' => ['nullable', 'string', 'max:50'],
 
             'id_cliente' => ['nullable', 'integer', 'exists:clientes,id'],
             'id_parceiro' => ['nullable', 'integer', 'exists:parceiros,id'],

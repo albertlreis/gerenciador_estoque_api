@@ -797,10 +797,19 @@ class ConciliacaoContaAzulService
         }
 
         $numero = $this->firstString($payload, ['numero', 'numeroVenda', 'numeroPedido']);
+        $numeroExternoDuplicado = false;
         if ($numero !== '') {
-            $pedido = Pedido::query()->where('numero_externo', $numero)->first();
-            if ($pedido) {
-                return ['status' => 'conciliado', 'id_local' => (int) $pedido->id];
+            $pedidos = Pedido::query()
+                ->where('numero_externo', $numero)
+                ->limit(2)
+                ->get(['id']);
+
+            if ($pedidos->count() === 1) {
+                return ['status' => 'conciliado', 'id_local' => (int) $pedidos->first()->id];
+            }
+
+            if ($pedidos->count() > 1) {
+                $numeroExternoDuplicado = true;
             }
         }
 
@@ -828,6 +837,13 @@ class ConciliacaoContaAzulService
             if ($pedido) {
                 return ['status' => 'conciliado', 'id_local' => (int) $pedido->id];
             }
+        }
+
+        if ($numeroExternoDuplicado) {
+            return [
+                'status' => 'conflito',
+                'observacao' => 'Mais de um pedido local usa o mesmo número externo. Concilie pela tela informando cliente, data e valor.',
+            ];
         }
 
         return ['status' => 'pendente', 'observacao' => 'Venda sem número externo nem combinação cliente/data/total'];

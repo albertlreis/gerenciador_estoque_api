@@ -49,7 +49,7 @@ class PedidoService
 
             $resultados = Pedido::query()
                 ->with(['cliente:id,nome'])
-                ->select(['id', 'numero_externo', 'id_cliente'])
+                ->select(['id', 'numero_externo', 'id_cliente', 'data_pedido'])
                 ->when($termo !== '', function ($q) use ($termo) {
                     $q->where('numero_externo', 'like', "%{$termo}%")
                         ->orWhereHas('cliente', fn($sub) =>
@@ -59,12 +59,20 @@ class PedidoService
                 ->orderByDesc('data_pedido')
                 ->limit(20)
                 ->get()
-                ->map(fn($p) => [
-                    'id' => $p->id,
-                    'numero' => $p->numero_externo,
-                    'cliente' => $p->cliente?->nome ?? '-',
-                    'label' => "#$p->numero_externo - {$p->cliente?->nome}",
-                ]);
+                ->map(function ($p) {
+                    $numero = $p->numero_externo ?: "ID {$p->id}";
+                    $cliente = $p->cliente?->nome ?? '-';
+                    $data = $p->data_pedido?->format('d/m/Y');
+                    $detalhes = array_filter(["ID {$p->id}", $cliente, $data]);
+
+                    return [
+                        'id' => $p->id,
+                        'numero' => $p->numero_externo,
+                        'cliente' => $cliente,
+                        'data_pedido' => $data,
+                        'label' => "#{$numero} - " . implode(' - ', $detalhes),
+                    ];
+                });
 
             return response()->json($resultados);
         }

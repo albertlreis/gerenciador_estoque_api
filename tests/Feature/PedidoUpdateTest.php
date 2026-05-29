@@ -159,4 +159,27 @@ class PedidoUpdateTest extends TestCase
         $response = $this->putJson("/api/v1/pedidos/{$pedido->id}", $payload);
         $response->assertStatus(422);
     }
+
+    public function test_permite_editar_numero_externo_para_valor_ja_usado_por_outro_pedido(): void
+    {
+        [$pedido, , , , , $cliente, $parceiro] = $this->seedBase();
+
+        Pedido::create([
+            'id_cliente' => $cliente->id,
+            'id_usuario' => $pedido->id_usuario,
+            'id_parceiro' => $parceiro->id,
+            'tipo' => 'venda',
+            'numero_externo' => 'PED-DUP',
+            'data_pedido' => now(),
+            'valor_total' => 0,
+        ]);
+
+        $response = $this->putJson("/api/v1/pedidos/{$pedido->id}", [
+            'numero_externo' => 'PED-DUP',
+        ]);
+
+        $response->assertOk();
+
+        $this->assertSame(2, Pedido::query()->where('numero_externo', 'PED-DUP')->count());
+    }
 }

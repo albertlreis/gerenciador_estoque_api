@@ -265,6 +265,27 @@ class ContaAzulPendenciasServiceTest extends TestCase
         ]);
     }
 
+    public function test_vendas_com_numero_externo_duplicado_viram_conflito(): void
+    {
+        $clienteId = $this->createCliente(['nome' => 'Cliente Venda Duplicada']);
+        $this->createPedido($clienteId, ['numero_externo' => 'CA-DUP-001']);
+        $this->createPedido($clienteId, ['numero_externo' => 'CA-DUP-001']);
+
+        $id = $this->insertStaging('stg_conta_azul_vendas', 'venda-ca-dup-1', [
+            'numero' => 'CA-DUP-001',
+        ]);
+
+        $resultado = app(ConciliacaoContaAzulService::class)->conciliarVendas();
+
+        $this->assertSame(1, $resultado['conflitos']);
+
+        $row = DB::table('stg_conta_azul_vendas')->where('id', $id)->first();
+        $this->assertSame('conflito', $row->status_conciliacao);
+        $this->assertSame('conflito', $row->conciliacao_origem);
+        $this->assertStringContainsString('mesmo número externo', (string) $row->observacao_conciliacao);
+        $this->assertCount(2, json_decode((string) $row->candidato_json, true));
+    }
+
     public function test_titulos_e_baixas_auto_conciliam_quando_dependencias_estao_mapeadas(): void
     {
         $clienteId = $this->createCliente(['nome' => 'Cliente Financeiro']);

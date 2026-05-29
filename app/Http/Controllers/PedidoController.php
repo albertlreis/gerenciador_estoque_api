@@ -11,6 +11,9 @@ use App\Enums\TipoImportacao;
 use App\Models\Deposito;
 use App\Models\Pedido;
 use App\Models\PedidoImportacao;
+use App\Models\ProdutoEntregaEvento;
+use App\Models\ProdutoEntregaItem;
+use App\Services\EntregaProdutoService;
 use App\Services\FornecedorPedidoXmlParserService;
 use App\Services\ImportacaoPedidoService;
 use App\Services\NfeXmlParserService;
@@ -25,8 +28,11 @@ use Exception;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 /**
@@ -563,6 +569,203 @@ class PedidoController extends Controller
         ])->setPaper('a4');
 
         return $pdf->download("roteiro_pedido_{$pedidoId}.pdf");
+    }
+
+    /**
+     * Gera nota de entrega para o cliente e, opcionalmente, registra a entrega central.
+     */
+    public function notaEntregaPdf(int $pedidoId, Request $request, EntregaProdutoService $entregaService): Response
+    {
+        $data = $request->validate([
+            'registrar_entrega' => ['sometimes', 'boolean'],
+            'idempotency_key' => ['nullable', 'string', 'max:120'],
+            'observacao' => ['nullable', 'string', 'max:1000'],
+            'itens' => ['required', 'array', 'min:1'],
+            'itens.*.produto_entrega_item_id' => ['required', 'integer'],
+            'itens.*.quantidade' => ['required', 'integer', 'min:1'],
+        ]);
+
+        $registrarEntrega = (bool) ($data['registrar_entrega'] ?? false);
+        $idempotencyKey = trim((string) ($data['idempotency_key'] ?? ''));
+
+        if ($registrarEntrega && $idempotencyKey === '') {
+            throw ValidationException::withMessages([
+                'idempotency_key' => ['Informe a chave de idempotencia para registrar a entrega.'],
+            ]);
+        }
+
+        $pedido = Pedido::with([
+            'cliente.enderecoPrincipal',
+            'usuario',
+            'parceiro',
+        ])->findOrFail($pedidoId);
+
+        $selecionados = collect($data['itens'])
+            ->map(function (array $item) {
+                return [
+                    'id' => (int) $item['produto_entrega_item_id'],
+                    'quantidade' => (int) $item['quantidade'],
+                ];
+            })
+            ->groupBy('id')
+            ->map(fn (Collection $itens, int $id) => [
+                'id' => $id,
+                'quantidade' => (int) $itens->sum('quantidade'),
+            ])
+            ->values();
+
+        $entregas = ProdutoEntregaItem::query()
+            ->with([
+                'pedidoItem',
+                'variacao.imagem',
+                'variacao.produto.imagemPrincipal',
+                'variacao.produto',
+                'variacao.atributos',
+            ])
+            ->where('pedido_id', $pedido->id)
+            ->whereIn('id', $selecionados->pluck('id'))
+            ->get()
+            ->keyBy('id');
+
+        if ($entregas->count() !== $selecionados->count()) {
+            throw ValidationException::withMessages([
+                'itens' => ['Selecione apenas itens de entrega vinculados a este pedido.'],
+            ]);
+        }
+
+        $notaItens = $this->validarItensNotaEntrega(
+            $selecionados,
+            $entregas,
+            $registrarEntrega,
+            $idempotencyKey
+        );
+
+        $pdfImageService = app(PdfImageService::class);
+        $notaItens->each(function (ProdutoEntregaItem $item) use ($pdfImageService) {
+            $item->setAttribute(
+                'pdf_imagem_data_uri',
+                $pdfImageService->fromProdutoVariacao($item->variacao)
+            );
+        });
+
+        Pdf::setOptions(['isRemoteEnabled' => true]);
+        $pdfOutput = Pdf::loadView('exports.nota-entrega-pedido', [
+            'pedido' => $pedido,
+            'itens' => $notaItens,
+            'geradoEm' => now('America/Belem')->format('d/m/Y H:i'),
+            'observacaoNota' => $data['observacao'] ?? null,
+            'registrarEntrega' => $registrarEntrega,
+        ])->setPaper('a4')->output();
+
+        if ($registrarEntrega) {
+            DB::transaction(function () use ($notaItens, $entregaService, $idempotencyKey, $data) {
+                $notaItens->each(function (ProdutoEntregaItem $item) use ($entregaService, $idempotencyKey, $data) {
+                    $eventKey = $this->notaEntregaEventoKey($idempotencyKey, (int) $item->id);
+
+                    if (! ProdutoEntregaEvento::query()->where('idempotency_key', $eventKey)->exists()) {
+                        $bloqueio = $this->validarItemEntregavel($item->fresh(), (int) $item->getAttribute('nota_quantidade'));
+
+                        if ($bloqueio !== null) {
+                            throw ValidationException::withMessages(['itens' => [$bloqueio]]);
+                        }
+                    }
+
+                    $entregaService->entregarItem(
+                        $item,
+                        (int) $item->getAttribute('nota_quantidade'),
+                        auth()->id(),
+                        $data['observacao'] ?? 'Entrega registrada via nota de entrega.',
+                        $eventKey
+                    );
+                });
+            });
+        }
+
+        logAuditoria('pedido_pdf', 'Geração de PDF (nota de entrega)', [
+            'acao' => 'nota_entrega_pdf',
+            'pedido_id' => $pedido->id,
+            'registrar_entrega' => $registrarEntrega,
+            'itens' => $notaItens->map(fn (ProdutoEntregaItem $item) => [
+                'produto_entrega_item_id' => $item->id,
+                'pedido_item_id' => $item->pedido_item_id,
+                'quantidade' => (int) $item->getAttribute('nota_quantidade'),
+            ])->values()->all(),
+        ]);
+
+        $filename = "nota-entrega-pedido-{$pedido->id}.pdf";
+
+        return response($pdfOutput, 200, [
+            'Content-Type' => 'application/pdf',
+            'Content-Disposition' => 'attachment; filename="' . $filename . '"',
+        ]);
+    }
+
+    private function validarItensNotaEntrega(
+        Collection $selecionados,
+        Collection $entregas,
+        bool $registrarEntrega,
+        string $idempotencyKey
+    ): Collection {
+        $itens = collect();
+
+        foreach ($selecionados as $selecionado) {
+            /** @var ProdutoEntregaItem $item */
+            $item = $entregas->get($selecionado['id']);
+            $quantidade = (int) $selecionado['quantidade'];
+            $eventoExistente = $registrarEntrega
+                ? ProdutoEntregaEvento::query()
+                    ->where('idempotency_key', $this->notaEntregaEventoKey($idempotencyKey, (int) $item->id))
+                    ->first()
+                : null;
+
+            if ($eventoExistente) {
+                $quantidade = (int) $eventoExistente->quantidade;
+            } else {
+                $bloqueio = $this->validarItemEntregavel($item, $quantidade);
+
+                if ($bloqueio !== null) {
+                    throw ValidationException::withMessages(['itens' => [$bloqueio]]);
+                }
+            }
+
+            $item->setAttribute('nota_quantidade', $quantidade);
+            $itens->push($item);
+        }
+
+        return $itens;
+    }
+
+    private function validarItemEntregavel(?ProdutoEntregaItem $item, int $quantidade): ?string
+    {
+        if (! $item) {
+            return 'Item de entrega nao encontrado.';
+        }
+
+        $statusEntregaveis = [
+            ProdutoEntregaItem::STATUS_EXPEDIDO,
+            ProdutoEntregaItem::STATUS_EXPEDIDO_PARCIAL,
+            ProdutoEntregaItem::STATUS_ENTREGUE_PARCIAL,
+        ];
+
+        if (! in_array($item->status, $statusEntregaveis, true)) {
+            return "O item de entrega #{$item->id} nao esta em etapa de entrega.";
+        }
+
+        $pendente = max(0, (int) $item->quantidade_expedida - (int) $item->quantidade_entregue);
+        if ($pendente <= 0) {
+            return "O item de entrega #{$item->id} nao possui quantidade pendente de entrega.";
+        }
+
+        if ($quantidade > $pendente) {
+            return "A quantidade do item de entrega #{$item->id} excede o pendente de entrega ({$pendente}).";
+        }
+
+        return null;
+    }
+
+    private function notaEntregaEventoKey(string $idempotencyKey, int $itemId): string
+    {
+        return "nota-entrega:{$idempotencyKey}:item:{$itemId}:entregar";
     }
 
     /**

@@ -34,7 +34,7 @@ class EntregaProdutoService
             return $pedido->itens->map(function (PedidoItem $pedidoItem) use ($pedido, $usuarioId, $reservarAutomaticamente) {
                 $entrega = $this->criarOuAtualizarItemPedido($pedido, $pedidoItem, $usuarioId);
 
-                if ($reservarAutomaticamente) {
+                if ($reservarAutomaticamente && $pedido->isVenda()) {
                     $this->reservarItem($entrega, $pedidoItem->id_deposito, null, $usuarioId, 'Reserva automatica do pedido');
                 }
 
@@ -242,6 +242,32 @@ class EntregaProdutoService
                 ->lockForUpdate()
                 ->get()
                 ->map(fn (ProdutoEntregaItem $item) => $this->entregarItem($item, null, $usuarioId, 'Entrega do pedido ao cliente.'));
+        });
+    }
+
+    public function receberPedido(Pedido $pedido, ?int $usuarioId = null, ?string $observacao = null): Collection
+    {
+        return DB::transaction(function () use ($pedido, $usuarioId, $observacao) {
+            $itens = ProdutoEntregaItem::query()
+                ->where('pedido_id', $pedido->id)
+                ->whereColumn('quantidade_recebida', '<', 'quantidade_total')
+                ->whereNotIn('status', [ProdutoEntregaItem::STATUS_CANCELADO, ProdutoEntregaItem::STATUS_RECEBIDO])
+                ->lockForUpdate()
+                ->get();
+
+            if ($itens->isEmpty()) {
+                $itens = $this->criarDemandaPedido($pedido, $usuarioId, false)
+                    ->filter(fn (ProdutoEntregaItem $item) => (int) $item->quantidade_recebida < (int) $item->quantidade_total);
+            }
+
+            return collect($itens)->map(fn (ProdutoEntregaItem $item) => $this->receberItem(
+                $item,
+                $item->id_deposito_destino ?: $item->id_deposito_origem,
+                null,
+                $usuarioId,
+                $observacao ?: 'Recebimento do pedido ao estoque.',
+                "pedido:{$pedido->id}:receber-item:{$item->id}"
+            ));
         });
     }
 
@@ -757,11 +783,14 @@ class EntregaProdutoService
 
     private function criarOuAtualizarItemPedido(Pedido $pedido, PedidoItem $pedidoItem, ?int $usuarioId = null): ProdutoEntregaItem
     {
+        $reposicao = $pedido->isReposicao();
         $status = $pedidoItem->id_deposito
             ? ProdutoEntregaItem::STATUS_AGUARDANDO_ESTOQUE
             : ProdutoEntregaItem::STATUS_BLOQUEADO_REVISAO;
 
-        $bloqueio = $pedidoItem->id_deposito ? null : 'Pedido item sem deposito de origem.';
+        $bloqueio = $pedidoItem->id_deposito
+            ? null
+            : ($reposicao ? 'Pedido item sem deposito de destino.' : 'Pedido item sem deposito de origem.');
 
         $entrega = ProdutoEntregaItem::query()->firstOrNew([
             'tipo_origem' => ProdutoEntregaItem::ORIGEM_PEDIDO,
@@ -773,6 +802,8 @@ class EntregaProdutoService
             ProdutoEntregaItem::STATUS_EXPEDIDO_PARCIAL,
             ProdutoEntregaItem::STATUS_ENTREGUE,
             ProdutoEntregaItem::STATUS_ENTREGUE_PARCIAL,
+            ProdutoEntregaItem::STATUS_RECEBIDO,
+            ProdutoEntregaItem::STATUS_RECEBIDO_PARCIAL,
             ProdutoEntregaItem::STATUS_CANCELADO,
         ], true);
 
@@ -783,7 +814,8 @@ class EntregaProdutoService
                 'pedido_item_id' => $pedidoItem->id,
                 'id_variacao' => $pedidoItem->id_variacao,
                 'quantidade_total' => (int) $pedidoItem->quantidade,
-                'id_deposito_origem' => $pedidoItem->id_deposito,
+                'id_deposito_origem' => $reposicao ? null : $pedidoItem->id_deposito,
+                'id_deposito_destino' => $reposicao ? $pedidoItem->id_deposito : null,
                 'previsao_entrega' => $pedido->data_limite_entrega,
                 'status' => $mantemStatus ? $statusAtual : $status,
                 'bloqueio_motivo' => $bloqueio,
@@ -794,12 +826,12 @@ class EntregaProdutoService
             $entrega,
             ProdutoEntregaEvento::DEMANDA_CRIADA,
             (int) $pedidoItem->quantidade,
-            $pedidoItem->id_deposito,
-            null,
+            $reposicao ? null : $pedidoItem->id_deposito,
+            $reposicao ? $pedidoItem->id_deposito : null,
             null,
             null,
             $usuarioId,
-            'Demanda de pedido criada.',
+            $reposicao ? 'Demanda de recebimento de reposicao criada.' : 'Demanda de pedido criada.',
             ['pedido_item_id' => $pedidoItem->id],
             "pedido-item:{$pedidoItem->id}:demanda"
         );
@@ -923,6 +955,11 @@ class EntregaProdutoService
             return;
         }
 
+        $pedido = Pedido::query()->select('id', 'tipo')->find($recebimento->pedido_id);
+        if (!$pedido?->isVenda()) {
+            return;
+        }
+
         $restante = $quantidadeRecebida;
         ProdutoEntregaItem::query()
             ->where('pedido_id', $recebimento->pedido_id)
@@ -978,6 +1015,12 @@ class EntregaProdutoService
             return (int) $itens->sum('quantidade_expedida') >= $total
                 ? ProdutoEntregaItem::STATUS_EXPEDIDO
                 : ProdutoEntregaItem::STATUS_EXPEDIDO_PARCIAL;
+        }
+
+        if ((int) $itens->sum('quantidade_recebida') > 0) {
+            return (int) $itens->sum('quantidade_recebida') >= $total
+                ? ProdutoEntregaItem::STATUS_RECEBIDO
+                : ProdutoEntregaItem::STATUS_RECEBIDO_PARCIAL;
         }
 
         if ((int) $itens->sum('quantidade_reservada') > 0) {

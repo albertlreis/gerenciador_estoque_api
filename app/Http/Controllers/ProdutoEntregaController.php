@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Http\Resources\ProdutoEntregaItemResource;
+use App\Models\Pedido;
 use App\Models\ProdutoEntregaEvento;
 use App\Models\ProdutoEntregaItem;
 use App\Services\EntregaProdutoService;
@@ -26,6 +27,7 @@ class ProdutoEntregaController extends Controller
             'previsao_fim' => ['nullable', 'date_format:Y-m-d'],
             'pendentes' => ['nullable', 'boolean'],
             'entregaveis' => ['nullable', 'boolean'],
+            'recebiveis' => ['nullable', 'boolean'],
             'per_page' => ['nullable', 'integer', 'min:1'],
         ]);
 
@@ -91,6 +93,15 @@ class ProdutoEntregaController extends Controller
                     ProdutoEntregaItem::STATUS_EXPEDIDO_PARCIAL,
                     ProdutoEntregaItem::STATUS_ENTREGUE_PARCIAL,
                 ])->whereColumn('quantidade_expedida', '>', 'quantidade_entregue');
+            })
+            ->when($request->boolean('recebiveis'), function ($q) {
+                $q->whereIn('status', [
+                    ProdutoEntregaItem::STATUS_AGUARDANDO_ESTOQUE,
+                    ProdutoEntregaItem::STATUS_RECEBIDO_PARCIAL,
+                    ProdutoEntregaItem::STATUS_BLOQUEADO_REVISAO,
+                ])
+                    ->whereColumn('quantidade_recebida', '<', 'quantidade_total')
+                    ->whereHas('pedido', fn ($pedido) => $pedido->where('tipo', Pedido::TIPO_REPOSICAO));
             })
             ->orderByDesc('updated_at');
 

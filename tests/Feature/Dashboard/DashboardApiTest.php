@@ -6,6 +6,7 @@ use App\Enums\PedidoStatus;
 use App\Models\Pedido;
 use App\Models\PedidoStatusHistorico;
 use App\Models\Usuario;
+use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -16,6 +17,20 @@ use Tests\TestCase;
 class DashboardApiTest extends TestCase
 {
     use RefreshDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        Carbon::setTestNow(Carbon::parse('2026-06-15 12:00:00'));
+    }
+
+    protected function tearDown(): void
+    {
+        Carbon::setTestNow();
+
+        parent::tearDown();
+    }
 
     public function test_dashboard_admin_retorna_resumo_operacional_e_ignora_compare(): void
     {

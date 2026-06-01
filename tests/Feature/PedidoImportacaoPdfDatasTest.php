@@ -157,7 +157,7 @@ class PedidoImportacaoPdfDatasTest extends TestCase
         $this->assertSame('2025-01-06', optional($pedido->data_limite_entrega)->toDateString());
     }
 
-    public function test_confirma_importacao_com_entregue_cria_status_criado_e_entregue(): void
+    public function test_confirma_importacao_com_reposicao_entregue_cria_status_criado_e_entrega_estoque(): void
     {
         $usuario = Usuario::create([
             'nome' => 'Usuario Entrega',
@@ -229,7 +229,7 @@ class PedidoImportacaoPdfDatasTest extends TestCase
 
         $statusEntregue = PedidoStatusHistorico::query()
             ->where('pedido_id', $pedido->id)
-            ->where('status', PedidoStatus::ENTREGA_CLIENTE->value)
+            ->where('status', PedidoStatus::ENTREGA_ESTOQUE->value)
             ->first();
 
         $this->assertNotNull($statusCriado);

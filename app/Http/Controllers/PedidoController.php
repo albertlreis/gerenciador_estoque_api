@@ -9,10 +9,13 @@ use App\Http\Resources\PedidoCompletoResource;
 use App\Enums\EstrategiaVinculoImportacao;
 use App\Enums\TipoImportacao;
 use App\Models\Deposito;
+use App\Models\Estoque;
+use App\Models\EstoqueReserva;
 use App\Models\Pedido;
 use App\Models\PedidoImportacao;
 use App\Models\ProdutoEntregaEvento;
 use App\Models\ProdutoEntregaItem;
+use App\Services\EstoqueDisponibilidadeService;
 use App\Services\EntregaProdutoService;
 use App\Services\FornecedorPedidoXmlParserService;
 use App\Services\ImportacaoPedidoService;
@@ -572,17 +575,57 @@ class PedidoController extends Controller
     }
 
     /**
-     * Gera nota de entrega para o cliente e, opcionalmente, registra a entrega central.
+     * Retorna os itens que podem compor uma nota de entrega.
      */
-    public function notaEntregaPdf(int $pedidoId, Request $request, EntregaProdutoService $entregaService): Response
+    public function notaEntregaItens(int $pedidoId, EstoqueDisponibilidadeService $disponibilidade): JsonResponse
     {
+        $pedido = Pedido::query()->findOrFail($pedidoId);
+
+        $itens = ProdutoEntregaItem::query()
+            ->with([
+                'pedidoItem',
+                'variacao.imagem',
+                'variacao.produto.imagemPrincipal',
+                'variacao.produto',
+                'variacao.atributos',
+                'depositoOrigem:id,nome',
+                'depositoDestino:id,nome',
+            ])
+            ->where('pedido_id', $pedido->id)
+            ->whereNotIn('status', [
+                ProdutoEntregaItem::STATUS_CANCELADO,
+                ProdutoEntregaItem::STATUS_RECEBIDO,
+                ProdutoEntregaItem::STATUS_ENTREGUE,
+            ])
+            ->whereColumn('quantidade_entregue', '<', 'quantidade_total')
+            ->orderBy('id')
+            ->get()
+            ->map(fn (ProdutoEntregaItem $item) => $this->formatarItemNotaEntrega($item, $disponibilidade))
+            ->values();
+
+        return response()->json(['data' => $itens]);
+    }
+
+    /**
+     * Gera nota de entrega para o cliente e, opcionalmente, registra expedição e entrega central.
+     */
+    public function notaEntregaPdf(
+        int $pedidoId,
+        Request $request,
+        EntregaProdutoService $entregaService,
+        EstoqueDisponibilidadeService $disponibilidade
+    ): Response {
         $data = $request->validate([
             'registrar_entrega' => ['sometimes', 'boolean'],
             'idempotency_key' => ['nullable', 'string', 'max:120'],
             'observacao' => ['nullable', 'string', 'max:1000'],
             'itens' => ['required', 'array', 'min:1'],
             'itens.*.produto_entrega_item_id' => ['required', 'integer'],
-            'itens.*.quantidade' => ['required', 'integer', 'min:1'],
+            'itens.*.quantidade' => ['nullable', 'integer', 'min:1'],
+            'itens.*.entregar_expedido' => ['nullable', 'integer', 'min:0'],
+            'itens.*.alocacoes' => ['nullable', 'array'],
+            'itens.*.alocacoes.*.deposito_id' => ['required', 'integer', 'exists:depositos,id'],
+            'itens.*.alocacoes.*.quantidade' => ['required', 'integer', 'min:1'],
         ]);
 
         $registrarEntrega = (bool) ($data['registrar_entrega'] ?? false);
@@ -600,19 +643,13 @@ class PedidoController extends Controller
             'parceiro',
         ])->findOrFail($pedidoId);
 
-        $selecionados = collect($data['itens'])
-            ->map(function (array $item) {
-                return [
-                    'id' => (int) $item['produto_entrega_item_id'],
-                    'quantidade' => (int) $item['quantidade'],
-                ];
-            })
-            ->groupBy('id')
-            ->map(fn (Collection $itens, int $id) => [
-                'id' => $id,
-                'quantidade' => (int) $itens->sum('quantidade'),
-            ])
-            ->values();
+        $selecionados = $this->normalizarItensNotaEntrega($data['itens']);
+
+        if ($selecionados->isEmpty()) {
+            throw ValidationException::withMessages([
+                'itens' => ['Selecione ao menos um item com quantidade para a nota de entrega.'],
+            ]);
+        }
 
         $entregas = ProdutoEntregaItem::query()
             ->with([
@@ -637,7 +674,8 @@ class PedidoController extends Controller
             $selecionados,
             $entregas,
             $registrarEntrega,
-            $idempotencyKey
+            $idempotencyKey,
+            $disponibilidade
         );
 
         $pdfImageService = app(PdfImageService::class);
@@ -660,23 +698,47 @@ class PedidoController extends Controller
         if ($registrarEntrega) {
             DB::transaction(function () use ($notaItens, $entregaService, $idempotencyKey, $data) {
                 $notaItens->each(function (ProdutoEntregaItem $item) use ($entregaService, $idempotencyKey, $data) {
-                    $eventKey = $this->notaEntregaEventoKey($idempotencyKey, (int) $item->id);
+                    $entregarExpedido = (int) $item->getAttribute('nota_entregar_expedido');
+                    $entregarExpedidoRegistrado = (bool) $item->getAttribute('nota_entregar_expedido_registrado');
 
-                    if (! ProdutoEntregaEvento::query()->where('idempotency_key', $eventKey)->exists()) {
-                        $bloqueio = $this->validarItemEntregavel($item->fresh(), (int) $item->getAttribute('nota_quantidade'));
-
-                        if ($bloqueio !== null) {
-                            throw ValidationException::withMessages(['itens' => [$bloqueio]]);
-                        }
+                    if ($entregarExpedido > 0 && ! $entregarExpedidoRegistrado) {
+                        $entregaService->entregarItem(
+                            $item,
+                            $entregarExpedido,
+                            auth()->id(),
+                            $data['observacao'] ?? 'Entrega registrada via nota de entrega.',
+                            $this->notaEntregaEventoKey($idempotencyKey, (int) $item->id)
+                        );
                     }
 
-                    $entregaService->entregarItem(
-                        $item,
-                        (int) $item->getAttribute('nota_quantidade'),
-                        auth()->id(),
-                        $data['observacao'] ?? 'Entrega registrada via nota de entrega.',
-                        $eventKey
-                    );
+                    foreach ((array) $item->getAttribute('nota_alocacoes') as $alocacao) {
+                        if (! empty($alocacao['entrega_registrada'])) {
+                            continue;
+                        }
+
+                        $depositoId = (int) $alocacao['deposito_id'];
+                        $quantidade = (int) $alocacao['quantidade'];
+
+                        if (empty($alocacao['expedicao_registrada'])) {
+                            $entregaService->expedirItem(
+                                $item,
+                                $depositoId,
+                                $quantidade,
+                                auth()->id(),
+                                $data['observacao'] ?? 'Expedicao registrada via nota de entrega.',
+                                ProdutoEntregaEvento::EXPEDIDO_CLIENTE,
+                                $this->notaEntregaEventoKey($idempotencyKey, (int) $item->id, 'expedir', $depositoId)
+                            );
+                        }
+
+                        $entregaService->entregarItem(
+                            $item,
+                            $quantidade,
+                            auth()->id(),
+                            $data['observacao'] ?? 'Entrega registrada via nota de entrega.',
+                            $this->notaEntregaEventoKey($idempotencyKey, (int) $item->id, 'entregar', $depositoId)
+                        );
+                    }
                 });
             });
         }
@@ -689,6 +751,8 @@ class PedidoController extends Controller
                 'produto_entrega_item_id' => $item->id,
                 'pedido_item_id' => $item->pedido_item_id,
                 'quantidade' => (int) $item->getAttribute('nota_quantidade'),
+                'entregar_expedido' => (int) $item->getAttribute('nota_entregar_expedido'),
+                'alocacoes' => $item->getAttribute('nota_alocacoes') ?? [],
             ])->values()->all(),
         ]);
 
@@ -700,72 +764,427 @@ class PedidoController extends Controller
         ]);
     }
 
+    private function formatarItemNotaEntrega(
+        ProdutoEntregaItem $item,
+        EstoqueDisponibilidadeService $disponibilidade
+    ): array {
+        $pendenteTotal = max(0, (int) $item->quantidade_total - (int) $item->quantidade_entregue);
+        $pendenteExpedido = max(0, (int) $item->quantidade_expedida - (int) $item->quantidade_entregue);
+        $pendenteExpedicao = max(0, (int) $item->quantidade_total - (int) $item->quantidade_expedida);
+
+        return [
+            'id' => $item->id,
+            'tipo_origem' => $item->tipo_origem,
+            'origem_id' => $item->origem_id,
+            'pedido_id' => $item->pedido_id,
+            'pedido_item_id' => $item->pedido_item_id,
+            'id_variacao' => $item->id_variacao,
+            'quantidade_total' => (int) $item->quantidade_total,
+            'quantidade_reservada' => (int) $item->quantidade_reservada,
+            'quantidade_expedida' => (int) $item->quantidade_expedida,
+            'quantidade_entregue' => (int) $item->quantidade_entregue,
+            'quantidade_pendente_total' => $pendenteTotal,
+            'quantidade_pendente_entrega' => $pendenteExpedido,
+            'quantidade_pendente_expedicao_nota' => $pendenteExpedicao,
+            'id_deposito_origem' => $item->id_deposito_origem,
+            'id_deposito_destino' => $item->id_deposito_destino,
+            'status' => $item->status,
+            'pedido_item' => $item->pedidoItem,
+            'variacao' => $item->variacao,
+            'deposito_origem' => $item->depositoOrigem,
+            'deposito_destino' => $item->depositoDestino,
+            'depositos_disponiveis' => $this->depositosDisponiveisNotaEntrega(
+                $item,
+                $disponibilidade,
+                $pendenteExpedicao
+            ),
+        ];
+    }
+
+    private function normalizarItensNotaEntrega(array $itens): Collection
+    {
+        return collect($itens)
+            ->map(function (array $item) {
+                $alocacoes = collect((array) ($item['alocacoes'] ?? []))
+                    ->map(fn (array $alocacao) => [
+                        'deposito_id' => (int) ($alocacao['deposito_id'] ?? 0),
+                        'quantidade' => (int) ($alocacao['quantidade'] ?? 0),
+                    ])
+                    ->filter(fn (array $alocacao) => $alocacao['deposito_id'] > 0 && $alocacao['quantidade'] > 0)
+                    ->groupBy('deposito_id')
+                    ->map(fn (Collection $grupo, int $depositoId) => [
+                        'deposito_id' => $depositoId,
+                        'quantidade' => (int) $grupo->sum('quantidade'),
+                    ])
+                    ->values();
+
+                $entregarExpedido = array_key_exists('entregar_expedido', $item)
+                    ? (int) ($item['entregar_expedido'] ?? 0)
+                    : 0;
+
+                if ($entregarExpedido <= 0 && $alocacoes->isEmpty() && array_key_exists('quantidade', $item)) {
+                    $entregarExpedido = (int) ($item['quantidade'] ?? 0);
+                }
+
+                return [
+                    'id' => (int) ($item['produto_entrega_item_id'] ?? 0),
+                    'entregar_expedido' => max(0, $entregarExpedido),
+                    'alocacoes' => $alocacoes,
+                ];
+            })
+            ->filter(fn (array $item) => $item['id'] > 0)
+            ->groupBy('id')
+            ->map(fn (Collection $grupo, int $id) => [
+                'id' => $id,
+                'entregar_expedido' => (int) $grupo->sum('entregar_expedido'),
+                'alocacoes' => $grupo
+                    ->flatMap(fn (array $item) => $item['alocacoes'])
+                    ->groupBy('deposito_id')
+                    ->map(fn (Collection $alocacoes, int $depositoId) => [
+                        'deposito_id' => $depositoId,
+                        'quantidade' => (int) $alocacoes->sum('quantidade'),
+                    ])
+                    ->values(),
+            ])
+            ->values();
+    }
+
     private function validarItensNotaEntrega(
         Collection $selecionados,
         Collection $entregas,
         bool $registrarEntrega,
-        string $idempotencyKey
+        string $idempotencyKey,
+        EstoqueDisponibilidadeService $disponibilidade
     ): Collection {
         $itens = collect();
 
         foreach ($selecionados as $selecionado) {
             /** @var ProdutoEntregaItem $item */
             $item = $entregas->get($selecionado['id']);
-            $quantidade = (int) $selecionado['quantidade'];
-            $eventoExistente = $registrarEntrega
+            $selecaoJaRegistrada = $registrarEntrega
+                && $this->notaEntregaSelecaoJaRegistrada($item, $selecionado, $idempotencyKey);
+            $bloqueio = $this->validarItemSelecionavelNotaEntrega($item, $selecaoJaRegistrada);
+
+            if ($bloqueio !== null) {
+                throw ValidationException::withMessages(['itens' => [$bloqueio]]);
+            }
+
+            $entregarExpedidoSolicitado = (int) ($selecionado['entregar_expedido'] ?? 0);
+            $entregarExpedidoRegistrado = false;
+            $eventoEntregaExpedido = $registrarEntrega && $entregarExpedidoSolicitado > 0
                 ? ProdutoEntregaEvento::query()
                     ->where('idempotency_key', $this->notaEntregaEventoKey($idempotencyKey, (int) $item->id))
                     ->first()
                 : null;
 
-            if ($eventoExistente) {
-                $quantidade = (int) $eventoExistente->quantidade;
+            if ($eventoEntregaExpedido) {
+                $entregarExpedido = (int) $eventoEntregaExpedido->quantidade;
+                $entregarExpedidoNovo = 0;
+                $entregarExpedidoRegistrado = true;
             } else {
-                $bloqueio = $this->validarItemEntregavel($item, $quantidade);
+                $entregarExpedido = $entregarExpedidoSolicitado;
+                $entregarExpedidoNovo = $entregarExpedido;
+            }
 
-                if ($bloqueio !== null) {
-                    throw ValidationException::withMessages(['itens' => [$bloqueio]]);
+            $pendenteTotal = max(0, (int) $item->quantidade_total - (int) $item->quantidade_entregue);
+            $pendenteExpedido = max(0, (int) $item->quantidade_expedida - (int) $item->quantidade_entregue);
+
+            if ($entregarExpedidoNovo > $pendenteExpedido) {
+                throw ValidationException::withMessages([
+                    'itens' => ["A quantidade ja expedida do item de entrega #{$item->id} excede o pendente de entrega ({$pendenteExpedido})."],
+                ]);
+            }
+
+            $alocacoesEfetivas = collect();
+            $alocacoesParaValidarSaldo = collect();
+            $quantidadeAindaNaoEntregue = $entregarExpedidoNovo;
+
+            foreach (collect($selecionado['alocacoes'] ?? []) as $alocacao) {
+                $depositoId = (int) ($alocacao['deposito_id'] ?? 0);
+                $quantidade = (int) ($alocacao['quantidade'] ?? 0);
+
+                if ($depositoId <= 0 || $quantidade <= 0) {
+                    continue;
+                }
+
+                $eventoEntrega = $registrarEntrega
+                    ? ProdutoEntregaEvento::query()
+                        ->where('idempotency_key', $this->notaEntregaEventoKey($idempotencyKey, (int) $item->id, 'entregar', $depositoId))
+                        ->first()
+                    : null;
+                $eventoExpedicao = $registrarEntrega
+                    ? ProdutoEntregaEvento::query()
+                        ->where('idempotency_key', $this->notaEntregaEventoKey($idempotencyKey, (int) $item->id, 'expedir', $depositoId))
+                        ->first()
+                    : null;
+
+                $quantidadeEfetiva = $eventoEntrega
+                    ? (int) $eventoEntrega->quantidade
+                    : ($eventoExpedicao ? (int) $eventoExpedicao->quantidade : $quantidade);
+
+                $alocacoesEfetivas->push([
+                    'deposito_id' => $depositoId,
+                    'quantidade' => $quantidadeEfetiva,
+                    'expedicao_registrada' => (bool) $eventoExpedicao,
+                    'entrega_registrada' => (bool) $eventoEntrega,
+                ]);
+
+                if (! $eventoEntrega) {
+                    $quantidadeAindaNaoEntregue += $quantidadeEfetiva;
+                }
+
+                if (! $eventoExpedicao && ! $eventoEntrega) {
+                    $alocacoesParaValidarSaldo->push([
+                        'deposito_id' => $depositoId,
+                        'quantidade' => $quantidadeEfetiva,
+                    ]);
                 }
             }
 
-            $item->setAttribute('nota_quantidade', $quantidade);
+            if ($quantidadeAindaNaoEntregue > $pendenteTotal) {
+                throw ValidationException::withMessages([
+                    'itens' => ["A quantidade do item de entrega #{$item->id} excede o pendente total de entrega ({$pendenteTotal})."],
+                ]);
+            }
+
+            if ($alocacoesParaValidarSaldo->isNotEmpty()) {
+                $alocacoesOrdenadas = $this->validarAlocacoesNotaEntrega(
+                    $item,
+                    $alocacoesParaValidarSaldo,
+                    $disponibilidade
+                );
+                $ordem = $alocacoesOrdenadas->pluck('deposito_id')->values()->all();
+
+                $alocacoesEfetivas = $alocacoesEfetivas
+                    ->sortBy(fn (array $alocacao) => array_search($alocacao['deposito_id'], $ordem, true) === false
+                        ? PHP_INT_MAX
+                        : array_search($alocacao['deposito_id'], $ordem, true))
+                    ->values();
+            }
+
+            $quantidadeTotalNota = $entregarExpedido + (int) $alocacoesEfetivas->sum('quantidade');
+
+            if ($quantidadeTotalNota <= 0) {
+                throw ValidationException::withMessages([
+                    'itens' => ["Informe uma quantidade para o item de entrega #{$item->id}."],
+                ]);
+            }
+
+            $item->setAttribute('nota_quantidade', $quantidadeTotalNota);
+            $item->setAttribute('nota_entregar_expedido', $entregarExpedido);
+            $item->setAttribute('nota_entregar_expedido_registrado', $entregarExpedidoRegistrado);
+            $item->setAttribute('nota_alocacoes', $alocacoesEfetivas->values()->all());
             $itens->push($item);
         }
 
         return $itens;
     }
 
-    private function validarItemEntregavel(?ProdutoEntregaItem $item, int $quantidade): ?string
+    private function notaEntregaSelecaoJaRegistrada(
+        ?ProdutoEntregaItem $item,
+        array $selecionado,
+        string $idempotencyKey
+    ): bool {
+        if (! $item || $idempotencyKey === '') {
+            return false;
+        }
+
+        $temQuantidade = false;
+        $entregarExpedido = (int) ($selecionado['entregar_expedido'] ?? 0);
+
+        if ($entregarExpedido > 0) {
+            $temQuantidade = true;
+
+            if (! ProdutoEntregaEvento::query()
+                ->where('idempotency_key', $this->notaEntregaEventoKey($idempotencyKey, (int) $item->id))
+                ->exists()) {
+                return false;
+            }
+        }
+
+        foreach (collect($selecionado['alocacoes'] ?? []) as $alocacao) {
+            $depositoId = (int) ($alocacao['deposito_id'] ?? 0);
+            $quantidade = (int) ($alocacao['quantidade'] ?? 0);
+
+            if ($depositoId <= 0 || $quantidade <= 0) {
+                continue;
+            }
+
+            $temQuantidade = true;
+
+            if (! ProdutoEntregaEvento::query()
+                ->where('idempotency_key', $this->notaEntregaEventoKey($idempotencyKey, (int) $item->id, 'entregar', $depositoId))
+                ->exists()) {
+                return false;
+            }
+        }
+
+        return $temQuantidade;
+    }
+
+    private function validarItemSelecionavelNotaEntrega(
+        ?ProdutoEntregaItem $item,
+        bool $permitirEntregueRegistrado = false
+    ): ?string
     {
         if (! $item) {
             return 'Item de entrega nao encontrado.';
         }
 
-        $statusEntregaveis = [
-            ProdutoEntregaItem::STATUS_EXPEDIDO,
-            ProdutoEntregaItem::STATUS_EXPEDIDO_PARCIAL,
-            ProdutoEntregaItem::STATUS_ENTREGUE_PARCIAL,
-        ];
-
-        if (! in_array($item->status, $statusEntregaveis, true)) {
-            return "O item de entrega #{$item->id} nao esta em etapa de entrega.";
+        if (in_array($item->status, [
+            ProdutoEntregaItem::STATUS_CANCELADO,
+            ProdutoEntregaItem::STATUS_RECEBIDO,
+        ], true)) {
+            return "O item de entrega #{$item->id} nao pode compor nota de entrega.";
         }
 
-        $pendente = max(0, (int) $item->quantidade_expedida - (int) $item->quantidade_entregue);
-        if ($pendente <= 0) {
+        if ($item->status === ProdutoEntregaItem::STATUS_ENTREGUE && ! $permitirEntregueRegistrado) {
+            return "O item de entrega #{$item->id} nao pode compor nota de entrega.";
+        }
+
+        $pendente = max(0, (int) $item->quantidade_total - (int) $item->quantidade_entregue);
+        if ($pendente <= 0 && ! $permitirEntregueRegistrado) {
             return "O item de entrega #{$item->id} nao possui quantidade pendente de entrega.";
-        }
-
-        if ($quantidade > $pendente) {
-            return "A quantidade do item de entrega #{$item->id} excede o pendente de entrega ({$pendente}).";
         }
 
         return null;
     }
 
-    private function notaEntregaEventoKey(string $idempotencyKey, int $itemId): string
+    private function validarAlocacoesNotaEntrega(
+        ProdutoEntregaItem $item,
+        Collection $alocacoes,
+        EstoqueDisponibilidadeService $disponibilidade
+    ): Collection {
+        $pendenteExpedicao = max(0, (int) $item->quantidade_total - (int) $item->quantidade_expedida);
+        $depositos = collect($this->depositosDisponiveisNotaEntrega($item, $disponibilidade, $pendenteExpedicao))
+            ->keyBy('id');
+
+        foreach ($alocacoes as $alocacao) {
+            $depositoId = (int) $alocacao['deposito_id'];
+            $quantidade = (int) $alocacao['quantidade'];
+            $deposito = $depositos->get($depositoId);
+
+            if (! $deposito) {
+                throw ValidationException::withMessages([
+                    'itens' => ["O deposito #{$depositoId} nao possui saldo utilizavel para o item de entrega #{$item->id}."],
+                ]);
+            }
+
+            $maximo = (int) ($deposito['quantidade_utilizavel'] ?? 0);
+            if ($quantidade > $maximo) {
+                throw ValidationException::withMessages([
+                    'itens' => ["A quantidade do deposito {$deposito['nome']} excede o saldo utilizavel ({$maximo})."],
+                ]);
+            }
+        }
+
+        $reservasPorDeposito = $this->reservasAtivasNotaEntrega($item)
+            ->groupBy('id_deposito')
+            ->map(fn (Collection $reservas) => (int) $reservas->sum(fn (EstoqueReserva $reserva) => $reserva->pendente()));
+        $reservaTotal = (int) $reservasPorDeposito->sum();
+        $totalAlocado = (int) $alocacoes->sum('quantidade');
+        $reservadoAlocado = (int) $alocacoes
+            ->filter(fn (array $alocacao) => $reservasPorDeposito->has($alocacao['deposito_id']))
+            ->sum('quantidade');
+        $foraReserva = (int) $alocacoes
+            ->reject(fn (array $alocacao) => $reservasPorDeposito->has($alocacao['deposito_id']))
+            ->sum('quantidade');
+
+        if ($reservaTotal > 0 && $foraReserva > 0 && $reservadoAlocado < min($reservaTotal, $totalAlocado)) {
+            throw ValidationException::withMessages([
+                'itens' => ["Use primeiro a reserva existente do item de entrega #{$item->id} antes de expedir por outro deposito."],
+            ]);
+        }
+
+        return $alocacoes
+            ->sortBy(fn (array $alocacao) => $reservasPorDeposito->has($alocacao['deposito_id']) ? 0 : 1)
+            ->values();
+    }
+
+    private function depositosDisponiveisNotaEntrega(
+        ProdutoEntregaItem $item,
+        EstoqueDisponibilidadeService $disponibilidade,
+        int $pendenteExpedicao
+    ): array {
+        if ($pendenteExpedicao <= 0 || ! $item->id_variacao) {
+            return [];
+        }
+
+        $reservasPorDeposito = $this->reservasAtivasNotaEntrega($item)
+            ->filter(fn (EstoqueReserva $reserva) => (int) $reserva->id_deposito > 0)
+            ->groupBy('id_deposito')
+            ->map(fn (Collection $reservas) => (int) $reservas->sum(fn (EstoqueReserva $reserva) => $reserva->pendente()));
+
+        $depositoIds = Estoque::query()
+            ->where('id_variacao', $item->id_variacao)
+            ->where('quantidade', '>', 0)
+            ->pluck('id_deposito')
+            ->merge($reservasPorDeposito->keys())
+            ->filter(fn ($id) => (int) $id > 0)
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values();
+
+        if ($depositoIds->isEmpty()) {
+            return [];
+        }
+
+        $nomes = Deposito::query()
+            ->whereIn('id', $depositoIds)
+            ->pluck('nome', 'id');
+
+        return $depositoIds
+            ->map(function (int $depositoId) use ($item, $disponibilidade, $pendenteExpedicao, $reservasPorDeposito, $nomes) {
+                $disponivel = max(0, $disponibilidade->getDisponivel((int) $item->id_variacao, $depositoId));
+                $reservado = (int) ($reservasPorDeposito[$depositoId] ?? 0);
+                $utilizavel = max(0, $disponivel + $reservado);
+
+                if ($utilizavel <= 0) {
+                    return null;
+                }
+
+                return [
+                    'id' => $depositoId,
+                    'nome' => $nomes[$depositoId] ?? "Deposito #{$depositoId}",
+                    'disponivel' => $disponivel,
+                    'reservado' => $reservado,
+                    'quantidade_utilizavel' => min($utilizavel, $pendenteExpedicao),
+                    'is_reserva' => $reservado > 0,
+                ];
+            })
+            ->filter()
+            ->sortBy(fn (array $deposito) => ($deposito['is_reserva'] ? '0' : '1') . '|' . $deposito['nome'])
+            ->values()
+            ->all();
+    }
+
+    private function reservasAtivasNotaEntrega(ProdutoEntregaItem $item): Collection
     {
-        return "nota-entrega:{$idempotencyKey}:item:{$itemId}:entregar";
+        return EstoqueReserva::query()
+            ->where('id_variacao', $item->id_variacao)
+            ->where('status', 'ativa')
+            ->where(function ($q) {
+                $q->whereNull('data_expira')
+                    ->orWhere('data_expira', '>', now());
+            })
+            ->when($item->pedido_id, fn ($q) => $q->where('pedido_id', $item->pedido_id))
+            ->when($item->pedido_item_id, fn ($q) => $q->where('pedido_item_id', $item->pedido_item_id))
+            ->get();
+    }
+
+    private function notaEntregaEventoKey(
+        string $idempotencyKey,
+        int $itemId,
+        string $acao = 'entregar',
+        ?int $depositoId = null
+    ): string {
+        $base = "nota-entrega:{$idempotencyKey}:item:{$itemId}";
+
+        if ($depositoId) {
+            $base .= ":deposito:{$depositoId}";
+        }
+
+        return "{$base}:{$acao}";
     }
 
     /**

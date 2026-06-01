@@ -340,6 +340,7 @@ Route::middleware(['auth:sanctum', 'senha.nao_obrigatoria'])
 
         Route::prefix('pedidos/{pedido}')->whereNumber('pedido')->group(function () {
             Route::get('detalhado', [PedidoController::class, 'completo']);
+            Route::get('nota-entrega/itens', [PedidoController::class, 'notaEntregaItens']);
             Route::get('pdf/roteiro', [PedidoController::class, 'roteiroPdf']);
             Route::post('pdf/nota-entrega', [PedidoController::class, 'notaEntregaPdf']);
             Route::patch('cancelar', [PedidoController::class, 'cancelar']);

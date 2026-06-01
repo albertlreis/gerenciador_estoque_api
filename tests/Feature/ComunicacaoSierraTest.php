@@ -64,7 +64,7 @@ class ComunicacaoSierraTest extends TestCase
             'quantidade_total' => 1,
             'quantidade_reservada' => 1,
             'quantidade_expedida' => 1,
-            'status' => ProdutoEntregaItem::STATUS_EXPEDIDO,
+            'status' => ProdutoEntregaItem::STATUS_RESERVADO,
         ]);
 
         $this->actingAs($user, 'sanctum');

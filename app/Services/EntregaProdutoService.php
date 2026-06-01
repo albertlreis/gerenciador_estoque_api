@@ -75,7 +75,8 @@ class EntregaProdutoService
                     'quantidade_total' => (int) $item->quantidade,
                     'id_deposito_destino' => $item->deposito_id,
                     'status' => $this->statusRecebimento((int) $item->quantidade, (int) $item->quantidade_entregue),
-                    'bloqueio_motivo' => null,
+                    'em_revisao' => ! $item->deposito_id,
+                    'bloqueio_motivo' => $item->deposito_id ? null : 'Pedido de fabrica sem deposito de destino.',
                 ]
             );
 
@@ -290,6 +291,7 @@ class EntregaProdutoService
             if (!$depositoId) {
                 $entrega->update([
                     'status' => ProdutoEntregaItem::STATUS_AGUARDANDO_ESTOQUE,
+                    'em_revisao' => true,
                     'bloqueio_motivo' => 'Deposito de origem nao definido para reserva.',
                 ]);
                 return $entrega->fresh();
@@ -306,6 +308,7 @@ class EntregaProdutoService
                 $entrega->update([
                     'id_deposito_origem' => $depositoId,
                     'status' => ProdutoEntregaItem::STATUS_AGUARDANDO_ESTOQUE,
+                    'em_revisao' => false,
                     'bloqueio_motivo' => "Estoque insuficiente para reserva. Disponivel: {$disponivel}, solicitado: {$quantidade}.",
                 ]);
                 return $entrega->fresh();
@@ -329,9 +332,8 @@ class EntregaProdutoService
             $entrega->quantidade_reservada = (int) $entrega->quantidade_reservada + (int) $quantidade;
             $entrega->id_deposito_origem = $depositoId;
             $entrega->bloqueio_motivo = null;
-            $entrega->status = $entrega->quantidade_reservada >= $entrega->quantidade_total
-                ? ProdutoEntregaItem::STATUS_RESERVADO
-                : ProdutoEntregaItem::STATUS_AGUARDANDO_ESTOQUE;
+            $entrega->em_revisao = false;
+            $entrega->status = $this->statusOperacional($entrega);
             $entrega->save();
 
             $this->registrarEvento(
@@ -407,6 +409,7 @@ class EntregaProdutoService
             $entrega->id_deposito_destino = $depositoId;
             $entrega->status = $this->statusRecebimento((int) $entrega->quantidade_total, (int) $entrega->quantidade_recebida);
             $entrega->bloqueio_motivo = null;
+            $entrega->em_revisao = false;
             $entrega->save();
 
             $this->registrarEvento(
@@ -477,6 +480,7 @@ class EntregaProdutoService
             $reservaIdParaConsumo = ProdutoEntregaEvento::query()
                 ->where('produto_entrega_item_id', $entrega->id)
                 ->where('tipo_evento', ProdutoEntregaEvento::RESERVA_CRIADA)
+                ->where('id_deposito_origem', (int) $depositoId)
                 ->whereNotNull('estoque_reserva_id')
                 ->orderByDesc('id')
                 ->value('estoque_reserva_id');
@@ -521,10 +525,9 @@ class EntregaProdutoService
 
             $entrega->quantidade_expedida = (int) $entrega->quantidade_expedida + (int) $quantidade;
             $entrega->id_deposito_origem = $depositoId;
-            $entrega->status = $entrega->quantidade_expedida >= $entrega->quantidade_total
-                ? ProdutoEntregaItem::STATUS_EXPEDIDO
-                : ProdutoEntregaItem::STATUS_EXPEDIDO_PARCIAL;
+            $entrega->status = $this->statusOperacional($entrega);
             $entrega->bloqueio_motivo = null;
+            $entrega->em_revisao = false;
             $entrega->save();
 
             $this->registrarEvento(
@@ -582,8 +585,9 @@ class EntregaProdutoService
             ], $usuarioId);
 
             $entrega->id_deposito_destino = $depositoAssistenciaId;
-            $entrega->status = ProdutoEntregaItem::STATUS_PRONTO_EXPEDICAO;
+            $entrega->status = ProdutoEntregaItem::STATUS_RESERVADO;
             $entrega->bloqueio_motivo = null;
+            $entrega->em_revisao = false;
             $entrega->save();
 
             $this->registrarEvento(
@@ -631,10 +635,9 @@ class EntregaProdutoService
             }
 
             $entrega->quantidade_entregue = (int) $entrega->quantidade_entregue + (int) $quantidade;
-            $entrega->status = $entrega->quantidade_entregue >= $entrega->quantidade_total
-                ? ProdutoEntregaItem::STATUS_ENTREGUE
-                : ProdutoEntregaItem::STATUS_ENTREGUE_PARCIAL;
+            $entrega->status = $this->statusOperacional($entrega);
             $entrega->bloqueio_motivo = null;
+            $entrega->em_revisao = false;
             $entrega->save();
 
             $this->registrarEvento(
@@ -776,7 +779,8 @@ class EntregaProdutoService
             'quantidade_recebida' => (int) $itens->sum('quantidade_recebida'),
             'quantidade_expedida' => (int) $itens->sum('quantidade_expedida'),
             'quantidade_entregue' => (int) $itens->sum('quantidade_entregue'),
-            'pendentes_revisao' => $itens->where('status', ProdutoEntregaItem::STATUS_BLOQUEADO_REVISAO)->count(),
+            'pendentes_revisao' => $itens->where('em_revisao', true)->count(),
+            'parcial' => $this->temParcialidade($itens, $total),
             'status' => $this->statusAgregado($itens, $total),
         ];
     }
@@ -784,9 +788,7 @@ class EntregaProdutoService
     private function criarOuAtualizarItemPedido(Pedido $pedido, PedidoItem $pedidoItem, ?int $usuarioId = null): ProdutoEntregaItem
     {
         $reposicao = $pedido->isReposicao();
-        $status = $pedidoItem->id_deposito
-            ? ProdutoEntregaItem::STATUS_AGUARDANDO_ESTOQUE
-            : ProdutoEntregaItem::STATUS_BLOQUEADO_REVISAO;
+        $status = ProdutoEntregaItem::STATUS_AGUARDANDO_ESTOQUE;
 
         $bloqueio = $pedidoItem->id_deposito
             ? null
@@ -797,13 +799,10 @@ class EntregaProdutoService
             'pedido_item_id' => $pedidoItem->id,
         ]);
         $statusAtual = (string) ($entrega->status ?? '');
+        $statusAtual = ProdutoEntregaItem::normalizarStatus($statusAtual) ?: $statusAtual;
         $mantemStatus = in_array($statusAtual, [
-            ProdutoEntregaItem::STATUS_EXPEDIDO,
-            ProdutoEntregaItem::STATUS_EXPEDIDO_PARCIAL,
             ProdutoEntregaItem::STATUS_ENTREGUE,
-            ProdutoEntregaItem::STATUS_ENTREGUE_PARCIAL,
             ProdutoEntregaItem::STATUS_RECEBIDO,
-            ProdutoEntregaItem::STATUS_RECEBIDO_PARCIAL,
             ProdutoEntregaItem::STATUS_CANCELADO,
         ], true);
 
@@ -818,6 +817,7 @@ class EntregaProdutoService
                 'id_deposito_destino' => $reposicao ? $pedidoItem->id_deposito : null,
                 'previsao_entrega' => $pedido->data_limite_entrega,
                 'status' => $mantemStatus ? $statusAtual : $status,
+                'em_revisao' => ! $pedidoItem->id_deposito,
                 'bloqueio_motivo' => $bloqueio,
         ]);
         $entrega->save();
@@ -887,10 +887,6 @@ class EntregaProdutoService
             return ProdutoEntregaItem::STATUS_RECEBIDO;
         }
 
-        if ($recebido > 0) {
-            return ProdutoEntregaItem::STATUS_RECEBIDO_PARCIAL;
-        }
-
         return ProdutoEntregaItem::STATUS_AGUARDANDO_ESTOQUE;
     }
 
@@ -918,31 +914,28 @@ class EntregaProdutoService
     {
         $total = (int) $item->quantidade_total;
 
+        if ($item->status === ProdutoEntregaItem::STATUS_CANCELADO) {
+            return ProdutoEntregaItem::STATUS_CANCELADO;
+        }
+
         if ($total > 0 && (int) $item->quantidade_entregue >= $total) {
             return ProdutoEntregaItem::STATUS_ENTREGUE;
         }
 
-        if ((int) $item->quantidade_entregue > 0) {
-            return ProdutoEntregaItem::STATUS_ENTREGUE_PARCIAL;
-        }
-
-        if ($total > 0 && (int) $item->quantidade_expedida >= $total) {
-            return ProdutoEntregaItem::STATUS_EXPEDIDO;
-        }
-
-        if ((int) $item->quantidade_expedida > 0) {
-            return ProdutoEntregaItem::STATUS_EXPEDIDO_PARCIAL;
-        }
-
-        if ($total > 0 && (int) $item->quantidade_recebida >= $total) {
+        if (
+            $total > 0
+            && (int) $item->quantidade_recebida >= $total
+            && (int) $item->quantidade_expedida === 0
+            && (int) $item->quantidade_entregue === 0
+        ) {
             return ProdutoEntregaItem::STATUS_RECEBIDO;
         }
 
-        if ((int) $item->quantidade_recebida > 0) {
-            return ProdutoEntregaItem::STATUS_RECEBIDO_PARCIAL;
-        }
-
-        if ($total > 0 && (int) $item->quantidade_reservada >= $total) {
+        if (
+            (int) $item->quantidade_entregue > 0
+            || (int) $item->quantidade_expedida > 0
+            || ($total > 0 && (int) $item->quantidade_reservada >= $total)
+        ) {
             return ProdutoEntregaItem::STATUS_RESERVADO;
         }
 
@@ -964,10 +957,8 @@ class EntregaProdutoService
         ProdutoEntregaItem::query()
             ->where('pedido_id', $recebimento->pedido_id)
             ->where('id_variacao', $recebimento->id_variacao)
-            ->whereIn('status', [
-                ProdutoEntregaItem::STATUS_AGUARDANDO_ESTOQUE,
-                ProdutoEntregaItem::STATUS_BLOQUEADO_REVISAO,
-            ])
+            ->where('status', ProdutoEntregaItem::STATUS_AGUARDANDO_ESTOQUE)
+            ->where('em_revisao', false)
             ->orderBy('id')
             ->get()
             ->each(function (ProdutoEntregaItem $demanda) use (&$restante, $depositoId, $usuarioId) {
@@ -1007,32 +998,38 @@ class EntregaProdutoService
             return ProdutoEntregaItem::STATUS_ENTREGUE;
         }
 
-        if ((int) $itens->sum('quantidade_entregue') > 0) {
-            return ProdutoEntregaItem::STATUS_ENTREGUE_PARCIAL;
+        if (
+            $total > 0
+            && (int) $itens->sum('quantidade_recebida') >= $total
+            && (int) $itens->sum('quantidade_expedida') === 0
+            && (int) $itens->sum('quantidade_entregue') === 0
+        ) {
+            return ProdutoEntregaItem::STATUS_RECEBIDO;
         }
 
-        if ((int) $itens->sum('quantidade_expedida') > 0) {
-            return (int) $itens->sum('quantidade_expedida') >= $total
-                ? ProdutoEntregaItem::STATUS_EXPEDIDO
-                : ProdutoEntregaItem::STATUS_EXPEDIDO_PARCIAL;
-        }
-
-        if ((int) $itens->sum('quantidade_recebida') > 0) {
-            return (int) $itens->sum('quantidade_recebida') >= $total
-                ? ProdutoEntregaItem::STATUS_RECEBIDO
-                : ProdutoEntregaItem::STATUS_RECEBIDO_PARCIAL;
-        }
-
-        if ((int) $itens->sum('quantidade_reservada') > 0) {
-            return (int) $itens->sum('quantidade_reservada') >= $total
-                ? ProdutoEntregaItem::STATUS_RESERVADO
-                : ProdutoEntregaItem::STATUS_AGUARDANDO_ESTOQUE;
-        }
-
-        if ($itens->contains(fn (ProdutoEntregaItem $item) => $item->status === ProdutoEntregaItem::STATUS_BLOQUEADO_REVISAO)) {
-            return ProdutoEntregaItem::STATUS_BLOQUEADO_REVISAO;
+        if (
+            (int) $itens->sum('quantidade_entregue') > 0
+            || (int) $itens->sum('quantidade_expedida') > 0
+            || ($total > 0 && (int) $itens->sum('quantidade_reservada') >= $total)
+        ) {
+            return ProdutoEntregaItem::STATUS_RESERVADO;
         }
 
         return ProdutoEntregaItem::STATUS_AGUARDANDO_ESTOQUE;
+    }
+
+    private function temParcialidade(Collection|EloquentCollection $itens, int $total): bool
+    {
+        if ($total <= 0) {
+            return false;
+        }
+
+        return $itens->contains(function (ProdutoEntregaItem $item) {
+            $itemTotal = (int) $item->quantidade_total;
+
+            return ((int) $item->quantidade_recebida > 0 && (int) $item->quantidade_recebida < $itemTotal)
+                || ((int) $item->quantidade_expedida > 0 && (int) $item->quantidade_expedida < $itemTotal)
+                || ((int) $item->quantidade_entregue > 0 && (int) $item->quantidade_entregue < $itemTotal);
+        });
     }
 }

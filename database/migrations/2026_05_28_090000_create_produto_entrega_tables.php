@@ -32,6 +32,7 @@ return new class extends Migration
             $table->unsignedInteger('id_deposito_destino')->nullable();
 
             $table->string('status', 40)->index();
+            $table->boolean('em_revisao')->default(false);
             $table->date('previsao_entrega')->nullable();
             $table->text('bloqueio_motivo')->nullable();
             $table->timestamps();

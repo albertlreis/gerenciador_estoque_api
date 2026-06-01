@@ -157,12 +157,14 @@ class ProdutoEntregaCentralTest extends TestCase
         $service->entregarItem($entrega, 1, $usuario->id, 'Entrega parcial teste', 'entrega-parcial-1');
 
         $entrega = $entrega->fresh();
-        $this->assertSame(ProdutoEntregaItem::STATUS_ENTREGUE_PARCIAL, $entrega->status);
+        $this->assertSame(ProdutoEntregaItem::STATUS_RESERVADO, $entrega->status);
         $this->assertSame(1, (int) $entrega->quantidade_entregue);
         $this->assertSame(0, (int) Estoque::query()->where('id_variacao', $variacao->id)->where('id_deposito', $deposito->id)->value('quantidade'));
         $this->assertSame(1, EstoqueMovimentacao::query()->where('pedido_id', $pedido->id)->count());
         $this->assertSame(1, ProdutoEntregaEvento::query()->where('idempotency_key', 'entrega-parcial-1')->count());
-        $this->assertSame(ProdutoEntregaItem::STATUS_ENTREGUE_PARCIAL, $service->resumoPedido($pedido->fresh())['status']);
+        $resumo = $service->resumoPedido($pedido->fresh());
+        $this->assertSame(ProdutoEntregaItem::STATUS_RESERVADO, $resumo['status']);
+        $this->assertTrue($resumo['parcial']);
 
         $this->getJson('/api/v1/entregas/itens?entregaveis=1&per_page=10')
             ->assertOk()
@@ -255,12 +257,102 @@ class ProdutoEntregaCentralTest extends TestCase
         $this->postJson("/api/v1/pedidos/{$pedido->id}/pdf/nota-entrega", $payload)->assertOk();
 
         $entrega = $entrega->fresh();
-        $this->assertSame(ProdutoEntregaItem::STATUS_ENTREGUE_PARCIAL, $entrega->status);
+        $this->assertSame(ProdutoEntregaItem::STATUS_RESERVADO, $entrega->status);
         $this->assertSame(1, (int) $entrega->quantidade_entregue);
         $this->assertSame(0, (int) Estoque::query()->where('id_variacao', $variacao->id)->where('id_deposito', $deposito->id)->value('quantidade'));
         $this->assertSame(1, EstoqueMovimentacao::query()->where('pedido_id', $pedido->id)->count());
         $this->assertSame(1, ProdutoEntregaEvento::query()
             ->where('idempotency_key', "nota-entrega:nota-entrega-teste-1:item:{$entrega->id}:entregar")
+            ->where('tipo_evento', ProdutoEntregaEvento::ENTREGUE_CLIENTE)
+            ->count());
+    }
+
+    public function test_nota_entrega_itens_retorna_produtos_pendentes_com_depositos_disponiveis(): void
+    {
+        [$usuario, $pedido, $variacao, $deposito] = $this->criarPedidoComItem(3);
+        $depositoExtra = Deposito::create(['nome' => 'Deposito Extra Nota']);
+
+        Sanctum::actingAs($usuario);
+
+        Estoque::updateOrCreate(
+            ['id_variacao' => $variacao->id, 'id_deposito' => $deposito->id],
+            ['quantidade' => 2]
+        );
+        Estoque::updateOrCreate(
+            ['id_variacao' => $variacao->id, 'id_deposito' => $depositoExtra->id],
+            ['quantidade' => 1]
+        );
+
+        app(EntregaProdutoService::class)->criarDemandaPedido($pedido, $usuario->id, false);
+        $entrega = ProdutoEntregaItem::query()->where('pedido_id', $pedido->id)->firstOrFail();
+
+        $this->getJson("/api/v1/pedidos/{$pedido->id}/nota-entrega/itens")
+            ->assertOk()
+            ->assertJsonFragment([
+                'id' => $entrega->id,
+                'quantidade_pendente_total' => 3,
+                'quantidade_pendente_expedicao_nota' => 3,
+            ])
+            ->assertJsonFragment([
+                'id' => $deposito->id,
+                'quantidade_utilizavel' => 2,
+            ])
+            ->assertJsonFragment([
+                'id' => $depositoExtra->id,
+                'quantidade_utilizavel' => 1,
+            ]);
+    }
+
+    public function test_nota_entrega_registra_expedicao_dividida_por_depositos_e_entrega_idempotente(): void
+    {
+        [$usuario, $pedido, $variacao, $deposito] = $this->criarPedidoComItem(3);
+        $depositoExtra = Deposito::create(['nome' => 'Deposito Extra Nota']);
+
+        Sanctum::actingAs($usuario);
+
+        Estoque::updateOrCreate(
+            ['id_variacao' => $variacao->id, 'id_deposito' => $deposito->id],
+            ['quantidade' => 2]
+        );
+        Estoque::updateOrCreate(
+            ['id_variacao' => $variacao->id, 'id_deposito' => $depositoExtra->id],
+            ['quantidade' => 1]
+        );
+
+        app(EntregaProdutoService::class)->criarDemandaPedido($pedido, $usuario->id, false);
+        $entrega = ProdutoEntregaItem::query()->where('pedido_id', $pedido->id)->firstOrFail();
+        $payload = [
+            'registrar_entrega' => true,
+            'idempotency_key' => 'nota-entrega-split-depositos',
+            'observacao' => 'Entrega dividida por depositos',
+            'itens' => [
+                [
+                    'produto_entrega_item_id' => $entrega->id,
+                    'entregar_expedido' => 0,
+                    'alocacoes' => [
+                        ['deposito_id' => $deposito->id, 'quantidade' => 2],
+                        ['deposito_id' => $depositoExtra->id, 'quantidade' => 1],
+                    ],
+                ],
+            ],
+        ];
+
+        $this->postJson("/api/v1/pedidos/{$pedido->id}/pdf/nota-entrega", $payload)->assertOk();
+        $this->postJson("/api/v1/pedidos/{$pedido->id}/pdf/nota-entrega", $payload)->assertOk();
+
+        $entrega = $entrega->fresh();
+        $this->assertSame(ProdutoEntregaItem::STATUS_ENTREGUE, $entrega->status);
+        $this->assertSame(3, (int) $entrega->quantidade_expedida);
+        $this->assertSame(3, (int) $entrega->quantidade_entregue);
+        $this->assertSame(0, (int) Estoque::query()->where('id_variacao', $variacao->id)->where('id_deposito', $deposito->id)->value('quantidade'));
+        $this->assertSame(0, (int) Estoque::query()->where('id_variacao', $variacao->id)->where('id_deposito', $depositoExtra->id)->value('quantidade'));
+        $this->assertSame(2, EstoqueMovimentacao::query()->where('pedido_id', $pedido->id)->count());
+        $this->assertSame(2, ProdutoEntregaEvento::query()
+            ->where('produto_entrega_item_id', $entrega->id)
+            ->where('tipo_evento', ProdutoEntregaEvento::EXPEDIDO_CLIENTE)
+            ->count());
+        $this->assertSame(2, ProdutoEntregaEvento::query()
+            ->where('produto_entrega_item_id', $entrega->id)
             ->where('tipo_evento', ProdutoEntregaEvento::ENTREGUE_CLIENTE)
             ->count());
     }
@@ -324,7 +416,8 @@ class ProdutoEntregaCentralTest extends TestCase
 
         $entrega = ProdutoEntregaItem::query()->where('pedido_id', $pedido->id)->firstOrFail();
         $entrega->update([
-            'status' => ProdutoEntregaItem::STATUS_BLOQUEADO_REVISAO,
+            'status' => ProdutoEntregaItem::STATUS_AGUARDANDO_ESTOQUE,
+            'em_revisao' => true,
             'previsao_entrega' => now()->addDays(2)->toDateString(),
             'bloqueio_motivo' => 'Deposito pendente para teste',
         ]);
@@ -352,6 +445,36 @@ class ProdutoEntregaCentralTest extends TestCase
         $this->getJson('/api/v1/entregas/itens?per_page=10&previsao_inicio=' . now()->addDays(10)->toDateString())
             ->assertOk()
             ->assertJsonMissing(['id' => $entrega->id]);
+    }
+
+    public function test_recriar_entregas_reconstroi_tabelas_centrais_sem_movimentar_estoque(): void
+    {
+        [$usuario, $pedido, $variacao, $deposito] = $this->criarPedidoComItem(2);
+
+        Estoque::updateOrCreate(
+            ['id_variacao' => $variacao->id, 'id_deposito' => $deposito->id],
+            ['quantidade' => 2]
+        );
+
+        $service = app(EntregaProdutoService::class);
+        $service->criarDemandaPedido($pedido, $usuario->id, true);
+        $service->expedirPedido($pedido, $usuario->id);
+
+        $this->artisan('entregas:recriar --dry-run')
+            ->assertExitCode(0);
+
+        $this->artisan('entregas:recriar --apply')
+            ->assertExitCode(0);
+
+        $entrega = ProdutoEntregaItem::query()->where('pedido_id', $pedido->id)->firstOrFail();
+
+        $this->assertSame(ProdutoEntregaItem::STATUS_RESERVADO, $entrega->status);
+        $this->assertSame(2, (int) $entrega->quantidade_reservada);
+        $this->assertSame(2, (int) $entrega->quantidade_expedida);
+        $this->assertSame(0, (int) $entrega->quantidade_entregue);
+        $this->assertSame(0, (int) Estoque::query()->where('id_variacao', $variacao->id)->where('id_deposito', $deposito->id)->value('quantidade'));
+        $this->assertSame(1, EstoqueMovimentacao::query()->where('pedido_id', $pedido->id)->count());
+        $this->assertGreaterThanOrEqual(3, ProdutoEntregaEvento::query()->where('produto_entrega_item_id', $entrega->id)->count());
     }
 
     private function criarPedidoComItem(int $quantidade): array

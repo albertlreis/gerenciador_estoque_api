@@ -12,15 +12,37 @@ class ProdutoEntregaItem extends Model
 
     public const STATUS_AGUARDANDO_ESTOQUE = 'aguardando_estoque';
     public const STATUS_RESERVADO = 'reservado';
-    public const STATUS_PRONTO_EXPEDICAO = 'pronto_expedicao';
-    public const STATUS_EXPEDIDO_PARCIAL = 'expedido_parcial';
-    public const STATUS_EXPEDIDO = 'expedido';
-    public const STATUS_ENTREGUE_PARCIAL = 'entregue_parcial';
-    public const STATUS_ENTREGUE = 'entregue';
-    public const STATUS_RECEBIDO_PARCIAL = 'recebido_parcial';
     public const STATUS_RECEBIDO = 'recebido';
+    public const STATUS_ENTREGUE = 'entregue';
     public const STATUS_CANCELADO = 'cancelado';
-    public const STATUS_BLOQUEADO_REVISAO = 'bloqueado_revisao';
+
+    public const STATUSES = [
+        self::STATUS_AGUARDANDO_ESTOQUE,
+        self::STATUS_RESERVADO,
+        self::STATUS_RECEBIDO,
+        self::STATUS_ENTREGUE,
+        self::STATUS_CANCELADO,
+    ];
+
+    public const STATUS_ALIASES = [
+        'aguardando' => self::STATUS_AGUARDANDO_ESTOQUE,
+        'receber' => self::STATUS_AGUARDANDO_ESTOQUE,
+        'recebido_parcial' => self::STATUS_AGUARDANDO_ESTOQUE,
+        'bloqueado_revisao' => self::STATUS_AGUARDANDO_ESTOQUE,
+        'entregar' => self::STATUS_RESERVADO,
+        'pronto_expedicao' => self::STATUS_RESERVADO,
+        'expedido' => self::STATUS_RESERVADO,
+        'expedido_parcial' => self::STATUS_RESERVADO,
+        'entregue_parcial' => self::STATUS_RESERVADO,
+    ];
+
+    public const STATUS_LABELS = [
+        self::STATUS_AGUARDANDO_ESTOQUE => 'Aguardando estoque',
+        self::STATUS_RESERVADO => 'Reservado',
+        self::STATUS_RECEBIDO => 'Recebido',
+        self::STATUS_ENTREGUE => 'Entregue',
+        self::STATUS_CANCELADO => 'Cancelado',
+    ];
 
     public const ORIGEM_PEDIDO = 'pedido';
     public const ORIGEM_PEDIDO_FABRICA = 'pedido_fabrica';
@@ -46,11 +68,13 @@ class ProdutoEntregaItem extends Model
         'id_deposito_origem',
         'id_deposito_destino',
         'status',
+        'em_revisao',
         'previsao_entrega',
         'bloqueio_motivo',
     ];
 
     protected $casts = [
+        'em_revisao' => 'boolean',
         'previsao_entrega' => 'date',
         'quantidade_total' => 'integer',
         'quantidade_reservada' => 'integer',
@@ -107,5 +131,27 @@ class ProdutoEntregaItem extends Model
     public function depositoDestino(): BelongsTo
     {
         return $this->belongsTo(Deposito::class, 'id_deposito_destino');
+    }
+
+    public static function normalizarStatus(?string $status): ?string
+    {
+        $status = trim((string) $status);
+
+        if ($status === '') {
+            return null;
+        }
+
+        if (in_array($status, self::STATUSES, true)) {
+            return $status;
+        }
+
+        return self::STATUS_ALIASES[$status] ?? null;
+    }
+
+    public static function labelStatus(?string $status): ?string
+    {
+        $normalizado = self::normalizarStatus($status);
+
+        return $normalizado ? (self::STATUS_LABELS[$normalizado] ?? $normalizado) : null;
     }
 }

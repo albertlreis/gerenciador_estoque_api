@@ -8,6 +8,14 @@ class ProdutoEntregaItemResource extends JsonResource
 {
     public function toArray($request): array
     {
+        $total = (int) $this->quantidade_total;
+        $recebida = (int) $this->quantidade_recebida;
+        $expedida = (int) $this->quantidade_expedida;
+        $entregue = (int) $this->quantidade_entregue;
+        $parcial = ($recebida > 0 && $recebida < $total)
+            || ($expedida > 0 && $expedida < $total)
+            || ($entregue > 0 && $entregue < $total);
+
         return [
             'id' => $this->id,
             'tipo_origem' => $this->tipo_origem,
@@ -30,6 +38,9 @@ class ProdutoEntregaItemResource extends JsonResource
             'id_deposito_origem' => $this->id_deposito_origem,
             'id_deposito_destino' => $this->id_deposito_destino,
             'status' => $this->status,
+            'status_label' => \App\Models\ProdutoEntregaItem::labelStatus($this->status),
+            'em_revisao' => (bool) $this->em_revisao,
+            'parcial' => $parcial,
             'previsao_entrega' => optional($this->previsao_entrega)?->toDateString(),
             'bloqueio_motivo' => $this->bloqueio_motivo,
             'pedido' => $this->whenLoaded('pedido'),

@@ -83,9 +83,8 @@ class ReprocessarEntregasCommand extends Command
                             'quantidade_total' => (int) $item->quantidade,
                             'id_deposito_origem' => $item->id_deposito,
                             'previsao_entrega' => $item->pedido?->data_limite_entrega,
-                            'status' => $item->id_deposito
-                                ? ProdutoEntregaItem::STATUS_AGUARDANDO_ESTOQUE
-                                : ProdutoEntregaItem::STATUS_BLOQUEADO_REVISAO,
+                            'status' => ProdutoEntregaItem::STATUS_AGUARDANDO_ESTOQUE,
+                            'em_revisao' => ! $item->id_deposito,
                             'bloqueio_motivo' => $item->id_deposito ? null : 'Reprocessamento: pedido item sem deposito.',
                         ]
                     );
@@ -118,7 +117,7 @@ class ReprocessarEntregasCommand extends Command
                         ->sum('quantidade');
 
                     $entrega->quantidade_reservada = min((int) $entrega->quantidade_total, $reservada);
-                    if ($entrega->status !== ProdutoEntregaItem::STATUS_BLOQUEADO_REVISAO) {
+                    if (! $entrega->em_revisao) {
                         $entrega->status = $entrega->quantidade_reservada >= $entrega->quantidade_total
                             ? ProdutoEntregaItem::STATUS_RESERVADO
                             : ProdutoEntregaItem::STATUS_AGUARDANDO_ESTOQUE;
@@ -185,9 +184,7 @@ class ReprocessarEntregasCommand extends Command
                         ->sum('quantidade');
 
                     $entrega->quantidade_expedida = min((int) $entrega->quantidade_total, $expedida);
-                    $entrega->status = $entrega->quantidade_expedida >= $entrega->quantidade_total
-                        ? ProdutoEntregaItem::STATUS_EXPEDIDO
-                        : ProdutoEntregaItem::STATUS_EXPEDIDO_PARCIAL;
+                    $entrega->status = ProdutoEntregaItem::STATUS_RESERVADO;
                     $entrega->bloqueio_motivo = null;
                     $entrega->save();
 
@@ -210,8 +207,8 @@ class ReprocessarEntregasCommand extends Command
             ->chunkById(200, function ($itens) {
                 foreach ($itens as $item) {
                     $recebido = (int) $item->quantidade_entregue;
-                    $status = $recebido > 0
-                        ? ProdutoEntregaItem::STATUS_BLOQUEADO_REVISAO
+                    $status = $recebido >= (int) $item->quantidade
+                        ? ProdutoEntregaItem::STATUS_RECEBIDO
                         : ProdutoEntregaItem::STATUS_AGUARDANDO_ESTOQUE;
 
                     $entrega = ProdutoEntregaItem::query()->updateOrCreate(
@@ -226,9 +223,8 @@ class ReprocessarEntregasCommand extends Command
                             'quantidade_recebida' => $recebido,
                             'id_deposito_destino' => $item->deposito_id,
                             'status' => $status,
-                            'bloqueio_motivo' => $recebido > 0
-                                ? 'Reprocessamento: recebimento de fabrica historico sem movimentacao de estoque vinculada.'
-                                : null,
+                            'em_revisao' => ! $item->deposito_id,
+                            'bloqueio_motivo' => $item->deposito_id ? null : 'Reprocessamento: pedido de fabrica sem deposito.',
                         ]
                     );
 
@@ -272,7 +268,7 @@ class ReprocessarEntregasCommand extends Command
                             $item->save();
                             $this->evento($item, ProdutoEntregaEvento::ENTREGUE_CLIENTE, (int) $item->quantidade_total, "reprocessar:pedido:{$pedido->id}:item:{$item->id}:entregue");
                         } else {
-                            $item->status = ProdutoEntregaItem::STATUS_BLOQUEADO_REVISAO;
+                            $item->em_revisao = true;
                             $item->bloqueio_motivo = 'Reprocessamento: pedido marcado como entregue/finalizado sem expedicao central ou movimentacao suficiente.';
                             $item->save();
                         }

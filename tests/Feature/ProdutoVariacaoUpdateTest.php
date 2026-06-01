@@ -141,6 +141,104 @@ class ProdutoVariacaoUpdateTest extends TestCase
         ]);
     }
 
+    public function test_patch_variacoes_bulk_permite_referencia_repetida_em_outra_variacao(): void
+    {
+        $usuario = $this->criarUsuario();
+        Sanctum::actingAs($usuario);
+        Cache::put('permissoes_usuario_' . $usuario->id, ['produto_variacoes.editar'], now()->addHour());
+
+        [$produtoId, $now] = $this->criarProdutoBase();
+        [$outroProdutoId] = $this->criarProdutoBase();
+
+        $variacaoId = DB::table('produto_variacoes')->insertGetId([
+            'produto_id' => $produtoId,
+            'referencia' => 'REF-DUP-BULK',
+            'nome' => 'Variacao editada',
+            'preco' => 100,
+            'custo' => 50,
+            'codigo_barras' => null,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ]);
+
+        $outraVariacaoId = DB::table('produto_variacoes')->insertGetId([
+            'produto_id' => $outroProdutoId,
+            'referencia' => 'REF-DUP-BULK',
+            'nome' => 'Outra variacao',
+            'preco' => 80,
+            'custo' => 30,
+            'codigo_barras' => null,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ]);
+
+        $response = $this->patchJson("/api/v1/produtos/{$produtoId}/variacoes/bulk", [[
+            'id' => $variacaoId,
+            'referencia' => 'REF-DUP-BULK',
+            'preco' => 100,
+            'custo' => 50,
+        ]]);
+
+        $response->assertOk()
+            ->assertJsonPath('message', 'Variações salvas com sucesso.');
+
+        $this->assertDatabaseHas('produto_variacoes', [
+            'id' => $variacaoId,
+            'referencia' => 'REF-DUP-BULK',
+        ]);
+
+        $this->assertDatabaseHas('produto_variacoes', [
+            'id' => $outraVariacaoId,
+            'referencia' => 'REF-DUP-BULK',
+        ]);
+    }
+
+    public function test_patch_variacoes_bulk_rejeita_sku_interno_repetido(): void
+    {
+        $usuario = $this->criarUsuario();
+        Sanctum::actingAs($usuario);
+        Cache::put('permissoes_usuario_' . $usuario->id, ['produto_variacoes.editar'], now()->addHour());
+
+        [$produtoId, $now] = $this->criarProdutoBase();
+        [$outroProdutoId] = $this->criarProdutoBase();
+
+        $variacaoId = DB::table('produto_variacoes')->insertGetId([
+            'produto_id' => $produtoId,
+            'referencia' => 'REF-SKU-ORIG',
+            'sku_interno' => 'SKU-ORIG',
+            'nome' => 'Variacao editada',
+            'preco' => 100,
+            'custo' => 50,
+            'codigo_barras' => null,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ]);
+
+        DB::table('produto_variacoes')->insert([
+            'produto_id' => $outroProdutoId,
+            'referencia' => 'REF-SKU-DUP',
+            'sku_interno' => 'SKU-DUP',
+            'nome' => 'Outra variacao',
+            'preco' => 80,
+            'custo' => 30,
+            'codigo_barras' => null,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ]);
+
+        $response = $this->patchJson("/api/v1/produtos/{$produtoId}/variacoes/bulk", [[
+            'id' => $variacaoId,
+            'referencia' => 'REF-SKU-ORIG',
+            'sku_interno' => 'SKU-DUP',
+            'preco' => 100,
+            'custo' => 50,
+        ]]);
+
+        $response->assertStatus(422)
+            ->assertJsonValidationErrors(['sku_interno'])
+            ->assertJsonFragment(['Este SKU interno já está em uso em outra variação.']);
+    }
+
     public function test_put_variacao_individual_atualiza_campos(): void
     {
         $usuario = $this->criarUsuario();

@@ -209,7 +209,7 @@ class ProdutoVariacaoController extends Controller
         }
 
         $validator = Validator::make($payload, [
-            'referencia' => 'sometimes|nullable|string|max:100|unique:produto_variacoes,referencia,' . $variacao->id,
+            'referencia' => 'sometimes|nullable|string|max:100',
             'nome' => 'sometimes|nullable|string|max:255',
             'preco' => 'sometimes|numeric|min:0',
             'custo' => 'sometimes|nullable|numeric|min:0',
@@ -236,7 +236,6 @@ class ProdutoVariacaoController extends Controller
             'preco.min' => 'O preço da variação não pode ser negativo.',
             'custo.numeric' => 'Informe um custo válido para a variação.',
             'custo.min' => 'O custo da variação não pode ser negativo.',
-            'referencia.unique' => 'Esta referência já está em uso em outra variação.',
             'sku_interno.unique' => 'Este SKU interno já está em uso em outra variação.',
             'chave_variacao.unique' => 'Esta chave de variação já está em uso.',
             'audit.motivo.max' => 'O motivo pode ter no máximo 500 caracteres.',

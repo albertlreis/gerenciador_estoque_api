@@ -243,6 +243,38 @@ class ProdutoVariacaoPatchGlobalTest extends TestCase
         ]);
     }
 
+    public function test_patch_permite_referencia_repetida_em_outra_variacao(): void
+    {
+        $this->autenticar(['produto_variacoes.editar']);
+        [$variacaoId] = $this->criarProdutoVariacaoComCarrinhos();
+
+        $produtoId = DB::table('produto_variacoes')->where('id', $variacaoId)->value('produto_id');
+        $now = now();
+
+        DB::table('produto_variacoes')->insert([
+            'produto_id' => $produtoId,
+            'referencia' => 'PATCH-REF-DUP',
+            'nome' => 'Outra variacao patch',
+            'preco' => 80,
+            'custo' => 30,
+            'codigo_barras' => null,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ]);
+
+        $response = $this->patchJson("/api/v1/produto-variacoes/{$variacaoId}", [
+            'referencia' => 'PATCH-REF-DUP',
+        ]);
+
+        $response->assertOk()
+            ->assertJsonPath('referencia', 'PATCH-REF-DUP');
+
+        $this->assertDatabaseHas('produto_variacoes', [
+            'id' => $variacaoId,
+            'referencia' => 'PATCH-REF-DUP',
+        ]);
+    }
+
     public function test_patch_bloqueia_sem_permissao(): void
     {
         $this->autenticar([]);

@@ -53,16 +53,11 @@
                 ? $precoMin * (1 - ($descontoMax / 100))
                 : null;
 
-            $imgRel = optional($produto?->imagemPrincipal)->url ?? '';
-            $imgAbs = ($imgRel && !empty($baseFsDir ?? null))
-                ? ($baseFsDir . DIRECTORY_SEPARATOR . $imgRel)
-                : '';
+            $imgSrc = app(\App\Services\PdfImageService::class)->fromProdutoOrPlaceholder($produto);
         @endphp
         <tr>
             <td style="text-align:center;">
-                @if($imgAbs)
-                    <img src="{{ $imgAbs }}" width="80" style="max-height:64px;" alt="Imagem produto"/>
-                @endif
+                <img src="{{ $imgSrc }}" width="80" height="64" style="object-fit:cover;" alt="Imagem produto"/>
             </td>
             <td class="wrap">{{ $refs ?: '?' }}</td>
             <td class="wrap">{{ $produto->nome ?? '?' }}</td>

@@ -6,12 +6,12 @@ use App\Models\Produto;
 use App\Models\ProdutoConjunto;
 use App\Models\ProdutoVariacao;
 use Illuminate\Support\Collection;
-use Illuminate\Support\Facades\Storage;
 
 class OutletCatalogoPdfService
 {
     public function __construct(
         private readonly OutletCatalogoPricingService $pricingService,
+        private readonly PdfImageService $pdfImageService,
     ) {
     }
 
@@ -282,50 +282,12 @@ class OutletCatalogoPdfService
 
     private function resolverImagemHeroSrc(string $path): ?string
     {
-        $publicStorage = public_path('storage/' . ltrim($path, '/'));
-        if (is_file($publicStorage)) {
-            return $publicStorage;
-        }
-
-        if (Storage::disk('public')->exists($path)) {
-            return Storage::disk('public')->path($path);
-        }
-
-        return null;
+        return $this->pdfImageService->toPdfSrc($path);
     }
 
     private function resolverImagemSrcVariacao(ProdutoVariacao $variacao): ?string
     {
-        $url = trim((string) ($variacao->imagem?->url ?? ''));
-        if ($url === '') {
-            return null;
-        }
-
-        if (preg_match('#^https?://#i', $url) === 1) {
-            return $url;
-        }
-
-        $path = parse_url($url, PHP_URL_PATH) ?: $url;
-        $path = ltrim(str_replace('\\', '/', (string) $path), '/');
-
-        if (str_starts_with($path, 'storage/')) {
-            $relative = ltrim(substr($path, strlen('storage/')), '/');
-            $publicStorage = public_path('storage/' . $relative);
-            if (is_file($publicStorage)) {
-                return $publicStorage;
-            }
-
-            if (Storage::disk('public')->exists($relative)) {
-                return Storage::disk('public')->path($relative);
-            }
-        }
-
-        $publicFile = public_path($path);
-        if (is_file($publicFile)) {
-            return $publicFile;
-        }
-
-        return null;
+        return $this->pdfImageService->fromProdutoVariacaoOrPlaceholder($variacao);
     }
 
     private function formatMoney(float $value): string

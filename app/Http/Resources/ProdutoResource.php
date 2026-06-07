@@ -15,7 +15,10 @@ class ProdutoResource extends JsonResource
         $variacoes = $this->getRelationValue('variacoes') ?? collect();
         $outletCatalogo = app(OutletCatalogoPricingService::class)->build($variacoes);
 
-        $imagemPrincipal = $this->imagemPrincipal?->url ?? $this->imagemPrincipal?->url_completa;
+        $imagemPrincipalModel = $this->relationLoaded('imagemPrincipal')
+            ? $this->imagemPrincipal
+            : ($this->relationLoaded('imagens') ? $this->imagens->first() : null);
+        $imagemPrincipal = $imagemPrincipalModel?->url ?? $imagemPrincipalModel?->url_completa;
         return [
             'id' => $this->id,
             'nome' => $this->nome,

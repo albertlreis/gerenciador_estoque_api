@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\EstoqueTransferencia;
+use App\Services\PdfImageService;
 use Illuminate\Http\Request;
 use Barryvdh\DomPDF\Facade\Pdf;
 
@@ -47,9 +48,18 @@ class EstoqueTransferenciaController extends Controller
             'depositoOrigem',
             'depositoDestino',
             'usuario',
-            'itens.variacao.produto',
+            'itens.variacao.imagem',
+            'itens.variacao.produto.imagemPrincipal',
             'itens.variacao.atributos',
         ]);
+
+        $pdfImageService = app(PdfImageService::class);
+        $transferencia->itens->each(function ($item) use ($pdfImageService) {
+            $item->setAttribute(
+                'pdf_imagem_data_uri',
+                $pdfImageService->fromProdutoVariacaoOrPlaceholder($item->variacao)
+            );
+        });
 
         $pdf = Pdf::loadView('exports.transferencia-deposito', [
             'transferencia' => $transferencia

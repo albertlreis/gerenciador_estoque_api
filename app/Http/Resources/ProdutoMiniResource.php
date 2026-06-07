@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources;
 
+use App\Models\ProdutoImagem;
 use Illuminate\Http\Resources\Json\JsonResource;
 
 /**
@@ -11,6 +12,10 @@ class ProdutoMiniResource extends JsonResource
 {
     public function toArray($request): array
     {
+        $imagemPrincipalModel = $this->relationLoaded('imagemPrincipal')
+            ? $this->imagemPrincipal
+            : ($this->relationLoaded('imagens') ? $this->imagens->first() : null);
+
         return [
             'id'            => $this->id,
             'nome'          => $this->nome,
@@ -19,7 +24,7 @@ class ProdutoMiniResource extends JsonResource
             'altura'        => $this->altura !== null ? (float) $this->altura : null,
             'largura'       => $this->largura !== null ? (float) $this->largura : null,
             'profundidade'  => $this->profundidade !== null ? (float) $this->profundidade : null,
-            'imagem'        => $this->imagemPrincipal?->url_completa,
+            'imagem'        => ProdutoImagem::normalizarUrlPublica($imagemPrincipalModel?->url),
             'variacoes'     => $this->whenLoaded('variacoes', function () {
                 return $this->variacoes->map(fn($v) => [
                     'id'            => $v->id,
@@ -28,7 +33,7 @@ class ProdutoMiniResource extends JsonResource
                     'chave_variacao' => $v->chave_variacao,
                     'codigo_barras' => $v->codigo_barras,
                     'nome_completo' => $v->nome_completo,
-                    'imagem_url'    => $v->imagem_url,
+                    'imagem_url'    => ProdutoImagem::normalizarUrlPublica($v->imagem?->url ?? $v->imagem_url),
                     'altura'        => $v->dimensao_3,
                     'largura'       => $v->dimensao_1,
                     'profundidade'  => $v->dimensao_2,

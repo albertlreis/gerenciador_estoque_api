@@ -74,6 +74,34 @@ class ProdutoResourceUrlsTest extends TestCase
         ]);
     }
 
+    private function criarVariacao(int $produtoId, string $referencia = 'REF-TESTE'): int
+    {
+        $now = now();
+
+        return (int) DB::table('produto_variacoes')->insertGetId([
+            'produto_id' => $produtoId,
+            'referencia' => $referencia,
+            'nome' => 'Variacao Teste',
+            'preco' => 10,
+            'custo' => 5,
+            'codigo_barras' => null,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ]);
+    }
+
+    private function criarImagemVariacao(int $variacaoId, string $url): void
+    {
+        $now = now();
+
+        DB::table('produto_variacao_imagens')->insert([
+            'id_variacao' => $variacaoId,
+            'url' => $url,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ]);
+    }
+
     public function test_show_produto_normaliza_imagem_principal_e_manual_legacy(): void
     {
         $usuario = $this->criarUsuario();
@@ -131,5 +159,23 @@ class ProdutoResourceUrlsTest extends TestCase
             ->assertJsonMissing([
                 'imagem_principal' => $baseUrl . '/storage/produtos/produtos/foto3.jpg',
             ]);
+    }
+
+    public function test_show_produto_normaliza_imagem_da_variacao(): void
+    {
+        $usuario = $this->criarUsuario();
+        Sanctum::actingAs($usuario);
+
+        $produtoId = $this->criarProdutoBase('manual.pdf');
+        $variacaoId = $this->criarVariacao($produtoId, 'REF-VAR-IMG');
+        $this->criarImagemVariacao($variacaoId, '/storage/produtos/variacoes/foto-var.jpg');
+
+        $baseUrl = rtrim((string) config('app.url'), '/');
+
+        $response = $this->getJson("/api/v1/produtos/{$produtoId}");
+
+        $response
+            ->assertOk()
+            ->assertJsonPath('data.variacoes.0.imagem_url', $baseUrl . '/storage/produtos/variacoes/foto-var.jpg');
     }
 }

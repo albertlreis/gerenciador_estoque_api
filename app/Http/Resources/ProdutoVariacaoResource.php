@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources;
 
+use App\Models\ProdutoImagem;
 use Illuminate\Http\Resources\Json\JsonResource;
 
 /**
@@ -52,7 +53,7 @@ class ProdutoVariacaoResource extends JsonResource
             'sku_interno' => $this->sku_interno,
             'chave_variacao' => $this->chave_variacao,
             'codigo_barras' => $this->codigo_barras,
-            'imagem_url' => $this->imagem_url,
+            'imagem_url' => ProdutoImagem::normalizarUrlPublica($this->imagem?->url ?? $this->imagem_url),
             'altura' => $this->dimensao_3,
             'largura' => $this->dimensao_1,
             'profundidade' => $this->dimensao_2,
@@ -102,7 +103,7 @@ class ProdutoVariacaoResource extends JsonResource
                 'id'     => $this->produto->id,
                 'nome'   => $this->produto->nome,
                 'codigo_produto' => $this->produto->codigo_produto,
-                'imagem' => $this->produto->imagemPrincipal?->url,
+                'imagem' => ProdutoImagem::normalizarUrlPublica($this->produto->imagemPrincipal?->url),
             ]),
         ];
     }

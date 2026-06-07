@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources;
 
+use App\Models\ProdutoImagem;
 use Illuminate\Http\Resources\Json\JsonResource;
 
 class ConsignacaoDetalhadaResource extends JsonResource
@@ -35,7 +36,10 @@ class ConsignacaoDetalhadaResource extends JsonResource
                 'nome' => optional($this->produtoVariacao->produto)->nome,
                 'variacao' => $this->produtoVariacao->nome_completo,
                 'descricao' => $this->produtoVariacao->descricao ?? null,
-                'imagem' => optional($this->produtoVariacao->produto->imagemPrincipal)->url ?? null,
+                'imagem' => ProdutoImagem::normalizarUrlPublica(
+                    $this->produtoVariacao?->imagem?->url
+                    ?? $this->produtoVariacao?->produto?->imagemPrincipal?->url
+                ),
             ],
 
             // Histórico de devoluções

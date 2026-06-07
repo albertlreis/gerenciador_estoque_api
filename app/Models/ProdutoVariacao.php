@@ -161,7 +161,7 @@ class ProdutoVariacao extends Model
 
     public function getImagemUrlAttribute(): ?string
     {
-        return $this->imagem?->url;
+        return ProdutoImagem::normalizarUrlPublica($this->imagem?->url);
     }
 
     public function outlets(): HasMany

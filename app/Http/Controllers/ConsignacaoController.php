@@ -840,7 +840,7 @@ class ConsignacaoController extends Controller
         $pedido->consignacoes->each(function ($consignacao) use ($pdfImageService) {
             $consignacao->setAttribute(
                 'pdf_imagem_data_uri',
-                $pdfImageService->fromProdutoVariacao($consignacao->produtoVariacao)
+                $pdfImageService->fromProdutoVariacaoOrPlaceholder($consignacao->produtoVariacao)
             );
         });
 

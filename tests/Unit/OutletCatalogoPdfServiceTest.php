@@ -14,6 +14,9 @@ class OutletCatalogoPdfServiceTest extends TestCase
 {
     use DatabaseTransactions;
 
+    private const PNG_VARIACAO = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADUlEQVR42mP8z8BQDwAFgwJ/lb4qmgAAAABJRU5ErkJggg==';
+    private const PNG_PRODUTO = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+
     private int $categoriaId;
     private int $fornecedorId;
     private int $motivoId;
@@ -203,6 +206,39 @@ class OutletCatalogoPdfServiceTest extends TestCase
         $this->assertSame([], array_column($resultado['itens_avulsos'], 'id'));
     }
 
+    public function test_item_avulso_usa_imagem_da_variacao_antes_da_imagem_do_produto(): void
+    {
+        Storage::fake('public');
+        Storage::disk('public')->put('produtos/produto.png', base64_decode(self::PNG_PRODUTO));
+        Storage::disk('public')->put('produtos/variacoes/variacao.png', base64_decode(self::PNG_VARIACAO));
+
+        [$produtoId, $variacaoId] = $this->criarProdutoComVariacao('Poltrona Imagem', 'IMG-001', 500.00, 1);
+        $now = now();
+
+        DB::table('produto_imagens')->insert([
+            'id_produto' => $produtoId,
+            'url' => 'produto.png',
+            'principal' => 1,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ]);
+
+        DB::table('produto_variacao_imagens')->insert([
+            'id_variacao' => $variacaoId,
+            'url' => '/storage/produtos/variacoes/variacao.png',
+            'created_at' => $now,
+            'updated_at' => $now,
+        ]);
+
+        $resultado = $this->service()->build($this->carregarProdutos([$produtoId]));
+
+        $this->assertCount(1, $resultado['itens_avulsos']);
+        $this->assertSame(
+            'data:image/png;base64,' . self::PNG_VARIACAO,
+            $resultado['itens_avulsos'][0]['imagem_src']
+        );
+    }
+
     private function service(): OutletCatalogoPdfService
     {
         return app(OutletCatalogoPdfService::class);
@@ -268,6 +304,7 @@ class OutletCatalogoPdfServiceTest extends TestCase
             ->whereIn('id', $produtoIds)
             ->with([
                 'categoria',
+                'imagemPrincipal',
                 'variacoes.atributos',
                 'variacoes.imagem',
                 'variacoes.outlets',

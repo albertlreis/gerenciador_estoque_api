@@ -110,6 +110,7 @@ class ProdutoVariacaoImagemController extends Controller
             'id' => $imagem->id,
             'id_variacao' => $imagem->id_variacao,
             'url' => $imagem->url,
+            'url_completa' => $imagem->url_completa,
             'created_at' => $imagem->created_at,
             'updated_at' => $imagem->updated_at,
         ];

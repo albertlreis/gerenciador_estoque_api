@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Exports\Relatorios\EstoqueAtualExport;
+use App\Services\PdfImageService;
 use App\Services\Relatorios\EstoqueRelatorioService;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\JsonResponse;
@@ -10,7 +11,6 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Maatwebsite\Excel\Facades\Excel;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
-use App\Models\ProdutoImagem; // <- usaremos a pasta FOLDER
 
 /**
  * @group Relatórios: Estoque
@@ -37,15 +37,19 @@ class EstoqueRelatorioController extends Controller
         $formato = strtolower((string) $request->query('formato'));
 
         if ($formato === 'pdf') {
-            $baseFsDir = public_path('storage' . DIRECTORY_SEPARATOR . ProdutoImagem::FOLDER);
-
             Pdf::setOptions(['isRemoteEnabled' => true]);
 
             $geradoEm = now('America/Belem')->format('d/m/Y H:i');
+            $pdfImageService = app(PdfImageService::class);
+            $dados = collect($dados)
+                ->map(function (array $info) use ($pdfImageService): array {
+                    $info['imagem_principal_pdf'] = $pdfImageService->toPdfSrc($info['imagem_principal'] ?? null);
+                    return $info;
+                })
+                ->all();
 
             $pdf = Pdf::loadView('exports.estoque-atual', [
                 'dados'     => $dados,
-                'baseFsDir' => $baseFsDir,
                 'geradoEm'  => $geradoEm,
             ]);
 

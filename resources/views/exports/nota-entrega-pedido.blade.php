@@ -132,14 +132,13 @@
                     $referencia = trim((string)($variacao?->referencia ?? ''));
                     $descricao = $produtoNome !== '' ? $produtoNome : ($variacaoNome !== '' ? $variacaoNome : 'Produto');
                     $detalhe = trim(implode(' | ', array_filter([$variacaoNome, $atributos])));
-                    $imgDataUri = trim((string)($item->pdf_imagem_data_uri ?? ''));
+                    $imgDataUri = trim((string)($item->pdf_imagem_data_uri ?? ''))
+                        ?: app(\App\Services\PdfImageService::class)->placeholderDataUri();
                     $obsItem = trim((string)($item->pedidoItem?->observacoes ?? ''));
                 @endphp
                 <tr>
                     <td style="text-align: center;">
-                        @if($imgDataUri)
-                            <img src="{{ $imgDataUri }}" width="74" style="max-height: 62px;" alt="Imagem do produto">
-                        @endif
+                        <img src="{{ $imgDataUri }}" width="74" height="62" style="object-fit:cover;" alt="Imagem do produto">
                     </td>
                     <td class="qty">{{ (int)($item->nota_quantidade ?? 0) }}</td>
                     <td class="wrap">

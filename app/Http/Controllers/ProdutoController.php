@@ -13,6 +13,7 @@ use App\Http\Resources\ProdutoSimplificadoResource;
 use App\Services\LogService;
 use App\Services\OutletCatalogoPricingService;
 use App\Services\OutletCatalogoPdfService;
+use App\Services\PdfImageService;
 use App\Services\ProdutoSugestoesOutletService;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Support\Facades\Cache;
@@ -30,10 +31,7 @@ use App\Http\Requests\{ConfirmarImportacaoRequest,
     StoreProdutoRequest,
     UpdateProdutoRequest};
 use App\Http\Resources\ProdutoResource;
-use App\Models\{
-    Produto,
-    ProdutoImagem
-};
+use App\Models\Produto;
 use App\Services\ProdutoService;
 
 class ProdutoController extends Controller
@@ -174,9 +172,9 @@ class ProdutoController extends Controller
         }
 
         $pricingService = app(OutletCatalogoPricingService::class);
-        $baseFsDir = public_path('storage' . DIRECTORY_SEPARATOR . ProdutoImagem::FOLDER);
+        $pdfImageService = app(PdfImageService::class);
         $itensExportacao = $produtos
-            ->map(fn ($produto) => $this->mapearProdutoParaExportacaoOutlet($produto, $pricingService, $baseFsDir))
+            ->map(fn ($produto) => $this->mapearProdutoParaExportacaoOutlet($produto, $pricingService, $pdfImageService))
             ->values();
 
         if (app()->environment('local')) {
@@ -235,7 +233,7 @@ class ProdutoController extends Controller
     private function mapearProdutoParaExportacaoOutlet(
         Produto $produto,
         OutletCatalogoPricingService $pricingService,
-        string $baseFsDir
+        PdfImageService $pdfImageService
     ): array {
         $variacoes = $produto->variacoes ?? collect();
         $catalogo = $pricingService->build($variacoes);
@@ -286,7 +284,7 @@ class ProdutoController extends Controller
                 : 0;
         });
 
-        $imagem = $this->resolverImagemCatalogoOutlet($produto, $baseFsDir);
+        $imagem = $pdfImageService->fromProdutoOrPlaceholder($produto);
 
         return [
             'id' => $produto->id,
@@ -309,39 +307,6 @@ class ProdutoController extends Controller
             'pagamento_condicoes' => $catalogo['pagamento_condicoes'],
             'outlet_restante_total' => (int) $outletRestanteTotal,
         ];
-    }
-
-    private function resolverImagemCatalogoOutlet(Produto $produto, string $baseFsDir): ?string
-    {
-        $imagemPrincipal = $produto->imagemPrincipal;
-        if (!$imagemPrincipal) {
-            return null;
-        }
-
-        $url = (string) ($imagemPrincipal->url ?? $imagemPrincipal->url_completa ?? '');
-        if ($url === '') {
-            return null;
-        }
-
-        if (preg_match('#^https?://#i', $url) === 1) {
-            return $url;
-        }
-
-        $normalizado = trim($url);
-        $normalizado = str_replace(['\\', '/storage/'], [DIRECTORY_SEPARATOR, ''], $normalizado);
-        $normalizado = ltrim($normalizado, DIRECTORY_SEPARATOR);
-
-        $caminhoDireto = $baseFsDir . DIRECTORY_SEPARATOR . $normalizado;
-        if (is_file($caminhoDireto)) {
-            return $caminhoDireto;
-        }
-
-        $caminhoPublicStorage = public_path('storage' . DIRECTORY_SEPARATOR . $normalizado);
-        if (is_file($caminhoPublicStorage)) {
-            return $caminhoPublicStorage;
-        }
-
-        return null;
     }
 
     /**

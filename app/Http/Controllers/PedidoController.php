@@ -476,7 +476,7 @@ class PedidoController extends Controller
             $pedido->consignacoes->each(function ($consignacao) use ($pdfImageService) {
                 $consignacao->setAttribute(
                     'pdf_imagem_data_uri',
-                    $pdfImageService->fromProdutoVariacao($consignacao->produtoVariacao)
+                    $pdfImageService->fromProdutoVariacaoOrPlaceholder($consignacao->produtoVariacao)
                 );
             });
 
@@ -538,7 +538,7 @@ class PedidoController extends Controller
         $pedido->itens->each(function ($item) use ($pdfImageService) {
             $item->setAttribute(
                 'pdf_imagem_data_uri',
-                $pdfImageService->fromProdutoVariacao($item->variacao)
+                $pdfImageService->fromProdutoVariacaoOrPlaceholder($item->variacao)
             );
         });
 
@@ -682,7 +682,7 @@ class PedidoController extends Controller
         $notaItens->each(function (ProdutoEntregaItem $item) use ($pdfImageService) {
             $item->setAttribute(
                 'pdf_imagem_data_uri',
-                $pdfImageService->fromProdutoVariacao($item->variacao)
+                $pdfImageService->fromProdutoVariacaoOrPlaceholder($item->variacao)
             );
         });
 

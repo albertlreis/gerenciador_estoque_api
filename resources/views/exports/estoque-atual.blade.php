@@ -8,10 +8,6 @@
         $somenteOutlet = request()->boolean('somente_outlet');
         $compacto = $compacto ?? false;
 
-        $baseFsDir = isset($baseFsDir) && is_dir($baseFsDir)
-            ? $baseFsDir
-            : public_path('storage/produtos');
-
         $totaisDeposito = [];
         $totalGeralQuantidade = 0;
         $totalGeralValor = 0.0;
@@ -106,13 +102,8 @@
             <tr>
                 @if($somenteOutlet && !$compacto)
                     <td style="text-align:center;">
-                        @php
-                            $imgRel = trim((string)($info['imagem_principal'] ?? ''));
-                            $imgAbs = $imgRel !== '' ? $baseFsDir . DIRECTORY_SEPARATOR . $imgRel : '';
-                        @endphp
-                        @if($imgAbs)
-                            <img src="{{ $imgAbs }}" alt="Imagem" style="max-height:64px; max-width:{{ $wImg - 4 }}px;">
-                        @endif
+                        @php($imgSrc = $info['imagem_principal_pdf'] ?? app(\App\Services\PdfImageService::class)->placeholderDataUri())
+                        <img src="{{ $imgSrc }}" alt="Imagem" style="width:{{ $wImg - 4 }}px; height:64px; object-fit:cover;">
                     </td>
                 @endif
 

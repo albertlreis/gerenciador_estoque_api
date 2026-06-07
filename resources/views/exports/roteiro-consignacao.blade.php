@@ -101,7 +101,8 @@
                             ? ($temDescricao ? "{$referencia} - {$descricao}" : $referencia)
                             : ($temDescricao ? $descricao : '-');
 
-                        $imgDataUri = trim((string)($item->pdf_imagem_data_uri ?? ''));
+                        $imgDataUri = trim((string)($item->pdf_imagem_data_uri ?? ''))
+                            ?: app(\App\Services\PdfImageService::class)->placeholderDataUri();
 
                         // LOCALIZAÇÃO: Estoque.id_deposito (corrigido!) x item->deposito_id (Consignacao)
                         $locTexto = '—';
@@ -131,9 +132,7 @@
                     @endphp
                     <tr>
                         <td style="text-align:center;">
-                            @if($imgDataUri)
-                                <img src="{{ $imgDataUri }}" width="80" style="max-height:64px;" alt="Imagem produto"/>
-                            @endif
+                            <img src="{{ $imgDataUri }}" width="80" height="64" style="object-fit:cover;" alt="Imagem produto"/>
                         </td>
                         <td class="nowrap">{{ (int)($item->quantidade ?? 0) }}</td>
                         <td class="wrap">{{ $descricaoComReferencia }}</td>

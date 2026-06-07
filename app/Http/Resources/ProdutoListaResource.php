@@ -10,7 +10,10 @@ class ProdutoListaResource extends JsonResource
     public function toArray($request): array
     {
         $variacoes = $this->getRelationValue('variacoes') ?? collect();
-        $imagemPrincipal = $this->imagemPrincipal?->url ?? $this->imagemPrincipal?->url_completa;
+        $imagemPrincipalModel = $this->relationLoaded('imagemPrincipal')
+            ? $this->imagemPrincipal
+            : ($this->relationLoaded('imagens') ? $this->imagens->first() : null);
+        $imagemPrincipal = $imagemPrincipalModel?->url ?? $imagemPrincipalModel?->url_completa;
 
         return [
             'id' => $this->id,
@@ -36,7 +39,7 @@ class ProdutoListaResource extends JsonResource
                         'preco' => (float) ($v->preco ?? 0),
                         'estoque_total' => (int) ($v->estoque_total ?? 0),
                         'outlet_restante_total' => (int) ($v->outlet_restante_total ?? 0),
-                        'imagem_url' => $v->imagem_url,
+                        'imagem_url' => $this->normalizarUrlImagem($v->imagem?->url ?? $v->imagem_url),
                     ];
                 })->values();
             }),

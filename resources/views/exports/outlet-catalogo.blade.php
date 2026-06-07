@@ -108,8 +108,9 @@
             padding: 6px;
         }
         .media-image {
-            max-width: 104px;
-            max-height: 108px;
+            width: 104px;
+            height: 108px;
+            object-fit: cover;
         }
         .media-placeholder-icon {
             width: 30px;

@@ -14,9 +14,17 @@ class ProdutoVariacaoImagem extends Model
         'url',
     ];
 
+    protected $appends = [
+        'url_completa',
+    ];
+
     public function variacao(): BelongsTo
     {
         return $this->belongsTo(ProdutoVariacao::class, 'id_variacao');
     }
-}
 
+    public function getUrlCompletaAttribute(): ?string
+    {
+        return ProdutoImagem::normalizarUrlPublica($this->url);
+    }
+}

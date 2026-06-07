@@ -56,6 +56,17 @@ class PdfImageServiceTest extends TestCase
         $this->assertNull($service->toDataUri(null));
     }
 
+    public function test_to_pdf_src_retorna_placeholder_quando_imagem_nao_existe(): void
+    {
+        Storage::fake('public');
+
+        $service = app(PdfImageService::class);
+        $dataUri = $service->toPdfSrc('/storage/produtos/inexistente.png');
+
+        $this->assertStringStartsWith('data:image/svg+xml;base64,', $dataUri);
+        $this->assertSame($service->placeholderDataUri(), $dataUri);
+    }
+
     public function test_resolve_imagem_da_variacao_com_prioridade(): void
     {
         Storage::fake('public');
@@ -141,6 +152,21 @@ class PdfImageServiceTest extends TestCase
 
         $this->assertNull($service->fromProdutoVariacao($variacao->fresh()->load('imagem', 'produto.imagemPrincipal')));
         $this->assertNull($service->fromProdutoVariacao(null));
+    }
+
+    public function test_from_produto_variacao_or_placeholder_retorna_placeholder_sem_imagem_valida(): void
+    {
+        Storage::fake('public');
+
+        $produto = $this->createProduto('Produto sem imagem');
+        $variacao = $this->createVariacao($produto, 'REF-PLACEHOLDER');
+
+        $service = app(PdfImageService::class);
+
+        $this->assertSame(
+            $service->placeholderDataUri(),
+            $service->fromProdutoVariacaoOrPlaceholder($variacao->fresh()->load('imagem', 'produto.imagemPrincipal'))
+        );
     }
 
     private function createProduto(string $nome, bool $ativo = true): Produto

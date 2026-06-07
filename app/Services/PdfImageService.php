@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\ProdutoImagem;
+use App\Models\Produto;
 use App\Models\ProdutoVariacao;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
@@ -11,6 +12,8 @@ use Illuminate\Support\Str;
 
 class PdfImageService
 {
+    private ?string $placeholderDataUri = null;
+
     /**
      * @var array<string, list<array{produto_id: int, url: string}>>
      */
@@ -53,6 +56,28 @@ class PdfImageService
         return sprintf('data:%s;base64,%s', $mime, base64_encode($raw));
     }
 
+    public function toPdfSrc(?string $path): string
+    {
+        return $this->toDataUri($path) ?? $this->placeholderDataUri();
+    }
+
+    public function placeholderDataUri(): string
+    {
+        if ($this->placeholderDataUri !== null) {
+            return $this->placeholderDataUri;
+        }
+
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg" width="80" height="64" viewBox="0 0 80 64">'
+            . '<rect width="80" height="64" fill="#f1f5f9"/>'
+            . '<rect x="0.5" y="0.5" width="79" height="63" fill="none" stroke="#cbd5e1"/>'
+            . '<path d="M20 42l12-14 9 10 6-7 13 11H20z" fill="#cbd5e1"/>'
+            . '<circle cx="56" cy="20" r="6" fill="#cbd5e1"/>'
+            . '<text x="40" y="55" text-anchor="middle" font-family="Arial, sans-serif" font-size="8" fill="#64748b">SEM IMG</text>'
+            . '</svg>';
+
+        return $this->placeholderDataUri = 'data:image/svg+xml;base64,' . base64_encode($svg);
+    }
+
     public function fromProdutoVariacao(?ProdutoVariacao $variacao): ?string
     {
         if ($variacao === null) {
@@ -80,6 +105,37 @@ class PdfImageService
         }
 
         return null;
+    }
+
+    public function fromProdutoVariacaoOrPlaceholder(?ProdutoVariacao $variacao): string
+    {
+        return $this->fromProdutoVariacao($variacao) ?? $this->placeholderDataUri();
+    }
+
+    public function fromProduto(?Produto $produto): ?string
+    {
+        if ($produto === null) {
+            return null;
+        }
+
+        $paths = [
+            $produto->imagemPrincipal?->url,
+            $produto->imagemPrincipal?->url_completa,
+        ];
+
+        foreach ($paths as $path) {
+            $dataUri = $this->toDataUri($path);
+            if ($dataUri !== null) {
+                return $dataUri;
+            }
+        }
+
+        return null;
+    }
+
+    public function fromProdutoOrPlaceholder(?Produto $produto): string
+    {
+        return $this->fromProduto($produto) ?? $this->placeholderDataUri();
     }
 
     /**

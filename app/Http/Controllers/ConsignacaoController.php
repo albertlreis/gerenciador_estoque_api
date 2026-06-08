@@ -162,6 +162,7 @@ class ConsignacaoController extends Controller
             'compras.canceladaPor',
             'devolucoes.usuario',
             'devolucoes.canceladaPor',
+            'entregaItem',
             'movimentacoes.usuario',
             'movimentacoes.depositoOrigem',
             'movimentacoes.depositoDestino',
@@ -310,6 +311,7 @@ class ConsignacaoController extends Controller
             'devolucoes',
             'devolucoes.usuario',
             'devolucoes.canceladaPor',
+            'entregaItem',
             'movimentacoes.usuario',
             'movimentacoes.depositoOrigem',
             'movimentacoes.depositoDestino',
@@ -339,18 +341,18 @@ class ConsignacaoController extends Controller
 
         DB::transaction(function () use ($consignacao, $request) {
             if ($request->status === 'comprado') {
-                $restante = $consignacao->quantidadeRestante();
+                $restante = $consignacao->quantidadeDisponivelCliente();
                 if ($restante <= 0) {
                     abort(422, 'Consignação sem quantidade disponível para venda.');
                 }
 
-                $consignacao->compras()->create([
+                $compra = $consignacao->compras()->create([
                     'quantidade' => $restante,
                     'observacoes' => null,
                     'usuario_id' => AuthHelper::getUsuarioId(),
                 ]);
 
-                $this->registrarVendaCentralConsignacao($consignacao, $restante, AuthHelper::getUsuarioId(), null);
+                $this->registrarVendaCentralConsignacao($consignacao, $restante, AuthHelper::getUsuarioId(), null, (int) $compra->id);
                 $this->recalcularStatusConsignacao($consignacao->fresh(['devolucoes', 'compras']));
                 $this->marcarPedidoConsignacaoComoVendido($consignacao->pedido);
             } else {
@@ -384,6 +386,164 @@ class ConsignacaoController extends Controller
         return response()->json(ConsignacaoResource::collection($consignacoes));
     }
 
+    public function registrarEnvio($id, Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'quantidade' => 'nullable|integer|min:1',
+            'observacoes' => 'nullable|string',
+        ]);
+
+        $usuarioId = AuthHelper::getUsuarioId();
+
+        $resultado = DB::transaction(function () use ($id, $validated, $usuarioId) {
+            $consignacao = Consignacao::with(['devolucoes', 'compras', 'produtoVariacao.produto'])
+                ->lockForUpdate()
+                ->findOrFail($id);
+
+            $pendente = $consignacao->quantidadePendenteEnvio();
+            $quantidade = isset($validated['quantidade']) ? (int) $validated['quantidade'] : $pendente;
+
+            if ($pendente <= 0) {
+                return [
+                    'ok' => false,
+                    'status' => 422,
+                    'message' => 'Toda a quantidade desta consignacao ja foi enviada ao cliente.',
+                ];
+            }
+
+            if ($quantidade > $pendente) {
+                return [
+                    'ok' => false,
+                    'status' => 422,
+                    'message' => "Quantidade maior que o pendente de envio ({$pendente}).",
+                ];
+            }
+
+            $this->registrarEnvioCentralConsignacao(
+                $consignacao,
+                $quantidade,
+                $usuarioId,
+                $validated['observacoes'] ?? null
+            );
+
+            return ['ok' => true, 'processados' => 1];
+        });
+
+        if (!$resultado['ok']) {
+            return response()->json([
+                'message' => $resultado['message'],
+                'erro' => $resultado['message'],
+            ], $resultado['status']);
+        }
+
+        return response()->json(['mensagem' => 'Envio de consignacao registrado com sucesso.', 'processados' => 1]);
+    }
+
+    public function registrarEnviosEmMassa(int $pedidoId, Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'observacoes' => 'nullable|string',
+            'itens' => 'required|array|min:1',
+            'itens.*.consignacao_id' => 'required|integer|min:1|distinct',
+            'itens.*.quantidade' => 'nullable|integer|min:1',
+        ]);
+
+        Pedido::findOrFail($pedidoId);
+
+        $itensPayload = collect($validated['itens'])
+            ->mapWithKeys(fn ($item) => [(int) $item['consignacao_id'] => isset($item['quantidade']) ? (int) $item['quantidade'] : null]);
+        $consignacaoIds = $itensPayload->keys()->values();
+        $usuarioId = AuthHelper::getUsuarioId();
+        $observacoes = $validated['observacoes'] ?? null;
+
+        $resultado = DB::transaction(function () use ($pedidoId, $consignacaoIds, $itensPayload, $usuarioId, $observacoes) {
+            $consignacoes = Consignacao::with(['devolucoes', 'compras', 'produtoVariacao.produto'])
+                ->where('pedido_id', $pedidoId)
+                ->whereIn('id', $consignacaoIds)
+                ->lockForUpdate()
+                ->get()
+                ->keyBy('id');
+
+            $invalidos = [];
+            $quantidades = [];
+
+            foreach ($consignacaoIds as $consignacaoId) {
+                $consignacao = $consignacoes->get($consignacaoId);
+                if (!$consignacao) {
+                    $invalidos[] = [
+                        'id' => $consignacaoId,
+                        'motivo' => 'Item nao encontrado neste pedido.',
+                    ];
+                    continue;
+                }
+
+                $pendente = $consignacao->quantidadePendenteEnvio();
+                $quantidadeSolicitada = $itensPayload->get($consignacaoId);
+                $quantidade = $quantidadeSolicitada !== null ? (int) $quantidadeSolicitada : $pendente;
+
+                if ($pendente <= 0) {
+                    $invalidos[] = [
+                        'id' => $consignacao->id,
+                        'nome' => $this->nomeConsignacao($consignacao),
+                        'motivo' => 'Toda a quantidade ja foi enviada ao cliente.',
+                    ];
+                    continue;
+                }
+
+                if ($quantidade > $pendente) {
+                    $invalidos[] = [
+                        'id' => $consignacao->id,
+                        'nome' => $this->nomeConsignacao($consignacao),
+                        'motivo' => "Quantidade maior que o pendente de envio ({$pendente}).",
+                    ];
+                    continue;
+                }
+
+                $quantidades[$consignacaoId] = $quantidade;
+            }
+
+            if ($invalidos !== []) {
+                return [
+                    'ok' => false,
+                    'status' => 422,
+                    'message' => 'Alguns produtos nao podem ter envio registrado. Atualize a tela e tente novamente.',
+                    'itens_invalidos' => $invalidos,
+                ];
+            }
+
+            foreach ($consignacaoIds as $consignacaoId) {
+                $this->registrarEnvioCentralConsignacao(
+                    $consignacoes->get($consignacaoId),
+                    $quantidades[$consignacaoId],
+                    $usuarioId,
+                    $observacoes
+                );
+            }
+
+            return [
+                'ok' => true,
+                'processados' => $consignacaoIds->count(),
+            ];
+        });
+
+        if (!$resultado['ok']) {
+            return response()->json([
+                'message' => $resultado['message'],
+                'erro' => $resultado['message'],
+                'itens_invalidos' => $resultado['itens_invalidos'],
+            ], $resultado['status']);
+        }
+
+        $processados = (int) $resultado['processados'];
+
+        return response()->json([
+            'mensagem' => $processados === 1
+                ? 'Envio de consignacao registrado com sucesso.'
+                : "{$processados} envios de consignacao registrados com sucesso.",
+            'processados' => $processados,
+        ]);
+    }
+
     public function registrarDevolucao($id, Request $request): JsonResponse
     {
         $request->validate([
@@ -398,10 +558,10 @@ class ConsignacaoController extends Controller
             return response()->json(['erro' => 'Não é possível registrar devolução para consignação finalizada.'], 422);
         }
 
-        $restante = $consignacao->quantidadeRestante();
+        $restante = $consignacao->quantidadeDisponivelCliente();
 
         if ($request->quantidade > $restante) {
-            return response()->json(['erro' => 'Quantidade devolvida excede o restante.'], 422);
+            return response()->json(['erro' => "Quantidade devolvida excede o saldo enviado ao cliente ({$restante})."], 422);
         }
 
         $usuarioId = AuthHelper::getUsuarioId();
@@ -477,7 +637,7 @@ class ConsignacaoController extends Controller
                 }
 
                 $quantidade = (int) $itensPayload->get($consignacaoId);
-                $restante = $consignacao->quantidadeRestante();
+                $restante = $consignacao->quantidadeDisponivelCliente();
 
                 if (!in_array($consignacao->status, ['pendente', 'parcial'], true)) {
                     $invalidos[] = [
@@ -492,7 +652,7 @@ class ConsignacaoController extends Controller
                     $invalidos[] = [
                         'id' => $consignacao->id,
                         'nome' => $this->nomeConsignacao($consignacao),
-                        'motivo' => 'Sem quantidade disponivel para devolucao.',
+                        'motivo' => 'Sem quantidade enviada ao cliente disponivel para devolucao.',
                     ];
                     continue;
                 }
@@ -624,7 +784,7 @@ class ConsignacaoController extends Controller
                     continue;
                 }
 
-                $restante = $consignacao->quantidadeRestante();
+                $restante = $consignacao->quantidadeDisponivelCliente();
                 $quantidade = $itensPayload->has($consignacaoId)
                     ? (int) $itensPayload->get($consignacaoId)
                     : $restante;
@@ -633,7 +793,7 @@ class ConsignacaoController extends Controller
                     $invalidos[] = [
                         'id' => $consignacao->id,
                         'nome' => $this->nomeConsignacao($consignacao),
-                        'motivo' => 'Sem quantidade disponivel para venda.',
+                        'motivo' => 'Sem quantidade enviada ao cliente disponivel para venda.',
                     ];
                     continue;
                 }
@@ -662,13 +822,13 @@ class ConsignacaoController extends Controller
             foreach ($consignacaoIds as $consignacaoId) {
                 /** @var Consignacao $consignacao */
                 $consignacao = $consignacoes->get($consignacaoId);
-                $consignacao->compras()->create([
+                $compra = $consignacao->compras()->create([
                     'quantidade' => $quantidades[$consignacaoId],
                     'observacoes' => $observacoes,
                     'usuario_id' => $usuarioId,
                 ]);
 
-                $this->registrarVendaCentralConsignacao($consignacao, $quantidades[$consignacaoId], $usuarioId, $observacoes);
+                $this->registrarVendaCentralConsignacao($consignacao, $quantidades[$consignacaoId], $usuarioId, $observacoes, (int) $compra->id);
                 $this->recalcularStatusConsignacao($consignacao->fresh(['devolucoes', 'compras']));
             }
 
@@ -908,7 +1068,7 @@ class ConsignacaoController extends Controller
             ->get();
     }
 
-    private function registrarVendaCentralConsignacao(Consignacao $consignacao, int $quantidade, ?int $usuarioId, ?string $observacoes): void
+    private function registrarEnvioCentralConsignacao(Consignacao $consignacao, int $quantidade, ?int $usuarioId, ?string $observacoes): void
     {
         if ($quantidade <= 0) {
             return;
@@ -916,23 +1076,34 @@ class ConsignacaoController extends Controller
 
         $entregas = app(EntregaProdutoService::class);
         $central = $entregas->criarDemandaConsignacao($consignacao, $usuarioId);
-        $marcador = $consignacao->quantidadeComprada();
+        $marcador = $consignacao->quantidadeEnviada();
 
         $entregas->expedirItem(
             $central,
             $consignacao->deposito_id,
             $quantidade,
             $usuarioId,
-            $observacoes ?: "Venda de consignacao #{$consignacao->id}",
+            $observacoes ?: "Envio de consignacao #{$consignacao->id}",
             ProdutoEntregaEvento::ENVIADO_CONSIGNACAO,
-            "consignacao:{$consignacao->id}:venda:{$marcador}:expedicao"
+            "consignacao:{$consignacao->id}:envio:{$marcador}"
         );
+    }
+
+    private function registrarVendaCentralConsignacao(Consignacao $consignacao, int $quantidade, ?int $usuarioId, ?string $observacoes, ?int $marcadorEvento = null): void
+    {
+        if ($quantidade <= 0) {
+            return;
+        }
+
+        $entregas = app(EntregaProdutoService::class);
+        $central = $entregas->criarDemandaConsignacao($consignacao, $usuarioId);
+        $marcador = $marcadorEvento ?? $consignacao->quantidadeComprada();
 
         $entregas->entregarItem(
             $central,
             $quantidade,
             $usuarioId,
-            $observacoes ?: "Venda de consignacao entregue #{$consignacao->id}",
+            $observacoes ?: "Venda de consignacao confirmada #{$consignacao->id}",
             "consignacao:{$consignacao->id}:venda:{$marcador}:entrega"
         );
     }
@@ -962,7 +1133,6 @@ class ConsignacaoController extends Controller
             })
             ->whereIn('tipo_evento', [
                 ProdutoEntregaEvento::ENTREGUE_CLIENTE,
-                ProdutoEntregaEvento::ENVIADO_CONSIGNACAO,
             ])
             ->orderByDesc('id')
             ->get();

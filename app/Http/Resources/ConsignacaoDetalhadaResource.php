@@ -16,7 +16,9 @@ class ConsignacaoDetalhadaResource extends JsonResource
             'cliente_nome' => optional($this->pedido->cliente)->nome,
 
             'quantidade' => $this->quantidade,
-            'quantidade_disponivel' => $this->quantidadeRestante(),
+            'quantidade_disponivel' => $this->quantidadeDisponivelCliente(),
+            'quantidade_enviada' => $this->quantidadeEnviada(),
+            'quantidade_pendente_envio' => $this->quantidadePendenteEnvio(),
             'quantidade_comprada' => $this->quantidadeComprada(),
             'quantidade_devolvida' => $this->quantidadeDevolvida(),
 

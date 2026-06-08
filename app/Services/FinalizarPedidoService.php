@@ -7,6 +7,7 @@ use App\Helpers\AuthHelper;
 use App\Integrations\ContaAzul\Services\ContaAzulExportDispatchService;
 use App\Http\Requests\StorePedidoRequest;
 use App\Models\Carrinho;
+use App\Models\ProdutoEntregaEvento;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Collection;
@@ -106,9 +107,10 @@ final class FinalizarPedidoService
         $depositosResolvidos = $this->resolverDepositosPorItem($itensFinalizacao, $depositosMapBruto);
 
         $emConsignacao = $request->boolean('modo_consignacao');
+        $baixarConsignacaoAgora = $emConsignacao && $request->boolean('registrar_movimentacao');
 
         // Validação quando for movimentar (aplica a normal e consignado)
-        return DB::transaction(function () use ($request, $carrinho, $itensFinalizacao, $idUsuarioFinal, $depositosResolvidos, $emConsignacao) {
+        return DB::transaction(function () use ($request, $carrinho, $itensFinalizacao, $idUsuarioFinal, $depositosResolvidos, $emConsignacao, $baixarConsignacaoAgora) {
             $total        = $itensFinalizacao->sum('subtotal');
             $dataPedido   = Carbon::now('America/Belem');
             $prazoPadrao  = (int) config('orders.prazo_padrao_dias_uteis', 60);
@@ -145,12 +147,24 @@ final class FinalizarPedidoService
             }
 
             // Movimentação OU Reserva (ambos usam o mapa resolvido)
-            $this->entregaProdutoService->criarDemandaPedido($pedido, $idUsuarioFinal, true);
+            $this->entregaProdutoService->criarDemandaPedido($pedido, $idUsuarioFinal, !$emConsignacao);
 
             if ($emConsignacao) {
                 $pedido->load('consignacoes');
                 foreach ($pedido->consignacoes as $consignacao) {
-                    $this->entregaProdutoService->criarDemandaConsignacao($consignacao, $idUsuarioFinal);
+                    $central = $this->entregaProdutoService->criarDemandaConsignacao($consignacao, $idUsuarioFinal);
+
+                    if ($baixarConsignacaoAgora) {
+                        $this->entregaProdutoService->expedirItem(
+                            $central,
+                            $consignacao->deposito_id,
+                            null,
+                            $idUsuarioFinal,
+                            "Envio inicial da consignacao #{$consignacao->id}",
+                            ProdutoEntregaEvento::ENVIADO_CONSIGNACAO,
+                            "consignacao:{$consignacao->id}:envio-inicial"
+                        );
+                    }
                 }
             }
 

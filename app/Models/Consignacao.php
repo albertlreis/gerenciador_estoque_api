@@ -57,6 +57,31 @@ class Consignacao extends Model
             ->where('ref_type', 'consignacao');
     }
 
+    public function entregaItem()
+    {
+        return $this->hasOne(ProdutoEntregaItem::class, 'consignacao_id')
+            ->where('tipo_origem', ProdutoEntregaItem::ORIGEM_CONSIGNACAO);
+    }
+
+    public function quantidadeEnviada(): int
+    {
+        $entrega = $this->relationLoaded('entregaItem')
+            ? $this->entregaItem
+            : $this->entregaItem()->first();
+
+        return max(0, (int) ($entrega?->quantidade_expedida ?? 0));
+    }
+
+    public function quantidadePendenteEnvio(): int
+    {
+        return max(0, (int) $this->quantidade - $this->quantidadeEnviada());
+    }
+
+    public function quantidadeDisponivelCliente(): int
+    {
+        return max(0, $this->quantidadeEnviada() - $this->quantidadeDevolvida() - $this->quantidadeComprada());
+    }
+
     public function quantidadeDevolvida(): int
     {
         if (!$this->relationLoaded('devolucoes')) {

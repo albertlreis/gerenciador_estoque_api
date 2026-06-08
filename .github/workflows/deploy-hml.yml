@@ -22,6 +22,9 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
+    env:
+      APP_ENV: testing
+      LOG_CHANNEL: testing_null
 
     services:
       mysql:
@@ -34,12 +37,16 @@ jobs:
         ports:
           - 3306:3306
         options: >-
-          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --log-driver=none
+          --health-cmd="MYSQL_PWD=root mysqladmin ping -h 127.0.0.1 -uroot"
           --health-interval=10s
           --health-timeout=5s
           --health-retries=10
 
     steps:
+      - name: Configure Git defaults
+        run: git config --global init.defaultBranch master
+
       - name: Checkout
         uses: actions/checkout@v6
 
@@ -58,6 +65,7 @@ jobs:
       - name: Prepare environment
         run: |
           cp .env.testing.example .env.testing
+          cp .env.testing.example .env
           composer install --no-interaction --prefer-dist
           npm install
 
@@ -70,8 +78,8 @@ jobs:
             exit 1
           fi
 
-          docker exec "${mysql_container}" mysql -uroot -proot -e "SET GLOBAL log_bin_trust_function_creators = 1;"
-          docker exec "${mysql_container}" mysql -uroot -proot -e "SHOW VARIABLES LIKE 'log_bin_trust_function_creators';"
+          docker exec "${mysql_container}" sh -lc "MYSQL_PWD=root mysql -uroot -e 'SET GLOBAL log_bin_trust_function_creators = 1;'"
+          docker exec "${mysql_container}" sh -lc "MYSQL_PWD=root mysql -uroot -e \"SHOW VARIABLES LIKE 'log_bin_trust_function_creators';\""
 
       - name: Run migrations
         env:
@@ -79,9 +87,7 @@ jobs:
         run: php artisan migrate --env=testing --force
 
       - name: Run tests
-        env:
-          APP_ENV: testing
-        run: php artisan test
+        run: php artisan test --without-tty
 
   deploy:
     needs: test
@@ -103,7 +109,8 @@ jobs:
 
       - name: Trigger deploy on droplet
         run: |
-          remote_command="cd /home/docker/acadsoft/sierra-estoque-hml && ./deploy.sh"
+          compose_fix_cmd="if [ -f docker-compose.yml ]; then cp docker-compose.yml docker-compose.yml.bak-version-obsolete && sed -i '/^version:/d' docker-compose.yml; fi"
+          remote_command="cd /home/docker/acadsoft/sierra-estoque-hml && ${compose_fix_cmd} && ./deploy.sh"
 
           if [ "${RUN_MIGRATIONS}" = "true" ]; then
             remote_command="${remote_command} --migrate"

@@ -22,6 +22,9 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
+    env:
+      APP_ENV: testing
+      LOG_CHANNEL: testing_null
 
     services:
       mysql:
@@ -34,12 +37,16 @@ jobs:
         ports:
           - 3306:3306
         options: >-
-          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --log-driver=none
+          --health-cmd="MYSQL_PWD=root mysqladmin ping -h 127.0.0.1 -uroot"
           --health-interval=10s
           --health-timeout=5s
           --health-retries=10
 
     steps:
+      - name: Configure Git defaults
+        run: git config --global init.defaultBranch master
+
       - name: Checkout
         uses: actions/checkout@v6
 
@@ -58,6 +65,7 @@ jobs:
       - name: Prepare environment
         run: |
           cp .env.testing.example .env.testing
+          cp .env.testing.example .env
           composer install --no-interaction --prefer-dist
           npm install
 
@@ -70,8 +78,8 @@ jobs:
             exit 1
           fi
 
-          docker exec "${mysql_container}" mysql -uroot -proot -e "SET GLOBAL log_bin_trust_function_creators = 1;"
-          docker exec "${mysql_container}" mysql -uroot -proot -e "SHOW VARIABLES LIKE 'log_bin_trust_function_creators';"
+          docker exec "${mysql_container}" sh -lc "MYSQL_PWD=root mysql -uroot -e 'SET GLOBAL log_bin_trust_function_creators = 1;'"
+          docker exec "${mysql_container}" sh -lc "MYSQL_PWD=root mysql -uroot -e \"SHOW VARIABLES LIKE 'log_bin_trust_function_creators';\""
 
       - name: Run migrations
         env:
@@ -79,9 +87,7 @@ jobs:
         run: php artisan migrate --env=testing --force
 
       - name: Run tests
-        env:
-          APP_ENV: testing
-        run: php artisan test
+        run: php artisan test --without-tty
 
   deploy:
     needs: test
@@ -111,6 +117,7 @@ jobs:
             backup_cmd="./html/scripts/backup-production.sh && "
           fi
 
-          remote_command="cd /home/docker/acadsoft/sierra-estoque && repo_git_dir=\$(find . -maxdepth 3 -type d -name .git -print -quit) && repo_dir=\${repo_git_dir%/.git} && if [ -n \"\${repo_dir}\" ]; then git -C \"\${repo_dir}\" fetch origin master && git -C \"\${repo_dir}\" reset --hard origin/master && git -C \"\${repo_dir}\" clean -fd; fi && ${backup_cmd}./deploy.sh ${deploy_args} && docker exec sierra_estoque_app sh -lc 'mkdir -p /var/www/html/storage/framework/cache/data /var/www/html/storage/logs /var/www/html/bootstrap/cache && chown -R www-data:www-data /var/www/html/storage/framework/cache /var/www/html/storage/logs /var/www/html/bootstrap/cache && chmod -R ug+rwX /var/www/html/storage/framework/cache /var/www/html/storage/logs /var/www/html/bootstrap/cache'"
+          compose_fix_cmd="if [ -f docker-compose.yml ]; then cp docker-compose.yml docker-compose.yml.bak-version-obsolete && sed -i '/^version:/d' docker-compose.yml; fi"
+          remote_command="cd /home/docker/acadsoft/sierra-estoque && repo_git_dir=\$(find . -maxdepth 3 -type d -name .git -print -quit) && repo_dir=\${repo_git_dir%/.git} && if [ -n \"\${repo_dir}\" ]; then git -C \"\${repo_dir}\" fetch origin master && git -C \"\${repo_dir}\" reset --hard origin/master && git -C \"\${repo_dir}\" clean -fd; fi && ${compose_fix_cmd} && ${backup_cmd}./deploy.sh ${deploy_args} && docker exec sierra_estoque_app sh -lc 'mkdir -p /var/www/html/storage/framework/cache/data /var/www/html/storage/logs /var/www/html/bootstrap/cache && chown -R www-data:www-data /var/www/html/storage/framework/cache /var/www/html/storage/logs /var/www/html/bootstrap/cache && chmod -R ug+rwX /var/www/html/storage/framework/cache /var/www/html/storage/logs /var/www/html/bootstrap/cache'"
 
           ssh -p "${{ secrets.DEPLOY_PORT }}" "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" "${remote_command}"

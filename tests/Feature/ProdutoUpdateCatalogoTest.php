@@ -8,6 +8,7 @@ use App\Models\Produto;
 use App\Models\Usuario;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
@@ -74,5 +75,20 @@ class ProdutoUpdateCatalogoTest extends TestCase
         $this->assertNull($produto->profundidade);
         $this->assertNull($produto->peso);
         $this->assertNull($produto->estoque_minimo);
+
+        $logId = DB::table('auditoria_logs')
+            ->where('modulo', 'produtos')
+            ->where('acao', 'produto.updated')
+            ->where('entity_id', (string) $produto->id)
+            ->latest('id')
+            ->value('id');
+
+        $this->assertNotNull($logId);
+        $this->assertDatabaseHas('auditoria_log_mudancas', [
+            'auditoria_log_id' => $logId,
+            'campo' => 'nome',
+            'old_value' => 'Produto Original',
+            'new_value' => 'Produto Atualizado',
+        ]);
     }
 }

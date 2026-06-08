@@ -414,6 +414,7 @@ class ProdutoController extends Controller
             }
 
             $produto->delete();
+            $this->produtoService->registrarProdutoRemovido($produto);
             DB::commit();
 
             return response()->json(['message' => 'Produto excluído com sucesso.']);

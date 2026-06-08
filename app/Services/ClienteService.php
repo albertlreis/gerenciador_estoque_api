@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Integrations\ContaAzul\Services\ContaAzulExportDispatchService;
 use App\Models\Cliente;
+use App\Support\Auditoria\AuditoriaDiff;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -14,10 +15,23 @@ use Throwable;
 
 class ClienteService
 {
+    private const CLIENTE_AUDIT_FIELDS = [
+        'nome',
+        'nome_fantasia',
+        'documento',
+        'inscricao_estadual',
+        'email',
+        'telefone',
+        'tipo',
+        'whatsapp',
+        'data_nascimento',
+    ];
+
     public function __construct(
         protected ClienteRepository $clientes,
         protected ClienteEnderecoRepository $enderecosRepo,
         protected ContaAzulExportDispatchService $contaAzulExports,
+        protected AuditoriaEventoService $auditoria,
     ) {}
 
     public function listarClientes(array $filtros = []): Collection
@@ -149,6 +163,17 @@ class ClienteService
             return $cliente;
         });
 
+        $this->auditoria->registrar(
+            module: 'clientes',
+            action: 'cliente.created',
+            label: 'Cliente criado',
+            auditable: $cliente,
+            mudancas: array_merge(
+                AuditoriaDiff::modelChanges(null, $cliente, self::CLIENTE_AUDIT_FIELDS),
+                AuditoriaDiff::listChange('enderecos', [], $this->enderecosResumo($cliente))
+            )
+        );
+
         $this->dispatchContaAzulClienteExport($cliente, 'cliente_criado');
 
         return $cliente;
@@ -156,6 +181,8 @@ class ClienteService
 
     public function atualizarClienteComEnderecos(Cliente $cliente, array $data): Cliente
     {
+        $before = $cliente->fresh(['enderecos']);
+
         $cliente = DB::transaction(function () use ($cliente, $data) {
             $data = $this->normalizeClienteData($data);
 
@@ -173,9 +200,57 @@ class ClienteService
             return $cliente;
         });
 
+        $this->auditoria->registrar(
+            module: 'clientes',
+            action: 'cliente.updated',
+            label: 'Cliente atualizado',
+            auditable: $cliente,
+            mudancas: array_merge(
+                AuditoriaDiff::modelChanges($before, $cliente, self::CLIENTE_AUDIT_FIELDS),
+                AuditoriaDiff::listChange('enderecos', $this->enderecosResumo($before), $this->enderecosResumo($cliente))
+            )
+        );
+
         $this->dispatchContaAzulClienteExport($cliente, 'cliente_atualizado');
 
         return $cliente;
+    }
+
+    public function registrarClienteRemovido(Cliente $cliente): void
+    {
+        $cliente->loadMissing('enderecos');
+
+        $this->auditoria->registrar(
+            module: 'clientes',
+            action: 'cliente.deleted',
+            label: 'Cliente removido',
+            auditable: $cliente,
+            mudancas: array_merge(
+                AuditoriaDiff::modelChanges($cliente, null, self::CLIENTE_AUDIT_FIELDS),
+                AuditoriaDiff::listChange('enderecos', $this->enderecosResumo($cliente), [])
+            )
+        );
+    }
+
+    /**
+     * @return array<int,string>
+     */
+    private function enderecosResumo(Cliente $cliente): array
+    {
+        $enderecos = $cliente->relationLoaded('enderecos')
+            ? $cliente->enderecos
+            : $cliente->enderecos()->get();
+
+        return $enderecos
+            ->map(fn ($endereco) => implode(':', [
+                $endereco->principal ? 'principal' : 'secundario',
+                preg_replace('/\D/', '', (string) $endereco->cep),
+                trim((string) $endereco->cidade),
+                trim((string) $endereco->estado),
+            ]))
+            ->filter()
+            ->values()
+            ->all();
     }
 
     private function dispatchContaAzulClienteExport(Cliente $cliente, string $evento): void

@@ -83,6 +83,7 @@ class ClienteController extends Controller
 
     public function destroy(Cliente $cliente): JsonResponse
     {
+        $this->service->registrarClienteRemovido($cliente);
         $cliente->delete();
         return response()->json(null, 204);
     }

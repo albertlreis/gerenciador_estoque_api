@@ -7,17 +7,33 @@ use App\Integrations\ContaAzul\Services\ContaAzulExportDispatchService;
 use App\Models\Pedido;
 use App\Models\PedidoItem;
 use App\Models\ProdutoVariacao;
+use App\Support\Auditoria\AuditoriaDiff;
 use Carbon\Carbon;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 use Throwable;
 
 class PedidoUpdateService
 {
+    private const PEDIDO_AUDIT_FIELDS = [
+        'tipo',
+        'id_cliente',
+        'id_usuario',
+        'id_parceiro',
+        'numero_externo',
+        'data_pedido',
+        'valor_total',
+        'observacoes',
+        'prazo_dias_uteis',
+        'data_limite_entrega',
+    ];
+
     public function __construct(
         private readonly PedidoPrazoService $prazoService,
         private readonly EntregaProdutoService $entregaProdutoService,
         private readonly ContaAzulExportDispatchService $contaAzulExports,
+        private readonly AuditoriaEventoService $auditoria,
     ) {}
 
     /**
@@ -27,9 +43,11 @@ class PedidoUpdateService
      * @param array<string,mixed> $data
      * @return Pedido
      */
-    public function atualizar(Pedido $pedido, array $data): Pedido
+    public function atualizar(Pedido $pedido, array $data, ?int $usuarioId = null): Pedido
     {
-        return DB::transaction(function () use ($pedido, $data) {
+        return DB::transaction(function () use ($pedido, $data, $usuarioId) {
+            $before = $pedido->fresh(['itens']);
+            $itensResumoAntes = $this->itensResumo($before->itens);
             $itensInput = array_key_exists('itens', $data) ? (array) $data['itens'] : null;
             $itensAntigos = $pedido->itens()->get();
 
@@ -70,6 +88,15 @@ class PedidoUpdateService
             if ($pedido->isVenda() && !$pedido->isConsignado()) {
                 $this->exportarContaAzulBestEffort((int) $pedido->id, 'pedido_atualizado');
             }
+
+            $this->registrarAuditoriaAtualizacao(
+                $before,
+                $pedido,
+                $itensResumoAntes,
+                $this->itensResumo($pedido->itens),
+                $diffs,
+                $usuarioId
+            );
 
             return $pedido;
         });
@@ -291,6 +318,60 @@ class PedidoUpdateService
     private function makeDiffKey(int $variacaoId, int $depositoId): string
     {
         return $variacaoId . '|' . $depositoId;
+    }
+
+    /**
+     * @param array<int,string> $itensAntes
+     * @param array<int,string> $itensDepois
+     * @param array<string,int>|null $estoqueDiffs
+     */
+    private function registrarAuditoriaAtualizacao(
+        Pedido $before,
+        Pedido $after,
+        array $itensAntes,
+        array $itensDepois,
+        ?array $estoqueDiffs,
+        ?int $usuarioId
+    ): void {
+        $mudancas = AuditoriaDiff::modelChanges($before, $after, self::PEDIDO_AUDIT_FIELDS);
+        $mudancas = array_merge(
+            $mudancas,
+            AuditoriaDiff::listChange('itens', $itensAntes, $itensDepois)
+        );
+
+        $this->auditoria->registrar(
+            module: 'pedidos',
+            action: 'pedido.updated',
+            label: "Pedido #{$after->id} atualizado",
+            auditable: $after,
+            mudancas: $mudancas,
+            metadata: array_filter([
+                'usuario_id' => $usuarioId,
+                'estoque_diffs' => $estoqueDiffs,
+            ], fn ($value) => $value !== null && $value !== [])
+        );
+    }
+
+    /**
+     * @param iterable<int,PedidoItem> $itens
+     * @return array<int,string>
+     */
+    private function itensResumo(iterable $itens): array
+    {
+        $resumo = [];
+
+        foreach ($itens as $item) {
+            $resumo[] = implode(':', [
+                (int) ($item->id_variacao ?? 0),
+                (int) ($item->id_deposito ?? 0),
+                (int) ($item->quantidade ?? 0),
+                number_format((float) ($item->preco_unitario ?? 0), 2, '.', ''),
+            ]);
+        }
+
+        sort($resumo, SORT_NATURAL);
+
+        return $resumo;
     }
 
 }

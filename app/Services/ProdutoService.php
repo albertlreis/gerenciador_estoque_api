@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Integrations\ContaAzul\Services\ContaAzulExportDispatchService;
 use App\Models\Produto;
+use App\Support\Auditoria\AuditoriaDiff;
 use Exception;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
@@ -18,8 +19,25 @@ use Throwable;
 
 class ProdutoService
 {
+    private const PRODUTO_AUDIT_FIELDS = [
+        'nome',
+        'descricao',
+        'id_categoria',
+        'id_fornecedor',
+        'codigo_produto',
+        'altura',
+        'largura',
+        'profundidade',
+        'peso',
+        'manual_conservacao',
+        'ativo',
+        'motivo_desativacao',
+        'estoque_minimo',
+    ];
+
     public function __construct(
         private readonly ContaAzulExportDispatchService $contaAzulExports,
+        private readonly AuditoriaEventoService $auditoria,
     ) {
     }
 
@@ -47,6 +65,14 @@ class ProdutoService
             'estoque_minimo' => $data['estoque_minimo'] ?? null,
         ]);
 
+        $this->auditoria->registrar(
+            module: 'produtos',
+            action: 'produto.created',
+            label: 'Produto criado',
+            auditable: $produto,
+            mudancas: AuditoriaDiff::modelChanges(null, $produto, self::PRODUTO_AUDIT_FIELDS)
+        );
+
         $this->contaAzulExports->produto((int) $produto->id, null, null, ['evento' => 'produto_criado']);
 
         return $produto;
@@ -54,6 +80,7 @@ class ProdutoService
 
     public function update(Produto $produto, array $data): Produto
     {
+        $before = $produto->fresh();
         $updateData = [
             'nome' => $data['nome'],
             'descricao' => $data['descricao'] ?? null,
@@ -76,6 +103,14 @@ class ProdutoService
         $produto->update($updateData);
 
         $produto = $produto->refresh();
+        $this->auditoria->registrar(
+            module: 'produtos',
+            action: 'produto.updated',
+            label: 'Produto atualizado',
+            auditable: $produto,
+            mudancas: AuditoriaDiff::modelChanges($before, $produto, self::PRODUTO_AUDIT_FIELDS)
+        );
+
         $this->contaAzulExports->produto((int) $produto->id, null, null, ['evento' => 'produto_atualizado']);
 
         return $produto;
@@ -102,6 +137,17 @@ class ProdutoService
 
             throw new Exception("Erro ao salvar o manual: " . $e->getMessage());
         }
+    }
+
+    public function registrarProdutoRemovido(Produto $produto): void
+    {
+        $this->auditoria->registrar(
+            module: 'produtos',
+            action: 'produto.deleted',
+            label: 'Produto removido',
+            auditable: $produto,
+            mudancas: AuditoriaDiff::modelChanges($produto, null, self::PRODUTO_AUDIT_FIELDS)
+        );
     }
 
     private function armazenarManualConservacao(UploadedFile $file): string

@@ -6,6 +6,7 @@ use App\Integrations\ContaAzul\Services\ContaAzulExportDispatchService;
 use App\Models\Cliente;
 use App\Services\ClienteService;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Mockery;
 use RuntimeException;
@@ -39,6 +40,20 @@ class ClienteContaAzulExportTest extends TestCase
         $this->assertDatabaseHas('clientes', [
             'id' => $cliente->id,
             'nome' => 'Cliente Exportacao Nao Impeditiva',
+        ]);
+
+        $logId = DB::table('auditoria_logs')
+            ->where('modulo', 'clientes')
+            ->where('acao', 'cliente.created')
+            ->where('entity_id', (string) $cliente->id)
+            ->latest('id')
+            ->value('id');
+
+        $this->assertNotNull($logId);
+        $this->assertDatabaseHas('auditoria_log_mudancas', [
+            'auditoria_log_id' => $logId,
+            'campo' => 'nome',
+            'new_value' => 'Cliente Exportacao Nao Impeditiva',
         ]);
 
         Log::shouldHaveReceived('warning')
@@ -83,6 +98,21 @@ class ClienteContaAzulExportTest extends TestCase
             'id' => $cliente->id,
             'nome' => 'Cliente Depois',
             'email' => 'cliente.depois@test.com',
+        ]);
+
+        $logId = DB::table('auditoria_logs')
+            ->where('modulo', 'clientes')
+            ->where('acao', 'cliente.updated')
+            ->where('entity_id', (string) $cliente->id)
+            ->latest('id')
+            ->value('id');
+
+        $this->assertNotNull($logId);
+        $this->assertDatabaseHas('auditoria_log_mudancas', [
+            'auditoria_log_id' => $logId,
+            'campo' => 'nome',
+            'old_value' => 'Cliente Antes',
+            'new_value' => 'Cliente Depois',
         ]);
 
         Log::shouldHaveReceived('warning')

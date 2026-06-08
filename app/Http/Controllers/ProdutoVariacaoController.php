@@ -119,6 +119,7 @@ class ProdutoVariacaoController extends Controller
             return response()->json(['error' => 'Variação não pertence a este produto'], 404);
         }
 
+        $this->service->registrarRemocao($variacao);
         $variacao->delete();
         return response()->json(null, 204);
     }

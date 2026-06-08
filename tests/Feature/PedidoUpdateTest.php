@@ -13,6 +13,7 @@ use App\Models\ProdutoVariacao;
 use App\Models\Usuario;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
@@ -140,6 +141,25 @@ class PedidoUpdateTest extends TestCase
             'id_pedido' => $pedido->id,
             'id_variacao' => $variacaoB->id,
             'quantidade' => 1,
+        ]);
+
+        $logId = DB::table('auditoria_logs')
+            ->where('modulo', 'pedidos')
+            ->where('acao', 'pedido.updated')
+            ->where('entity_id', (string) $pedido->id)
+            ->latest('id')
+            ->value('id');
+
+        $this->assertNotNull($logId);
+        $this->assertDatabaseHas('auditoria_log_mudancas', [
+            'auditoria_log_id' => $logId,
+            'campo' => 'numero_externo',
+            'old_value' => 'PED-001',
+            'new_value' => 'PED-EDIT',
+        ]);
+        $this->assertDatabaseHas('auditoria_log_mudancas', [
+            'auditoria_log_id' => $logId,
+            'campo' => 'itens',
         ]);
     }
 

@@ -7,6 +7,7 @@ use App\Integrations\ContaAzul\Services\ContaAzulExportDispatchService;
 use App\Models\Produto;
 use App\Models\ProdutoVariacao;
 use App\Models\ProdutoVariacaoCodigoHistorico;
+use App\Support\Auditoria\AuditoriaDiff;
 use Illuminate\Contracts\Validation\Validator as ValidatorContract;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
@@ -83,6 +84,7 @@ class ProdutoVariacaoService
         );
 
         $variacao = $variacao->refresh()->load('atributos', 'codigosHistoricos', 'imagem');
+        $this->registrarCriacao($variacao);
         $this->contaAzulExports->produto((int) $produto->id, (int) $variacao->id, null, ['evento' => 'variacao_criada']);
 
         return $variacao;
@@ -122,6 +124,7 @@ class ProdutoVariacaoService
                     'produto_id' => $produtoId,
                     ...$payload,
                 ]);
+                $this->registrarCriacao($variacao->refresh());
             }
 
             $idsRecebidos[] = $variacao->id;
@@ -143,7 +146,13 @@ class ProdutoVariacaoService
             $this->contaAzulExports->produto((int) $produto->id, (int) $variacao->id, null, ['evento' => 'variacao_atualizada_lote']);
         }
 
-        $produto->variacoes()->whereNotIn('id', $idsRecebidos)->delete();
+        $produto->variacoes()
+            ->whereNotIn('id', $idsRecebidos)
+            ->get()
+            ->each(function (ProdutoVariacao $variacao): void {
+                $this->registrarRemocao($variacao);
+                $variacao->delete();
+            });
     }
 
     public function atualizarIndividual(ProdutoVariacao $variacao, array $data): ProdutoVariacao
@@ -290,6 +299,30 @@ class ProdutoVariacaoService
                 'audit.motivo' => 'Informe o motivo da alteração de preço.',
             ]);
         }
+    }
+
+    public function registrarRemocao(ProdutoVariacao $variacao): void
+    {
+        $this->auditoria->registrar(
+            module: 'produto_variacoes',
+            action: 'deleted',
+            label: 'Variacao removida',
+            auditable: $variacao,
+            mudancas: AuditoriaDiff::modelChanges($variacao, null, self::CAMPOS_AUDITAVEIS),
+            metadata: ['produto_id' => $variacao->produto_id]
+        );
+    }
+
+    private function registrarCriacao(ProdutoVariacao $variacao): void
+    {
+        $this->auditoria->registrar(
+            module: 'produto_variacoes',
+            action: 'created',
+            label: 'Variacao criada',
+            auditable: $variacao,
+            mudancas: AuditoriaDiff::modelChanges(null, $variacao, self::CAMPOS_AUDITAVEIS),
+            metadata: ['produto_id' => $variacao->produto_id]
+        );
     }
 
     private function makeValidator(array $data, ?ProdutoVariacao $variacao = null): ValidatorContract

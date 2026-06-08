@@ -3,7 +3,9 @@
 namespace Tests\Feature;
 
 use App\Models\Usuario;
+use App\Models\ContaPagar;
 use App\Services\AuditoriaLogService;
+use App\Services\FinanceiroAuditoriaService;
 use App\Support\Auditoria\LaravelLogFileParser;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Cache;
@@ -378,5 +380,43 @@ class AuditoriaLogsApiTest extends TestCase
         $this->assertStringNotContainsString('abc123', (string) $log->raw_excerpt);
 
         @unlink($file);
+    }
+
+    public function test_auditoria_financeira_grava_mudancas_principais(): void
+    {
+        $conta = ContaPagar::create([
+            'descricao' => 'Conta auditada',
+            'data_vencimento' => now()->addDay()->toDateString(),
+            'valor_bruto' => 100,
+            'desconto' => 0,
+            'juros' => 0,
+            'multa' => 0,
+            'status' => 'ABERTA',
+        ]);
+
+        app(FinanceiroAuditoriaService::class)->log('updated', $conta, [
+            'descricao' => 'Conta auditada',
+            'valor_bruto' => '100.00',
+            'status' => 'ABERTA',
+        ], [
+            'descricao' => 'Conta auditada atualizada',
+            'valor_bruto' => '120.00',
+            'status' => 'ABERTA',
+        ]);
+
+        $logId = DB::table('auditoria_logs')
+            ->where('modulo', 'financeiro')
+            ->where('acao', 'updated')
+            ->where('entity_id', (string) $conta->id)
+            ->latest('id')
+            ->value('id');
+
+        $this->assertNotNull($logId);
+        $this->assertDatabaseHas('auditoria_log_mudancas', [
+            'auditoria_log_id' => $logId,
+            'campo' => 'valor_bruto',
+            'old_value' => '100.00',
+            'new_value' => '120.00',
+        ]);
     }
 }

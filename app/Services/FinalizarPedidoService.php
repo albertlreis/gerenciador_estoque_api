@@ -164,6 +164,15 @@ final class FinalizarPedidoService
                             ProdutoEntregaEvento::ENVIADO_CONSIGNACAO,
                             "consignacao:{$consignacao->id}:envio-inicial"
                         );
+                    } else {
+                        $this->entregaProdutoService->reservarItem(
+                            $central,
+                            $consignacao->deposito_id,
+                            null,
+                            $idUsuarioFinal,
+                            "Reserva inicial da consignacao #{$consignacao->id}",
+                            "consignacao:{$consignacao->id}:reserva-inicial"
+                        );
                     }
                 }
             }

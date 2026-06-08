@@ -401,6 +401,10 @@ class DashboardApiTest extends TestCase
     {
         $usuario = $this->autenticar(['financeiro.dashboard.visualizar']);
 
+        DB::table('contas_pagar_pagamentos')->delete();
+        DB::table('contas_pagar')->delete();
+        DB::table('contas_receber')->delete();
+
         $clienteId = $this->criarCliente('Cliente Financeiro');
         $vendedorId = $this->criarUsuario('Vendedor Financeiro')->id;
         $pedido = $this->criarPedido($clienteId, $vendedorId, now()->subDays(2), 120.00);

@@ -477,6 +477,27 @@ class ProdutoEntregaCentralTest extends TestCase
         $this->assertGreaterThanOrEqual(3, ProdutoEntregaEvento::query()->where('produto_entrega_item_id', $entrega->id)->count());
     }
 
+    public function test_reserva_nao_ultrapassa_saldo_disponivel(): void
+    {
+        [$usuario, $pedido, $variacao, $deposito] = $this->criarPedidoComItem(3);
+
+        Estoque::updateOrCreate(
+            ['id_variacao' => $variacao->id, 'id_deposito' => $deposito->id],
+            ['quantidade' => 2]
+        );
+
+        $service = app(EntregaProdutoService::class);
+        $entrega = $service->criarDemandaPedido($pedido, $usuario->id, false)->first();
+
+        $service->reservarItem($entrega, $deposito->id, 2, $usuario->id, 'Reserva inicial', 'reserva-limite-1');
+        $bloqueada = $service->reservarItem($entrega, $deposito->id, 1, $usuario->id, 'Reserva excedente', 'reserva-limite-2');
+
+        $this->assertSame(2, (int) EstoqueReserva::query()->where('pedido_id', $pedido->id)->sum('quantidade'));
+        $this->assertSame(2, (int) $bloqueada->quantidade_reservada);
+        $this->assertSame(ProdutoEntregaItem::STATUS_AGUARDANDO_ESTOQUE, $bloqueada->status);
+        $this->assertStringContainsString('Estoque insuficiente', (string) $bloqueada->bloqueio_motivo);
+    }
+
     private function criarPedidoComItem(int $quantidade): array
     {
         $usuario = Usuario::create([

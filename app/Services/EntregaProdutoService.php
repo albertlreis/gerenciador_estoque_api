@@ -13,6 +13,7 @@ use App\Models\PedidoItem;
 use App\Models\ProdutoEntregaEvento;
 use App\Models\ProdutoEntregaItem;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
+use InvalidArgumentException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -319,15 +320,25 @@ class EntregaProdutoService
                 return $entrega;
             }
 
-            $reserva = $this->reservas->reservar(
-                variacaoId: (int) $entrega->id_variacao,
-                depositoId: (int) $depositoId,
-                quantidade: (int) $quantidade,
-                pedidoId: $entrega->pedido_id ? (int) $entrega->pedido_id : null,
-                pedidoItemId: $entrega->pedido_item_id ? (int) $entrega->pedido_item_id : null,
-                usuarioId: $usuarioId,
-                motivo: 'produto_entrega'
-            );
+            try {
+                $reserva = $this->reservas->reservar(
+                    variacaoId: (int) $entrega->id_variacao,
+                    depositoId: (int) $depositoId,
+                    quantidade: (int) $quantidade,
+                    pedidoId: $entrega->pedido_id ? (int) $entrega->pedido_id : null,
+                    pedidoItemId: $entrega->pedido_item_id ? (int) $entrega->pedido_item_id : null,
+                    usuarioId: $usuarioId,
+                    motivo: 'produto_entrega'
+                );
+            } catch (InvalidArgumentException $e) {
+                $entrega->update([
+                    'id_deposito_origem' => $depositoId,
+                    'status' => ProdutoEntregaItem::STATUS_AGUARDANDO_ESTOQUE,
+                    'em_revisao' => false,
+                    'bloqueio_motivo' => $e->getMessage(),
+                ]);
+                return $entrega->fresh();
+            }
 
             $entrega->quantidade_reservada = (int) $entrega->quantidade_reservada + (int) $quantidade;
             $entrega->id_deposito_origem = $depositoId;
@@ -520,6 +531,8 @@ class EntregaProdutoService
                     pedidoItemId: $entrega->pedido_item_id ? (int) $entrega->pedido_item_id : null,
                     reservaId: $reservaIdParaConsumo ? (int) $reservaIdParaConsumo : null,
                     tipoMovimentacao: $tipoMovimentacao,
+                    refType: $entrega->tipo_origem,
+                    refId: $entrega->origem_id ? (int) $entrega->origem_id : null,
                 );
             }
 

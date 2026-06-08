@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\EstoqueReserva;
+use InvalidArgumentException;
 use Illuminate\Support\Facades\DB;
 
 class ReservaEstoqueService
@@ -20,6 +21,29 @@ class ReservaEstoqueService
         return DB::transaction(function () use (
             $variacaoId, $depositoId, $quantidade, $pedidoId, $pedidoItemId, $usuarioId, $motivo
         ) {
+            if ($quantidade <= 0) {
+                throw new InvalidArgumentException('Quantidade da reserva deve ser positiva.');
+            }
+
+            if ($depositoId !== null) {
+                $saldo = DB::table('estoque')
+                    ->where('id_variacao', $variacaoId)
+                    ->where('id_deposito', $depositoId)
+                    ->lockForUpdate()
+                    ->first();
+
+                if (!$saldo) {
+                    throw new InvalidArgumentException('Saldo inexistente no depósito para reserva.');
+                }
+
+                $reservado = $this->reservasEmAbertoPorDeposito($variacaoId, $depositoId);
+                $disponivel = (int) $saldo->quantidade - (int) $reservado;
+
+                if ($disponivel < $quantidade) {
+                    throw new InvalidArgumentException("Estoque insuficiente para reserva. Disponivel: {$disponivel}, solicitado: {$quantidade}.");
+                }
+            }
+
             return EstoqueReserva::create([
                 'id_variacao' => $variacaoId,
                 'id_deposito' => $depositoId,

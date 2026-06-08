@@ -14,6 +14,7 @@ use Carbon\Carbon;
 use Carbon\CarbonInterface;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -435,7 +436,8 @@ class EstoqueMovimentacaoService
             return;
         }
 
-        // não existe: cria
+        // não existe: cria. Se outra transação criar a mesma linha entre o SELECT
+        // e o INSERT, recarrega com lock e aplica o crédito sobre a linha existente.
         $insertPayload = [
             'id_variacao' => $variacaoId,
             'id_deposito' => $depositoId,
@@ -448,7 +450,39 @@ class EstoqueMovimentacaoService
             $insertPayload['data_entrada_estoque_atual'] = $dataMovimentacao;
         }
 
-        DB::table('estoque')->insert($insertPayload);
+        try {
+            DB::table('estoque')->insert($insertPayload);
+            return;
+        } catch (QueryException $e) {
+            if (!$this->isUniqueConstraintViolation($e)) {
+                throw $e;
+            }
+        }
+
+        $row = DB::table('estoque')
+            ->where('id_variacao', $variacaoId)
+            ->where('id_deposito', $depositoId)
+            ->lockForUpdate()
+            ->first();
+
+        if (!$row) {
+            throw new RuntimeException('Falha ao criar saldo de estoque.');
+        }
+
+        $novaQtd = (int) $row->quantidade + $qtd;
+        $updatePayload = [
+            'quantidade' => $novaQtd,
+            'updated_at' => Carbon::now(),
+        ];
+
+        if ($this->deveDefinirDataEntradaAtual($tipo, (int) $row->quantidade, $novaQtd)) {
+            $updatePayload['data_entrada_estoque_atual'] = $dataMovimentacao;
+        }
+
+        DB::table('estoque')
+            ->where('id_variacao', $variacaoId)
+            ->where('id_deposito', $depositoId)
+            ->update($updatePayload);
     }
 
     private function resolveDataMovimentacao(mixed $rawDate): Carbon
@@ -503,6 +537,14 @@ class EstoqueMovimentacaoService
         return $this->isTipoEntradaParaDataEstoque($tipo)
             && $saldoAnterior === 0
             && $saldoNovo > 0;
+    }
+
+    private function isUniqueConstraintViolation(QueryException $e): bool
+    {
+        $sqlState = (string) ($e->errorInfo[0] ?? $e->getCode());
+        $driverCode = (int) ($e->errorInfo[1] ?? 0);
+
+        return $sqlState === '23000' && in_array($driverCode, [1062, 19], true);
     }
 
     /**
@@ -760,11 +802,13 @@ class EstoqueMovimentacaoService
         ?int $pedidoItemId = null,
         ?string $loteId = null,
         ?int $reservaId = null,
-        string $tipoMovimentacao = EstoqueMovimentacaoTipo::SAIDA_ENTREGA_CLIENTE->value
+        string $tipoMovimentacao = EstoqueMovimentacaoTipo::SAIDA_ENTREGA_CLIENTE->value,
+        ?string $refType = null,
+        ?int $refId = null
     ): EstoqueMovimentacao {
         return DB::transaction(function () use (
             $variacaoId, $depositoSaidaId, $quantidade, $usuarioId, $observacao,
-            $pedidoId, $pedidoItemId, $loteId, $reservaId, $tipoMovimentacao
+            $pedidoId, $pedidoItemId, $loteId, $reservaId, $tipoMovimentacao, $refType, $refId
         ) {
             // 1) Consome reservas ativas vinculadas ao pedido/pedido_item antes da baixa fisica.
             if ($reservaId || $pedidoId) {
@@ -846,8 +890,8 @@ class EstoqueMovimentacaoService
                 'reserva_id'     => $reservaId,
 
                 // ✅ referência genérica (se quiser padronizar)
-                'ref_type' => $pedidoId ? 'pedido' : null,
-                'ref_id'   => $pedidoId,
+                'ref_type' => $refType ?? ($pedidoId ? 'pedido' : null),
+                'ref_id'   => $refId ?? $pedidoId,
             ]);
         });
     }

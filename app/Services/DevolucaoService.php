@@ -2,9 +2,9 @@
 
 namespace App\Services;
 
+use App\Enums\EstoqueMovimentacaoTipo;
 use App\Models\Devolucao;
 use App\Models\Credito;
-use App\Models\Estoque;
 use App\Models\ProdutoEntregaEvento;
 use Exception;
 use Illuminate\Support\Facades\DB;
@@ -16,6 +16,7 @@ class DevolucaoService
 {
     public function __construct(
         private readonly EntregaProdutoService $entregaProdutoService,
+        private readonly EstoqueMovimentacaoService $estoqueMovimentacaoService,
     ) {}
 
     /**
@@ -110,7 +111,23 @@ class DevolucaoService
                     $totalNovo = 0;
 
                     foreach ($dItem->trocaItens as $t) {
-                        $this->ajustarEstoque($t->nova_variacao_id, $t->quantidade, -1);
+                        $depositoTrocaId = $dItem->pedidoItem->id_deposito ?: config('app.deposito_padrao');
+                        if (!$depositoTrocaId) {
+                            throw new Exception('Informe o depósito de saída dos itens de troca.');
+                        }
+
+                        $this->estoqueMovimentacaoService->registrarMovimentacaoManual([
+                            'id_variacao' => (int) $t->nova_variacao_id,
+                            'id_deposito_origem' => (int) $depositoTrocaId,
+                            'id_deposito_destino' => null,
+                            'tipo' => EstoqueMovimentacaoTipo::SAIDA_ENTREGA_CLIENTE->value,
+                            'quantidade' => (int) $t->quantidade,
+                            'observacao' => "Troca da devolucao #{$dev->id}.",
+                            'data_movimentacao' => now(),
+                            'ref_type' => 'devolucao_troca',
+                            'ref_id' => (int) $t->id,
+                        ], null);
+
                         $totalNovo += $t->preco_unitario * $t->quantidade;
                     }
 
@@ -159,23 +176,4 @@ class DevolucaoService
         $dev->save();
     }
 
-    /**
-     * Ajusta o estoque de uma variação de produto.
-     *
-     * @param  int  $variacaoId
-     * @param  int  $quantidade
-     * @param  int  $sinal  +1 para entrada, -1 para saída
-     * @return void
-     */
-    protected function ajustarEstoque(int $variacaoId, int $quantidade, int $sinal): void
-    {
-        $depositoId = config('app.deposito_padrao');
-        $estoque = Estoque::firstOrNew([
-            'id_variacao' => $variacaoId,
-            'id_deposito' => $depositoId,
-        ]);
-
-        $estoque->quantidade = ($estoque->quantidade ?? 0) + ($quantidade * $sinal);
-        $estoque->save();
-    }
 }

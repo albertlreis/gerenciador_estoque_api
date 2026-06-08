@@ -222,7 +222,10 @@ class GoogleCalendarController extends Controller
         $perPage = max(1, min((int) $request->query('per_page', 25), 100));
         $page = AuditoriaLog::query()
             ->where('modulo', 'google_calendar')
-            ->where('source_table', 'google_calendar_logs')
+            ->where(function ($query) {
+                $query->where('source_table', 'google_calendar_logs')
+                    ->orWhereNull('source_table');
+            })
             ->orderByDesc('occurred_at')
             ->orderByDesc('id')
             ->paginate($perPage);
@@ -324,6 +327,14 @@ class GoogleCalendarController extends Controller
      */
     private function validateEventPayload(Request $request, bool $creating): array
     {
+        return $request->validate(self::eventValidationRules($creating));
+    }
+
+    /**
+     * @return array<string, array<int, string>>
+     */
+    private static function eventValidationRules(bool $creating): array
+    {
         $required = $creating ? 'required' : 'sometimes';
 
         $rules = [
@@ -331,8 +342,8 @@ class GoogleCalendarController extends Controller
             'summary' => [$required, 'string', 'max:255'],
             'description' => ['nullable', 'string', 'max:6000'],
             'location' => ['nullable', 'string', 'max:255'],
-            'start' => [$required, 'date'],
-            'end' => [$required, 'date', 'after:start'],
+            'start' => [$required, 'date', $creating ? null : 'required_with:end'],
+            'end' => [$required, 'date', 'after:start', $creating ? null : 'required_with:start'],
             'all_day' => ['nullable', 'boolean'],
             'timezone' => ['nullable', 'string', 'max:80'],
             'generate_meet' => ['nullable', 'boolean'],
@@ -340,6 +351,9 @@ class GoogleCalendarController extends Controller
             'attendees' => ['nullable', 'array'],
         ];
 
-        return $request->validate($rules);
+        return array_map(
+            fn (array $rule) => array_values(array_filter($rule, fn ($item) => $item !== null)),
+            $rules
+        );
     }
 }

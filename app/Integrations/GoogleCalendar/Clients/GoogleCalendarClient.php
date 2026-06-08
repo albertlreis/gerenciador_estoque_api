@@ -83,8 +83,14 @@ class GoogleCalendarClient
         for ($i = 0; $i < $attempts; $i++) {
             try {
                 $response = $this->http->request($method, ltrim($uri, '/'), $options);
+                $normalized = $this->normalizeResponse($response);
 
-                return $this->normalizeResponse($response);
+                if ($i < $attempts - 1 && $this->shouldRetryStatus($normalized['status'])) {
+                    usleep($sleepMs * 1000 * ($i + 1));
+                    continue;
+                }
+
+                return $normalized;
             } catch (RequestException $e) {
                 if ($i < $attempts - 1 && $this->shouldRetry($e)) {
                     usleep($sleepMs * 1000 * ($i + 1));
@@ -117,7 +123,11 @@ class GoogleCalendarClient
             return true;
         }
 
-        $code = $response->getStatusCode();
+        return $this->shouldRetryStatus($response->getStatusCode());
+    }
+
+    private function shouldRetryStatus(int $code): bool
+    {
         return $code === 429 || $code >= 500;
     }
 

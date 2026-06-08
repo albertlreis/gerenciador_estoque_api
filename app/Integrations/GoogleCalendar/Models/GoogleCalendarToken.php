@@ -19,8 +19,15 @@ class GoogleCalendarToken extends Model
     ];
 
     protected $casts = [
+        'access_token' => 'encrypted',
+        'refresh_token' => 'encrypted',
         'expires_at' => 'datetime',
         'ultimo_refresh_em' => 'datetime',
+    ];
+
+    protected $hidden = [
+        'access_token',
+        'refresh_token',
     ];
 
     public function conexao(): BelongsTo

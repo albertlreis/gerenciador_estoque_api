@@ -189,7 +189,11 @@ class GoogleCalendarEventService
             throw new GoogleCalendarException('Agenda Google nao encontrada ou nao habilitada.', 'calendar_not_found');
         }
 
-        if (!$calendar->isWritable()) {
+        if (!$calendar->isWritableForMutations()) {
+            if (!$calendar->enabled) {
+                throw new GoogleCalendarException('Agenda Google desabilitada para mutacoes.', 'calendar_disabled');
+            }
+
             throw new GoogleCalendarException('A conta conectada nao tem permissao de escrita nesta agenda.', 'calendar_readonly');
         }
 
@@ -455,6 +459,7 @@ class GoogleCalendarEventService
             'actor_id' => $usuarioId,
             'entity_type' => 'google_calendar_event',
             'entity_id' => $eventId,
+            'source_table' => 'google_calendar_logs',
             'context_json' => [
                 'conexao_id' => $conexao->id,
                 'calendar_id' => $calendarId,

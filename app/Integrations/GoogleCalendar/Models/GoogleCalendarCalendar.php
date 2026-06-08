@@ -40,4 +40,9 @@ class GoogleCalendarCalendar extends Model
     {
         return in_array($this->access_role, ['owner', 'writer'], true);
     }
+
+    public function isWritableForMutations(): bool
+    {
+        return $this->enabled && $this->isWritable();
+    }
 }

@@ -4,6 +4,7 @@ namespace Tests\Unit;
 
 use App\Integrations\GoogleCalendar\Auth\GoogleCalendarOAuthService;
 use App\Integrations\GoogleCalendar\Clients\GoogleCalendarClient;
+use App\Integrations\GoogleCalendar\Models\GoogleCalendarCalendar;
 use App\Integrations\GoogleCalendar\Services\GoogleCalendarConnectionService;
 use App\Integrations\GoogleCalendar\Services\GoogleCalendarEventService;
 use PHPUnit\Framework\TestCase;
@@ -66,6 +67,26 @@ class GoogleCalendarEventServiceTest extends TestCase
 
         $this->assertSame('2026-05-13', $body['start']['date']);
         $this->assertSame('2026-05-14', $body['end']['date']);
+    }
+
+    public function test_disabled_calendar_is_not_writable_for_mutations(): void
+    {
+        $calendar = new GoogleCalendarCalendar([
+            'access_role' => 'writer',
+            'enabled' => false,
+        ]);
+
+        $this->assertFalse($calendar->isWritableForMutations());
+    }
+
+    public function test_readonly_calendar_is_not_writable_for_mutations(): void
+    {
+        $calendar = new GoogleCalendarCalendar([
+            'access_role' => 'reader',
+            'enabled' => true,
+        ]);
+
+        $this->assertFalse($calendar->isWritableForMutations());
     }
 
     private function service(): GoogleCalendarEventService

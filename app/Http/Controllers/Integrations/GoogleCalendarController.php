@@ -336,14 +336,15 @@ class GoogleCalendarController extends Controller
     private static function eventValidationRules(bool $creating): array
     {
         $required = $creating ? 'required' : 'sometimes';
+        $dateRequired = $creating ? 'required' : 'nullable';
 
         $rules = [
             'calendar_id' => ['required', 'string', 'max:255'],
             'summary' => [$required, 'string', 'max:255'],
             'description' => ['nullable', 'string', 'max:6000'],
             'location' => ['nullable', 'string', 'max:255'],
-            'start' => [$required, 'date', $creating ? null : 'required_with:end'],
-            'end' => [$required, 'date', 'after:start', $creating ? null : 'required_with:start'],
+            'start' => [$dateRequired, 'date', $creating ? null : 'required_with:end'],
+            'end' => [$dateRequired, 'date', 'after:start', $creating ? null : 'required_with:start'],
             'all_day' => ['nullable', 'boolean'],
             'timezone' => ['nullable', 'string', 'max:80'],
             'generate_meet' => ['nullable', 'boolean'],

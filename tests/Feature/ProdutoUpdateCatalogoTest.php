@@ -49,7 +49,7 @@ class ProdutoUpdateCatalogoTest extends TestCase
             'nome' => 'Produto Atualizado',
             'descricao' => 'Nova descricao',
             'id_categoria' => $categoria->id,
-            'id_fornecedor' => $fornecedor->id,
+            'id_fornecedor' => '',
             'altura' => '1,25',
             'largura' => '2.50',
             'profundidade' => '',
@@ -70,6 +70,7 @@ class ProdutoUpdateCatalogoTest extends TestCase
 
         $this->assertSame('Produto Atualizado', $produto->nome);
         $this->assertSame('Nova descricao', $produto->descricao);
+        $this->assertNull($produto->id_fornecedor);
         $this->assertSame('1.25', (string) $produto->altura);
         $this->assertSame('2.50', (string) $produto->largura);
         $this->assertNull($produto->profundidade);

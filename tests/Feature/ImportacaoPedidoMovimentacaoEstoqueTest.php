@@ -208,6 +208,13 @@ class ImportacaoPedidoMovimentacaoEstoqueTest extends TestCase
                 'id' => $entrega->id,
                 'quantidade_pendente_recebimento' => 4,
             ]);
+
+        $this->getJson("/api/v1/pedidos/{$pedidoId}/detalhado")
+            ->assertOk()
+            ->assertJsonPath('data.entrega_itens.0.id', $entrega->id)
+            ->assertJsonPath('data.entrega_itens.0.status', ProdutoEntregaItem::STATUS_AGUARDANDO_ESTOQUE)
+            ->assertJsonPath('data.entrega_itens.0.quantidade_pendente_recebimento', 4)
+            ->assertJsonPath('data.entrega_itens.0.deposito_destino.id', $deposito->id);
     }
 
     public function test_reposicao_recebida_sem_deposito_retorna_validacao(): void

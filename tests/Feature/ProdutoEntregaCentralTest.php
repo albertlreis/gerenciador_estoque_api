@@ -83,6 +83,115 @@ class ProdutoEntregaCentralTest extends TestCase
         $this->assertSame(1, EstoqueMovimentacao::query()->where('observacao', 'Recebimento teste')->count());
         $this->assertSame(1, ProdutoEntregaEvento::query()->where('idempotency_key', 'teste-fabrica-1')->count());
         $this->assertSame(ProdutoEntregaItem::STATUS_RECEBIDO, $central->fresh()->status);
+        $this->assertDatabaseMissing('pedido_status_historico', [
+            'pedido_id' => $pedido->id,
+            'status' => PedidoStatus::FINALIZADO->value,
+        ]);
+    }
+
+    public function test_recebimento_total_de_reposicao_finaliza_pedido(): void
+    {
+        [$usuario, $pedido, $variacao, $deposito] = $this->criarPedidoComItem(3, Pedido::TIPO_REPOSICAO);
+
+        $service = app(EntregaProdutoService::class);
+        $central = $service->criarDemandaPedido($pedido, $usuario->id, false)->firstOrFail();
+
+        $service->receberItem($central, $deposito->id, 3, $usuario->id, 'Recebimento total reposicao', 'reposicao-total-1');
+
+        $this->assertDatabaseHas('pedido_status_historico', [
+            'pedido_id' => $pedido->id,
+            'status' => PedidoStatus::FINALIZADO->value,
+            'usuario_id' => $usuario->id,
+            'observacoes' => 'Pedido finalizado automaticamente apos recebimento total dos produtos.',
+        ]);
+        $this->assertSame(
+            PedidoStatus::FINALIZADO->value,
+            $pedido->historicoStatus()->latest('data_status')->latest('id')->first()?->getRawOriginal('status')
+        );
+    }
+
+    public function test_recebimento_parcial_de_reposicao_nao_finaliza_pedido(): void
+    {
+        [$usuario, $pedido, $variacao, $deposito] = $this->criarPedidoComItem(3, Pedido::TIPO_REPOSICAO);
+
+        $service = app(EntregaProdutoService::class);
+        $central = $service->criarDemandaPedido($pedido, $usuario->id, false)->firstOrFail();
+
+        $service->receberItem($central, $deposito->id, 1, $usuario->id, 'Recebimento parcial reposicao', 'reposicao-parcial-1');
+
+        $this->assertDatabaseMissing('pedido_status_historico', [
+            'pedido_id' => $pedido->id,
+            'status' => PedidoStatus::FINALIZADO->value,
+        ]);
+    }
+
+    public function test_reposicao_com_multiplos_itens_finaliza_apenas_no_ultimo_recebimento(): void
+    {
+        [$usuario, $pedido, $variacao, $deposito] = $this->criarPedidoComItem(1, Pedido::TIPO_REPOSICAO);
+        PedidoItem::create([
+            'id_pedido' => $pedido->id,
+            'id_variacao' => $variacao->id,
+            'id_deposito' => $deposito->id,
+            'quantidade' => 2,
+            'preco_unitario' => 100,
+            'subtotal' => 200,
+        ]);
+        $pedido->unsetRelation('itens');
+
+        $service = app(EntregaProdutoService::class);
+        $centrais = $service->criarDemandaPedido($pedido, $usuario->id, false)->values();
+
+        $service->receberItem($centrais[0], $deposito->id, 1, $usuario->id, 'Recebimento item A', 'reposicao-multi-a');
+
+        $this->assertDatabaseMissing('pedido_status_historico', [
+            'pedido_id' => $pedido->id,
+            'status' => PedidoStatus::FINALIZADO->value,
+        ]);
+
+        $service->receberItem($centrais[1], $deposito->id, 2, $usuario->id, 'Recebimento item B', 'reposicao-multi-b');
+
+        $this->assertSame(1, PedidoStatusHistorico::query()
+            ->where('pedido_id', $pedido->id)
+            ->where('status', PedidoStatus::FINALIZADO->value)
+            ->count());
+    }
+
+    public function test_recebimento_idempotente_de_reposicao_nao_duplica_status_finalizado(): void
+    {
+        [$usuario, $pedido, $variacao, $deposito] = $this->criarPedidoComItem(1, Pedido::TIPO_REPOSICAO);
+
+        $service = app(EntregaProdutoService::class);
+        $central = $service->criarDemandaPedido($pedido, $usuario->id, false)->firstOrFail();
+
+        $service->receberItem($central, $deposito->id, 1, $usuario->id, 'Recebimento idempotente', 'reposicao-idempotente-1');
+        $service->receberItem($central, $deposito->id, 1, $usuario->id, 'Recebimento idempotente', 'reposicao-idempotente-1');
+        $service->receberItem($central, $deposito->id, 1, $usuario->id, 'Recebimento sem pendencia', 'reposicao-idempotente-2');
+
+        $this->assertSame(1, PedidoStatusHistorico::query()
+            ->where('pedido_id', $pedido->id)
+            ->where('status', PedidoStatus::FINALIZADO->value)
+            ->count());
+    }
+
+    public function test_reposicao_cancelada_nao_finaliza_ao_receber_todos_os_itens(): void
+    {
+        [$usuario, $pedido, $variacao, $deposito] = $this->criarPedidoComItem(1, Pedido::TIPO_REPOSICAO);
+        PedidoStatusHistorico::create([
+            'pedido_id' => $pedido->id,
+            'status' => PedidoStatus::CANCELADO,
+            'data_status' => now()->addSecond(),
+            'usuario_id' => $usuario->id,
+        ]);
+
+        $service = app(EntregaProdutoService::class);
+        $central = $service->criarDemandaPedido($pedido, $usuario->id, false)->firstOrFail();
+
+        $service->receberItem($central, $deposito->id, 1, $usuario->id, 'Recebimento reposicao cancelada', 'reposicao-cancelada-1');
+
+        $this->assertDatabaseMissing('pedido_status_historico', [
+            'pedido_id' => $pedido->id,
+            'status' => PedidoStatus::FINALIZADO->value,
+        ]);
     }
 
     public function test_expedicao_consumir_multiplas_reservas_do_mesmo_item(): void
@@ -498,7 +607,7 @@ class ProdutoEntregaCentralTest extends TestCase
         $this->assertStringContainsString('Estoque insuficiente', (string) $bloqueada->bloqueio_motivo);
     }
 
-    private function criarPedidoComItem(int $quantidade): array
+    private function criarPedidoComItem(int $quantidade, string $tipo = Pedido::TIPO_VENDA): array
     {
         $usuario = Usuario::create([
             'nome' => 'Usuario Entrega',
@@ -526,6 +635,7 @@ class ProdutoEntregaCentralTest extends TestCase
         ]);
         $deposito = Deposito::create(['nome' => 'Deposito Entrega']);
         $pedido = Pedido::create([
+            'tipo' => $tipo,
             'id_cliente' => $cliente->id,
             'id_usuario' => $usuario->id,
             'data_pedido' => now(),

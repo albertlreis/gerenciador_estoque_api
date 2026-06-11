@@ -84,6 +84,7 @@ class PedidoCompletoResource extends JsonResource
             'dias_uteis_restantes' => $diasUteisRestantes, // null quando não se aplica
             'atrasado_entrega'     => $atrasadoEntrega,
             'entrega_produtos'      => $entregaResumo,
+            'entrega_itens'          => ProdutoEntregaItemResource::collection($this->whenLoaded('entregaItens')),
 
             'itens'      => PedidoItemResource::collection($this->itens),
             'historico'  => PedidoStatusResource::collection(

@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Enums\EstoqueMovimentacaoTipo;
+use App\Enums\PedidoStatus;
 use App\Models\AssistenciaChamadoItem;
 use App\Models\Consignacao;
 use App\Models\DevolucaoItem;
@@ -439,6 +440,7 @@ class EntregaProdutoService
 
             if ($tipoEvento === ProdutoEntregaEvento::RECEBIDO_ESTOQUE) {
                 $this->reservarDemandasLiberadasPorRecebimento($entrega, (int) $depositoId, (int) $quantidade, $usuarioId);
+                $this->finalizarReposicaoSeRecebidaIntegralmente($entrega, $usuarioId);
             }
 
             return $entrega->fresh(['eventos']);
@@ -995,6 +997,59 @@ class EntregaProdutoService
                 );
                 $restante -= $reservar;
             });
+    }
+
+    private function finalizarReposicaoSeRecebidaIntegralmente(ProdutoEntregaItem $recebimento, ?int $usuarioId): void
+    {
+        if (
+            !$recebimento->pedido_id
+            || $recebimento->tipo_origem !== ProdutoEntregaItem::ORIGEM_PEDIDO
+        ) {
+            return;
+        }
+
+        $pedido = Pedido::query()->find($recebimento->pedido_id);
+        if (!$pedido?->isReposicao()) {
+            return;
+        }
+
+        $ultimoStatus = $pedido->historicoStatus()
+            ->latest('data_status')
+            ->latest('id')
+            ->first();
+        $ultimoStatusValor = $ultimoStatus?->getRawOriginal('status');
+
+        if ($ultimoStatusValor === PedidoStatus::CANCELADO->value) {
+            return;
+        }
+
+        if ($pedido->historicoStatus()->where('status', PedidoStatus::FINALIZADO->value)->exists()) {
+            return;
+        }
+
+        $itensRecebiveis = ProdutoEntregaItem::query()
+            ->where('pedido_id', $pedido->id)
+            ->where('tipo_origem', ProdutoEntregaItem::ORIGEM_PEDIDO)
+            ->where('status', '!=', ProdutoEntregaItem::STATUS_CANCELADO);
+
+        if (!(clone $itensRecebiveis)->exists()) {
+            return;
+        }
+
+        $possuiPendente = (clone $itensRecebiveis)
+            ->whereColumn('quantidade_recebida', '<', 'quantidade_total')
+            ->exists();
+
+        if ($possuiPendente) {
+            return;
+        }
+
+        $pedido->historicoStatus()->create([
+            'status' => PedidoStatus::FINALIZADO,
+            'data_status' => now(),
+            'usuario_id' => $usuarioId,
+            'observacoes' => 'Pedido finalizado automaticamente apos recebimento total dos produtos.',
+        ]);
     }
 
     private function statusAgregado(Collection|EloquentCollection $itens, int $total): ?string

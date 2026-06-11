@@ -120,6 +120,8 @@ Route::middleware(['auth:sanctum', 'senha.nao_obrigatoria'])
 
         // Variações (busca/listagem global)
         Route::get('variacoes', [ProdutoVariacaoController::class, 'buscar']);
+        Route::get('variacoes/precos-custos', [ProdutoVariacaoController::class, 'precosCustos']);
+        Route::patch('produto-variacoes/precos-custos/bulk', [ProdutoVariacaoController::class, 'bulkPrecosCustos']);
         Route::patch('produto-variacoes/{variacao}', [ProdutoVariacaoController::class, 'patchGlobal'])
             ->whereNumber('variacao');
 

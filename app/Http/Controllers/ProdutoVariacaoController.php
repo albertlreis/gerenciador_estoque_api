@@ -7,11 +7,13 @@ use App\Http\Resources\ProdutoMiniResource;
 use App\Http\Resources\ProdutoSimplificadoResource;
 use App\Http\Resources\ProdutoVariacaoResource;
 use App\Models\Produto;
+use App\Models\ProdutoImagem;
 use App\Models\ProdutoVariacao;
 use App\Services\ProdutoVariacaoService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 use Throwable;
 
@@ -171,6 +173,196 @@ class ProdutoVariacaoController extends Controller
         );
     }
 
+    public function precosCustos(Request $request): JsonResponse
+    {
+        if ($resposta = $this->autorizarPrecosCustos()) {
+            return $resposta;
+        }
+
+        $perPage = min(max((int) $request->input('per_page', 20), 1), 100);
+        $query = ProdutoVariacao::query()
+            ->with(['produto.categoria', 'produto.fornecedor', 'produto.imagemPrincipal', 'atributos', 'imagem'])
+            ->withSum('estoques as quantidade_estoque', 'quantidade')
+            ->orderByDesc('id');
+
+        $search = trim((string) $request->input('search', ''));
+        if ($search !== '') {
+            $termo = iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $search);
+            $termo = mb_strtolower($termo !== false ? $termo : $search);
+            $like = '%' . str_replace(['\\', '%', '_'], ['\\\\', '\%', '\_'], $termo) . '%';
+
+            $query->where(function ($q) use ($like) {
+                $q->whereRaw("LOWER(referencia) LIKE ? ESCAPE '\\\\'", [$like])
+                    ->orWhereRaw("LOWER(sku_interno) LIKE ? ESCAPE '\\\\'", [$like])
+                    ->orWhereRaw("LOWER(chave_variacao) LIKE ? ESCAPE '\\\\'", [$like])
+                    ->orWhereRaw("LOWER(codigo_barras) LIKE ? ESCAPE '\\\\'", [$like])
+                    ->orWhereHas('produto', function ($produto) use ($like) {
+                        $produto->whereRaw("LOWER(nome) LIKE ? ESCAPE '\\\\'", [$like])
+                            ->orWhereRaw("LOWER(codigo_produto) LIKE ? ESCAPE '\\\\'", [$like]);
+                    })
+                    ->orWhereHas('atributos', function ($atributos) use ($like) {
+                        $atributos->whereRaw("LOWER(atributo) LIKE ? ESCAPE '\\\\'", [$like])
+                            ->orWhereRaw("LOWER(valor) LIKE ? ESCAPE '\\\\'", [$like]);
+                    });
+            });
+        }
+
+        $referenciaExata = trim((string) $request->input('referencia_exata', ''));
+        if ($referenciaExata !== '') {
+            $query->where('referencia', $referenciaExata);
+        }
+
+        $categoriaIds = collect((array) $request->input('id_categoria', []))
+            ->filter(fn ($id) => $id !== null && $id !== '')
+            ->map(fn ($id) => (int) $id)
+            ->filter()
+            ->values()
+            ->all();
+
+        if (!empty($categoriaIds)) {
+            $query->whereHas('produto', fn ($produto) => $produto->whereIn('id_categoria', $categoriaIds));
+        }
+
+        $fornecedorIds = collect((array) $request->input('fornecedor_id', []))
+            ->filter(fn ($id) => $id !== null && $id !== '')
+            ->map(fn ($id) => (int) $id)
+            ->filter()
+            ->values()
+            ->all();
+
+        if (!empty($fornecedorIds)) {
+            $query->whereHas('produto', fn ($produto) => $produto->whereIn('id_fornecedor', $fornecedorIds));
+        }
+
+        if ($request->filled('produto_id')) {
+            $query->where('produto_id', (int) $request->input('produto_id'));
+        }
+
+        if ($request->boolean('sem_custo')) {
+            $query->where(fn ($q) => $q->whereNull('custo')->orWhere('custo', '<=', 0));
+        }
+
+        if ($request->boolean('sem_preco')) {
+            $query->where(fn ($q) => $q->whereNull('preco')->orWhere('preco', '<=', 0));
+        }
+
+        if ($request->boolean('outlet') || $request->boolean('is_outlet')) {
+            $query->whereHas('outlets', fn ($outlet) => $outlet->where('quantidade_restante', '>', 0));
+        }
+
+        $paginator = $query->paginate($perPage);
+        $paginator->getCollection()->transform(fn (ProdutoVariacao $variacao) => $this->mapearPrecoCusto($variacao));
+
+        return response()->json([
+            'data' => $paginator->items(),
+            'meta' => [
+                'current_page' => $paginator->currentPage(),
+                'per_page' => $paginator->perPage(),
+                'total' => $paginator->total(),
+                'last_page' => $paginator->lastPage(),
+                'from' => $paginator->firstItem(),
+                'to' => $paginator->lastItem(),
+            ],
+        ]);
+    }
+
+    public function bulkPrecosCustos(Request $request): JsonResponse
+    {
+        if ($resposta = $this->autorizarPrecosCustos()) {
+            return $resposta;
+        }
+
+        $validator = Validator::make($request->all(), [
+            'motivo' => 'nullable|string|max:500',
+            'items' => 'required|array|min:1|max:200',
+            'items.*.id' => 'required|integer|exists:produto_variacoes,id',
+            'items.*.preco' => 'sometimes|numeric|min:0',
+            'items.*.custo' => 'sometimes|nullable|numeric|min:0',
+        ], [
+            'items.required' => 'Informe ao menos uma variaÃ§Ã£o para atualizar.',
+            'items.*.id.exists' => 'Uma das variaÃ§Ãµes informadas nÃ£o foi encontrada.',
+            'items.*.preco.numeric' => 'Informe um preÃ§o vÃ¡lido para a variaÃ§Ã£o.',
+            'items.*.preco.min' => 'O preÃ§o da variaÃ§Ã£o nÃ£o pode ser negativo.',
+            'items.*.custo.numeric' => 'Informe um custo vÃ¡lido para a variaÃ§Ã£o.',
+            'items.*.custo.min' => 'O custo da variaÃ§Ã£o nÃ£o pode ser negativo.',
+            'motivo.max' => 'O motivo pode ter no mÃ¡ximo 500 caracteres.',
+        ]);
+
+        $validator->after(function ($validator) use ($request): void {
+            $items = collect((array) $request->input('items', []));
+            $ids = $items->pluck('id')->filter()->map(fn ($id) => (int) $id)->values();
+            if ($ids->isEmpty()) {
+                return;
+            }
+
+            $variacoes = ProdutoVariacao::whereIn('id', $ids)->get()->keyBy('id');
+            $precoMudou = $items->contains(function ($item) use ($variacoes): bool {
+                if (!is_array($item) || !array_key_exists('preco', $item)) {
+                    return false;
+                }
+
+                $variacao = $variacoes->get((int) ($item['id'] ?? 0));
+                if (!$variacao) {
+                    return false;
+                }
+
+                return number_format((float) $variacao->preco, 2, '.', '')
+                    !== number_format((float) $item['preco'], 2, '.', '');
+            });
+
+            if ($precoMudou && trim((string) $request->input('motivo', '')) === '') {
+                $validator->errors()->add('motivo', 'Informe o motivo da alteraÃ§Ã£o de preÃ§o.');
+            }
+        });
+
+        if ($validator->fails()) {
+            return response()->json([
+                'message' => 'Revise os campos destacados e tente novamente.',
+                'errors' => $validator->errors(),
+            ], 422);
+        }
+
+        $items = collect($validator->validated()['items']);
+        $motivo = trim((string) $request->input('motivo', ''));
+        $variacoes = ProdutoVariacao::whereIn('id', $items->pluck('id')->map(fn ($id) => (int) $id))
+            ->get()
+            ->keyBy('id');
+
+        DB::transaction(function () use ($items, $variacoes, $motivo): void {
+            foreach ($items as $item) {
+                $variacao = $variacoes->get((int) $item['id']);
+                if (!$variacao) {
+                    continue;
+                }
+
+                $updates = [];
+                if (array_key_exists('preco', $item)) {
+                    $updates['preco'] = $item['preco'];
+                }
+                if (array_key_exists('custo', $item)) {
+                    $updates['custo'] = $item['custo'];
+                }
+
+                if (empty($updates)) {
+                    continue;
+                }
+
+                $this->service->salvarComAuditoria(
+                    $variacao,
+                    $updates,
+                    [
+                        'label' => 'AlteraÃ§Ã£o em lote de preÃ§os e custos',
+                        'motivo' => $motivo,
+                        'origin' => 'cadastro',
+                    ],
+                    'AlteraÃ§Ã£o em lote de preÃ§os e custos'
+                );
+            }
+        });
+
+        return response()->json(['message' => 'PreÃ§os e custos atualizados com sucesso.']);
+    }
+
     public function patchGlobal(Request $request, ProdutoVariacao $variacao): JsonResponse
     {
         if ($resposta = $this->autorizarVariacao('editar')) {
@@ -287,6 +479,48 @@ class ProdutoVariacaoController extends Controller
         return response()->json($variacaoAtualizada);
     }
 
+    private function mapearPrecoCusto(ProdutoVariacao $variacao): array
+    {
+        $preco = (float) ($variacao->preco ?? 0);
+        $custo = $variacao->custo === null ? null : (float) $variacao->custo;
+        $lucro = $custo === null ? null : $preco - $custo;
+        $margem = $preco > 0 && $lucro !== null ? ($lucro / $preco) * 100 : null;
+
+        $atributosResumo = $variacao->relationLoaded('atributos')
+            ? $variacao->atributos
+                ->sortBy(fn ($atributo) => mb_strtolower(($atributo->atributo ?? '') . ' ' . ($atributo->valor ?? '')))
+                ->map(function ($atributo) {
+                    $nome = trim((string) ($atributo->atributo ?? ''));
+                    $valor = trim((string) ($atributo->valor ?? ''));
+
+                    return $nome !== '' && $valor !== '' ? "{$nome}: {$valor}" : ($nome ?: $valor);
+                })
+                ->filter()
+                ->values()
+                ->join(' | ')
+            : '';
+
+        return [
+            'id' => $variacao->id,
+            'produto_id' => $variacao->produto_id,
+            'produto_nome' => $variacao->produto?->nome,
+            'codigo_produto' => $variacao->produto?->codigo_produto,
+            'categoria_nome' => $variacao->produto?->categoria?->nome,
+            'fornecedor_nome' => $variacao->produto?->fornecedor?->nome,
+            'referencia' => $variacao->referencia,
+            'sku_interno' => $variacao->sku_interno,
+            'chave_variacao' => $variacao->chave_variacao,
+            'atributos_resumo' => $atributosResumo,
+            'preco' => $preco,
+            'custo' => $custo,
+            'lucro' => $lucro === null ? null : round($lucro, 2),
+            'margem_percentual' => $margem === null ? null : round($margem, 2),
+            'estoque_total' => (int) ($variacao->quantidade_estoque ?? 0),
+            'imagem_url' => $variacao->imagem_url,
+            'produto_imagem_url' => ProdutoImagem::normalizarUrlPublica($variacao->produto?->imagemPrincipal?->url),
+        ];
+    }
+
 
     private function autorizarVariacao(string $acao): ?JsonResponse
     {
@@ -305,6 +539,24 @@ class ProdutoVariacaoController extends Controller
         }
 
         return response()->json(['message' => 'Sem permissão para esta ação.'], 403);
+    }
+
+    private function autorizarPrecosCustos(): ?JsonResponse
+    {
+        $permissoes = [
+            'produtos.precos_custos',
+            'produto_variacoes.editar',
+            'produtos.editar',
+            'produtos.gerenciar',
+        ];
+
+        foreach ($permissoes as $permissao) {
+            if (AuthHelper::hasPermissao($permissao)) {
+                return null;
+            }
+        }
+
+        return response()->json(['message' => 'Sem permissão para acessar preços e custos.'], 403);
     }
 
 }

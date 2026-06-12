@@ -6,6 +6,7 @@ use App\Enums\PedidoStatus;
 use App\Models\Categoria;
 use App\Models\Deposito;
 use App\Models\Estoque;
+use App\Models\Fornecedor;
 use App\Models\Pedido;
 use App\Models\PedidoStatusHistorico;
 use App\Models\Produto;
@@ -32,6 +33,7 @@ class PedidoImportacaoPdfDatasTest extends TestCase
         $categoria = Categoria::create([
             'nome' => 'Categoria Teste',
         ]);
+        $fornecedor = Fornecedor::create(['nome' => 'Fornecedor Datas 1', 'status' => 1]);
 
         $numeroExterno = 'IMP-' . Str::random(8);
 
@@ -41,6 +43,7 @@ class PedidoImportacaoPdfDatasTest extends TestCase
             'pedido' => [
                 'tipo' => 'reposicao',
                 'numero_externo' => $numeroExterno,
+                'id_fornecedor' => $fornecedor->id,
                 'total' => 100,
                 'data_pedido' => '14/08/2020',
             ],
@@ -78,6 +81,7 @@ class PedidoImportacaoPdfDatasTest extends TestCase
         $categoria = Categoria::create([
             'nome' => 'Categoria Teste 2',
         ]);
+        $fornecedor = Fornecedor::create(['nome' => 'Fornecedor Datas 2', 'status' => 1]);
 
         $numeroExterno = 'IMP-' . Str::random(8);
 
@@ -87,6 +91,7 @@ class PedidoImportacaoPdfDatasTest extends TestCase
             'pedido' => [
                 'tipo' => 'reposicao',
                 'numero_externo' => $numeroExterno,
+                'id_fornecedor' => $fornecedor->id,
                 'total' => 200,
                 'data_pedido' => '14.08.20',
             ],
@@ -122,6 +127,7 @@ class PedidoImportacaoPdfDatasTest extends TestCase
         ]);
 
         $categoria = Categoria::create(['nome' => 'Categoria Prazo']);
+        $fornecedor = Fornecedor::create(['nome' => 'Fornecedor Prazo', 'status' => 1]);
         $numeroExterno = 'IMP-' . Str::random(8);
 
         $payload = [
@@ -130,6 +136,7 @@ class PedidoImportacaoPdfDatasTest extends TestCase
             'pedido' => [
                 'tipo' => 'reposicao',
                 'numero_externo' => $numeroExterno,
+                'id_fornecedor' => $fornecedor->id,
                 'total' => 100,
                 'data_pedido' => '2025-01-03', // sexta-feira
             ],
@@ -167,10 +174,12 @@ class PedidoImportacaoPdfDatasTest extends TestCase
         ]);
 
         $categoria = Categoria::create(['nome' => 'Categoria Entrega']);
+        $fornecedor = Fornecedor::create(['nome' => 'Fornecedor Entrega', 'status' => 1]);
         $deposito = Deposito::create(['nome' => 'Deposito Importacao Entregue']);
         $produto = Produto::create([
             'nome' => 'Produto Entregue',
             'id_categoria' => $categoria->id,
+            'id_fornecedor' => $fornecedor->id,
             'ativo' => true,
         ]);
         $variacao = ProdutoVariacao::create([
@@ -195,6 +204,7 @@ class PedidoImportacaoPdfDatasTest extends TestCase
             'pedido' => [
                 'tipo' => 'reposicao',
                 'numero_externo' => $numeroExterno,
+                'id_fornecedor' => $fornecedor->id,
                 'total' => 200,
                 'data_pedido' => '2025-01-10',
             ],

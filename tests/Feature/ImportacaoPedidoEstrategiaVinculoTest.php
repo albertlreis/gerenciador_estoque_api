@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\Categoria;
+use App\Models\Fornecedor;
 use App\Models\Pedido;
 use App\Models\Produto;
 use App\Models\ProdutoVariacao;
@@ -25,9 +26,11 @@ class ImportacaoPedidoEstrategiaVinculoTest extends TestCase
         ]);
 
         $categoria = Categoria::create(['nome' => 'Cat Estrategia']);
+        $fornecedor = Fornecedor::create(['nome' => 'Fornecedor Estrategia', 'status' => 1]);
         $produto = Produto::create([
             'nome' => 'Poltrona Teste',
             'id_categoria' => $categoria->id,
+            'id_fornecedor' => $fornecedor->id,
             'ativo' => true,
         ]);
 
@@ -48,6 +51,7 @@ class ImportacaoPedidoEstrategiaVinculoTest extends TestCase
             'pedido' => [
                 'tipo' => 'reposicao',
                 'numero_externo' => $numeroExterno,
+                'id_fornecedor' => $fornecedor->id,
                 'total' => 80,
                 'data_pedido' => '2024-01-10',
             ],
@@ -89,9 +93,11 @@ class ImportacaoPedidoEstrategiaVinculoTest extends TestCase
         ]);
 
         $categoria = Categoria::create(['nome' => 'Cat Vinculo Unico']);
+        $fornecedor = Fornecedor::create(['nome' => 'Fornecedor Vinculo Unico', 'status' => 1]);
         $produto = Produto::create([
             'nome' => 'Mesa Teste',
             'id_categoria' => $categoria->id,
+            'id_fornecedor' => $fornecedor->id,
             'ativo' => true,
         ]);
 
@@ -111,6 +117,7 @@ class ImportacaoPedidoEstrategiaVinculoTest extends TestCase
             'pedido' => [
                 'tipo' => 'reposicao',
                 'numero_externo' => $numeroExterno,
+                'id_fornecedor' => $fornecedor->id,
                 'total' => 120,
                 'data_pedido' => '2024-02-01',
             ],
@@ -149,6 +156,7 @@ class ImportacaoPedidoEstrategiaVinculoTest extends TestCase
         ]);
 
         $categoria = Categoria::create(['nome' => 'Cat Atributo Longo']);
+        $fornecedor = Fornecedor::create(['nome' => 'Fornecedor Atributo Longo', 'status' => 1]);
         $numeroExterno = 'IMP-ATTR-' . Str::random(8);
 
         $payload = [
@@ -157,6 +165,7 @@ class ImportacaoPedidoEstrategiaVinculoTest extends TestCase
             'pedido' => [
                 'tipo' => 'reposicao',
                 'numero_externo' => $numeroExterno,
+                'id_fornecedor' => $fornecedor->id,
                 'total' => 120,
                 'data_pedido' => '2024-02-01',
             ],

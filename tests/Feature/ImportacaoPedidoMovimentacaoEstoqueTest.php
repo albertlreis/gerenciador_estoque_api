@@ -8,6 +8,7 @@ use App\Models\Cliente;
 use App\Models\Deposito;
 use App\Models\Estoque;
 use App\Models\EstoqueMovimentacao;
+use App\Models\Fornecedor;
 use App\Models\Produto;
 use App\Models\ProdutoEntregaEvento;
 use App\Models\ProdutoEntregaItem;
@@ -19,6 +20,8 @@ use Tests\TestCase;
 class ImportacaoPedidoMovimentacaoEstoqueTest extends TestCase
 {
     use RefreshDatabase;
+
+    private ?int $fornecedorId = null;
 
     public function test_venda_entregue_com_movimentacao_baixa_estoque_e_marca_entregue(): void
     {
@@ -253,10 +256,16 @@ class ImportacaoPedidoMovimentacaoEstoqueTest extends TestCase
         ]);
 
         $categoria = Categoria::create(['nome' => 'Categoria Importacao']);
+        $fornecedor = Fornecedor::create([
+            'nome' => 'Fornecedor Importacao',
+            'status' => 1,
+        ]);
+        $this->fornecedorId = $fornecedor->id;
 
         $produto = Produto::create([
             'nome' => 'Produto Importacao',
             'id_categoria' => $categoria->id,
+            'id_fornecedor' => $fornecedor->id,
             'ativo' => true,
         ]);
 
@@ -291,6 +300,7 @@ class ImportacaoPedidoMovimentacaoEstoqueTest extends TestCase
             'pedido' => [
                 'tipo' => $tipo,
                 'numero_externo' => uniqid('IMP-', false),
+                'id_fornecedor' => $this->fornecedorId,
                 'total' => $quantidade * 100,
                 'data_pedido' => $data,
                 'data_entrega' => $entregue ? $data : null,

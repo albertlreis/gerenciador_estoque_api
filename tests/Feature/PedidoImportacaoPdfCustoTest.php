@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\Categoria;
+use App\Models\Fornecedor;
 use App\Models\PedidoItem;
 use App\Models\Usuario;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -25,6 +26,10 @@ class PedidoImportacaoPdfCustoTest extends TestCase
         $categoria = Categoria::create([
             'nome' => 'Categoria Custo',
         ]);
+        $fornecedor = Fornecedor::create([
+            'nome' => 'Fornecedor Custo',
+            'status' => 1,
+        ]);
 
         $payload = [
             'importacao_id' => null,
@@ -32,6 +37,7 @@ class PedidoImportacaoPdfCustoTest extends TestCase
             'pedido' => [
                 'tipo' => 'reposicao',
                 'numero_externo' => 'IMP-CST-' . Str::random(8),
+                'id_fornecedor' => $fornecedor->id,
                 'total' => 240,
                 'data_pedido' => '2025-01-10',
             ],
@@ -70,6 +76,10 @@ class PedidoImportacaoPdfCustoTest extends TestCase
         $categoria = Categoria::create([
             'nome' => 'Categoria Legado',
         ]);
+        $fornecedor = Fornecedor::create([
+            'nome' => 'Fornecedor Legado',
+            'status' => 1,
+        ]);
 
         $payload = [
             'importacao_id' => null,
@@ -77,6 +87,7 @@ class PedidoImportacaoPdfCustoTest extends TestCase
             'pedido' => [
                 'tipo' => 'reposicao',
                 'numero_externo' => 'IMP-LEG-' . Str::random(8),
+                'id_fornecedor' => $fornecedor->id,
                 'total' => 180,
                 'data_pedido' => '2025-01-10',
             ],

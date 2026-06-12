@@ -72,6 +72,10 @@ class FornecedorPedidoXmlParserService
             'data_inclusao' => null,
             'data_entrega' => null,
             'cliente' => $cliente ?: $loja ?: $fornecedor ?: 'Fornecedor',
+            'fornecedor_sugerido' => [
+                'nome' => $fornecedor,
+                'cnpj' => null,
+            ],
             'observacoes' => implode(' | ', $observacoes),
         ];
     }

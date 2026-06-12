@@ -21,6 +21,7 @@ class PedidoUpdateService
         'id_cliente',
         'id_usuario',
         'id_parceiro',
+        'id_fornecedor',
         'numero_externo',
         'data_pedido',
         'valor_total',
@@ -73,9 +74,10 @@ class PedidoUpdateService
             }
 
             $pedido = $pedido->fresh([
-                'cliente:id,nome,email,telefone',
-                'parceiro:id,nome',
-                'usuario:id,nome',
+               'cliente:id,nome,email,telefone',
+               'parceiro:id,nome',
+               'fornecedor:id,nome,cnpj',
+               'usuario:id,nome',
                 'statusAtual',
                 'itens.variacao.produto.imagens',
                 'itens.variacao.atributos',
@@ -126,9 +128,10 @@ class PedidoUpdateService
     {
         $permitidos = [
             'tipo',
-            'id_cliente',
-            'id_parceiro',
-            'numero_externo',
+          'id_cliente',
+          'id_parceiro',
+          'id_fornecedor',
+          'numero_externo',
             'observacoes',
             'prazo_dias_uteis',
             'data_limite_entrega',

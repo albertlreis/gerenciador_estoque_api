@@ -116,6 +116,7 @@ class PedidoService
         $pedido = Pedido::with([
             'cliente:id,nome,email,telefone',
             'parceiro:id,nome',
+            'fornecedor:id,nome,cnpj',
             'usuario:id,nome',
             'statusAtual',
             'itens.variacao.produto.imagens',

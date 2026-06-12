@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\Fornecedor;
 use App\Models\Usuario;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
@@ -24,6 +25,11 @@ class ImportacaoPedidoNfeXmlTest extends TestCase
             'senha' => 'teste',
             'ativo' => 1,
         ]);
+        $fornecedor = Fornecedor::create([
+            'nome' => 'Queen Books',
+            'cnpj' => '07.266.606/0001-12',
+            'status' => 1,
+        ]);
 
         $path = $this->fixturePath('nfe-35250207.xml');
         $this->assertFileExists($path);
@@ -38,6 +44,8 @@ class ImportacaoPedidoNfeXmlTest extends TestCase
         $response->assertStatus(200);
         $response->assertJsonPath('sucesso', true);
         $response->assertJsonPath('dados.pedido.numero_externo', '');
+        $response->assertJsonPath('dados.pedido.id_fornecedor', $fornecedor->id);
+        $response->assertJsonPath('dados.pedido.fornecedor_sugerido.cnpj', '07266606000112');
         $response->assertJsonPath('dados.itens_extraidos', true);
         $response->assertJsonPath('dados.requer_insercao_manual', false);
         $this->assertGreaterThan(0, count($response->json('dados.itens') ?? []));

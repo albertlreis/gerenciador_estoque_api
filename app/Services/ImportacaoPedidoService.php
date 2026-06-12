@@ -60,6 +60,7 @@ class ImportacaoPedidoService
             'cliente.id'           => 'nullable|numeric|min:1',
 
             'pedido.numero_externo'=> 'required|string|max:50',
+            'pedido.id_fornecedor'  => 'required|integer|exists:fornecedores,id',
             'pedido.total'         => 'nullable|numeric',
             'pedido.observacoes'   => 'nullable|string',
             'pedido.data_pedido'   => 'nullable|string',
@@ -197,6 +198,7 @@ class ImportacaoPedidoService
             $importacaoId = $request->input('importacao_id');
 
             $tipo = $dadosPedido['tipo'] ?? Pedido::TIPO_VENDA;
+            $fornecedorId = (int) ($dadosPedido['id_fornecedor'] ?? 0);
 
             if ($importacaoId) {
                 /** @var PedidoImportacao $importacao */
@@ -347,6 +349,7 @@ class ImportacaoPedidoService
                 'id_cliente'    => $clienteId,
                 'id_usuario'    => $usuario->id,
                 'id_parceiro'   => $dadosPedido['id_parceiro'] ?? null,
+                'id_fornecedor' => $fornecedorId,
                 'numero_externo'=> $numeroExterno ?: null,
                 'data_pedido'   => $dataBasePedido->toDateTimeString(),
                 'valor_total'   => $valorTotal,
@@ -460,6 +463,8 @@ class ImportacaoPedidoService
                     $produto = Produto::firstOrCreate([
                         'nome'         => $item['nome'],
                         'id_categoria' => $item['id_categoria'],
+                    ], [
+                        'id_fornecedor' => $fornecedorId,
                     ]);
 
                     $variacao = ProdutoVariacao::create([

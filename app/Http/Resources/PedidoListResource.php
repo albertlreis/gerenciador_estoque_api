@@ -71,6 +71,12 @@ class PedidoListResource extends JsonResource
             'data'                   => $this->data_pedido,
             'cliente'                => $this->cliente,
             'parceiro'               => $this->parceiro,
+            'id_fornecedor'          => $this->id_fornecedor,
+            'fornecedor'             => $this->fornecedor ? [
+                'id' => $this->fornecedor->id,
+                'nome' => $this->fornecedor->nome,
+                'cnpj' => $this->fornecedor->cnpj,
+            ] : null,
             'vendedor'               => $this->usuario,
             'data_ultimo_status'     => $dataUltimoStatus,
             'valor_total'            => $this->valor_total,

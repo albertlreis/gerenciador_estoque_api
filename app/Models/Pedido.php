@@ -21,6 +21,7 @@ class Pedido extends Model
         'id_cliente',
         'id_usuario',
         'id_parceiro',
+        'id_fornecedor',
         'numero_externo',
         'data_pedido',
         'valor_total',
@@ -65,6 +66,11 @@ class Pedido extends Model
     public function parceiro(): BelongsTo
     {
         return $this->belongsTo(Parceiro::class, 'id_parceiro');
+    }
+
+    public function fornecedor(): BelongsTo
+    {
+        return $this->belongsTo(Fornecedor::class, 'id_fornecedor');
     }
 
     public function itens(): HasMany

@@ -64,6 +64,13 @@ class PedidoCompletoResource extends JsonResource
                 'nome' => $this->parceiro->nome,
             ] : null,
 
+            'id_fornecedor' => $this->id_fornecedor,
+            'fornecedor' => $this->fornecedor ? [
+                'id'   => $this->fornecedor->id,
+                'nome' => $this->fornecedor->nome,
+                'cnpj' => $this->fornecedor->cnpj,
+            ] : null,
+
             'id_usuario' => $this->id_usuario,
             'usuario' => $this->usuario ? [
                 'id'   => $this->usuario->id,

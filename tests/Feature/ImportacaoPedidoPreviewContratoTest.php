@@ -2,6 +2,9 @@
 
 namespace Tests\Feature;
 
+use App\Models\Categoria;
+use App\Models\Fornecedor;
+use App\Models\Pedido;
 use App\Models\PedidoImportacao;
 use App\Models\Usuario;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -11,6 +14,32 @@ use Tests\TestCase;
 class ImportacaoPedidoPreviewContratoTest extends TestCase
 {
     use RefreshDatabase;
+
+    private function criarUsuario(string $email = 'usuario@example.com'): Usuario
+    {
+        return Usuario::create([
+            'nome' => 'Usuario Test',
+            'email' => $email,
+            'senha' => 'teste',
+            'ativo' => 1,
+        ]);
+    }
+
+    private function criarFornecedor(array $attributes = []): Fornecedor
+    {
+        return Fornecedor::create(array_merge([
+            'nome' => 'Fornecedor Teste',
+            'cnpj' => '12345678000199',
+            'status' => 1,
+        ], $attributes));
+    }
+
+    private function criarCategoria(array $attributes = []): Categoria
+    {
+        return Categoria::create(array_merge([
+            'nome' => 'Categoria Teste',
+        ], $attributes));
+    }
 
     public function test_preview_com_itens_retorna_200_com_flags_itens_extraidos_true(): void
     {
@@ -88,6 +117,60 @@ class ImportacaoPedidoPreviewContratoTest extends TestCase
         $this->assertNull(PedidoImportacao::query()->latest('id')->first()?->numero_externo);
     }
 
+    public function test_preview_listing_sugere_fornecedor_por_nome_unico(): void
+    {
+        $usuario = $this->criarUsuario('preview-fornecedor@example.com');
+        $fornecedor = $this->criarFornecedor([
+            'nome' => 'Moveis Beta',
+            'cnpj' => null,
+        ]);
+
+        $this->mock(\App\Services\FornecedorPedidoXmlParserService::class, function ($mock) {
+            $mock->shouldReceive('extrair')
+                ->once()
+                ->andReturn([
+                    'pedido' => [
+                        'numero_pedido' => '12345',
+                        'data_pedido' => null,
+                        'data_inclusao' => null,
+                        'cliente' => 'Cliente Teste',
+                        'observacoes' => '',
+                        'fornecedor_sugerido' => [
+                            'nome' => 'Móveis Beta',
+                            'cnpj' => null,
+                        ],
+                    ],
+                    'itens' => [
+                        [
+                            'nome' => 'Produto XML',
+                            'quantidade' => 1,
+                            'valor' => 100,
+                            'id_categoria' => 1,
+                        ],
+                    ],
+                    'totais' => [
+                        'total_bruto' => '100,00',
+                        'total_liquido' => '100,00',
+                    ],
+                ]);
+        });
+
+        $arquivo = UploadedFile::fake()->createWithContent(
+            'pedido.xml',
+            '<?xml version="1.0" encoding="UTF-8"?><LISTING><NUMERO_PEDIDO>12345</NUMERO_PEDIDO></LISTING>'
+        );
+
+        $response = $this->actingAs($usuario, 'sanctum')
+            ->post('/api/v1/pedidos/import', [
+                'tipo_importacao' => 'PRODUTOS_XML_FORNECEDORES',
+                'arquivo' => $arquivo,
+            ]);
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('dados.pedido.id_fornecedor', $fornecedor->id);
+        $response->assertJsonPath('dados.pedido.fornecedor_sugerido.nome', 'Móveis Beta');
+    }
+
     public function test_confirmar_sem_itens_retorna_422(): void
     {
         $usuario = Usuario::create([
@@ -96,6 +179,7 @@ class ImportacaoPedidoPreviewContratoTest extends TestCase
             'senha' => 'teste',
             'ativo' => 1,
         ]);
+        $fornecedor = $this->criarFornecedor();
 
         $importacao = PedidoImportacao::create([
             'arquivo_nome' => 'test.xml',
@@ -113,7 +197,7 @@ class ImportacaoPedidoPreviewContratoTest extends TestCase
         $response = $this->actingAs($usuario, 'sanctum')
             ->postJson('/api/v1/pedidos/import/pdf/confirm', [
                 'importacao_id' => $importacao->id,
-                'pedido' => ['tipo' => 'reposicao', 'numero_externo' => '999', 'total' => 100],
+                'pedido' => ['tipo' => 'reposicao', 'numero_externo' => '999', 'total' => 100, 'id_fornecedor' => $fornecedor->id],
                 'cliente' => [],
                 'itens' => [],
             ]);
@@ -130,10 +214,11 @@ class ImportacaoPedidoPreviewContratoTest extends TestCase
             'senha' => 'teste',
             'ativo' => 1,
         ]);
+        $fornecedor = $this->criarFornecedor();
 
         $response = $this->actingAs($usuario, 'sanctum')
             ->postJson('/api/v1/pedidos/import/pdf/confirm', [
-                'pedido' => ['tipo' => 'reposicao', 'numero_externo' => '', 'total' => 100],
+                'pedido' => ['tipo' => 'reposicao', 'numero_externo' => '', 'total' => 100, 'id_fornecedor' => $fornecedor->id],
                 'cliente' => [],
                 'itens' => [
                     [
@@ -147,5 +232,70 @@ class ImportacaoPedidoPreviewContratoTest extends TestCase
 
         $response->assertStatus(422);
         $response->assertJsonValidationErrors('pedido.numero_externo');
+    }
+
+    public function test_confirmar_sem_fornecedor_retorna_422(): void
+    {
+        $usuario = $this->criarUsuario('confirm-sem-fornecedor@example.com');
+        $categoria = $this->criarCategoria();
+
+        $response = $this->actingAs($usuario, 'sanctum')
+            ->postJson('/api/v1/pedidos/import/pdf/confirm', [
+                'pedido' => ['tipo' => 'reposicao', 'numero_externo' => 'MAN-SEM-FORN', 'total' => 100],
+                'cliente' => [],
+                'itens' => [
+                    [
+                        'ref' => 'REF-SEM-FORN',
+                        'nome' => 'Produto Teste',
+                        'quantidade' => 1,
+                        'valor' => 100,
+                        'id_categoria' => $categoria->id,
+                    ],
+                ],
+            ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors('pedido.id_fornecedor');
+    }
+
+    public function test_confirmar_manual_reposicao_com_fornecedor_cria_pedido(): void
+    {
+        $usuario = $this->criarUsuario('confirm-manual@example.com');
+        $fornecedor = $this->criarFornecedor([
+            'nome' => 'Fornecedor Manual',
+            'cnpj' => '11222333000144',
+        ]);
+        $categoria = $this->criarCategoria();
+
+        $response = $this->actingAs($usuario, 'sanctum')
+            ->postJson('/api/v1/pedidos/import/pdf/confirm', [
+                'importacao_id' => null,
+                'tipo_importacao' => null,
+                'pedido' => [
+                    'tipo' => 'reposicao',
+                    'numero_externo' => 'MAN-001',
+                    'id_fornecedor' => $fornecedor->id,
+                    'total' => 100,
+                ],
+                'cliente' => [],
+                'itens' => [
+                    [
+                        'ref' => 'REF-MANUAL',
+                        'sku_interno' => 'SKU-MANUAL',
+                        'nome' => 'Produto Manual',
+                        'quantidade' => 1,
+                        'valor' => 100,
+                        'preco_unitario' => 100,
+                        'custo_unitario' => 80,
+                        'id_categoria' => $categoria->id,
+                    ],
+                ],
+            ]);
+
+        $response->assertStatus(200);
+        $pedido = Pedido::findOrFail($response->json('id'));
+        $this->assertSame(Pedido::TIPO_REPOSICAO, $pedido->tipo);
+        $this->assertSame($fornecedor->id, $pedido->id_fornecedor);
+        $this->assertNull(PedidoImportacao::query()->where('pedido_id', $pedido->id)->first());
     }
 }

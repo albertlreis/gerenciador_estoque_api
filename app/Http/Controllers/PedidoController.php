@@ -11,6 +11,7 @@ use App\Enums\TipoImportacao;
 use App\Models\Deposito;
 use App\Models\Estoque;
 use App\Models\EstoqueReserva;
+use App\Models\Fornecedor;
 use App\Models\Pedido;
 use App\Models\PedidoImportacao;
 use App\Models\ProdutoEntregaEvento;
@@ -107,6 +108,7 @@ class PedidoController extends Controller
         $pedidoCompleto = $updated->load([
             'cliente:id,nome,email,telefone',
             'parceiro:id,nome',
+            'fornecedor:id,nome,cnpj',
             'usuario:id,nome',
             'statusAtual',
             'itens.variacao.produto.imagens',
@@ -312,9 +314,18 @@ class PedidoController extends Controller
             ];
 
             $numeroExtraido = trim((string) ($pedido['numero_pedido'] ?? ''));
+            $fornecedorSugerido = is_array($pedido['fornecedor_sugerido'] ?? null)
+                ? $pedido['fornecedor_sugerido']
+                : [];
+            $fornecedorVinculado = $this->resolverFornecedorSugerido($fornecedorSugerido);
 
             $pedidoFormatado = [
                 'numero_externo' => '',
+                'id_fornecedor' => $fornecedorVinculado?->id,
+                'fornecedor_sugerido' => [
+                    'nome' => $fornecedorSugerido['nome'] ?? null,
+                    'cnpj' => $this->normalizarDocumentoFornecedor($fornecedorSugerido['cnpj'] ?? null),
+                ],
                 'data_pedido' => $pedido['data_pedido'] ?? null,
                 'data_inclusao' => $pedido['data_inclusao'] ?? null,
                 'data_entrega' => $pedido['data_entrega'] ?? null,
@@ -423,6 +434,7 @@ class PedidoController extends Controller
             'cliente.enderecoPrincipal', // opcional, mas útil p/ PDF (se quiser)
             'usuario',
             'parceiro',
+            'fornecedor',
             'statusAtual',
         ])->findOrFail($pedidoId);
 
@@ -449,6 +461,7 @@ class PedidoController extends Controller
                 'cliente.enderecoPrincipal',
                 'usuario',
                 'parceiro',
+                'fornecedor',
                 'statusAtual',
 
                 'consignacoes.deposito',
@@ -513,6 +526,7 @@ class PedidoController extends Controller
             'cliente.enderecoPrincipal',
             'usuario',
             'parceiro',
+            'fornecedor',
 
             'itens.variacao.imagem',
             'itens.variacao.produto.imagemPrincipal',
@@ -643,6 +657,7 @@ class PedidoController extends Controller
             'cliente.enderecoPrincipal',
             'usuario',
             'parceiro',
+            'fornecedor',
         ])->findOrFail($pedidoId);
 
         $selecionados = $this->normalizarItensNotaEntrega($data['itens']);
@@ -1189,9 +1204,55 @@ class PedidoController extends Controller
         return "{$base}:{$acao}";
     }
 
-    /**
-     * Verifica se há dados mínimos do pedido (cabeçalho/totais) para aceitar preview sem itens.
-     */
+    private function resolverFornecedorSugerido(array $fornecedorSugerido): ?Fornecedor
+    {
+        $cnpj = $this->normalizarDocumentoFornecedor($fornecedorSugerido['cnpj'] ?? null);
+        if ($cnpj) {
+            $porCnpj = Fornecedor::query()
+                ->where('status', 1)
+                ->where('cnpj', $cnpj)
+                ->get();
+
+            if ($porCnpj->count() === 1) {
+                return $porCnpj->first();
+            }
+        }
+
+        $nomeNormalizado = $this->normalizarNomeFornecedor($fornecedorSugerido['nome'] ?? null);
+        if (!$nomeNormalizado) {
+            return null;
+        }
+
+        $matches = Fornecedor::query()
+            ->where('status', 1)
+            ->get()
+            ->filter(fn (Fornecedor $fornecedor) => $this->normalizarNomeFornecedor($fornecedor->nome) === $nomeNormalizado)
+            ->values();
+
+        return $matches->count() === 1 ? $matches->first() : null;
+    }
+
+    private function normalizarDocumentoFornecedor(mixed $value): ?string
+    {
+        $documento = preg_replace('/\D+/', '', (string) ($value ?? ''));
+        return $documento !== '' ? $documento : null;
+    }
+
+    private function normalizarNomeFornecedor(mixed $value): ?string
+    {
+        $nome = trim((string) ($value ?? ''));
+        if ($nome === '') {
+            return null;
+        }
+
+        $ascii = iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $nome);
+        $normalized = strtolower($ascii !== false ? $ascii : $nome);
+        $normalized = preg_replace('/[^a-z0-9]+/', ' ', $normalized);
+        $normalized = trim(preg_replace('/\s+/', ' ', (string) $normalized));
+
+        return $normalized !== '' ? $normalized : null;
+    }
+
     private function temPedidoMinimo(array $pedido, array $totais): bool
     {
         $temNumero = !empty(trim((string) ($pedido['numero_pedido'] ?? '')));

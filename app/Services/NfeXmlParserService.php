@@ -68,6 +68,7 @@ class NfeXmlParserService
         }
 
         $emitente = $this->texto($xpath, '//nfe:emit/nfe:xNome') ?: $this->texto($xpath, '//nfe:emit/nfe:xFant');
+        $emitenteCnpj = $this->texto($xpath, '//nfe:emit/nfe:CNPJ');
         $destinatario = $this->texto($xpath, '//nfe:dest/nfe:xNome');
 
         $dataPedido = null;
@@ -83,6 +84,10 @@ class NfeXmlParserService
             'data_inclusao' => $dataPedido,
             'data_entrega' => null,
             'cliente' => $destinatario ?: $emitente,
+            'fornecedor_sugerido' => [
+                'nome' => $emitente,
+                'cnpj' => $emitenteCnpj,
+            ],
             'observacoes' => '',
         ];
     }

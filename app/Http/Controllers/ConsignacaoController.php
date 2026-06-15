@@ -11,6 +11,7 @@ use App\Models\Cliente;
 use App\Models\Consignacao;
 use App\Models\ConsignacaoCompra;
 use App\Models\ConsignacaoDevolucao;
+use App\Models\Parceiro;
 use App\Models\Pedido;
 use App\Models\PedidoItem;
 use App\Models\PedidoStatusHistorico;
@@ -18,6 +19,7 @@ use App\Models\ProdutoEntregaEvento;
 use App\Models\ProdutoVariacao;
 use App\Services\EstoqueMovimentacaoService;
 use App\Services\EntregaProdutoService;
+use App\Services\DesfazerConsignacaoService;
 use App\Services\PdfImageService;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\JsonResponse;
@@ -35,6 +37,7 @@ class ConsignacaoController extends Controller
         $request->validate([
             'data_ini' => 'nullable|date_format:Y-m-d',
             'data_fim' => 'nullable|date_format:Y-m-d',
+            'parceiro_id' => 'nullable|integer|exists:parceiros,id',
         ]);
 
         $query = Consignacao::with([
@@ -43,12 +46,14 @@ class ConsignacaoController extends Controller
             'pedido.parceiro:id,nome',
             'pedido.statusAtual',
             'produtoVariacao.produto',
+            'compras',
+            'devolucoes',
         ])
             ->withSum([
                 'devolucoes as devolvido_total' => fn ($q) => $q->whereNull('consignacao_devolucoes.cancelada_em'),
             ], 'quantidade');
 
-        if (!AuthHelper::hasPermissao('consignacoes.visualizar.todos')) {
+        if (!AuthHelper::podeVisualizarConsignacoesDeTodos()) {
             $query->whereHas('pedido', function ($q) {
                 $q->where('id_usuario', AuthHelper::getUsuarioId());
             });
@@ -74,6 +79,12 @@ class ConsignacaoController extends Controller
         if ($request->filled('vendedor_id')) {
             $query->whereHas('pedido', function ($q) use ($request) {
                 $q->where('id_usuario', $request->vendedor_id);
+            });
+        }
+
+        if ($request->filled('parceiro_id')) {
+            $query->whereHas('pedido', function ($q) use ($request) {
+                $q->where('id_parceiro', $request->parceiro_id);
             });
         }
 
@@ -234,7 +245,7 @@ class ConsignacaoController extends Controller
                 /** @var ProdutoVariacao $variacao */
                 $variacao = ProdutoVariacao::query()->findOrFail((int) $item['id_variacao']);
 
-                PedidoItem::query()->create([
+                $pedidoItem = PedidoItem::query()->create([
                     'id_pedido' => $pedidoAtual->id,
                     'id_variacao' => $variacao->id,
                     'quantidade' => $quantidade,
@@ -246,6 +257,7 @@ class ConsignacaoController extends Controller
 
                 $consignacao = Consignacao::query()->create([
                     'pedido_id' => $pedidoAtual->id,
+                    'pedido_item_id' => $pedidoItem->id,
                     'produto_variacao_id' => $variacao->id,
                     'deposito_id' => (int) $item['id_deposito'],
                     'quantidade' => $quantidade,
@@ -318,6 +330,36 @@ class ConsignacaoController extends Controller
         ])->findOrFail($id);
 
         return response()->json(new ConsignacaoDetalhadaResource($consignacao));
+    }
+
+    public function desfazer(int $id, DesfazerConsignacaoService $service): JsonResponse
+    {
+        if (!AuthHelper::hasPermissao('consignacoes.gerenciar')) {
+            return response()->json(['message' => 'Sem permissao para gerenciar consignacoes.'], 403);
+        }
+
+        $resultado = $service->desfazerItem($id, AuthHelper::getUsuarioId());
+
+        return response()->json([
+            'mensagem' => 'Consignacao desfeita com sucesso.',
+            ...$resultado,
+        ]);
+    }
+
+    public function desfazerPedido(Pedido $pedido, DesfazerConsignacaoService $service): JsonResponse
+    {
+        if (!AuthHelper::hasPermissao('consignacoes.gerenciar')) {
+            return response()->json(['message' => 'Sem permissao para gerenciar consignacoes.'], 403);
+        }
+
+        $resultado = $service->desfazerPedido($pedido, AuthHelper::getUsuarioId());
+
+        return response()->json([
+            'mensagem' => $resultado['consignacoes_desfeitas'] === 1
+                ? 'Consignacao desfeita com sucesso.'
+                : "{$resultado['consignacoes_desfeitas']} consignacoes desfeitas com sucesso.",
+            ...$resultado,
+        ]);
     }
 
     public function atualizarStatus($id, Request $request): JsonResponse
@@ -1233,6 +1275,32 @@ class ConsignacaoController extends Controller
             ->get();
 
         return response()->json($vendedores);
+    }
+
+    public function parceiros(): JsonResponse
+    {
+        $pedidosQuery = Pedido::query()
+            ->whereHas('consignacoes')
+            ->whereNotNull('id_parceiro');
+
+        if (!AuthHelper::podeVisualizarConsignacoesDeTodos()) {
+            $pedidosQuery->where('id_usuario', AuthHelper::getUsuarioId());
+        }
+
+        $parceiroIds = $pedidosQuery
+            ->distinct()
+            ->pluck('id_parceiro')
+            ->filter()
+            ->values();
+
+        $parceiros = Parceiro::query()
+            ->whereIn('id', $parceiroIds)
+            ->select('id', 'nome')
+            ->distinct()
+            ->orderBy('nome')
+            ->get();
+
+        return response()->json($parceiros);
     }
 
 }

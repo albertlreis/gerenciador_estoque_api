@@ -112,6 +112,7 @@ class EntregaProdutoService
                     'tipo_origem' => ProdutoEntregaItem::ORIGEM_CONSIGNACAO,
                     'origem_id' => $consignacao->id,
                     'pedido_id' => $consignacao->pedido_id,
+                    'pedido_item_id' => $consignacao->pedido_item_id,
                     'consignacao_id' => $consignacao->id,
                     'id_variacao' => $consignacao->produto_variacao_id,
                     'quantidade_total' => (int) $consignacao->quantidade,

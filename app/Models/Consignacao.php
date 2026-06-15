@@ -12,6 +12,7 @@ class Consignacao extends Model
 
     protected $fillable = [
         'pedido_id',
+        'pedido_item_id',
         'produto_variacao_id',
         'deposito_id',
         'quantidade',
@@ -39,6 +40,11 @@ class Consignacao extends Model
     public function produtoVariacao(): BelongsTo
     {
         return $this->belongsTo(ProdutoVariacao::class, 'produto_variacao_id');
+    }
+
+    public function pedidoItem(): BelongsTo
+    {
+        return $this->belongsTo(PedidoItem::class, 'pedido_item_id');
     }
 
     public function devolucoes(): HasMany

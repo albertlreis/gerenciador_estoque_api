@@ -12,6 +12,7 @@ use App\Models\ConsignacaoDevolucao;
 use App\Models\Deposito;
 use App\Models\Estoque;
 use App\Models\EstoqueMovimentacao;
+use App\Models\EstoqueReserva;
 use App\Models\Pedido;
 use App\Models\PedidoItem;
 use App\Models\PedidoStatusHistorico;
@@ -21,6 +22,7 @@ use App\Models\ProdutoImagem;
 use App\Models\ProdutoVariacao;
 use App\Models\ProdutoVariacaoImagem;
 use App\Models\Usuario;
+use App\Services\EntregaProdutoService;
 use App\Services\PdfImageService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
@@ -445,6 +447,164 @@ class ConsignacaoRoteiroPdfTest extends TestCase
         $this->assertNotNull(ConsignacaoCompra::where('consignacao_id', $consignacao->id)->value('cancelada_em'));
     }
 
+    public function test_listagem_informa_flags_para_desfazer_consignacao(): void
+    {
+        [$pedidoId] = $this->criarPedidoConsignado('pendente', PedidoStatus::CONSIGNADO);
+        Cache::put('permissoes_usuario_' . auth()->id(), ['consignacoes.gerenciar'], now()->addHour());
+        $consignacao = Consignacao::where('pedido_id', $pedidoId)->firstOrFail();
+
+        $response = $this->getJson('/api/v1/consignacoes');
+        $item = collect($response->json('data'))->firstWhere('id', $consignacao->id);
+
+        $response->assertOk();
+        $this->assertSame(true, $item['pode_desfazer'] ?? null);
+        $this->assertSame(false, $item['tem_historico_comercial'] ?? null);
+        $this->assertNull($item['desfazer_bloqueio'] ?? null);
+    }
+
+    public function test_listagem_bloqueia_desfazer_com_historico_para_nao_admin(): void
+    {
+        [$pedidoId] = $this->criarPedidoConsignado('comprado', PedidoStatus::CONSIGNADO);
+        Cache::put('permissoes_usuario_' . auth()->id(), ['consignacoes.gerenciar'], now()->addHour());
+        $consignacao = Consignacao::where('pedido_id', $pedidoId)->firstOrFail();
+
+        $response = $this->getJson('/api/v1/consignacoes');
+        $item = collect($response->json('data'))->firstWhere('id', $consignacao->id);
+
+        $response->assertOk();
+        $this->assertSame(false, $item['pode_desfazer'] ?? null);
+        $this->assertSame(true, $item['tem_historico_comercial'] ?? null);
+        $this->assertStringContainsString('Apenas administradores', (string) ($item['desfazer_bloqueio'] ?? ''));
+    }
+
+    public function test_listagem_libera_desfazer_com_historico_para_admin(): void
+    {
+        [$pedidoId] = $this->criarPedidoConsignado('comprado', PedidoStatus::CONSIGNADO, ['Administrador']);
+        Cache::put('permissoes_usuario_' . auth()->id(), ['consignacoes.gerenciar'], now()->addHour());
+        $consignacao = Consignacao::where('pedido_id', $pedidoId)->firstOrFail();
+
+        $response = $this->getJson('/api/v1/consignacoes');
+        $item = collect($response->json('data'))->firstWhere('id', $consignacao->id);
+
+        $response->assertOk();
+        $this->assertSame(true, $item['pode_desfazer'] ?? null);
+        $this->assertSame(true, $item['tem_historico_comercial'] ?? null);
+        $this->assertNull($item['desfazer_bloqueio'] ?? null);
+    }
+
+    public function test_desfaz_item_pendente_com_reserva_cancelando_item_e_pedido(): void
+    {
+        [$pedidoId] = $this->criarPedidoConsignado('pendente', PedidoStatus::CONSIGNADO);
+        Cache::put('permissoes_usuario_' . auth()->id(), ['consignacoes.gerenciar'], now()->addHour());
+        $consignacao = Consignacao::where('pedido_id', $pedidoId)->firstOrFail();
+        $pedidoItemId = (int) $consignacao->pedido_item_id;
+        $this->garantirEstoqueConsignacao($consignacao, 1);
+
+        $entregas = app(EntregaProdutoService::class);
+        $central = $entregas->criarDemandaConsignacao($consignacao, auth()->id());
+        $entregas->reservarItem($central, $consignacao->deposito_id, null, auth()->id(), 'Reserva teste');
+
+        $reservaId = EstoqueReserva::where('pedido_item_id', $pedidoItemId)->value('id');
+        $this->assertNotNull($reservaId);
+        $this->assertSame('ativa', EstoqueReserva::whereKey($reservaId)->value('status'));
+
+        $response = $this->postJson("/api/v1/consignacoes/{$consignacao->id}/desfazer");
+
+        $response->assertOk()
+            ->assertJsonPath('consignacoes_desfeitas', 1)
+            ->assertJsonPath('itens_removidos', 1)
+            ->assertJsonPath('pedido_cancelado', true);
+
+        $this->assertDatabaseMissing('consignacoes', ['id' => $consignacao->id]);
+        $this->assertDatabaseMissing('pedido_itens', ['id' => $pedidoItemId]);
+        $this->assertSame('cancelada', EstoqueReserva::whereKey($reservaId)->value('status'));
+        $this->assertDatabaseHas('pedido_status_historico', [
+            'pedido_id' => $pedidoId,
+            'status' => PedidoStatus::CANCELADO->value,
+        ]);
+    }
+
+    public function test_desfaz_item_enviado_estornando_movimentacao_de_estoque(): void
+    {
+        [$pedidoId, $variacaoId] = $this->criarPedidoConsignado('pendente', PedidoStatus::CONSIGNADO);
+        Cache::put('permissoes_usuario_' . auth()->id(), ['consignacoes.gerenciar'], now()->addHour());
+        $consignacao = Consignacao::where('pedido_id', $pedidoId)->firstOrFail();
+        $pedidoItemId = (int) $consignacao->pedido_item_id;
+        $this->enviarConsignacaoAoCliente($consignacao);
+
+        $this->assertSame(0, (int) Estoque::where('id_variacao', $variacaoId)->where('id_deposito', $consignacao->deposito_id)->value('quantidade'));
+
+        $response = $this->postJson("/api/v1/consignacoes/{$consignacao->id}/desfazer");
+
+        $response->assertOk()
+            ->assertJsonPath('pedido_cancelado', true);
+
+        $this->assertDatabaseMissing('consignacoes', ['id' => $consignacao->id]);
+        $this->assertDatabaseMissing('pedido_itens', ['id' => $pedidoItemId]);
+        $this->assertSame(1, (int) Estoque::where('id_variacao', $variacaoId)->where('id_deposito', $consignacao->deposito_id)->value('quantidade'));
+        $this->assertSame(1, EstoqueMovimentacao::where('tipo', 'estorno')->where('ref_type', 'estorno')->count());
+    }
+
+    public function test_bloqueia_desfazer_consignacao_com_venda_para_usuario_nao_admin(): void
+    {
+        [$pedidoId] = $this->criarPedidoConsignado('pendente', PedidoStatus::CONSIGNADO);
+        Cache::put('permissoes_usuario_' . auth()->id(), ['consignacoes.gerenciar'], now()->addHour());
+        $consignacao = Consignacao::where('pedido_id', $pedidoId)->firstOrFail();
+        $this->enviarConsignacaoAoCliente($consignacao);
+
+        $this->patchJson("/api/v1/consignacoes/pedidos/{$pedidoId}/compras-em-massa", [
+            'consignacao_ids' => [$consignacao->id],
+        ])->assertOk();
+
+        $response = $this->postJson("/api/v1/consignacoes/{$consignacao->id}/desfazer");
+
+        $response->assertForbidden();
+        $this->assertDatabaseHas('consignacoes', ['id' => $consignacao->id]);
+        $this->assertSame(1, $consignacao->fresh(['compras'])->quantidadeComprada());
+    }
+
+    public function test_admin_desfaz_consignacao_com_venda_estornando_historico(): void
+    {
+        [$pedidoId, $variacaoId] = $this->criarPedidoConsignado('pendente', PedidoStatus::CONSIGNADO, ['Administrador']);
+        Cache::put('permissoes_usuario_' . auth()->id(), ['consignacoes.gerenciar'], now()->addHour());
+        $consignacao = Consignacao::where('pedido_id', $pedidoId)->firstOrFail();
+        $this->enviarConsignacaoAoCliente($consignacao);
+
+        $this->patchJson("/api/v1/consignacoes/pedidos/{$pedidoId}/compras-em-massa", [
+            'consignacao_ids' => [$consignacao->id],
+        ])->assertOk();
+
+        $response = $this->postJson("/api/v1/consignacoes/{$consignacao->id}/desfazer");
+
+        $response->assertOk()
+            ->assertJsonPath('pedido_cancelado', true);
+
+        $this->assertDatabaseMissing('consignacoes', ['id' => $consignacao->id]);
+        $this->assertSame(1, (int) Estoque::where('id_variacao', $variacaoId)->where('id_deposito', $consignacao->deposito_id)->value('quantidade'));
+    }
+
+    public function test_desfaz_lote_de_consignacao_cancelando_pedido_sem_itens(): void
+    {
+        [$pedidoId] = $this->criarPedidoConsignado('pendente', PedidoStatus::CONSIGNADO);
+        Cache::put('permissoes_usuario_' . auth()->id(), ['consignacoes.gerenciar'], now()->addHour());
+        $consignacao = Consignacao::where('pedido_id', $pedidoId)->firstOrFail();
+        $this->criarConsignacaoParaPedido($pedidoId, $consignacao->deposito_id, 1);
+
+        $response = $this->postJson("/api/v1/consignacoes/pedidos/{$pedidoId}/desfazer");
+
+        $response->assertOk()
+            ->assertJsonPath('consignacoes_desfeitas', 2)
+            ->assertJsonPath('itens_removidos', 2)
+            ->assertJsonPath('pedido_cancelado', true);
+
+        $this->assertSame(0, Consignacao::where('pedido_id', $pedidoId)->count());
+        $this->assertSame(0, PedidoItem::where('id_pedido', $pedidoId)->count());
+        $this->assertDatabaseHas('pedido_status_historico', [
+            'pedido_id' => $pedidoId,
+            'status' => PedidoStatus::CANCELADO->value,
+        ]);
+    }
+
     public function test_view_do_roteiro_de_consignacao_renderiza_imagem_embutida(): void
     {
         Storage::fake('public');
@@ -727,8 +887,18 @@ class ConsignacaoRoteiroPdfTest extends TestCase
             'usuario_id' => $usuario->id,
         ]);
 
+        $pedidoItem = PedidoItem::create([
+            'id_pedido' => $pedido->id,
+            'id_variacao' => $variacao->id,
+            'id_deposito' => $deposito->id,
+            'quantidade' => 1,
+            'preco_unitario' => 150,
+            'subtotal' => 150,
+        ]);
+
         Consignacao::create([
             'pedido_id' => $pedido->id,
+            'pedido_item_id' => $pedidoItem->id,
             'produto_variacao_id' => $variacao->id,
             'deposito_id' => $deposito->id,
             'quantidade' => 1,
@@ -762,8 +932,18 @@ class ConsignacaoRoteiroPdfTest extends TestCase
             'custo' => 90,
         ]);
 
+        $pedidoItem = PedidoItem::create([
+            'id_pedido' => $pedidoId,
+            'id_variacao' => $variacao->id,
+            'id_deposito' => $depositoId,
+            'quantidade' => $quantidade,
+            'preco_unitario' => 150,
+            'subtotal' => 150 * $quantidade,
+        ]);
+
         return Consignacao::create([
             'pedido_id' => $pedidoId,
+            'pedido_item_id' => $pedidoItem->id,
             'produto_variacao_id' => $variacao->id,
             'deposito_id' => $depositoId,
             'quantidade' => $quantidade,

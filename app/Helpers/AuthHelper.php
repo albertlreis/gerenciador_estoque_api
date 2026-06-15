@@ -81,6 +81,22 @@ class AuthHelper
     }
 
     /**
+     * Regra central para listar consignacoes de todos os vendedores.
+     */
+    public static function podeVisualizarConsignacoesDeTodos(): bool
+    {
+        if (self::hasPermissao('consignacoes.visualizar.todos')) {
+            return true;
+        }
+
+        if (self::hasPermissao('pedidos.visualizar') && self::hasPermissao('carrinhos.finalizar')) {
+            return true;
+        }
+
+        return self::isPerfilAdministradorOuVendedor();
+    }
+
+    /**
      * Regra central para listar carrinhos de todos os vendedores.
      */
     public static function podeVisualizarCarrinhosDeTodos(): bool

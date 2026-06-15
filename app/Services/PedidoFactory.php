@@ -26,12 +26,14 @@ final class PedidoFactory
      *
      * @param  Pedido     $pedido
      * @param  Collection $itensCarrinho
-     * @return void
+     * @return Collection<int, PedidoItem>
      */
-    public function criarItens(Pedido $pedido, Collection $itensCarrinho): void
+    public function criarItens(Pedido $pedido, Collection $itensCarrinho): Collection
     {
+        $itensCriados = collect();
+
         foreach ($itensCarrinho as $item) {
-            PedidoItem::create([
+            $pedidoItem = PedidoItem::create([
                 'id_pedido'      => $pedido->id,
                 'id_carrinho_item' => $item->id,
                 'id_variacao'    => $item->id_variacao,
@@ -40,7 +42,11 @@ final class PedidoFactory
                 'subtotal'       => $item->subtotal,
                 'id_deposito'    => $item->id_deposito ?? null,
             ]);
+
+            $itensCriados->put((int) $item->id, $pedidoItem);
         }
+
+        return $itensCriados;
     }
 
     /**

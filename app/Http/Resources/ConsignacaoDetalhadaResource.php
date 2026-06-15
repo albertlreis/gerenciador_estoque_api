@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources;
 
+use App\Helpers\AuthHelper;
 use App\Models\ProdutoImagem;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -9,6 +10,12 @@ class ConsignacaoDetalhadaResource extends JsonResource
 {
     public function toArray($request): array
     {
+        $podeGerenciar = AuthHelper::hasPermissao('consignacoes.gerenciar');
+        $isAdmin = AuthHelper::hasPerfil('Administrador');
+        $temHistoricoComercial = $this->quantidadeComprada() > 0 || $this->quantidadeDevolvida() > 0;
+        $requerAdmin = $temHistoricoComercial;
+        $podeDesfazer = $podeGerenciar && (!$requerAdmin || $isAdmin);
+
         return [
             'id' => $this->id,
             'pedido_id' => $this->pedido_id,
@@ -28,6 +35,12 @@ class ConsignacaoDetalhadaResource extends JsonResource
 
             'status' => $this->status,
             'observacoes' => $this->observacoes,
+            'pode_desfazer' => $podeDesfazer,
+            'requer_admin_para_desfazer' => $requerAdmin,
+            'tem_historico_comercial' => $temHistoricoComercial,
+            'desfazer_bloqueio' => !$podeGerenciar
+                ? 'Sem permissao para gerenciar consignacoes.'
+                : ($requerAdmin && !$isAdmin ? 'Apenas administradores podem desfazer itens com venda ou devolucao registrada.' : null),
 
             // Nome do produto (completo para exibição)
             'produto_nome' => optional($this->produtoVariacao)->nome_completo,

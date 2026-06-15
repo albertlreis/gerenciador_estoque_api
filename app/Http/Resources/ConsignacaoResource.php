@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources;
 
+use App\Helpers\AuthHelper;
 use Illuminate\Http\Resources\Json\JsonResource;
 
 class ConsignacaoResource extends JsonResource
@@ -16,6 +17,10 @@ class ConsignacaoResource extends JsonResource
         $temComprado = $itens->contains('status', 'comprado');
         $temDevolvido = $itens->contains('status', 'devolvido');
         $temParcial = $itens->contains('status', 'parcial');
+        $podeGerenciar = AuthHelper::hasPermissao('consignacoes.gerenciar');
+        $isAdmin = AuthHelper::hasPerfil('Administrador');
+        $temHistoricoComercial = $itens->contains(fn ($item) => $item->quantidadeComprada() > 0 || $item->quantidadeDevolvida() > 0);
+        $podeDesfazer = $podeGerenciar && (!$temHistoricoComercial || $isAdmin);
 
         if ($temPendente) {
             if ($itens->where('status', 'pendente')->pluck('prazo_resposta')->contains(fn($prazo) => $prazo && $hoje->gt($prazo))) {
@@ -40,6 +45,11 @@ class ConsignacaoResource extends JsonResource
             'prazo_resposta' => optional($this->prazo_resposta)->format('d/m/Y'),
             'status' => $this->status,
             'status_calculado' => $statusPedido,
+            'pode_desfazer' => $podeDesfazer,
+            'tem_historico_comercial' => $temHistoricoComercial,
+            'desfazer_bloqueio' => !$podeGerenciar
+                ? 'Sem permissao para gerenciar consignacoes.'
+                : ($temHistoricoComercial && !$isAdmin ? 'Apenas administradores podem desfazer consignacoes com venda ou devolucao registrada.' : null),
         ];
     }
 }

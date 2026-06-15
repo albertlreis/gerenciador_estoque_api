@@ -409,6 +409,8 @@ Route::middleware(['auth:sanctum', 'senha.nao_obrigatoria'])
             Route::get('pedidos/{pedido}', [ConsignacaoController::class, 'porPedido'])->whereNumber('pedido');
             Route::post('pedidos/{pedido}/itens', [ConsignacaoController::class, 'adicionarItensAoPedido'])
                 ->whereNumber('pedido');
+            Route::post('pedidos/{pedido}/desfazer', [ConsignacaoController::class, 'desfazerPedido'])
+                ->whereNumber('pedido');
             Route::post('pedidos/{pedido}/devolucoes-em-massa', [ConsignacaoController::class, 'registrarDevolucoesEmMassa'])
                 ->whereNumber('pedido');
             Route::post('pedidos/{pedido}/envios-em-massa', [ConsignacaoController::class, 'registrarEnviosEmMassa'])
@@ -419,10 +421,13 @@ Route::middleware(['auth:sanctum', 'senha.nao_obrigatoria'])
             Route::get('vencendo', [ConsignacaoController::class, 'vencendo']);
             Route::get('clientes', [ConsignacaoController::class, 'clientes']);
             Route::get('vendedores', [ConsignacaoController::class, 'vendedores']);
+            Route::get('parceiros', [ConsignacaoController::class, 'parceiros']);
 
             Route::get('{consignacao}', [ConsignacaoController::class, 'show'])->whereNumber('consignacao');
 
             Route::patch('{consignacao}/status', [ConsignacaoController::class, 'atualizarStatus'])
+                ->whereNumber('consignacao');
+            Route::post('{consignacao}/desfazer', [ConsignacaoController::class, 'desfazer'])
                 ->whereNumber('consignacao');
 
             Route::post('{consignacao}/devolucoes', [ConsignacaoController::class, 'registrarDevolucao'])

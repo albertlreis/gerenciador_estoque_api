@@ -32,13 +32,25 @@ class ProdutoVariacaoResource extends JsonResource
         });
 
         // Estoque agregado (plural "estoques")
-        $estoqueTotal = 0;
+        $estoqueFisicoTotal = 0;
+        $estoqueReservadoTotal = 0;
         if ($this->relationLoaded('estoques')) {
-            $estoqueTotal = (int) $this->estoques->sum('quantidade');
+            foreach ($this->estoques as $estoque) {
+                $quantidadeFisica = (int) ($estoque->quantidade ?? 0);
+                $quantidadeReservada = method_exists($estoque, 'quantidadeReservadaAberta')
+                    ? $estoque->quantidadeReservadaAberta()
+                    : 0;
+
+                $estoqueFisicoTotal += $quantidadeFisica;
+                $estoqueReservadoTotal += $quantidadeReservada;
+            }
         } elseif ($this->relationLoaded('estoque')) {
-            // fallback legado (se existir relação singular)
-            $estoqueTotal = (int) ($this->estoque?->quantidade ?? 0);
+            $estoqueFisicoTotal = (int) ($this->estoque?->quantidade ?? 0);
+            $estoqueReservadoTotal = $this->estoque && method_exists($this->estoque, 'quantidadeReservadaAberta')
+                ? $this->estoque->quantidadeReservadaAberta()
+                : 0;
         }
+        $estoqueDisponivelTotal = max(0, $estoqueFisicoTotal - $estoqueReservadoTotal);
 
         // Outlet agregados
         $estoqueOutletTotal = $this->whenLoaded('outlets', fn () => (int) $this->outlets->sum('quantidade'));
@@ -72,8 +84,10 @@ class ProdutoVariacaoResource extends JsonResource
             'custo' => (float) ($this->custo ?? 0),
 
             // ✅ estoques compat + agregado
-            'estoque_total' => $estoqueTotal,
-            'quantidade_disponivel' => $estoqueTotal,
+            'estoque_total' => $estoqueDisponivelTotal,
+            'quantidade_fisica' => $estoqueFisicoTotal,
+            'quantidade_reservada' => $estoqueReservadoTotal,
+            'quantidade_disponivel' => $estoqueDisponivelTotal,
 //            'estoque' => ['quantidade' => $estoqueTotal],
             'estoques' => EstoqueResource::collection($this->whenLoaded('estoques')),
 

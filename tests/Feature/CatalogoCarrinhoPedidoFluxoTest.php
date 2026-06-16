@@ -471,9 +471,64 @@ class CatalogoCarrinhoPedidoFluxoTest extends TestCase
             'quantidade' => 2,
             'status' => 'ativa',
         ]);
+        $this->assertSame(6, (int) Estoque::where('id_variacao', $variacao->id)->where('id_deposito', $deposito->id)->value('quantidade'));
+        $this->assertDatabaseMissing('estoque_movimentacoes', [
+            'pedido_id' => $pedido->id,
+            'id_variacao' => $variacao->id,
+            'tipo' => 'consignacao_envio',
+        ]);
 
         $carrinho->refresh();
         $this->assertSame('finalizado', $carrinho->status);
+    }
+
+    public function test_finaliza_consignacao_com_registrar_movimentacao_true_apenas_reserva(): void
+    {
+        $usuario = $this->autenticar(['carrinhos.finalizar'], ['Vendedor']);
+        $cliente = $this->criarCliente();
+        $deposito = Deposito::create(['nome' => 'Deposito Consignacao Legado']);
+        ['variacao' => $variacao] = $this->criarProdutoComVariacao([], ['preco' => 200], $deposito, 4);
+        ['carrinho' => $carrinho, 'item' => $item] = $this->criarCarrinhoComItem($usuario, $cliente, $variacao, 3, $deposito);
+
+        $response = $this->postJson('/api/v1/pedidos', [
+            'id_carrinho' => $carrinho->id,
+            'id_cliente' => $cliente->id,
+            'modo_consignacao' => true,
+            'prazo_consignacao' => 15,
+            'registrar_movimentacao' => true,
+            'depositos_por_item' => [
+                [
+                    'id_carrinho_item' => $item->id,
+                    'id_deposito' => $deposito->id,
+                ],
+            ],
+        ]);
+
+        $response->assertStatus(201);
+
+        $pedidoId = (int) (data_get($response->json(), 'pedido.id') ?? data_get($response->json(), 'data.id'));
+        $pedido = Pedido::findOrFail($pedidoId);
+
+        $this->assertDatabaseHas('consignacoes', [
+            'pedido_id' => $pedido->id,
+            'produto_variacao_id' => $variacao->id,
+            'deposito_id' => $deposito->id,
+            'quantidade' => 3,
+            'status' => 'pendente',
+        ]);
+        $this->assertDatabaseHas('estoque_reservas', [
+            'pedido_id' => $pedido->id,
+            'id_variacao' => $variacao->id,
+            'id_deposito' => $deposito->id,
+            'quantidade' => 3,
+            'status' => 'ativa',
+        ]);
+        $this->assertSame(4, (int) Estoque::where('id_variacao', $variacao->id)->where('id_deposito', $deposito->id)->value('quantidade'));
+        $this->assertDatabaseMissing('estoque_movimentacoes', [
+            'pedido_id' => $pedido->id,
+            'id_variacao' => $variacao->id,
+            'tipo' => 'consignacao_envio',
+        ]);
     }
 
     public function test_vendedor_sem_permissao_recebe_403_ao_editar_produto(): void

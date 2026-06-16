@@ -231,14 +231,14 @@ class ProdutoService
             if ($depositoId) {
                 $q->where('id_deposito', $depositoId);
             }
-            $q->where('quantidade', '>', 0);
+            $q->whereRaw($this->estoqueDisponivelSql('> 0'), ['ativa', now()]);
         };
 
         $estoqueZerado = function ($q) use ($depositoId) {
             if ($depositoId) {
                 $q->where('id_deposito', $depositoId);
             }
-            $q->where('quantidade', '=', 0);
+            $q->whereRaw($this->estoqueDisponivelSql('<= 0'), ['ativa', now()]);
         };
 
         $with = [
@@ -427,5 +427,23 @@ class ProdutoService
     private function escapeLike(string $value): string
     {
         return str_replace(['\\', '%', '_'], ['\\\\', '\%', '\_'], $value);
+    }
+
+    private function estoqueDisponivelSql(string $comparador): string
+    {
+        return "(estoque.quantidade - COALESCE((
+            SELECT SUM(CASE
+                WHEN er.quantidade > er.quantidade_consumida THEN er.quantidade - er.quantidade_consumida
+                ELSE 0
+            END)
+            FROM estoque_reservas er
+            WHERE er.id_variacao = estoque.id_variacao
+                AND (
+                    er.id_deposito = estoque.id_deposito
+                    OR (er.id_deposito IS NULL AND estoque.id_deposito IS NULL)
+                )
+                AND er.status = ?
+                AND (er.data_expira IS NULL OR er.data_expira > ?)
+        ), 0)) {$comparador}";
     }
 }

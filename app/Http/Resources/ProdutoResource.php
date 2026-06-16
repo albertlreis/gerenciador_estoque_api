@@ -43,7 +43,10 @@ class ProdutoResource extends JsonResource
                 }
                 return false;
             }),
-            'estoque_total' => $this->getEstoqueTotalAttributeSafely(),
+            'estoque_total' => $this->getEstoqueDisponivelAttributeSafely(),
+            'quantidade_fisica' => $this->getEstoqueFisicoAttributeSafely(),
+            'quantidade_reservada' => $this->getEstoqueReservadoAttributeSafely(),
+            'quantidade_disponivel' => $this->getEstoqueDisponivelAttributeSafely(),
             'estoque_resumo' => $this->getEstoqueResumoAttributeSafely(),
             'estoque_outlet_total' => $this->getEstoqueOutletTotalAttributeSafely(),
             'depositos_disponiveis' => $this->getDepositosDisponiveisAttributeSafely(),
@@ -103,7 +106,7 @@ class ProdutoResource extends JsonResource
         return '/uploads/manuais/' . $valor;
     }
 
-    private function getEstoqueTotalAttributeSafely(): int
+    private function getEstoqueFisicoAttributeSafely(): int
     {
         $variacoes = $this->getRelationValue('variacoes') ?? collect();
 
@@ -117,6 +120,30 @@ class ProdutoResource extends JsonResource
             $estoque = $v->getRelationValue('estoque');
             return (float) ($estoque?->quantidade ?? 0);
         });
+    }
+
+    private function getEstoqueReservadoAttributeSafely(): int
+    {
+        $variacoes = $this->getRelationValue('variacoes') ?? collect();
+
+        return (int) $variacoes->sum(function ($v) {
+            $estoques = $v->getRelationValue('estoques');
+            if ($estoques instanceof \Illuminate\Support\Collection) {
+                return $estoques->sum(fn ($estoque) => method_exists($estoque, 'quantidadeReservadaAberta')
+                    ? $estoque->quantidadeReservadaAberta()
+                    : 0);
+            }
+
+            $estoque = $v->getRelationValue('estoque');
+            return $estoque && method_exists($estoque, 'quantidadeReservadaAberta')
+                ? $estoque->quantidadeReservadaAberta()
+                : 0;
+        });
+    }
+
+    private function getEstoqueDisponivelAttributeSafely(): int
+    {
+        return max(0, $this->getEstoqueFisicoAttributeSafely() - $this->getEstoqueReservadoAttributeSafely());
     }
 
     private function getEstoqueOutletTotalAttributeSafely(): int
@@ -139,7 +166,11 @@ class ProdutoResource extends JsonResource
                 continue;
             }
             foreach ($variacao->estoques as $estoque) {
-                $quantidade = (float) ($estoque->quantidade ?? 0);
+                $quantidadeFisica = (float) ($estoque->quantidade ?? 0);
+                $quantidadeReservada = method_exists($estoque, 'quantidadeReservadaAberta')
+                    ? $estoque->quantidadeReservadaAberta()
+                    : 0;
+                $quantidade = max(0, $quantidadeFisica - $quantidadeReservada);
                 if ($quantidade <= 0) {
                     continue;
                 }
@@ -182,7 +213,7 @@ class ProdutoResource extends JsonResource
             ];
         }
 
-        $quantidades = $variacoes->map(fn ($variacao) => $this->getQuantidadeVariacaoSafely($variacao));
+        $quantidades = $variacoes->map(fn ($variacao) => $this->getQuantidadeDisponivelVariacaoSafely($variacao));
         $comEstoque = $quantidades->filter(fn ($qtd) => $qtd > 0)->count();
         $semEstoque = $quantidades->filter(fn ($qtd) => $qtd <= 0)->count();
         $totalDisponivel = (int) $quantidades->filter(fn ($qtd) => $qtd > 0)->sum();
@@ -197,15 +228,27 @@ class ProdutoResource extends JsonResource
         ];
     }
 
-    private function getQuantidadeVariacaoSafely($variacao): int
+    private function getQuantidadeDisponivelVariacaoSafely($variacao): int
     {
         $estoques = $variacao->getRelationValue('estoques');
         if ($estoques instanceof \Illuminate\Support\Collection) {
-            return (int) $estoques->sum('quantidade');
+            return (int) $estoques->sum(function ($estoque) {
+                $quantidadeFisica = (int) ($estoque->quantidade ?? 0);
+                $quantidadeReservada = method_exists($estoque, 'quantidadeReservadaAberta')
+                    ? $estoque->quantidadeReservadaAberta()
+                    : 0;
+
+                return max(0, $quantidadeFisica - $quantidadeReservada);
+            });
         }
 
         $estoque = $variacao->getRelationValue('estoque');
-        return (int) ($estoque?->quantidade ?? 0);
+        $quantidadeFisica = (int) ($estoque?->quantidade ?? 0);
+        $quantidadeReservada = $estoque && method_exists($estoque, 'quantidadeReservadaAberta')
+            ? $estoque->quantidadeReservadaAberta()
+            : 0;
+
+        return max(0, $quantidadeFisica - $quantidadeReservada);
     }
 
 }

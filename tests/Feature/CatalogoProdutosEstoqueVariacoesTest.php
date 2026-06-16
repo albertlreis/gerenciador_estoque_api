@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\Categoria;
 use App\Models\Deposito;
 use App\Models\Estoque;
+use App\Models\EstoqueReserva;
 use App\Models\Produto;
 use App\Models\ProdutoVariacao;
 use App\Models\ProdutoVariacaoAtributo;
@@ -103,6 +104,77 @@ class CatalogoProdutosEstoqueVariacoesTest extends TestCase
         $variacoesC = collect($produtoCData['variacoes'] ?? []);
         $this->assertCount(1, $variacoesC);
         $this->assertTrue($variacoesC->contains('id', $variacaoCCom->id));
+    }
+
+    public function test_catalogo_subtrai_reservas_da_quantidade_disponivel(): void
+    {
+        $this->autenticar();
+
+        $categoria = Categoria::create(['nome' => 'Categoria Reserva']);
+        $deposito = Deposito::create(['nome' => 'Deposito Reserva']);
+        $produto = Produto::create([
+            'nome' => 'Produto Reservado',
+            'descricao' => 'Descricao',
+            'id_categoria' => $categoria->id,
+            'ativo' => true,
+        ]);
+        $variacao = $this->criarVariacaoComEstoque($produto, $deposito, 'RES-001', 3);
+
+        EstoqueReserva::create([
+            'id_variacao' => $variacao->id,
+            'id_deposito' => $deposito->id,
+            'quantidade' => 3,
+            'status' => 'ativa',
+        ]);
+
+        $response = $this->getJson('/api/v1/produtos?view=completa&deposito_id=' . $deposito->id);
+        $response->assertStatus(200);
+
+        $produtoData = collect($response->json('data'))->firstWhere('id', $produto->id);
+        $variacaoData = collect($produtoData['variacoes'] ?? [])->firstWhere('id', $variacao->id);
+
+        $this->assertSame(3, (int) data_get($variacaoData, 'quantidade_fisica'));
+        $this->assertSame(3, (int) data_get($variacaoData, 'quantidade_reservada'));
+        $this->assertSame(0, (int) data_get($variacaoData, 'quantidade_disponivel'));
+        $this->assertSame(0, (int) data_get($produtoData, 'estoque_resumo.total_disponivel'));
+    }
+
+    public function test_filtro_com_estoque_ignora_variacao_totalmente_reservada(): void
+    {
+        $this->autenticar();
+
+        $categoria = Categoria::create(['nome' => 'Categoria Reserva Filtro']);
+        $deposito = Deposito::create(['nome' => 'Deposito Reserva Filtro']);
+        $produtoReservado = Produto::create([
+            'nome' => 'Produto Totalmente Reservado',
+            'descricao' => 'Descricao',
+            'id_categoria' => $categoria->id,
+            'ativo' => true,
+        ]);
+        $produtoDisponivel = Produto::create([
+            'nome' => 'Produto Com Disponivel',
+            'descricao' => 'Descricao',
+            'id_categoria' => $categoria->id,
+            'ativo' => true,
+        ]);
+
+        $variacaoReservada = $this->criarVariacaoComEstoque($produtoReservado, $deposito, 'RES-FULL', 2);
+        $this->criarVariacaoComEstoque($produtoDisponivel, $deposito, 'RES-OPEN', 2);
+
+        EstoqueReserva::create([
+            'id_variacao' => $variacaoReservada->id,
+            'id_deposito' => $deposito->id,
+            'quantidade' => 2,
+            'status' => 'ativa',
+        ]);
+
+        $response = $this->getJson('/api/v1/produtos?estoque_status=com_estoque&deposito_id=' . $deposito->id);
+        $response->assertStatus(200);
+
+        $idsRetornados = collect($response->json('data'))->pluck('id')->all();
+
+        $this->assertNotContains($produtoReservado->id, $idsRetornados);
+        $this->assertContains($produtoDisponivel->id, $idsRetornados);
     }
 
     public function test_filtro_sem_estoque_retorna_produtos_com_ao_menos_uma_variacao_zerada(): void

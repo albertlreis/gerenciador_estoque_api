@@ -7,7 +7,6 @@ use App\Helpers\AuthHelper;
 use App\Integrations\ContaAzul\Services\ContaAzulExportDispatchService;
 use App\Http\Requests\StorePedidoRequest;
 use App\Models\Carrinho;
-use App\Models\ProdutoEntregaEvento;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Collection;
@@ -106,9 +105,8 @@ final class FinalizarPedidoService
         $depositosResolvidos = $this->resolverDepositosPorItem($itensFinalizacao, $depositosMapBruto);
 
         $emConsignacao = $request->boolean('modo_consignacao');
-        $baixarConsignacaoAgora = $emConsignacao && $request->boolean('registrar_movimentacao');
 
-        if ($request->boolean('registrar_movimentacao')) {
+        if (!$emConsignacao && $request->boolean('registrar_movimentacao')) {
             $saldoInsuficiente = $this->validarSaldoParaMovimentacao($itensFinalizacao, $depositosResolvidos);
 
             if ($saldoInsuficiente->isNotEmpty()) {
@@ -130,8 +128,8 @@ final class FinalizarPedidoService
             }
         }
 
-        // Validação quando for movimentar (aplica a normal e consignado)
-        return DB::transaction(function () use ($request, $carrinho, $itensFinalizacao, $idUsuarioFinal, $depositosResolvidos, $emConsignacao, $baixarConsignacaoAgora) {
+        // Validação quando for movimentar estoque físico em pedido normal.
+        return DB::transaction(function () use ($request, $carrinho, $itensFinalizacao, $idUsuarioFinal, $depositosResolvidos, $emConsignacao) {
             $total        = $itensFinalizacao->sum('subtotal');
             $dataPedido   = Carbon::now('America/Belem');
             $prazoPadrao  = (int) config('orders.prazo_padrao_dias_uteis', 60);
@@ -175,26 +173,14 @@ final class FinalizarPedidoService
                 foreach ($pedido->consignacoes as $consignacao) {
                     $central = $this->entregaProdutoService->criarDemandaConsignacao($consignacao, $idUsuarioFinal);
 
-                    if ($baixarConsignacaoAgora) {
-                        $this->entregaProdutoService->expedirItem(
-                            $central,
-                            $consignacao->deposito_id,
-                            null,
-                            $idUsuarioFinal,
-                            "Envio inicial da consignacao #{$consignacao->id}",
-                            ProdutoEntregaEvento::ENVIADO_CONSIGNACAO,
-                            "consignacao:{$consignacao->id}:envio-inicial"
-                        );
-                    } else {
-                        $this->entregaProdutoService->reservarItem(
-                            $central,
-                            $consignacao->deposito_id,
-                            null,
-                            $idUsuarioFinal,
-                            "Reserva inicial da consignacao #{$consignacao->id}",
-                            "consignacao:{$consignacao->id}:reserva-inicial"
-                        );
-                    }
+                    $this->entregaProdutoService->reservarItem(
+                        $central,
+                        $consignacao->deposito_id,
+                        null,
+                        $idUsuarioFinal,
+                        "Reserva inicial da consignacao #{$consignacao->id}",
+                        "consignacao:{$consignacao->id}:reserva-inicial"
+                    );
                 }
             }
 

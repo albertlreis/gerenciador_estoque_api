@@ -15,6 +15,11 @@ class ConsignacaoDetalhadaResource extends JsonResource
         $temHistoricoComercial = $this->quantidadeComprada() > 0 || $this->quantidadeDevolvida() > 0;
         $requerAdmin = $temHistoricoComercial;
         $podeDesfazer = $podeGerenciar && (!$requerAdmin || $isAdmin);
+        $entregaItem = $this->relationLoaded('entregaItem') ? $this->entregaItem : $this->entregaItem()->first();
+        $quantidadeReservada = max(0, (int) ($entregaItem?->quantidade_reservada ?? 0) - (int) ($entregaItem?->quantidade_expedida ?? 0));
+        $quantidadeEnviada = $this->quantidadeEnviada();
+        $quantidadeComprada = $this->quantidadeComprada();
+        $quantidadeDevolvida = $this->quantidadeDevolvida();
 
         return [
             'id' => $this->id,
@@ -24,16 +29,18 @@ class ConsignacaoDetalhadaResource extends JsonResource
 
             'quantidade' => $this->quantidade,
             'quantidade_disponivel' => $this->quantidadeDisponivelCliente(),
-            'quantidade_enviada' => $this->quantidadeEnviada(),
+            'quantidade_reservada' => $quantidadeReservada,
+            'quantidade_enviada' => $quantidadeEnviada,
             'quantidade_pendente_envio' => $this->quantidadePendenteEnvio(),
-            'quantidade_comprada' => $this->quantidadeComprada(),
-            'quantidade_devolvida' => $this->quantidadeDevolvida(),
+            'quantidade_comprada' => $quantidadeComprada,
+            'quantidade_devolvida' => $quantidadeDevolvida,
 
             'data_envio' => optional($this->data_envio)->format('d/m/Y'),
             'prazo_resposta' => optional($this->prazo_resposta)->format('d/m/Y'),
             'data_resposta' => optional($this->data_resposta)->format('d/m/Y'),
 
             'status' => $this->status,
+            'status_operacional' => $this->statusOperacional($quantidadeReservada, $quantidadeEnviada, $quantidadeComprada, $quantidadeDevolvida),
             'observacoes' => $this->observacoes,
             'pode_desfazer' => $podeDesfazer,
             'requer_admin_para_desfazer' => $requerAdmin,
@@ -112,5 +119,33 @@ class ConsignacaoDetalhadaResource extends JsonResource
                 ])->values();
             }),
         ];
+    }
+
+    private function statusOperacional(int $reservado, int $enviado, int $comprado, int $devolvido): string
+    {
+        $total = (int) $this->quantidade;
+        $respondido = $comprado + $devolvido;
+
+        if ($total > 0 && $respondido >= $total) {
+            if ($comprado > 0 && $devolvido > 0) {
+                return 'parcial';
+            }
+
+            return $comprado > 0 ? 'vendido' : 'devolvido';
+        }
+
+        if ($comprado > 0 || $devolvido > 0) {
+            return 'parcial';
+        }
+
+        if ($enviado > 0) {
+            return 'enviado';
+        }
+
+        if ($reservado > 0) {
+            return 'reservado';
+        }
+
+        return 'pendente_envio';
     }
 }

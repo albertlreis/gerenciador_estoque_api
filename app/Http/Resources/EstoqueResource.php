@@ -8,6 +8,12 @@ class EstoqueResource extends JsonResource
 {
     public function toArray($request): array
     {
+        $quantidadeFisica = (int) ($this->quantidade ?? 0);
+        $quantidadeReservada = method_exists($this->resource, 'quantidadeReservadaAberta')
+            ? $this->resource->quantidadeReservadaAberta()
+            : 0;
+        $quantidadeDisponivel = max(0, $quantidadeFisica - $quantidadeReservada);
+
         return [
             'id' => $this->id,
 
@@ -15,7 +21,10 @@ class EstoqueResource extends JsonResource
             'produto_variacao_id' => $this->produto_variacao_id ?? $this->id_variacao ?? null,
             'deposito_id' => $this->deposito_id ?? $this->id_deposito ?? null,
 
-            'quantidade' => (float) ($this->quantidade ?? 0),
+            'quantidade' => $quantidadeDisponivel,
+            'quantidade_fisica' => $quantidadeFisica,
+            'quantidade_reservada' => $quantidadeReservada,
+            'quantidade_disponivel' => $quantidadeDisponivel,
             'data_entrada_estoque_atual' => optional($this->data_entrada_estoque_atual)->toDateString(),
             'ultima_venda_em' => optional($this->ultima_venda_em)->toDateString(),
             'created_at' => optional($this->created_at)->toIso8601String(),

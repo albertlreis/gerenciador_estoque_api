@@ -12,6 +12,7 @@ use App\Models\ProdutoVariacao;
 use App\Models\Usuario;
 use App\Services\EstoqueMovimentacaoService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
@@ -58,10 +59,16 @@ class TransferenciaEntreDepositosTest extends TestCase
         return [$usuario, $variacao, $depOrigem, $depDestino];
     }
 
+    private function actingAsComPermissoes(Usuario $usuario, array $permissoes): void
+    {
+        Sanctum::actingAs($usuario);
+        Cache::put('permissoes_usuario_' . $usuario->id, $permissoes, now()->addHour());
+    }
+
     public function test_transferencia_lote_sucesso_ajusta_estoque_corretamente(): void
     {
         [$usuario, $variacao, $depOrigem, $depDestino] = $this->criarCenarioTransferencia();
-        Sanctum::actingAs($usuario);
+        $this->actingAsComPermissoes($usuario, ['estoque.transferir']);
 
         $payload = [
             'tipo' => 'transferencia',
@@ -107,10 +114,85 @@ class TransferenciaEntreDepositosTest extends TestCase
         $this->assertSame(3, (int) $transferencia->total_pecas);
     }
 
+    public function test_transferencia_lote_bloqueia_usuario_sem_permissao_de_estoque(): void
+    {
+        [$usuario, $variacao, $depOrigem, $depDestino] = $this->criarCenarioTransferencia();
+        $this->actingAsComPermissoes($usuario, []);
+
+        $response = $this->postJson('/api/v1/estoque/movimentacoes/lote', [
+            'tipo' => 'transferencia',
+            'deposito_origem_id' => $depOrigem->id,
+            'deposito_destino_id' => $depDestino->id,
+            'itens' => [
+                ['variacao_id' => $variacao->id, 'quantidade' => 1],
+            ],
+        ]);
+
+        $response->assertStatus(403);
+        $this->assertSame(
+            0,
+            EstoqueTransferencia::query()
+                ->where('deposito_origem_id', $depOrigem->id)
+                ->where('deposito_destino_id', $depDestino->id)
+                ->count()
+        );
+        $this->assertSame(
+            0,
+            EstoqueMovimentacao::query()
+                ->where('tipo', 'transferencia')
+                ->where('id_deposito_origem', $depOrigem->id)
+                ->where('id_deposito_destino', $depDestino->id)
+                ->count()
+        );
+    }
+
+    public function test_permissao_transferir_nao_autoriza_entrada_ou_saida_manual(): void
+    {
+        [$usuario, $variacao, $depOrigem, $depDestino] = $this->criarCenarioTransferencia();
+        $this->actingAsComPermissoes($usuario, ['estoque.transferir']);
+
+        $entrada = $this->postJson('/api/v1/estoque/movimentacoes/lote', [
+            'tipo' => 'entrada',
+            'deposito_destino_id' => $depDestino->id,
+            'itens' => [
+                ['variacao_id' => $variacao->id, 'quantidade' => 1],
+            ],
+        ]);
+        $entrada->assertStatus(403);
+
+        $saida = $this->postJson('/api/v1/estoque/movimentacoes/lote', [
+            'tipo' => 'saida',
+            'deposito_origem_id' => $depOrigem->id,
+            'itens' => [
+                ['variacao_id' => $variacao->id, 'quantidade' => 1],
+            ],
+        ]);
+        $saida->assertStatus(403);
+
+        $this->assertSame(0, EstoqueMovimentacao::query()->whereIn('tipo', ['entrada', 'saida'])->count());
+    }
+
+    public function test_permissao_movimentar_autoriza_entrada_manual(): void
+    {
+        [$usuario, $variacao, $depOrigem, $depDestino] = $this->criarCenarioTransferencia();
+        $this->actingAsComPermissoes($usuario, ['estoque.movimentar']);
+
+        $response = $this->postJson('/api/v1/estoque/movimentacoes/lote', [
+            'tipo' => 'entrada',
+            'deposito_destino_id' => $depDestino->id,
+            'itens' => [
+                ['variacao_id' => $variacao->id, 'quantidade' => 2],
+            ],
+        ]);
+
+        $response->assertOk();
+        $this->assertSame(2, EstoqueMovimentacao::query()->where('tipo', 'entrada')->value('quantidade'));
+    }
+
     public function test_transferencia_saldo_insuficiente_retorna_422_nao_altera_estoque(): void
     {
         [$usuario, $variacao, $depOrigem, $depDestino] = $this->criarCenarioTransferencia();
-        Sanctum::actingAs($usuario);
+        $this->actingAsComPermissoes($usuario, ['estoque.transferir']);
 
         $payload = [
             'tipo' => 'transferencia',
@@ -151,7 +233,7 @@ class TransferenciaEntreDepositosTest extends TestCase
     public function test_transferencia_origem_igual_destino_retorna_422(): void
     {
         [$usuario, $variacao, $depOrigem, $depDestino] = $this->criarCenarioTransferencia();
-        Sanctum::actingAs($usuario);
+        $this->actingAsComPermissoes($usuario, ['estoque.transferir']);
 
         $payload = [
             'tipo' => 'transferencia',
@@ -173,7 +255,7 @@ class TransferenciaEntreDepositosTest extends TestCase
     public function test_transferencia_variacao_inexistente_retorna_422(): void
     {
         [$usuario, $variacao, $depOrigem, $depDestino] = $this->criarCenarioTransferencia();
-        Sanctum::actingAs($usuario);
+        $this->actingAsComPermissoes($usuario, ['estoque.transferir']);
 
         $payload = [
             'tipo' => 'transferencia',
@@ -197,7 +279,7 @@ class TransferenciaEntreDepositosTest extends TestCase
             ->where('id_deposito', $depOrigem->id)
             ->delete();
 
-        Sanctum::actingAs($usuario);
+        $this->actingAsComPermissoes($usuario, ['estoque.transferir']);
         $payload = [
             'tipo' => 'transferencia',
             'deposito_origem_id' => $depOrigem->id,
@@ -219,7 +301,7 @@ class TransferenciaEntreDepositosTest extends TestCase
     public function test_transferencia_lote_e_atomica_quando_um_item_falha(): void
     {
         [$usuario, $variacaoA, $depOrigem, $depDestino] = $this->criarCenarioTransferencia();
-        Sanctum::actingAs($usuario);
+        $this->actingAsComPermissoes($usuario, ['estoque.transferir']);
 
         $categoria = Categoria::create(['nome' => 'Cat Transferencia 2']);
         $produto = Produto::create([
@@ -291,8 +373,21 @@ class TransferenciaEntreDepositosTest extends TestCase
                 ->value('quantidade')
         );
 
-        $this->assertSame(0, EstoqueTransferencia::query()->count());
-        $this->assertSame(0, EstoqueMovimentacao::query()->where('tipo', 'transferencia')->count());
+        $this->assertSame(
+            0,
+            EstoqueTransferencia::query()
+                ->where('deposito_origem_id', $depOrigem->id)
+                ->where('deposito_destino_id', $depDestino->id)
+                ->count()
+        );
+        $this->assertSame(
+            0,
+            EstoqueMovimentacao::query()
+                ->where('tipo', 'transferencia')
+                ->where('id_deposito_origem', $depOrigem->id)
+                ->where('id_deposito_destino', $depDestino->id)
+                ->count()
+        );
     }
 
     public function test_service_registrar_transferencia_lote_origem_destino_iguais_lanca_excecao(): void

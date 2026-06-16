@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\DTOs\FiltroMovimentacaoEstoqueDTO;
+use App\Helpers\AuthHelper;
 use App\Http\Requests\StoreMovimentacaoRequest;
 use App\Http\Requests\UpdateMovimentacaoRequest;
 use App\Http\Resources\MovimentacaoResource;
@@ -140,6 +141,12 @@ class EstoqueMovimentacaoController extends Controller
             return response()->json(['error' => 'Usuário não autenticado.'], 401);
         }
 
+        if (!$this->podeRegistrarLote((string) $dados['tipo'])) {
+            return response()->json([
+                'message' => 'Sem permissao para registrar esta movimentacao de estoque.',
+            ], 403);
+        }
+
         try {
             $result = $this->service->registrarMovimentacaoLote($dados, $usuarioId);
             return response()->json($result);
@@ -151,6 +158,16 @@ class EstoqueMovimentacaoController extends Controller
 
             return response()->json(['error' => $friendly], 422);
         }
+    }
+
+    private function podeRegistrarLote(string $tipo): bool
+    {
+        if ($tipo === 'transferencia') {
+            return AuthHelper::hasPermissao('estoque.transferir')
+                || AuthHelper::hasPermissao('estoque.movimentar');
+        }
+
+        return AuthHelper::hasPermissao('estoque.movimentar');
     }
 
     /**

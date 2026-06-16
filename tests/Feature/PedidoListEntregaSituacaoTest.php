@@ -130,4 +130,35 @@ class PedidoListEntregaSituacaoTest extends TestCase
         $this->assertSame('Atrasado', $pedidoPayload['situacao_entrega']);
         $this->assertSame(1, (int) ($pedidoPayload['dias_atraso'] ?? 0));
     }
+
+    public function test_filtra_pedidos_por_tipo_cliente_e_reposicao(): void
+    {
+        $usuario = $this->autenticar();
+        $pedidoVenda = $this->criarPedido($usuario, [
+            'tipo' => Pedido::TIPO_VENDA,
+            'numero_externo' => 'VENDA-TIPO-TESTE',
+        ]);
+        $pedidoReposicao = $this->criarPedido($usuario, [
+            'tipo' => Pedido::TIPO_REPOSICAO,
+            'numero_externo' => 'REPOSICAO-TIPO-TESTE',
+        ]);
+
+        $responseTodos = $this->getJson('/api/v1/pedidos?per_page=50');
+        $responseTodos->assertOk();
+        $idsTodos = collect($responseTodos->json('data'))->pluck('id')->map(fn ($id) => (int) $id)->all();
+        $this->assertContains($pedidoVenda->id, $idsTodos);
+        $this->assertContains($pedidoReposicao->id, $idsTodos);
+
+        $responseVenda = $this->getJson('/api/v1/pedidos?tipo=venda&per_page=50');
+        $responseVenda->assertOk();
+        $idsVenda = collect($responseVenda->json('data'))->pluck('id')->map(fn ($id) => (int) $id)->all();
+        $this->assertContains($pedidoVenda->id, $idsVenda);
+        $this->assertNotContains($pedidoReposicao->id, $idsVenda);
+
+        $responseReposicao = $this->getJson('/api/v1/pedidos?tipo=reposicao&per_page=50');
+        $responseReposicao->assertOk();
+        $idsReposicao = collect($responseReposicao->json('data'))->pluck('id')->map(fn ($id) => (int) $id)->all();
+        $this->assertNotContains($pedidoVenda->id, $idsReposicao);
+        $this->assertContains($pedidoReposicao->id, $idsReposicao);
+    }
 }

@@ -37,6 +37,10 @@ class PedidoRepository
             $query->whereHas('statusAtual', fn($q) => $q->where('status', $request->status));
         }
 
+        if (in_array($request->input('tipo'), [Pedido::TIPO_VENDA, Pedido::TIPO_REPOSICAO], true)) {
+            $query->where('tipo', $request->input('tipo'));
+        }
+
         if ($request->filled('data_inicio')) {
             $query->where('data_pedido', '>=', $request->input('data_inicio') . ' 00:00:00');
         }

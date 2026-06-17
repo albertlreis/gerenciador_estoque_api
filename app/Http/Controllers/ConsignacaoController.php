@@ -277,10 +277,20 @@ class ConsignacaoController extends Controller
                 $usuarioId ? (int) $usuarioId : null
             );
 
+            $entregas = app(EntregaProdutoService::class);
             foreach ($consignacoesCriadas as $consignacao) {
-                app(EntregaProdutoService::class)->criarDemandaConsignacao(
+                $central = $entregas->criarDemandaConsignacao(
                     $consignacao,
                     $usuarioId ? (int) $usuarioId : null
+                );
+
+                $entregas->reservarItem(
+                    $central,
+                    $consignacao->deposito_id,
+                    null,
+                    $usuarioId ? (int) $usuarioId : null,
+                    "Reserva inicial da consignacao #{$consignacao->id}",
+                    "consignacao:{$consignacao->id}:reserva-inicial"
                 );
             }
 

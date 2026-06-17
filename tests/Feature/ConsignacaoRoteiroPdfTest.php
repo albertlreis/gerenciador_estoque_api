@@ -741,6 +741,16 @@ class ConsignacaoRoteiroPdfTest extends TestCase
             'pedido_id' => $pedidoId,
             'id_variacao' => $variacao->id,
             'quantidade_total' => 2,
+            'quantidade_reservada' => 2,
+            'status' => ProdutoEntregaItem::STATUS_RESERVADO,
+        ]);
+        $this->assertDatabaseHas('estoque_reservas', [
+            'pedido_id' => $pedidoId,
+            'pedido_item_id' => $novaConsignacao->pedido_item_id,
+            'id_variacao' => $variacao->id,
+            'id_deposito' => $deposito->id,
+            'quantidade' => 2,
+            'status' => 'ativa',
         ]);
         $this->assertDatabaseHas('produto_entrega_itens', [
             'tipo_origem' => ProdutoEntregaItem::ORIGEM_PEDIDO,

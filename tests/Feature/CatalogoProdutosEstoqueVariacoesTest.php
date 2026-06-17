@@ -22,7 +22,7 @@ class CatalogoProdutosEstoqueVariacoesTest extends TestCase
     {
         $usuario = Usuario::create([
             'nome' => 'Usuario Teste',
-            'email' => 'catalogo-estoque@example.com',
+            'email' => uniqid('catalogo-estoque-', true) . '@example.com',
             'senha' => 'senha',
             'ativo' => true,
         ]);

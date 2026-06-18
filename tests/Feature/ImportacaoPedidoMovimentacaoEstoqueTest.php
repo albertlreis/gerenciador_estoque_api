@@ -8,22 +8,54 @@ use App\Models\Cliente;
 use App\Models\Deposito;
 use App\Models\Estoque;
 use App\Models\EstoqueMovimentacao;
+use App\Models\EstoqueReserva;
 use App\Models\Fornecedor;
 use App\Models\Produto;
 use App\Models\ProdutoEntregaEvento;
 use App\Models\ProdutoEntregaItem;
 use App\Models\ProdutoVariacao;
 use App\Models\Usuario;
-use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
 class ImportacaoPedidoMovimentacaoEstoqueTest extends TestCase
 {
-    use RefreshDatabase;
-
     private ?int $fornecedorId = null;
 
-    public function test_venda_entregue_com_movimentacao_baixa_estoque_e_marca_entregue(): void
+    public function test_venda_com_movimentacao_padrao_registra_entrada_e_reserva_sem_saida(): void
+    {
+        [$usuario, $cliente, $categoria, $variacao, $deposito] = $this->criarContexto();
+
+        $payload = $this->payloadImportacao(
+            tipo: 'venda',
+            clienteId: $cliente->id,
+            categoriaId: $categoria->id,
+            variacaoId: $variacao->id,
+            depositoId: $deposito->id,
+            quantidade: 2,
+            entregue: false,
+            movimentarEstoque: true,
+        );
+        unset($payload['movimentar_estoque']);
+
+        $response = $this->actingAs($usuario, 'sanctum')
+            ->postJson('/api/v1/pedidos/import/pdf/confirm', $payload);
+
+        $response->assertOk();
+
+        $pedidoId = $response->json('id');
+        $entrega = ProdutoEntregaItem::query()->where('pedido_id', $pedidoId)->firstOrFail();
+
+        $this->assertSame(2, (int) Estoque::query()->where('id_variacao', $variacao->id)->where('id_deposito', $deposito->id)->value('quantidade'));
+        $this->assertSame(2, (int) $entrega->quantidade_reservada);
+        $this->assertSame(0, (int) $entrega->quantidade_expedida);
+        $this->assertSame(0, (int) $entrega->quantidade_entregue);
+        $this->assertSame(ProdutoEntregaItem::STATUS_RESERVADO, $entrega->status);
+        $this->assertSame(1, EstoqueReserva::query()->where('pedido_id', $pedidoId)->where('status', 'ativa')->count());
+        $this->assertSame(1, EstoqueMovimentacao::query()->where('pedido_id', $pedidoId)->where('tipo', 'entrada_deposito')->count());
+        $this->assertSame(0, EstoqueMovimentacao::query()->where('pedido_id', $pedidoId)->where('tipo', 'saida_entrega_cliente')->count());
+    }
+
+    public function test_venda_com_saida_explicita_baixa_estoque_e_marca_expedida_sem_entregar(): void
     {
         [$usuario, $cliente, $categoria, $variacao, $deposito] = $this->criarContexto();
 
@@ -39,10 +71,10 @@ class ImportacaoPedidoMovimentacaoEstoqueTest extends TestCase
             variacaoId: $variacao->id,
             depositoId: $deposito->id,
             quantidade: 2,
-            entregue: true,
+            entregue: false,
             movimentarEstoque: true,
+            movimentacaoTipo: 'saida',
         );
-        unset($payload['movimentar_estoque']);
 
         $response = $this->actingAs($usuario, 'sanctum')
             ->postJson('/api/v1/pedidos/import/pdf/confirm', $payload);
@@ -55,11 +87,69 @@ class ImportacaoPedidoMovimentacaoEstoqueTest extends TestCase
         $this->assertSame(3, (int) Estoque::query()->where('id_variacao', $variacao->id)->where('id_deposito', $deposito->id)->value('quantidade'));
         $this->assertSame(2, (int) $entrega->quantidade_reservada);
         $this->assertSame(2, (int) $entrega->quantidade_expedida);
-        $this->assertSame(2, (int) $entrega->quantidade_entregue);
-        $this->assertSame(ProdutoEntregaItem::STATUS_ENTREGUE, $entrega->status);
+        $this->assertSame(0, (int) $entrega->quantidade_entregue);
+        $this->assertSame(ProdutoEntregaItem::STATUS_RESERVADO, $entrega->status);
         $this->assertSame(1, EstoqueMovimentacao::query()->where('pedido_id', $pedidoId)->count());
         $this->assertSame(1, ProdutoEntregaEvento::query()->where('produto_entrega_item_id', $entrega->id)->where('tipo_evento', ProdutoEntregaEvento::EXPEDIDO_CLIENTE)->count());
+        $this->assertSame(0, ProdutoEntregaEvento::query()->where('produto_entrega_item_id', $entrega->id)->where('tipo_evento', ProdutoEntregaEvento::ENTREGUE_CLIENTE)->count());
+        $this->assertSame('consumida', EstoqueReserva::query()->where('pedido_id', $pedidoId)->first()?->status);
+    }
+
+    public function test_venda_entregue_com_saida_explicita_baixa_estoque_e_marca_entregue(): void
+    {
+        [$usuario, $cliente, $categoria, $variacao, $deposito] = $this->criarContexto();
+
+        Estoque::updateOrCreate(
+            ['id_variacao' => $variacao->id, 'id_deposito' => $deposito->id],
+            ['quantidade' => 5]
+        );
+
+        $response = $this->actingAs($usuario, 'sanctum')
+            ->postJson('/api/v1/pedidos/import/pdf/confirm', $this->payloadImportacao(
+                tipo: 'venda',
+                clienteId: $cliente->id,
+                categoriaId: $categoria->id,
+                variacaoId: $variacao->id,
+                depositoId: $deposito->id,
+                quantidade: 2,
+                entregue: true,
+                movimentarEstoque: true,
+                movimentacaoTipo: 'saida',
+            ));
+
+        $response->assertOk();
+
+        $pedidoId = $response->json('id');
+        $entrega = ProdutoEntregaItem::query()->where('pedido_id', $pedidoId)->firstOrFail();
+
+        $this->assertSame(3, (int) Estoque::query()->where('id_variacao', $variacao->id)->where('id_deposito', $deposito->id)->value('quantidade'));
+        $this->assertSame(2, (int) $entrega->quantidade_expedida);
+        $this->assertSame(2, (int) $entrega->quantidade_entregue);
+        $this->assertSame(ProdutoEntregaItem::STATUS_ENTREGUE, $entrega->status);
+        $this->assertSame(1, ProdutoEntregaEvento::query()->where('produto_entrega_item_id', $entrega->id)->where('tipo_evento', ProdutoEntregaEvento::EXPEDIDO_CLIENTE)->count());
         $this->assertSame(1, ProdutoEntregaEvento::query()->where('produto_entrega_item_id', $entrega->id)->where('tipo_evento', ProdutoEntregaEvento::ENTREGUE_CLIENTE)->count());
+    }
+
+    public function test_venda_entregue_com_entrada_retorna_validacao(): void
+    {
+        [$usuario, $cliente, $categoria, $variacao, $deposito] = $this->criarContexto();
+
+        $response = $this->actingAs($usuario, 'sanctum')
+            ->postJson('/api/v1/pedidos/import/pdf/confirm', $this->payloadImportacao(
+                tipo: 'venda',
+                clienteId: $cliente->id,
+                categoriaId: $categoria->id,
+                variacaoId: $variacao->id,
+                depositoId: $deposito->id,
+                quantidade: 2,
+                entregue: true,
+                movimentarEstoque: true,
+                movimentacaoTipo: 'entrada',
+            ));
+
+        $response
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('itens');
     }
 
     public function test_venda_entregue_sem_movimentacao_cria_demanda_pendente_sem_baixa(): void
@@ -174,6 +264,35 @@ class ImportacaoPedidoMovimentacaoEstoqueTest extends TestCase
         ]);
     }
 
+    public function test_reposicao_com_saida_no_payload_movimenta_como_entrada(): void
+    {
+        [$usuario, , $categoria, $variacao, $deposito] = $this->criarContexto();
+
+        $response = $this->actingAs($usuario, 'sanctum')
+            ->postJson('/api/v1/pedidos/import/pdf/confirm', $this->payloadImportacao(
+                tipo: 'reposicao',
+                clienteId: null,
+                categoriaId: $categoria->id,
+                variacaoId: $variacao->id,
+                depositoId: $deposito->id,
+                quantidade: 3,
+                entregue: false,
+                movimentarEstoque: true,
+                movimentacaoTipo: 'saida',
+            ));
+
+        $response->assertOk();
+
+        $pedidoId = $response->json('id');
+        $entrega = ProdutoEntregaItem::query()->where('pedido_id', $pedidoId)->firstOrFail();
+
+        $this->assertSame(3, (int) Estoque::query()->where('id_variacao', $variacao->id)->where('id_deposito', $deposito->id)->value('quantidade'));
+        $this->assertSame(3, (int) $entrega->quantidade_recebida);
+        $this->assertSame(ProdutoEntregaItem::STATUS_RECEBIDO, $entrega->status);
+        $this->assertSame(1, EstoqueMovimentacao::query()->where('pedido_id', $pedidoId)->where('tipo', 'entrada_deposito')->count());
+        $this->assertSame(0, EstoqueMovimentacao::query()->where('pedido_id', $pedidoId)->where('tipo', 'saida_entrega_cliente')->count());
+    }
+
     public function test_reposicao_recebida_sem_movimentacao_fica_em_recebiveis_sem_entrada(): void
     {
         [$usuario, , $categoria, $variacao, $deposito] = $this->criarContexto();
@@ -241,6 +360,27 @@ class ImportacaoPedidoMovimentacaoEstoqueTest extends TestCase
             ->assertJsonValidationErrors('itens');
     }
 
+    public function test_movimentacao_sem_deposito_retorna_validacao_mesmo_sem_entrega(): void
+    {
+        [$usuario, $cliente, $categoria, $variacao] = $this->criarContexto();
+
+        $response = $this->actingAs($usuario, 'sanctum')
+            ->postJson('/api/v1/pedidos/import/pdf/confirm', $this->payloadImportacao(
+                tipo: 'venda',
+                clienteId: $cliente->id,
+                categoriaId: $categoria->id,
+                variacaoId: $variacao->id,
+                depositoId: null,
+                quantidade: 1,
+                entregue: false,
+                movimentarEstoque: true,
+            ));
+
+        $response
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('itens');
+    }
+
     private function criarContexto(): array
     {
         $usuario = Usuario::create([
@@ -290,9 +430,27 @@ class ImportacaoPedidoMovimentacaoEstoqueTest extends TestCase
         ?int $depositoId,
         int $quantidade,
         bool $entregue,
-        bool $movimentarEstoque
+        bool $movimentarEstoque,
+        ?string $movimentacaoTipo = null
     ): array {
         $data = now()->toDateString();
+
+        $item = [
+            'nome' => 'Produto Importacao',
+            'ref' => 'REF-IMPORTACAO',
+            'quantidade' => $quantidade,
+            'valor' => 100,
+            'preco_unitario' => 100,
+            'custo_unitario' => 50,
+            'id_categoria' => $categoriaId,
+            'id_variacao' => $variacaoId,
+            'id_deposito' => $depositoId,
+            'atributos' => [],
+        ];
+
+        if ($movimentacaoTipo !== null) {
+            $item['movimentacao_estoque_tipo'] = $movimentacaoTipo;
+        }
 
         return [
             'tipo_importacao' => 'PRODUTOS_XML_FORNECEDORES',
@@ -314,18 +472,7 @@ class ImportacaoPedidoMovimentacaoEstoqueTest extends TestCase
             'previsao_tipo' => 'DIAS_UTEIS',
             'dias_uteis_previstos' => 0,
             'itens' => [
-                [
-                    'nome' => 'Produto Importacao',
-                    'ref' => 'REF-IMPORTACAO',
-                    'quantidade' => $quantidade,
-                    'valor' => 100,
-                    'preco_unitario' => 100,
-                    'custo_unitario' => 50,
-                    'id_categoria' => $categoriaId,
-                    'id_variacao' => $variacaoId,
-                    'id_deposito' => $depositoId,
-                    'atributos' => [],
-                ],
+                $item,
             ],
         ];
     }

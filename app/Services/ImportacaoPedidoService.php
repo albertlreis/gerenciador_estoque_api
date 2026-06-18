@@ -12,8 +12,10 @@ use App\Models\ProdutoVariacaoAtributo;
 use App\Models\ProdutoVariacaoCodigoHistorico;
 use App\Models\PedidoImportacao;
 use App\Models\PedidoImportacaoItem;
+use App\Models\ProdutoEntregaEvento;
 use App\Models\Categoria;
 use App\Enums\EstrategiaVinculoImportacao;
+use App\Enums\EstoqueMovimentacaoTipo;
 use App\Enums\PedidoStatus;
 use App\Enums\TipoImportacao;
 use App\Helpers\StringHelper;
@@ -34,6 +36,8 @@ use Illuminate\Validation\ValidationException;
 class ImportacaoPedidoService
 {
     private const PRAZO_IMPORTACAO_PADRAO_DIAS_UTEIS = 60;
+    private const MOVIMENTACAO_ENTRADA = 'entrada';
+    private const MOVIMENTACAO_SAIDA = 'saida';
 
     private ?int $categoriaPadraoId = null;
 
@@ -90,6 +94,7 @@ class ImportacaoPedidoService
             'itens.*.custo_unitario' => 'nullable|numeric|min:0|max:99999999.99',
             'itens.*.id_categoria' => 'required|integer',
             'itens.*.id_deposito'  => 'nullable|integer|exists:depositos,id',
+            'itens.*.movimentacao_estoque_tipo' => 'nullable|in:entrada,saida',
             'itens.*.atributos'    => 'nullable|array',
             'itens.*.atributos.*'  => 'nullable',
             'estrategia_vinculo'   => 'nullable|in:' . implode(',', EstrategiaVinculoImportacao::valores()),
@@ -275,6 +280,13 @@ class ImportacaoPedidoService
             $movimentarEstoque = $request->has('movimentar_estoque')
                 ? $this->toBoolean($request->input('movimentar_estoque'))
                 : true;
+            $tiposMovimentacaoPorIndice = [];
+            foreach ($itens as $index => $itemMovimentacao) {
+                $tiposMovimentacaoPorIndice[$index] = $this->normalizarTipoMovimentacaoItem(
+                    $tipo,
+                    $itemMovimentacao['movimentacao_estoque_tipo'] ?? null
+                );
+            }
             $dataEntregaTopLevel = $request->input('data_entrega');
             $dataEntregaPedidoLegado = $dadosPedido['data_entrega'] ?? null;
             $dataEntrega = DateNormalizer::normalizeDate(
@@ -297,7 +309,7 @@ class ImportacaoPedidoService
                 ]);
             }
 
-            if ($entregue) {
+            if ($movimentarEstoque) {
                 $itensSemDeposito = collect($itens)
                     ->filter(fn ($item) => empty($item['id_deposito']))
                     ->keys()
@@ -307,7 +319,22 @@ class ImportacaoPedidoService
 
                 if ($itensSemDeposito !== []) {
                     throw ValidationException::withMessages([
-                        'itens' => ['Informe deposito para pedidos importados marcados como entregues: ' . implode(', ', $itensSemDeposito) . '.'],
+                        'itens' => ['Informe deposito para movimentar estoque dos itens importados: ' . implode(', ', $itensSemDeposito) . '.'],
+                    ]);
+                }
+            }
+
+            if ($tipo === Pedido::TIPO_VENDA && $entregue && $movimentarEstoque) {
+                $itensSemSaida = collect($tiposMovimentacaoPorIndice)
+                    ->filter(fn ($tipoMovimentacao) => $tipoMovimentacao !== self::MOVIMENTACAO_SAIDA)
+                    ->keys()
+                    ->map(fn ($index) => 'Item ' . ((int) $index + 1))
+                    ->values()
+                    ->all();
+
+                if ($itensSemSaida !== []) {
+                    throw ValidationException::withMessages([
+                        'itens' => ['Pedidos de cliente marcados como entregues devem movimentar os itens como saida: ' . implode(', ', $itensSemSaida) . '.'],
                     ]);
                 }
             }
@@ -373,7 +400,7 @@ class ImportacaoPedidoService
                 'usuario_id'  => $usuario->id,
             ]);
 
-            if ($entregue && $movimentarEstoque) {
+            if ($movimentarEstoque && ($entregue || $tipo === Pedido::TIPO_REPOSICAO)) {
                 PedidoStatusHistorico::create([
                     'pedido_id'   => $pedido->id,
                     'status'      => $tipo === Pedido::TIPO_REPOSICAO
@@ -384,6 +411,8 @@ class ImportacaoPedidoService
                     'observacoes' => 'Status aplicado na confirmação da importação PDF.',
                 ]);
             }
+
+            $pedidoItensCriados = collect();
 
             foreach ($itens as $index => $item) {
                 $item['nome'] = $this->normalizarNomeItem($item['nome'] ?? '');
@@ -503,6 +532,10 @@ class ImportacaoPedidoService
                     'id_deposito'    => $item['id_deposito'] ?? null,
                     'observacoes'    => $item['atributos']['observacao'] ?? null,
                 ]);
+                $pedidoItensCriados->push([
+                    'item' => $pedidoItem,
+                    'movimentacao_estoque_tipo' => $tiposMovimentacaoPorIndice[$index] ?? self::MOVIMENTACAO_ENTRADA,
+                ]);
 
                 PedidoImportacaoItem::create([
                     'pedido_importacao_id' => $importacaoId ? (int) $importacaoId : null,
@@ -543,21 +576,13 @@ class ImportacaoPedidoService
                 'itens_total' => count($itens),
             ]);
 
-            $entregas = app(EntregaProdutoService::class);
-            $entregas->criarDemandaPedido(
+            $this->aplicarMovimentacoesImportacao(
                 $pedido,
-                $usuario->id,
-                $movimentarEstoque && $tipo === Pedido::TIPO_VENDA
+                $pedidoItensCriados,
+                $movimentarEstoque,
+                $entregue,
+                $usuario->id
             );
-
-            if ($movimentarEstoque && $entregue) {
-                if ($tipo === Pedido::TIPO_REPOSICAO) {
-                    $entregas->receberPedido($pedido, $usuario->id, 'Recebimento de reposicao importada.');
-                } else {
-                    $entregas->expedirPedido($pedido, $usuario->id);
-                    $entregas->entregarPedido($pedido, $usuario->id);
-                }
-            }
 
             $itensConfirmados = $pedido->itens()
                 ->with('variacao.produto', 'variacao.atributos')
@@ -608,6 +633,116 @@ class ImportacaoPedidoService
                 'usuario_id' => Auth::id(),
                 'importacao_id' => $request->input('importacao_id'),
             ]);
+        }
+    }
+
+    private function normalizarTipoMovimentacaoItem(string $tipoPedido, mixed $tipoMovimentacao): string
+    {
+        if ($tipoPedido === Pedido::TIPO_REPOSICAO) {
+            return self::MOVIMENTACAO_ENTRADA;
+        }
+
+        $normalizado = strtolower(trim((string) $tipoMovimentacao));
+
+        return $normalizado === self::MOVIMENTACAO_SAIDA
+            ? self::MOVIMENTACAO_SAIDA
+            : self::MOVIMENTACAO_ENTRADA;
+    }
+
+    /**
+     * @param Collection<int,array{item:PedidoItem,movimentacao_estoque_tipo:string}> $pedidoItens
+     */
+    private function aplicarMovimentacoesImportacao(
+        Pedido $pedido,
+        Collection $pedidoItens,
+        bool $movimentarEstoque,
+        bool $entregue,
+        ?int $usuarioId
+    ): void {
+        $entregas = app(EntregaProdutoService::class);
+        $entregaItens = $entregas->criarDemandaPedido($pedido, $usuarioId, false)
+            ->keyBy('pedido_item_id');
+
+        if (!$movimentarEstoque) {
+            return;
+        }
+
+        $movimentacoes = app(EstoqueMovimentacaoService::class);
+
+        foreach ($pedidoItens as $registro) {
+            /** @var PedidoItem $pedidoItem */
+            $pedidoItem = $registro['item'];
+            $tipoMovimentacao = $this->normalizarTipoMovimentacaoItem(
+                (string) $pedido->tipo,
+                $registro['movimentacao_estoque_tipo'] ?? null
+            );
+            $entrega = $entregaItens->get($pedidoItem->id);
+
+            if (!$entrega) {
+                continue;
+            }
+
+            $depositoId = $pedidoItem->id_deposito ? (int) $pedidoItem->id_deposito : null;
+            $quantidade = (int) $pedidoItem->quantidade;
+
+            if ($pedido->isReposicao()) {
+                $entregas->receberItem(
+                    $entrega,
+                    $depositoId,
+                    $quantidade,
+                    $usuarioId,
+                    'Recebimento de reposicao importada.',
+                    "importacao-pedido:{$pedidoItem->id}:entrada"
+                );
+                continue;
+            }
+
+            if ($tipoMovimentacao === self::MOVIMENTACAO_SAIDA) {
+                $entregaAtualizada = $entregas->expedirItem(
+                    $entrega,
+                    $depositoId,
+                    $quantidade,
+                    $usuarioId,
+                    'Saida de estoque registrada na importacao do pedido.',
+                    ProdutoEntregaEvento::EXPEDIDO_CLIENTE,
+                    "importacao-pedido:{$pedidoItem->id}:saida"
+                );
+
+                if ($entregue) {
+                    $entregas->entregarItem(
+                        $entregaAtualizada,
+                        $quantidade,
+                        $usuarioId,
+                        'Entrega ao cliente registrada na importacao do pedido.',
+                        "importacao-pedido:{$pedidoItem->id}:entrega"
+                    );
+                }
+
+                continue;
+            }
+
+            $movimentacoes->registrarMovimentacaoManual([
+                'id_variacao' => (int) $pedidoItem->id_variacao,
+                'id_deposito_origem' => null,
+                'id_deposito_destino' => $depositoId,
+                'tipo' => EstoqueMovimentacaoTipo::ENTRADA_DEPOSITO->value,
+                'quantidade' => $quantidade,
+                'observacao' => 'Entrada de fabrica registrada na importacao do pedido.',
+                'data_movimentacao' => now(),
+                'ref_type' => 'pedido',
+                'ref_id' => $pedido->id,
+                'pedido_id' => $pedido->id,
+                'pedido_item_id' => $pedidoItem->id,
+            ], $usuarioId);
+
+            $entregas->reservarItem(
+                $entrega,
+                $depositoId,
+                $quantidade,
+                $usuarioId,
+                'Reserva criada apos entrada de fabrica importada.',
+                "importacao-pedido:{$pedidoItem->id}:reserva"
+            );
         }
     }
 

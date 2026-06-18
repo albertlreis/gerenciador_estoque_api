@@ -597,7 +597,7 @@ class PedidoController extends Controller
     {
         $pedido = Pedido::query()->findOrFail($pedidoId);
 
-        $itens = ProdutoEntregaItem::query()
+        $queryBase = fn () => ProdutoEntregaItem::query()
             ->with([
                 'pedidoItem',
                 'variacao.imagem',
@@ -607,7 +607,9 @@ class PedidoController extends Controller
                 'depositoOrigem:id,nome',
                 'depositoDestino:id,nome',
             ])
-            ->where('pedido_id', $pedido->id)
+            ->where('pedido_id', $pedido->id);
+
+        $itens = $queryBase()
             ->whereNotIn('status', [
                 ProdutoEntregaItem::STATUS_CANCELADO,
                 ProdutoEntregaItem::STATUS_RECEBIDO,
@@ -618,6 +620,16 @@ class PedidoController extends Controller
             ->get()
             ->map(fn (ProdutoEntregaItem $item) => $this->formatarItemNotaEntrega($item, $disponibilidade))
             ->values();
+
+        if ($itens->isEmpty()) {
+            $itens = $queryBase()
+                ->where('status', ProdutoEntregaItem::STATUS_ENTREGUE)
+                ->where('quantidade_entregue', '>', 0)
+                ->orderBy('id')
+                ->get()
+                ->map(fn (ProdutoEntregaItem $item) => $this->formatarItemNotaEntrega($item, $disponibilidade, 'reimpressao'))
+                ->values();
+        }
 
         return response()->json(['data' => $itens]);
     }
@@ -783,14 +795,18 @@ class PedidoController extends Controller
 
     private function formatarItemNotaEntrega(
         ProdutoEntregaItem $item,
-        EstoqueDisponibilidadeService $disponibilidade
+        EstoqueDisponibilidadeService $disponibilidade,
+        string $modoNota = 'pendente'
     ): array {
         $pendenteTotal = max(0, (int) $item->quantidade_total - (int) $item->quantidade_entregue);
         $pendenteExpedido = max(0, (int) $item->quantidade_expedida - (int) $item->quantidade_entregue);
         $pendenteExpedicao = max(0, (int) $item->quantidade_total - (int) $item->quantidade_expedida);
+        $reimpressao = $modoNota === 'reimpressao';
 
         return [
             'id' => $item->id,
+            'modo_nota' => $modoNota,
+            'pode_registrar_entrega' => ! $reimpressao,
             'tipo_origem' => $item->tipo_origem,
             'origem_id' => $item->origem_id,
             'pedido_id' => $item->pedido_id,
@@ -803,6 +819,7 @@ class PedidoController extends Controller
             'quantidade_pendente_total' => $pendenteTotal,
             'quantidade_pendente_entrega' => $pendenteExpedido,
             'quantidade_pendente_expedicao_nota' => $pendenteExpedicao,
+            'quantidade_reimpressao' => $reimpressao ? (int) $item->quantidade_entregue : null,
             'id_deposito_origem' => $item->id_deposito_origem,
             'id_deposito_destino' => $item->id_deposito_destino,
             'status' => $item->status,
@@ -838,6 +855,9 @@ class PedidoController extends Controller
                 $entregarExpedido = array_key_exists('entregar_expedido', $item)
                     ? (int) ($item['entregar_expedido'] ?? 0)
                     : 0;
+                $quantidade = array_key_exists('quantidade', $item)
+                    ? max(0, (int) ($item['quantidade'] ?? 0))
+                    : null;
 
                 if ($entregarExpedido <= 0 && $alocacoes->isEmpty() && array_key_exists('quantidade', $item)) {
                     $entregarExpedido = (int) ($item['quantidade'] ?? 0);
@@ -845,24 +865,32 @@ class PedidoController extends Controller
 
                 return [
                     'id' => (int) ($item['produto_entrega_item_id'] ?? 0),
+                    'quantidade' => $quantidade,
                     'entregar_expedido' => max(0, $entregarExpedido),
                     'alocacoes' => $alocacoes,
                 ];
             })
             ->filter(fn (array $item) => $item['id'] > 0)
             ->groupBy('id')
-            ->map(fn (Collection $grupo, int $id) => [
-                'id' => $id,
-                'entregar_expedido' => (int) $grupo->sum('entregar_expedido'),
-                'alocacoes' => $grupo
-                    ->flatMap(fn (array $item) => $item['alocacoes'])
-                    ->groupBy('deposito_id')
-                    ->map(fn (Collection $alocacoes, int $depositoId) => [
-                        'deposito_id' => $depositoId,
-                        'quantidade' => (int) $alocacoes->sum('quantidade'),
-                    ])
-                    ->values(),
-            ])
+            ->map(function (Collection $grupo, int $id) {
+                $quantidades = $grupo
+                    ->pluck('quantidade')
+                    ->filter(fn ($quantidade) => $quantidade !== null);
+
+                return [
+                    'id' => $id,
+                    'quantidade' => $quantidades->isEmpty() ? null : (int) $quantidades->sum(),
+                    'entregar_expedido' => (int) $grupo->sum('entregar_expedido'),
+                    'alocacoes' => $grupo
+                        ->flatMap(fn (array $item) => $item['alocacoes'])
+                        ->groupBy('deposito_id')
+                        ->map(fn (Collection $alocacoes, int $depositoId) => [
+                            'deposito_id' => $depositoId,
+                            'quantidade' => (int) $alocacoes->sum('quantidade'),
+                        ])
+                        ->values(),
+                ];
+            })
             ->values();
     }
 
@@ -880,10 +908,39 @@ class PedidoController extends Controller
             $item = $entregas->get($selecionado['id']);
             $selecaoJaRegistrada = $registrarEntrega
                 && $this->notaEntregaSelecaoJaRegistrada($item, $selecionado, $idempotencyKey);
-            $bloqueio = $this->validarItemSelecionavelNotaEntrega($item, $selecaoJaRegistrada);
+            $reimpressao = $item
+                ? $this->isReimpressaoNotaEntrega($item, $registrarEntrega, $selecaoJaRegistrada)
+                : false;
+            $bloqueio = $this->validarItemSelecionavelNotaEntrega($item, $selecaoJaRegistrada || $reimpressao);
 
             if ($bloqueio !== null) {
                 throw ValidationException::withMessages(['itens' => [$bloqueio]]);
+            }
+
+            if ($reimpressao) {
+                $quantidadeReimpressao = (int) ($selecionado['quantidade'] ?? $item->quantidade_entregue);
+                $quantidadeEntregue = (int) $item->quantidade_entregue;
+
+                if ($quantidadeReimpressao <= 0) {
+                    throw ValidationException::withMessages([
+                        'itens' => ["Informe uma quantidade para reimprimir o item de entrega #{$item->id}."],
+                    ]);
+                }
+
+                if ($quantidadeReimpressao > $quantidadeEntregue) {
+                    throw ValidationException::withMessages([
+                        'itens' => ["A quantidade de reimpressao do item de entrega #{$item->id} excede o total entregue ({$quantidadeEntregue})."],
+                    ]);
+                }
+
+                $item->setAttribute('nota_quantidade', $quantidadeReimpressao);
+                $item->setAttribute('nota_entregar_expedido', 0);
+                $item->setAttribute('nota_entregar_expedido_registrado', false);
+                $item->setAttribute('nota_alocacoes', []);
+                $item->setAttribute('nota_modo', 'reimpressao');
+                $itens->push($item);
+
+                continue;
             }
 
             $entregarExpedidoSolicitado = (int) ($selecionado['entregar_expedido'] ?? 0);
@@ -995,6 +1052,17 @@ class PedidoController extends Controller
         }
 
         return $itens;
+    }
+
+    private function isReimpressaoNotaEntrega(
+        ProdutoEntregaItem $item,
+        bool $registrarEntrega,
+        bool $selecaoJaRegistrada
+    ): bool {
+        return ! $registrarEntrega
+            && ! $selecaoJaRegistrada
+            && $item->status === ProdutoEntregaItem::STATUS_ENTREGUE
+            && (int) $item->quantidade_entregue > 0;
     }
 
     private function notaEntregaSelecaoJaRegistrada(

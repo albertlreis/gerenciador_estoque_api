@@ -412,6 +412,120 @@ class ProdutoEntregaCentralTest extends TestCase
             ]);
     }
 
+    public function test_nota_entrega_itens_retorna_reimpressao_quando_pedido_ja_foi_entregue(): void
+    {
+        [$usuario, $pedido, $variacao, $deposito] = $this->criarPedidoComItem(2);
+
+        Sanctum::actingAs($usuario);
+
+        Estoque::updateOrCreate(
+            ['id_variacao' => $variacao->id, 'id_deposito' => $deposito->id],
+            ['quantidade' => 2]
+        );
+
+        $service = app(EntregaProdutoService::class);
+        $service->criarDemandaPedido($pedido, $usuario->id, true);
+        $service->expedirPedido($pedido, $usuario->id);
+        $service->entregarPedido($pedido, $usuario->id);
+
+        $entrega = ProdutoEntregaItem::query()->where('pedido_id', $pedido->id)->firstOrFail();
+
+        $this->getJson("/api/v1/pedidos/{$pedido->id}/nota-entrega/itens")
+            ->assertOk()
+            ->assertJsonFragment([
+                'id' => $entrega->id,
+                'modo_nota' => 'reimpressao',
+                'pode_registrar_entrega' => false,
+                'quantidade_reimpressao' => 2,
+                'quantidade_pendente_total' => 0,
+            ]);
+    }
+
+    public function test_nota_entrega_reimpressao_nao_cria_eventos_nem_movimenta_estoque(): void
+    {
+        [$usuario, $pedido, $variacao, $deposito] = $this->criarPedidoComItem(2);
+
+        Sanctum::actingAs($usuario);
+
+        Estoque::updateOrCreate(
+            ['id_variacao' => $variacao->id, 'id_deposito' => $deposito->id],
+            ['quantidade' => 2]
+        );
+
+        $service = app(EntregaProdutoService::class);
+        $service->criarDemandaPedido($pedido, $usuario->id, true);
+        $service->expedirPedido($pedido, $usuario->id);
+        $service->entregarPedido($pedido, $usuario->id);
+
+        $entrega = ProdutoEntregaItem::query()->where('pedido_id', $pedido->id)->firstOrFail();
+        $eventosAntes = ProdutoEntregaEvento::query()->where('produto_entrega_item_id', $entrega->id)->count();
+        $movimentacoesAntes = EstoqueMovimentacao::query()->where('pedido_id', $pedido->id)->count();
+        $estoqueAntes = (int) Estoque::query()
+            ->where('id_variacao', $variacao->id)
+            ->where('id_deposito', $deposito->id)
+            ->value('quantidade');
+
+        $this->postJson("/api/v1/pedidos/{$pedido->id}/pdf/nota-entrega", [
+            'registrar_entrega' => false,
+            'observacao' => 'Reimpressao da nota',
+            'itens' => [
+                [
+                    'produto_entrega_item_id' => $entrega->id,
+                    'quantidade' => 2,
+                ],
+            ],
+        ])->assertOk();
+
+        $this->assertSame($eventosAntes, ProdutoEntregaEvento::query()->where('produto_entrega_item_id', $entrega->id)->count());
+        $this->assertSame($movimentacoesAntes, EstoqueMovimentacao::query()->where('pedido_id', $pedido->id)->count());
+        $this->assertSame($estoqueAntes, (int) Estoque::query()
+            ->where('id_variacao', $variacao->id)
+            ->where('id_deposito', $deposito->id)
+            ->value('quantidade'));
+    }
+
+    public function test_nota_entrega_reimpressao_bloqueia_registro_e_quantidade_acima_do_entregue(): void
+    {
+        [$usuario, $pedido, $variacao, $deposito] = $this->criarPedidoComItem(1);
+
+        Sanctum::actingAs($usuario);
+
+        Estoque::updateOrCreate(
+            ['id_variacao' => $variacao->id, 'id_deposito' => $deposito->id],
+            ['quantidade' => 1]
+        );
+
+        $service = app(EntregaProdutoService::class);
+        $service->criarDemandaPedido($pedido, $usuario->id, true);
+        $service->expedirPedido($pedido, $usuario->id);
+        $service->entregarPedido($pedido, $usuario->id);
+
+        $entrega = ProdutoEntregaItem::query()->where('pedido_id', $pedido->id)->firstOrFail();
+
+        $this->postJson("/api/v1/pedidos/{$pedido->id}/pdf/nota-entrega", [
+            'registrar_entrega' => true,
+            'idempotency_key' => 'reimpressao-nao-registra',
+            'itens' => [
+                [
+                    'produto_entrega_item_id' => $entrega->id,
+                    'quantidade' => 1,
+                ],
+            ],
+        ])->assertStatus(422)
+            ->assertJsonValidationErrors('itens');
+
+        $this->postJson("/api/v1/pedidos/{$pedido->id}/pdf/nota-entrega", [
+            'registrar_entrega' => false,
+            'itens' => [
+                [
+                    'produto_entrega_item_id' => $entrega->id,
+                    'quantidade' => 2,
+                ],
+            ],
+        ])->assertStatus(422)
+            ->assertJsonValidationErrors('itens');
+    }
+
     public function test_nota_entrega_registra_expedicao_dividida_por_depositos_e_entrega_idempotente(): void
     {
         [$usuario, $pedido, $variacao, $deposito] = $this->criarPedidoComItem(3);

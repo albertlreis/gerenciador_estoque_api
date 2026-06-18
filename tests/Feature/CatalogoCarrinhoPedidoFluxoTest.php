@@ -482,6 +482,42 @@ class CatalogoCarrinhoPedidoFluxoTest extends TestCase
         $this->assertSame('finalizado', $carrinho->status);
     }
 
+    public function test_rejeita_consignacao_sem_deposito_antes_de_criar_pedido(): void
+    {
+        $usuario = $this->autenticar(['carrinhos.finalizar'], ['Vendedor']);
+        $cliente = $this->criarCliente();
+        $deposito = Deposito::create(['nome' => 'Deposito Consignacao Obrigatorio']);
+        ['variacao' => $variacao] = $this->criarProdutoComVariacao([], ['preco' => 200], $deposito, 6);
+        ['carrinho' => $carrinho, 'item' => $item] = $this->criarCarrinhoComItem($usuario, $cliente, $variacao, 2);
+
+        $response = $this->postJson('/api/v1/pedidos', [
+            'id_carrinho' => $carrinho->id,
+            'id_cliente' => $cliente->id,
+            'observacoes' => 'Fluxo consignado sem deposito',
+            'modo_consignacao' => true,
+            'prazo_consignacao' => 15,
+            'registrar_movimentacao' => false,
+            'depositos_por_item' => [
+                [
+                    'id_carrinho_item' => $item->id,
+                    'id_deposito' => null,
+                ],
+            ],
+        ]);
+
+        $response
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['depositos_por_item']);
+
+        $this->assertStringContainsString(
+            'Selecione o deposito de saida para todos os itens da consignacao.',
+            (string) data_get($response->json(), 'errors.depositos_por_item.0')
+        );
+        $this->assertSame('rascunho', $carrinho->fresh()->status);
+        $this->assertSame(0, Pedido::where('id_cliente', $cliente->id)->count());
+        $this->assertSame(0, Consignacao::count());
+    }
+
     public function test_finaliza_consignacao_com_registrar_movimentacao_true_apenas_reserva(): void
     {
         $usuario = $this->autenticar(['carrinhos.finalizar'], ['Vendedor']);

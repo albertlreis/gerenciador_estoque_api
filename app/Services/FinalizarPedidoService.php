@@ -106,6 +106,10 @@ final class FinalizarPedidoService
 
         $emConsignacao = $request->boolean('modo_consignacao');
 
+        if ($emConsignacao) {
+            $this->validarDepositosConsignacao($itensFinalizacao, $depositosResolvidos);
+        }
+
         if (!$emConsignacao && $request->boolean('registrar_movimentacao')) {
             $saldoInsuficiente = $this->validarSaldoParaMovimentacao($itensFinalizacao, $depositosResolvidos);
 
@@ -289,6 +293,33 @@ final class FinalizarPedidoService
                     ]);
             })
             ->values();
+    }
+
+    private function validarDepositosConsignacao(Collection $itensFinalizacao, array $depositosResolvidos): void
+    {
+        $itensSemDeposito = $itensFinalizacao
+            ->filter(fn ($item) => empty($depositosResolvidos[$item->id] ?? $item->id_deposito))
+            ->values();
+
+        if ($itensSemDeposito->isEmpty()) {
+            return;
+        }
+
+        $nomes = $itensSemDeposito
+            ->map(fn ($item) => $this->nomeProdutoItem($item))
+            ->unique()
+            ->values();
+
+        $message = 'Selecione o deposito de saida para todos os itens da consignacao.';
+        if ($nomes->count() === 1) {
+            $message .= ' Item pendente: ' . $nomes->first() . '.';
+        } elseif ($nomes->count() > 1) {
+            $message .= ' Itens pendentes: ' . $nomes->join(', ') . '.';
+        }
+
+        throw ValidationException::withMessages([
+            'depositos_por_item' => [$message],
+        ]);
     }
 
     private function nomeProdutoItem(object $item): string

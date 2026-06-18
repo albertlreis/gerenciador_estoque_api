@@ -755,7 +755,11 @@ class ConciliacaoContaAzulService
 
         $codigo = $this->firstString($payload, ['sku', 'codigo', 'codigoSKU', 'codigoServico']);
         if ($codigo !== '') {
-            $v = ProdutoVariacao::query()->where('sku_interno', $codigo)->first();
+            $v = ProdutoVariacao::query()
+                ->where('sku_interno', $codigo)
+                ->orderByDesc('updated_at')
+                ->orderByDesc('id')
+                ->first();
             if ($v) {
                 return ['status' => 'conciliado', 'id_local' => (int) $v->produto_id, 'codigo_externo' => $codigo];
             }

@@ -189,7 +189,11 @@ final class ProdutoUpsertService
 
         $skuInterno = trim((string) ($payload['sku_interno'] ?? ''));
         if ($skuInterno !== '') {
-            $variacao = ProdutoVariacao::with('produto')->where('sku_interno', $skuInterno)->first();
+            $variacao = ProdutoVariacao::with('produto')
+                ->where('sku_interno', $skuInterno)
+                ->orderByDesc('updated_at')
+                ->orderByDesc('id')
+                ->first();
             if ($variacao) {
                 return $variacao;
             }

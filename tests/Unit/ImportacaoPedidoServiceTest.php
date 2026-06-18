@@ -135,4 +135,50 @@ class ImportacaoPedidoServiceTest extends TestCase
         $this->assertNull($itens[0]['id_variacao']);
         $this->assertCount(2, $itens[0]['variacoes_encontradas']);
     }
+
+    public function test_mescla_sku_interno_repetido_vincula_variacao_mais_recente(): void
+    {
+        $categoria = Categoria::create(['nome' => 'Categoria SKU Duplicado']);
+
+        $produtoAntigo = Produto::create([
+            'nome' => 'Produto Antigo',
+            'id_categoria' => $categoria->id,
+            'ativo' => true,
+        ]);
+        ProdutoVariacao::create([
+            'produto_id' => $produtoAntigo->id,
+            'referencia' => 'REF-SKU-PEDIDO-OLD',
+            'sku_interno' => 'SKU-PEDIDO-DUP',
+            'nome' => 'Variacao antiga',
+            'preco' => 10,
+            'custo' => 5,
+            'created_at' => now()->subDay(),
+            'updated_at' => now()->subDay(),
+        ]);
+
+        $produtoRecente = Produto::create([
+            'nome' => 'Produto Recente',
+            'id_categoria' => $categoria->id,
+            'ativo' => true,
+        ]);
+        $variacaoRecente = ProdutoVariacao::create([
+            'produto_id' => $produtoRecente->id,
+            'referencia' => 'REF-SKU-PEDIDO-NEW',
+            'sku_interno' => 'SKU-PEDIDO-DUP',
+            'nome' => 'Variacao recente',
+            'preco' => 12,
+            'custo' => 6,
+        ]);
+
+        $service = app(ImportacaoPedidoService::class);
+        $itens = $service->mesclarItensComVariacoes([[
+            'codigo' => 'SKU-PEDIDO-DUP',
+            'descricao' => 'Produto XML SKU duplicado',
+            'quantidade' => '1',
+            'preco_unitario' => '99',
+        ]]);
+
+        $this->assertSame($variacaoRecente->id, $itens[0]['id_variacao']);
+        $this->assertSame($produtoRecente->id, $itens[0]['produto_id']);
+    }
 }

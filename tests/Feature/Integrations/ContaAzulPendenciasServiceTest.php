@@ -239,6 +239,45 @@ class ContaAzulPendenciasServiceTest extends TestCase
         ]);
     }
 
+    public function test_produtos_com_sku_repetido_auto_conciliam_com_variacao_mais_recente(): void
+    {
+        $produtoAntigoId = $this->createProduto(['nome' => 'Produto SKU Antigo']);
+        DB::table('produto_variacoes')->insert([
+            'produto_id' => $produtoAntigoId,
+            'referencia' => 'SKU-DUP-OLD',
+            'nome' => 'Variacao antiga',
+            'sku_interno' => 'SKU-CONTA-AZUL-DUP',
+            'created_at' => now()->subDay(),
+            'updated_at' => now()->subDay(),
+        ]);
+
+        $produtoRecenteId = $this->createProduto(['nome' => 'Produto SKU Recente']);
+        DB::table('produto_variacoes')->insert([
+            'produto_id' => $produtoRecenteId,
+            'referencia' => 'SKU-DUP-NEW',
+            'nome' => 'Variacao recente',
+            'sku_interno' => 'SKU-CONTA-AZUL-DUP',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $id = $this->insertStaging('stg_conta_azul_produtos', 'produto-sku-dup', [
+            'nome' => 'Produto SKU duplicado',
+            'sku' => 'SKU-CONTA-AZUL-DUP',
+        ]);
+
+        $resultado = app(ConciliacaoContaAzulService::class)->conciliarProdutos();
+
+        $this->assertSame(1, $resultado['conciliados']);
+        $this->assertDatabaseHas('stg_conta_azul_produtos', [
+            'id' => $id,
+            'status_conciliacao' => 'conciliado',
+            'candidato_id_local' => $produtoRecenteId,
+            'candidato_score' => 100,
+            'conciliacao_origem' => 'auto',
+        ]);
+    }
+
     public function test_vendas_auto_conciliam_por_cliente_mapeado_data_e_total_unicos(): void
     {
         $clienteId = $this->createCliente(['nome' => 'Cliente Venda']);

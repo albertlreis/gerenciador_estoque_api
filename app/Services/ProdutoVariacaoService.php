@@ -342,7 +342,6 @@ class ProdutoVariacaoService
                 'nullable',
                 'string',
                 'max:120',
-                Rule::unique('produto_variacoes', 'sku_interno')->ignore($ignoreId),
             ],
             'chave_variacao' => [
                 'nullable',
@@ -387,7 +386,6 @@ class ProdutoVariacaoService
             'custo.min' => 'O custo da variação não pode ser negativo.',
             'referencia.max' => 'A referência pode ter no máximo 100 caracteres.',
             'sku_interno.max' => 'O SKU interno pode ter no máximo 120 caracteres.',
-            'sku_interno.unique' => 'Este SKU interno já está em uso em outra variação.',
             'chave_variacao.max' => 'A chave da variação pode ter no máximo 255 caracteres.',
             'chave_variacao.unique' => 'Esta chave de variação já está em uso.',
             'codigo_barras.max' => 'O código de barras pode ter no máximo 255 caracteres.',

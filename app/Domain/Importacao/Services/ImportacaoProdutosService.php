@@ -88,6 +88,8 @@ final class ImportacaoProdutosService
                             });
                     })
                     ->with(['produto', 'atributos'])
+                    ->orderByDesc('updated_at')
+                    ->orderByDesc('id')
                     ->first()
                 : null;
 

@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Services\Import\ProdutoUpsertService;
 use App\Models\Usuario;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -193,7 +194,7 @@ class ProdutoVariacaoUpdateTest extends TestCase
         ]);
     }
 
-    public function test_patch_variacoes_bulk_rejeita_sku_interno_repetido(): void
+    public function test_patch_variacoes_bulk_permite_sku_interno_repetido(): void
     {
         $usuario = $this->criarUsuario();
         Sanctum::actingAs($usuario);
@@ -234,9 +235,13 @@ class ProdutoVariacaoUpdateTest extends TestCase
             'custo' => 50,
         ]]);
 
-        $response->assertStatus(422)
-            ->assertJsonValidationErrors(['sku_interno'])
-            ->assertJsonFragment(['Este SKU interno já está em uso em outra variação.']);
+        $response->assertOk()
+            ->assertJsonPath('message', 'Variações salvas com sucesso.');
+
+        $this->assertDatabaseHas('produto_variacoes', [
+            'id' => $variacaoId,
+            'sku_interno' => 'SKU-DUP',
+        ]);
     }
 
     public function test_put_variacao_individual_atualiza_campos(): void
@@ -285,6 +290,94 @@ class ProdutoVariacaoUpdateTest extends TestCase
             'custo' => 55,
             'codigo_barras' => '789',
         ]);
+    }
+
+    public function test_put_variacao_individual_permite_sku_interno_repetido(): void
+    {
+        $usuario = $this->criarUsuario();
+        Sanctum::actingAs($usuario);
+        Cache::put('permissoes_usuario_' . $usuario->id, ['produto_variacoes.editar'], now()->addHour());
+
+        [$produtoId, $now] = $this->criarProdutoBase();
+        [$outroProdutoId] = $this->criarProdutoBase();
+
+        $variacaoId = DB::table('produto_variacoes')->insertGetId([
+            'produto_id' => $produtoId,
+            'referencia' => 'REF-PUT-SKU-ORIG',
+            'sku_interno' => 'SKU-PUT-ORIG',
+            'nome' => 'Variacao put',
+            'preco' => 100,
+            'custo' => 40,
+            'codigo_barras' => null,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ]);
+
+        DB::table('produto_variacoes')->insert([
+            'produto_id' => $outroProdutoId,
+            'referencia' => 'REF-PUT-SKU-DUP',
+            'sku_interno' => 'SKU-PUT-DUP',
+            'nome' => 'Outra variacao put',
+            'preco' => 90,
+            'custo' => 30,
+            'codigo_barras' => null,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ]);
+
+        $response = $this->putJson("/api/v1/produtos/{$produtoId}/variacoes/{$variacaoId}", [
+            'referencia' => 'REF-PUT-SKU-ORIG',
+            'sku_interno' => 'SKU-PUT-DUP',
+            'preco' => 100,
+            'custo' => 40,
+        ]);
+
+        $response->assertOk()
+            ->assertJsonFragment([
+                'id' => $variacaoId,
+                'sku_interno' => 'SKU-PUT-DUP',
+            ]);
+
+        $this->assertDatabaseHas('produto_variacoes', [
+            'id' => $variacaoId,
+            'sku_interno' => 'SKU-PUT-DUP',
+        ]);
+    }
+
+    public function test_localizacao_por_sku_interno_repetido_usa_variacao_mais_recente(): void
+    {
+        [$produtoAntigoId, $now] = $this->criarProdutoBase();
+        [$produtoRecenteId] = $this->criarProdutoBase();
+
+        DB::table('produto_variacoes')->insert([
+            'produto_id' => $produtoAntigoId,
+            'referencia' => 'REF-SKU-MATCH-OLD',
+            'sku_interno' => 'SKU-MATCH-DUP',
+            'nome' => 'Variacao antiga',
+            'preco' => 80,
+            'custo' => 30,
+            'codigo_barras' => null,
+            'created_at' => $now->copy()->subDay(),
+            'updated_at' => $now->copy()->subDay(),
+        ]);
+
+        $variacaoRecenteId = DB::table('produto_variacoes')->insertGetId([
+            'produto_id' => $produtoRecenteId,
+            'referencia' => 'REF-SKU-MATCH-NEW',
+            'sku_interno' => 'SKU-MATCH-DUP',
+            'nome' => 'Variacao recente',
+            'preco' => 100,
+            'custo' => 40,
+            'codigo_barras' => null,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ]);
+
+        $variacao = app(ProdutoUpsertService::class)->localizarVariacaoPorIdentidade([
+            'sku_interno' => 'SKU-MATCH-DUP',
+        ]);
+
+        $this->assertSame($variacaoRecenteId, $variacao?->id);
     }
 
     public function test_post_variacao_rejeita_preco_vazio_e_aceita_zero(): void

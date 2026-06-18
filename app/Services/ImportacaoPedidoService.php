@@ -742,6 +742,8 @@ class ImportacaoPedidoService
             ->where(function ($query) use ($identificador) {
                 $this->aplicarBuscaPorIdentificador($query, $identificador);
             })
+            ->orderByDesc('updated_at')
+            ->orderByDesc('id')
             ->first();
     }
 
@@ -855,9 +857,11 @@ class ImportacaoPedidoService
 
                 // Se não houver correspondência por referência, mantém comportamento legado
                 // (SKU interno/códigos históricos) para casos em que o PDF trouxe outro identificador.
-                // 2.2 SKU interno tem unicidade → pode selecionar direto
+                // 2.2 SKU interno duplicado: usa a variação mais recente
                 $variacaoSku = ProdutoVariacao::with(['produto.categoria', 'atributos'])
                     ->where('sku_interno', $ref)
+                    ->orderByDesc('updated_at')
+                    ->orderByDesc('id')
                     ->first();
 
                 if ($variacaoSku) {

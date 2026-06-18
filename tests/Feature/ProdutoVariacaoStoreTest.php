@@ -106,4 +106,46 @@ class ProdutoVariacaoStoreTest extends TestCase
             'valor' => 'M',
         ]);
     }
+
+    public function test_post_variacao_permite_sku_interno_repetido(): void
+    {
+        $usuario = $this->criarUsuario();
+        Sanctum::actingAs($usuario);
+        Cache::put('permissoes_usuario_' . $usuario->id, ['produto_variacoes.criar'], now()->addHour());
+
+        [$produtoId, $now] = $this->criarProdutoBase();
+        [$outroProdutoId] = $this->criarProdutoBase();
+
+        DB::table('produto_variacoes')->insert([
+            'produto_id' => $outroProdutoId,
+            'referencia' => 'REF-STORE-SKU-DUP-OLD',
+            'sku_interno' => 'SKU-STORE-DUP',
+            'nome' => 'Variacao existente',
+            'preco' => 80,
+            'custo' => 30,
+            'codigo_barras' => null,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ]);
+
+        $response = $this->postJson("/api/v1/produtos/{$produtoId}/variacoes", [
+            'referencia' => 'REF-STORE-SKU-DUP-NEW',
+            'sku_interno' => 'SKU-STORE-DUP',
+            'preco' => 100,
+            'custo' => 40,
+        ]);
+
+        $response->assertCreated()
+            ->assertJsonFragment([
+                'sku_interno' => 'SKU-STORE-DUP',
+            ]);
+
+        $variacaoId = $response->json('data.id') ?? $response->json('id');
+
+        $this->assertDatabaseHas('produto_variacoes', [
+            'id' => $variacaoId,
+            'produto_id' => $produtoId,
+            'sku_interno' => 'SKU-STORE-DUP',
+        ]);
+    }
 }

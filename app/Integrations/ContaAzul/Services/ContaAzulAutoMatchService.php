@@ -128,25 +128,20 @@ class ContaAzulAutoMatchService
 
         $codigo = $this->firstString($payload, ['sku', 'codigo', 'codigoSKU', 'codigoServico']);
         if ($codigo !== '') {
-            $variacoes = ProdutoVariacao::query()
+            $variacao = ProdutoVariacao::query()
                 ->where('sku_interno', $codigo)
                 ->with('produto')
-                ->get()
-                ->unique('produto_id')
-                ->values();
-            $candidate = $this->uniqueCandidate(
-                $variacoes,
-                100,
-                'SKU/código exato da variação',
-                fn (ProdutoVariacao $variacao) => $variacao->produto?->nome ?: 'Produto #' . $variacao->produto_id,
-                fn (ProdutoVariacao $variacao) => (int) $variacao->produto_id,
-                ['codigo_externo' => $codigo]
-            );
-            if ($candidate['ambiguous']) {
-                return $this->conflict($candidate['candidates'], 'Mais de um produto com o mesmo SKU/código');
-            }
-            if ($candidate['candidate']) {
-                return $this->auto($candidate['candidate']);
+                ->orderByDesc('updated_at')
+                ->orderByDesc('id')
+                ->first();
+            if ($variacao) {
+                return $this->auto($this->candidate(
+                    (int) $variacao->produto_id,
+                    100,
+                    'SKU/código exato da variação',
+                    $variacao->produto?->nome ?: 'Produto #' . $variacao->produto_id,
+                    ['codigo_externo' => $codigo]
+                ));
             }
 
             $produtos = Produto::query()->where('codigo_produto', $codigo)->get();

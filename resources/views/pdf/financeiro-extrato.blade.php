@@ -39,6 +39,7 @@
     </style>
 </head>
 <body>
+@php($contaDados = $conta_dados ?? [])
 <div class="header">
     <span class="title">Relatório de extrato</span>
     <span class="period">{{ $periodo['inicio'] }} a {{ $periodo['fim'] }}</span>
@@ -49,9 +50,9 @@
                 <img class="logo" src="{{ !extension_loaded('gd') ? 'data:image/svg+xml;base64,' . base64_encode('<svg xmlns="http://www.w3.org/2000/svg" width="120" height="80" viewBox="0 0 120 80"><text x="60" y="28" text-anchor="middle" font-family="serif" font-size="24" fill="#111">SR</text><text x="60" y="52" text-anchor="middle" font-family="serif" font-size="24" fill="#111">SIERRA</text><text x="60" y="66" text-anchor="middle" font-family="sans-serif" font-size="7" fill="#555">MOVEIS</text></svg>') : public_path('logo.png') }}" alt="Sierra">
             </td>
             <td class="company">
-                <strong>{{ $empresa['nome'] }}</strong>
+                <strong>{{ $contaDados['titular_nome'] ?? $empresa['nome'] }}</strong>
+                {{ $contaDados['titular_documento'] ?? $empresa['documento'] }}<br>
                 {{ $empresa['endereco'] }}<br>
-                {{ $empresa['documento'] }}<br>
                 {{ $empresa['telefone'] }}
             </td>
             <td>
@@ -61,13 +62,22 @@
                     <div class="summary-row"><span>Despesas Em Aberto (R$)</span><strong>{{ number_format($resumo['despesas_abertas'], 2, ',', '.') }}</strong></div>
                     <div class="summary-row"><span>Despesas Realizadas (R$)</span><strong>{{ number_format($resumo['despesas_realizadas'], 2, ',', '.') }}</strong></div>
                     <div class="summary-row"><span>Totais do Período (R$)</span><strong>{{ number_format($resumo['total_periodo'], 2, ',', '.') }}</strong></div>
+                    <div class="summary-row"><span>Saldo Final (R$)</span><strong>{{ number_format($resumo['saldo_realizado'], 2, ',', '.') }}</strong></div>
                 </div>
             </td>
         </tr>
     </table>
 </div>
 
-<div class="account"><strong>Conta:</strong> {{ $conta->nome }}</div>
+<div class="account">
+    <strong>Conta:</strong> {{ $conta->nome }}
+    @if(!empty($contaDados['identificacao_bancaria']))
+        <br><strong>Identificação bancária:</strong> {{ $contaDados['identificacao_bancaria'] }}
+    @endif
+    <br><strong>Titular:</strong> {{ $contaDados['titular_nome'] ?? '-' }}
+    <br><strong>Documento:</strong> {{ $contaDados['titular_documento'] ?? '-' }}
+    <br><strong>Moeda:</strong> {{ $contaDados['moeda'] ?? '-' }}
+</div>
 
 <table class="extract">
     <thead>

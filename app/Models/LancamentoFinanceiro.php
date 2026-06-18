@@ -7,6 +7,7 @@ use App\Enums\LancamentoTipo;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\MorphTo;
 
 class LancamentoFinanceiro extends Model
 {
@@ -68,5 +69,15 @@ class LancamentoFinanceiro extends Model
     public function centroCusto(): BelongsTo
     {
         return $this->belongsTo(CentroCusto::class, 'centro_custo_id')->withDefault();
+    }
+
+    public function referencia(): MorphTo
+    {
+        return $this->morphTo(__FUNCTION__, 'referencia_type', 'referencia_id');
+    }
+
+    public function pagamento(): MorphTo
+    {
+        return $this->morphTo(__FUNCTION__, 'pagamento_type', 'pagamento_id');
     }
 }

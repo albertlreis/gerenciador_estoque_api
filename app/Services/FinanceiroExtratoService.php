@@ -4,7 +4,11 @@ namespace App\Services;
 
 use App\Enums\LancamentoStatus;
 use App\Enums\LancamentoTipo;
+use App\Models\ContaPagar;
+use App\Models\ContaPagarPagamento;
 use App\Models\ContaFinanceira;
+use App\Models\ContaReceber;
+use App\Models\ContaReceberPagamento;
 use App\Models\LancamentoFinanceiro;
 use Illuminate\Support\Carbon;
 
@@ -24,12 +28,21 @@ class FinanceiroExtratoService
             ->sum(fn (LancamentoFinanceiro $l) => $this->signedValue($l));
 
         $lancamentos = LancamentoFinanceiro::query()
-            ->with(['categoria'])
+            ->with(['categoria', 'referencia', 'pagamento'])
             ->where('conta_id', $conta->id)
             ->whereBetween('data_movimento', [$inicio, $fim])
             ->orderBy('data_movimento')
             ->orderBy('id')
             ->get();
+
+        $lancamentos->loadMorph('referencia', [
+            ContaPagar::class => ['fornecedor'],
+            ContaReceber::class => ['pedido.cliente'],
+        ]);
+        $lancamentos->loadMorph('pagamento', [
+            ContaPagarPagamento::class => ['conta.fornecedor'],
+            ContaReceberPagamento::class => ['conta.pedido.cliente'],
+        ]);
 
         $saldo = $saldoInicial;
         $linhas = $lancamentos->map(function (LancamentoFinanceiro $l) use (&$saldo) {
@@ -41,7 +54,7 @@ class FinanceiroExtratoService
             return [
                 'data' => optional($l->data_movimento)->format('d/m/Y'),
                 'descricao' => (string) $l->descricao,
-                'cliente_fornecedor' => '-',
+                'cliente_fornecedor' => $this->clienteFornecedor($l),
                 'situacao' => $this->statusLabel($l),
                 'categoria' => $l->categoria?->nome ?: $this->categoriaFallback($l),
                 'valor' => $valor,
@@ -62,6 +75,7 @@ class FinanceiroExtratoService
                 'documento' => config('app.empresa_documento', '54.129.336/0001-88'),
                 'telefone' => config('app.empresa_telefone', '91984278816'),
             ],
+            'conta_dados' => $this->contaDados($conta),
             'conta' => $conta,
             'periodo' => [
                 'inicio' => $inicio->format('d/m/Y'),
@@ -81,6 +95,33 @@ class FinanceiroExtratoService
             ],
             'usuario' => auth()->user()?->nome ?? auth()->user()?->name ?? '-',
         ];
+    }
+
+    public function resumo(array $validated): array
+    {
+        $ids = $validated['conta_ids'] ?? [$validated['conta_id']];
+        $ids = collect(is_array($ids) ? $ids : [$ids])
+            ->filter(fn ($id) => $id !== null && $id !== '')
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values();
+
+        return $ids->map(function (int $id) use ($validated) {
+            $dados = $this->montar([
+                'conta_id' => $id,
+                'data_inicio' => $validated['data_inicio'],
+                'data_fim' => $validated['data_fim'],
+            ]);
+
+            return [
+                'conta_id' => $id,
+                'saldo_inicial' => $dados['resumo']['saldo_inicial'],
+                'receitas_realizadas' => $dados['resumo']['receitas_realizadas'],
+                'despesas_realizadas' => $dados['resumo']['despesas_realizadas'],
+                'total_periodo' => $dados['resumo']['total_periodo'],
+                'saldo_final' => $dados['resumo']['saldo_realizado'],
+            ];
+        })->all();
     }
 
     private function signedValue(LancamentoFinanceiro $l): float
@@ -124,5 +165,44 @@ class FinanceiroExtratoService
         }
 
         return '-';
+    }
+
+    private function clienteFornecedor(LancamentoFinanceiro $l): string
+    {
+        $referencia = $l->referencia;
+        if ($referencia instanceof ContaPagar) {
+            return $this->nonEmpty($referencia->fornecedor?->nome);
+        }
+        if ($referencia instanceof ContaReceber) {
+            return $this->nonEmpty($referencia->pedido?->cliente?->nome);
+        }
+
+        $pagamento = $l->pagamento;
+        if ($pagamento instanceof ContaPagarPagamento) {
+            return $this->nonEmpty($pagamento->conta?->fornecedor?->nome);
+        }
+        if ($pagamento instanceof ContaReceberPagamento) {
+            return $this->nonEmpty($pagamento->conta?->pedido?->cliente?->nome);
+        }
+
+        return '-';
+    }
+
+    private function contaDados(ContaFinanceira $conta): array
+    {
+        return [
+            'nome' => $conta->nome,
+            'titular_nome' => $conta->titular_nome ?: config('app.empresa_nome', 'G. P COMERCIO VAREJISTA DE MOVEIS LTDA'),
+            'titular_documento' => $conta->titular_documento ?: config('app.empresa_documento', '54.129.336/0001-88'),
+            'identificacao_bancaria' => $conta->identificacaoBancaria(),
+            'moeda' => $conta->moeda ?: 'BRL',
+        ];
+    }
+
+    private function nonEmpty(?string $value): string
+    {
+        $value = trim((string) $value);
+
+        return $value !== '' ? $value : '-';
     }
 }

@@ -542,6 +542,7 @@ Route::middleware(['auth:sanctum', 'senha.nao_obrigatoria'])
          * ============================================================ */
         Route::prefix('financeiro')->group(function () {
             Route::get('dashboard', [FinanceiroDashboardController::class, 'show']);
+            Route::get('extrato/resumo', [FinanceiroExtratoController::class, 'resumo']);
             Route::get('extrato/export/pdf', [FinanceiroExtratoController::class, 'exportPdf']);
             Route::get('extrato/export/excel', [FinanceiroExtratoController::class, 'exportExcel']);
 

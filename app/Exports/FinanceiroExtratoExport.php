@@ -17,12 +17,17 @@ class FinanceiroExtratoExport implements FromArray, WithTitle
     public function array(): array
     {
         $conta = $this->dados['conta'];
+        $contaDados = $this->dados['conta_dados'] ?? [];
         $periodo = $this->dados['periodo'];
         $resumo = $this->dados['resumo'];
 
         $rows = [
             ['Relatorio de extrato'],
             ['Conta', $conta->nome],
+            ['Titular', $contaDados['titular_nome'] ?? '-'],
+            ['Documento titular', $contaDados['titular_documento'] ?? '-'],
+            ['Banco / agencia / conta', $contaDados['identificacao_bancaria'] ?? '-'],
+            ['Moeda', $contaDados['moeda'] ?? '-'],
             ['Periodo', "{$periodo['inicio']} a {$periodo['fim']}"],
             [],
             ['Resumo'],
@@ -31,7 +36,7 @@ class FinanceiroExtratoExport implements FromArray, WithTitle
             ['Despesas realizadas', $resumo['despesas_realizadas']],
             ['Total do periodo', $resumo['total_periodo']],
             ['Cancelados', $resumo['perdidos']],
-            ['Saldo realizado', $resumo['saldo_realizado']],
+            ['Saldo final do periodo', $resumo['saldo_realizado']],
             [],
             ['Data', 'Descricao', 'Cliente/Fornecedor', 'Situacao', 'Categoria', 'Valor', 'Saldo'],
         ];

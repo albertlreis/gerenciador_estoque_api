@@ -6,6 +6,7 @@ use App\Models\Categoria;
 use App\Models\Fornecedor;
 use App\Models\Pedido;
 use App\Models\PedidoImportacao;
+use App\Models\Produto;
 use App\Models\Usuario;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
@@ -234,14 +235,20 @@ class ImportacaoPedidoPreviewContratoTest extends TestCase
         $response->assertJsonValidationErrors('pedido.numero_externo');
     }
 
-    public function test_confirmar_sem_fornecedor_retorna_422(): void
+    public function test_confirmar_sem_fornecedor_cria_pedido_e_produto_sem_fornecedor(): void
     {
         $usuario = $this->criarUsuario('confirm-sem-fornecedor@example.com');
         $categoria = $this->criarCategoria();
 
         $response = $this->actingAs($usuario, 'sanctum')
             ->postJson('/api/v1/pedidos/import/pdf/confirm', [
-                'pedido' => ['tipo' => 'reposicao', 'numero_externo' => 'MAN-SEM-FORN', 'total' => 100],
+                'pedido' => [
+                    'tipo' => 'reposicao',
+                    'numero_externo' => 'MAN-SEM-FORN',
+                    'id_fornecedor' => null,
+                    'total' => 100,
+                ],
+                'movimentar_estoque' => false,
                 'cliente' => [],
                 'itens' => [
                     [
@@ -249,13 +256,24 @@ class ImportacaoPedidoPreviewContratoTest extends TestCase
                         'nome' => 'Produto Teste',
                         'quantidade' => 1,
                         'valor' => 100,
+                        'preco_unitario' => 100,
+                        'custo_unitario' => 80,
                         'id_categoria' => $categoria->id,
                     ],
                 ],
             ]);
 
-        $response->assertStatus(422);
-        $response->assertJsonValidationErrors('pedido.id_fornecedor');
+        $response->assertStatus(200);
+
+        $pedido = Pedido::findOrFail($response->json('id'));
+        $this->assertSame(Pedido::TIPO_REPOSICAO, $pedido->tipo);
+        $this->assertNull($pedido->id_fornecedor);
+
+        $produto = Produto::query()
+            ->where('nome', 'Produto Teste')
+            ->where('id_categoria', $categoria->id)
+            ->firstOrFail();
+        $this->assertNull($produto->id_fornecedor);
     }
 
     public function test_confirmar_manual_reposicao_com_fornecedor_cria_pedido(): void
@@ -271,6 +289,7 @@ class ImportacaoPedidoPreviewContratoTest extends TestCase
             ->postJson('/api/v1/pedidos/import/pdf/confirm', [
                 'importacao_id' => null,
                 'tipo_importacao' => null,
+                'movimentar_estoque' => false,
                 'pedido' => [
                     'tipo' => 'reposicao',
                     'numero_externo' => 'MAN-001',

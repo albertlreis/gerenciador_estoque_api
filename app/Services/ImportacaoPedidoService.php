@@ -60,7 +60,7 @@ class ImportacaoPedidoService
             'cliente.id'           => 'nullable|numeric|min:1',
 
             'pedido.numero_externo'=> 'required|string|max:50',
-            'pedido.id_fornecedor'  => 'required|integer|exists:fornecedores,id',
+            'pedido.id_fornecedor'  => 'nullable|integer|exists:fornecedores,id',
             'pedido.total'         => 'nullable|numeric',
             'pedido.observacoes'   => 'nullable|string',
             'pedido.data_pedido'   => 'nullable|string',
@@ -198,7 +198,7 @@ class ImportacaoPedidoService
             $importacaoId = $request->input('importacao_id');
 
             $tipo = $dadosPedido['tipo'] ?? Pedido::TIPO_VENDA;
-            $fornecedorId = (int) ($dadosPedido['id_fornecedor'] ?? 0);
+            $fornecedorId = $this->toNullableInt($dadosPedido['id_fornecedor'] ?? null);
 
             if ($importacaoId) {
                 /** @var PedidoImportacao $importacao */

@@ -125,11 +125,10 @@ jobs:
       - name: Trigger deploy on droplet
         run: |
           deploy_args=""
-          backup_cmd=""
+          backup_cmd="./html/scripts/backup-production.sh && "
 
           if [ "${RUN_MIGRATIONS}" = "true" ]; then
             deploy_args="--migrate"
-            backup_cmd="./html/scripts/backup-production.sh && "
           fi
 
           compose_fix_cmd="if [ -f docker-compose.yml ]; then cp docker-compose.yml docker-compose.yml.bak-version-obsolete && sed -i '/^version:/d' docker-compose.yml; fi"

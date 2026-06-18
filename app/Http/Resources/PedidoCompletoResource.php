@@ -3,6 +3,7 @@
 namespace App\Http\Resources;
 
 use App\Services\BusinessDayService;
+use App\Support\Pdf\ClienteEnderecoPdf;
 use App\Traits\PedidoStatusTrait;
 use Carbon\Carbon;
 use Illuminate\Http\Resources\Json\JsonResource;
@@ -56,6 +57,7 @@ class PedidoCompletoResource extends JsonResource
                 'nome'     => $this->cliente->nome,
                 'email'    => $this->cliente->email,
                 'telefone' => $this->cliente->telefone,
+                'enderecos' => ClienteEnderecoPdf::paraResposta($this->cliente),
             ] : null,
 
             'id_parceiro' => $this->id_parceiro,

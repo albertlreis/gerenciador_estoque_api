@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Enums\PedidoStatus;
 use App\Models\Categoria;
 use App\Models\Cliente;
+use App\Models\ClienteEndereco;
 use App\Models\Deposito;
 use App\Models\Estoque;
 use App\Models\EstoqueMovimentacao;
@@ -332,6 +333,57 @@ class ProdutoEntregaCentralTest extends TestCase
             ->where('tipo_evento', ProdutoEntregaEvento::ENTREGUE_CLIENTE)
             ->count());
         $this->assertSame(1, EstoqueMovimentacao::query()->where('pedido_id', $pedido->id)->count());
+    }
+
+    public function test_nota_entrega_pdf_exige_endereco_quando_cliente_tem_multiplos_enderecos(): void
+    {
+        [$usuario, $pedido, $variacao, $deposito] = $this->criarPedidoComItem(1);
+
+        Sanctum::actingAs($usuario);
+        $enderecoEscolhido = $this->criarEnderecoCliente($pedido->cliente, [
+            'cep' => '66001010',
+            'endereco' => 'Rua Nota Principal',
+            'numero' => '10',
+            'bairro' => 'Bairro Nota',
+            'cidade' => 'Belem',
+            'estado' => 'PA',
+        ], true);
+        $this->criarEnderecoCliente($pedido->cliente, [
+            'cep' => '66001111',
+            'endereco' => 'Rua Nota Secundaria',
+            'numero' => '11',
+            'bairro' => 'Bairro Nota 2',
+            'cidade' => 'Belem',
+            'estado' => 'PA',
+        ]);
+
+        Estoque::updateOrCreate(
+            ['id_variacao' => $variacao->id, 'id_deposito' => $deposito->id],
+            ['quantidade' => 1]
+        );
+
+        $service = app(EntregaProdutoService::class);
+        $service->criarDemandaPedido($pedido, $usuario->id, true);
+        $service->expedirPedido($pedido, $usuario->id);
+        $entrega = ProdutoEntregaItem::query()->where('pedido_id', $pedido->id)->firstOrFail();
+
+        $payload = [
+            'registrar_entrega' => false,
+            'itens' => [
+                [
+                    'produto_entrega_item_id' => $entrega->id,
+                    'quantidade' => 1,
+                ],
+            ],
+        ];
+
+        $this->postJson("/api/v1/pedidos/{$pedido->id}/pdf/nota-entrega", $payload)
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('cliente_endereco_id');
+
+        $this->postJson("/api/v1/pedidos/{$pedido->id}/pdf/nota-entrega", $payload + [
+            'cliente_endereco_id' => $enderecoEscolhido->id,
+        ])->assertOk();
     }
 
     public function test_nota_entrega_pdf_registra_entrega_sem_movimentar_estoque_e_respeita_idempotencia(): void
@@ -771,5 +823,14 @@ class ProdutoEntregaCentralTest extends TestCase
         ]);
 
         return [$usuario, $pedido->fresh('itens'), $variacao, $deposito];
+    }
+
+    private function criarEnderecoCliente(Cliente $cliente, array $dados, bool $principal = false): ClienteEndereco
+    {
+        return ClienteEndereco::create($dados + [
+            'cliente_id' => $cliente->id,
+            'principal' => $principal,
+            'fingerprint' => hash('sha256', 'cliente-endereco-' . $cliente->id . '-' . ($dados['endereco'] ?? '') . '-' . uniqid('', true)),
+        ]);
     }
 }

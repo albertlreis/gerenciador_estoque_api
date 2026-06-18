@@ -21,6 +21,7 @@ use App\Services\EstoqueMovimentacaoService;
 use App\Services\EntregaProdutoService;
 use App\Services\DesfazerConsignacaoService;
 use App\Services\PdfImageService;
+use App\Support\Pdf\ClienteEnderecoPdf;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -166,7 +167,7 @@ class ConsignacaoController extends Controller
     public function porPedido($pedido_id): JsonResponse
     {
         $consignacoes = Consignacao::with([
-            'pedido.cliente',
+            'pedido.cliente.enderecos',
             'produtoVariacao.produto.imagemPrincipal',
             'produtoVariacao.atributos',
             'compras.usuario',
@@ -191,7 +192,11 @@ class ConsignacaoController extends Controller
             'pedido' => [
                 'id' => $pedido->id,
                 'numero_externo' => $pedido->numero_externo,
-                'cliente' => $pedido->cliente->nome ?? '-',
+                'cliente' => [
+                    'id' => $pedido->cliente?->id,
+                    'nome' => $pedido->cliente?->nome ?? '-',
+                    'enderecos' => ClienteEnderecoPdf::paraResposta($pedido->cliente),
+                ],
                 'data_envio' => optional($pedido->data_envio)->format('d/m/Y'),
             ],
             'consignacoes' => ConsignacaoDetalhadaResource::collection($consignacoes)
@@ -1023,6 +1028,7 @@ class ConsignacaoController extends Controller
     {
         $pedido = Pedido::with([
             'cliente.enderecoPrincipal',
+            'cliente.enderecos',
             'usuario',
             'parceiro',
             'statusAtual',
@@ -1033,6 +1039,10 @@ class ConsignacaoController extends Controller
             'consignacoes.produtoVariacao.atributos',
             'consignacoes.produtoVariacao.estoquesComLocalizacao',
         ])->findOrFail($id);
+        $enderecoEntrega = ClienteEnderecoPdf::resolverParaPedido(
+            $pedido,
+            $request->query('cliente_endereco_id')
+        );
 
         $consignacaoIds = collect((array) $request->query('consignacao_ids', []))
             ->merge((array) $request->query('consignacoes', []))
@@ -1080,6 +1090,7 @@ class ConsignacaoController extends Controller
             'grupos'     => $grupos,
             'geradoEm'   => now('America/Belem')->format('d/m/Y H:i'),
             'tituloRoteiro' => $tituloRoteiro,
+            'enderecoEntrega' => $enderecoEntrega,
         ])->setPaper('a4');
 
         return $pdf->download($filename);

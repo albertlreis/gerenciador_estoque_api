@@ -88,6 +88,78 @@ class ConsignacaoRoteiroPdfTest extends TestCase
         );
     }
 
+    public function test_roteiro_do_pedido_exige_escolha_quando_cliente_tem_multiplos_enderecos(): void
+    {
+        [$pedidoId] = $this->criarPedidoComItem();
+        $pedido = Pedido::findOrFail($pedidoId);
+        $this->criarEnderecoCliente($pedido->cliente, [
+            'cep' => '66000303',
+            'endereco' => 'Rua Secundaria Pedido',
+            'numero' => '303',
+            'bairro' => 'Bairro Extra',
+            'cidade' => 'Belem',
+            'estado' => 'PA',
+        ]);
+
+        $this->getJson("/api/v1/pedidos/{$pedidoId}/pdf/roteiro")
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('cliente_endereco_id');
+    }
+
+    public function test_roteiro_do_pedido_aceita_endereco_do_cliente_e_rejeita_de_outro_cliente(): void
+    {
+        [$pedidoId] = $this->criarPedidoComItem();
+        $pedido = Pedido::findOrFail($pedidoId);
+        $endereco = $this->criarEnderecoCliente($pedido->cliente, [
+            'cep' => '66000404',
+            'endereco' => 'Rua Escolhida Pedido',
+            'numero' => '404',
+            'bairro' => 'Bairro Escolhido',
+            'cidade' => 'Belem',
+            'estado' => 'PA',
+        ]);
+        $outroCliente = Cliente::create([
+            'nome' => 'Outro Cliente PDF',
+            'documento' => (string) random_int(10000000000, 99999999999),
+        ]);
+        $enderecoOutroCliente = $this->criarEnderecoCliente($outroCliente, [
+            'cep' => '66000909',
+            'endereco' => 'Rua Outro Cliente',
+            'numero' => '909',
+            'bairro' => 'Bairro Outro',
+            'cidade' => 'Belem',
+            'estado' => 'PA',
+        ], true);
+
+        $this->get("/api/v1/pedidos/{$pedidoId}/pdf/roteiro?cliente_endereco_id={$endereco->id}")
+            ->assertOk();
+
+        $this->getJson("/api/v1/pedidos/{$pedidoId}/pdf/roteiro?cliente_endereco_id={$enderecoOutroCliente->id}")
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('cliente_endereco_id');
+    }
+
+    public function test_roteiro_de_consignacao_exige_escolha_quando_cliente_tem_multiplos_enderecos(): void
+    {
+        [$pedidoId] = $this->criarPedidoConsignado('pendente', PedidoStatus::CONSIGNADO);
+        $pedido = Pedido::findOrFail($pedidoId);
+        $endereco = $this->criarEnderecoCliente($pedido->cliente, [
+            'cep' => '66000505',
+            'endereco' => 'Rua Escolhida Consignacao',
+            'numero' => '505',
+            'bairro' => 'Bairro Consignacao Extra',
+            'cidade' => 'Belem',
+            'estado' => 'PA',
+        ]);
+
+        $this->getJson("/api/v1/consignacoes/{$pedidoId}/pdf")
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('cliente_endereco_id');
+
+        $this->get("/api/v1/consignacoes/{$pedidoId}/pdf?cliente_endereco_id={$endereco->id}")
+            ->assertOk();
+    }
+
     public function test_bloqueia_cancelamento_de_venda_para_usuario_nao_adm(): void
     {
         [$pedidoId] = $this->criarPedidoConsignado('comprado', PedidoStatus::CONSIGNADO);
@@ -1082,12 +1154,17 @@ class ConsignacaoRoteiroPdfTest extends TestCase
         return [$pedido->id, $produto->id];
     }
 
-    private function criarEnderecoPrincipal(Cliente $cliente, array $dados): void
+    private function criarEnderecoPrincipal(Cliente $cliente, array $dados): ClienteEndereco
     {
-        ClienteEndereco::create($dados + [
+        return $this->criarEnderecoCliente($cliente, $dados, true);
+    }
+
+    private function criarEnderecoCliente(Cliente $cliente, array $dados, bool $principal = false): ClienteEndereco
+    {
+        return ClienteEndereco::create($dados + [
             'cliente_id' => $cliente->id,
-            'principal' => true,
-            'fingerprint' => hash('sha256', 'cliente-endereco-' . $cliente->id . '-' . ($dados['endereco'] ?? '')),
+            'principal' => $principal,
+            'fingerprint' => hash('sha256', 'cliente-endereco-' . $cliente->id . '-' . ($dados['endereco'] ?? '') . '-' . uniqid('', true)),
         ]);
     }
 }

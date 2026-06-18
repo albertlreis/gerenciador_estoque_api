@@ -27,6 +27,7 @@ use App\Services\PedidoUpdateService;
 use App\Services\EstatisticaPedidoService;
 use App\Services\PedidoExportService;
 use App\Services\PdfImageService;
+use App\Support\Pdf\ClienteEnderecoPdf;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Exception;
 use Illuminate\Http\JsonResponse;
@@ -432,11 +433,16 @@ class PedidoController extends Controller
         // 1) Carrega o básico + statusAtual para decidir o tipo sem puxar consignações/itens
         $pedidoBase = Pedido::with([
             'cliente.enderecoPrincipal', // opcional, mas útil p/ PDF (se quiser)
+            'cliente.enderecos',
             'usuario',
             'parceiro',
             'fornecedor',
             'statusAtual',
         ])->findOrFail($pedidoId);
+        $enderecoEntrega = ClienteEnderecoPdf::resolverParaPedido(
+            $pedidoBase,
+            $request->query('cliente_endereco_id')
+        );
 
         // Regra de negócio:
         // - Pedido consignado = status atual consignado (e/ou existe consignação)
@@ -459,6 +465,7 @@ class PedidoController extends Controller
         if ($isConsignado) {
             $pedido = Pedido::with([
                 'cliente.enderecoPrincipal',
+                'cliente.enderecos',
                 'usuario',
                 'parceiro',
                 'fornecedor',
@@ -516,6 +523,7 @@ class PedidoController extends Controller
                 'grupos'     => $grupos,
                 'geradoEm'   => now('America/Belem')->format('d/m/Y H:i'),
                 'tituloRoteiro' => $tituloRoteiro,
+                'enderecoEntrega' => $enderecoEntrega,
             ])->setPaper('a4');
 
             return $pdf->download($filename);
@@ -524,6 +532,7 @@ class PedidoController extends Controller
         // 3) Caso contrário: carrega APENAS itens do pedido e gera o template novo
         $pedido = Pedido::with([
             'cliente.enderecoPrincipal',
+            'cliente.enderecos',
             'usuario',
             'parceiro',
             'fornecedor',
@@ -585,6 +594,7 @@ class PedidoController extends Controller
             'pedido'     => $pedido,
             'grupos'     => $grupos,
             'geradoEm'   => now('America/Belem')->format('d/m/Y H:i'),
+            'enderecoEntrega' => $enderecoEntrega,
         ])->setPaper('a4');
 
         return $pdf->download("roteiro_pedido_{$pedidoId}.pdf");
@@ -595,7 +605,7 @@ class PedidoController extends Controller
      */
     public function notaEntregaItens(int $pedidoId, EstoqueDisponibilidadeService $disponibilidade): JsonResponse
     {
-        $pedido = Pedido::query()->findOrFail($pedidoId);
+        $pedido = Pedido::with('cliente.enderecos')->findOrFail($pedidoId);
 
         $queryBase = fn () => ProdutoEntregaItem::query()
             ->with([
@@ -631,7 +641,10 @@ class PedidoController extends Controller
                 ->values();
         }
 
-        return response()->json(['data' => $itens]);
+        return response()->json([
+            'data' => $itens,
+            'cliente_enderecos' => ClienteEnderecoPdf::paraResposta($pedido->cliente),
+        ]);
     }
 
     /**
@@ -647,6 +660,7 @@ class PedidoController extends Controller
             'registrar_entrega' => ['sometimes', 'boolean'],
             'idempotency_key' => ['nullable', 'string', 'max:120'],
             'observacao' => ['nullable', 'string', 'max:1000'],
+            'cliente_endereco_id' => ['nullable', 'integer'],
             'itens' => ['required', 'array', 'min:1'],
             'itens.*.produto_entrega_item_id' => ['required', 'integer'],
             'itens.*.quantidade' => ['nullable', 'integer', 'min:1'],
@@ -667,10 +681,15 @@ class PedidoController extends Controller
 
         $pedido = Pedido::with([
             'cliente.enderecoPrincipal',
+            'cliente.enderecos',
             'usuario',
             'parceiro',
             'fornecedor',
         ])->findOrFail($pedidoId);
+        $enderecoEntrega = ClienteEnderecoPdf::resolverParaPedido(
+            $pedido,
+            $data['cliente_endereco_id'] ?? null
+        );
 
         $selecionados = $this->normalizarItensNotaEntrega($data['itens']);
 
@@ -722,6 +741,7 @@ class PedidoController extends Controller
             'geradoEm' => now('America/Belem')->format('d/m/Y H:i'),
             'observacaoNota' => $data['observacao'] ?? null,
             'registrarEntrega' => $registrarEntrega,
+            'enderecoEntrega' => $enderecoEntrega,
         ])->setPaper('a4')->output();
 
         if ($registrarEntrega) {

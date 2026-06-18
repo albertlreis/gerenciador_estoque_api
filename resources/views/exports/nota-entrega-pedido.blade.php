@@ -40,7 +40,7 @@
 </head>
 <body>
 @php
-    $enderecoPrincipal = $pedido->cliente?->enderecoPrincipal ?? null;
+    $enderecoPrincipal = $enderecoEntrega ?? $pedido->cliente?->enderecoPrincipal ?? null;
     $enderecoTexto = '-';
 
     if ($enderecoPrincipal) {

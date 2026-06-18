@@ -41,6 +41,7 @@ class PedidoImportacaoPdfCustoTest extends TestCase
                 'total' => 240,
                 'data_pedido' => '2025-01-10',
             ],
+            'movimentar_estoque' => false,
             'itens' => [
                 [
                     'ref' => 'REF-CST-1',
@@ -91,6 +92,7 @@ class PedidoImportacaoPdfCustoTest extends TestCase
                 'total' => 180,
                 'data_pedido' => '2025-01-10',
             ],
+            'movimentar_estoque' => false,
             'itens' => [
                 [
                     'ref' => 'REF-LEG-1',

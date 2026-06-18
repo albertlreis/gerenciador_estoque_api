@@ -47,6 +47,7 @@ class PedidoImportacaoPdfDatasTest extends TestCase
                 'total' => 100,
                 'data_pedido' => '14/08/2020',
             ],
+            'movimentar_estoque' => false,
             'itens' => [
                 [
                     'ref' => 'REF-TESTE-1',
@@ -95,6 +96,7 @@ class PedidoImportacaoPdfDatasTest extends TestCase
                 'total' => 200,
                 'data_pedido' => '14.08.20',
             ],
+            'movimentar_estoque' => false,
             'itens' => [
                 [
                     'ref' => 'REF-TESTE-2',
@@ -142,6 +144,7 @@ class PedidoImportacaoPdfDatasTest extends TestCase
             ],
             'previsao_tipo' => 'DIAS_UTEIS',
             'dias_uteis_previstos' => 1,
+            'movimentar_estoque' => false,
             'itens' => [
                 [
                     'ref' => 'REF-PRZ-1',

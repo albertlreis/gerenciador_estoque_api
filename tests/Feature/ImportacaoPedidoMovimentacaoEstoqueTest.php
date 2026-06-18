@@ -15,11 +15,49 @@ use App\Models\ProdutoEntregaEvento;
 use App\Models\ProdutoEntregaItem;
 use App\Models\ProdutoVariacao;
 use App\Models\Usuario;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Tests\TestCase;
 
 class ImportacaoPedidoMovimentacaoEstoqueTest extends TestCase
 {
     private ?int $fornecedorId = null;
+
+    protected function tearDown(): void
+    {
+        if (app()->environment('testing')) {
+            DB::statement('SET FOREIGN_KEY_CHECKS=0');
+
+            foreach ([
+                'produto_entrega_eventos',
+                'estoque_movimentacoes',
+                'estoque_reservas',
+                'produto_entrega_itens',
+                'pedido_importacao_itens',
+                'pedido_importacoes',
+                'pedido_status_historico',
+                'pedido_itens',
+                'pedidos',
+                'estoque',
+                'produto_variacoes',
+                'produtos',
+                'depositos',
+                'clientes',
+                'fornecedores',
+                'categorias',
+                'usuarios',
+                'acesso_usuarios',
+            ] as $table) {
+                if (Schema::hasTable($table)) {
+                    DB::table($table)->truncate();
+                }
+            }
+
+            DB::statement('SET FOREIGN_KEY_CHECKS=1');
+        }
+
+        parent::tearDown();
+    }
 
     public function test_venda_com_movimentacao_padrao_registra_entrada_e_reserva_sem_saida(): void
     {

@@ -55,6 +55,7 @@ class ImportacaoPedidoEstrategiaVinculoTest extends TestCase
                 'total' => 80,
                 'data_pedido' => '2024-01-10',
             ],
+            'movimentar_estoque' => false,
             'itens' => [
                 [
                     'ref' => 'REF-DUP-EST',
@@ -121,6 +122,7 @@ class ImportacaoPedidoEstrategiaVinculoTest extends TestCase
                 'total' => 120,
                 'data_pedido' => '2024-02-01',
             ],
+            'movimentar_estoque' => false,
             'itens' => [
                 [
                     'ref' => 'REF-UNICA-CONFIRM',
@@ -169,6 +171,7 @@ class ImportacaoPedidoEstrategiaVinculoTest extends TestCase
                 'total' => 120,
                 'data_pedido' => '2024-02-01',
             ],
+            'movimentar_estoque' => false,
             'itens' => [
                 [
                     'ref' => 'REF-ATTR-LONGO',

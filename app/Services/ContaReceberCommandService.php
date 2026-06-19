@@ -11,9 +11,11 @@ use App\Models\FinanceiroParcelamento;
 use BackedEnum;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use App\Services\Comunicacao\ComunicacaoApiClient;
 use Illuminate\Validation\ValidationException;
+use Throwable;
 
 class ContaReceberCommandService
 {
@@ -59,7 +61,7 @@ class ContaReceberCommandService
                 ]);
             }
 
-            $this->contaAzulExports->titulo((int) $fresh->id, null, ['evento' => 'conta_receber_criada']);
+            $this->exportarTituloContaAzulBestEffort((int) $fresh->id, 'conta_receber_criada');
 
             return $fresh;
         });
@@ -79,7 +81,7 @@ class ContaReceberCommandService
             $fresh = $conta->fresh();
             $this->audit->log('updated', $conta, $antes, $fresh->toArray());
 
-            $this->contaAzulExports->titulo((int) $fresh->id, null, ['evento' => 'conta_receber_atualizada']);
+            $this->exportarTituloContaAzulBestEffort((int) $fresh->id, 'conta_receber_atualizada');
 
             return $fresh;
         });
@@ -144,7 +146,7 @@ class ContaReceberCommandService
 
             $this->audit->log('received', $conta, $antesConta, $depoisConta);
             $this->audit->log('ledger_created', $lancamento, null, $lancamento->fresh()->toArray());
-            $this->contaAzulExports->baixa((int) $pagamento->id, null, ['evento' => 'pagamento_registrado']);
+            $this->exportarBaixaContaAzulBestEffort((int) $pagamento->id, 'pagamento_registrado');
 
             return $pagamento->fresh(['usuario', 'contaFinanceira']);
         });
@@ -187,6 +189,59 @@ class ContaReceberCommandService
         $st = $conta->status;
         if ($st instanceof BackedEnum) return $st->value;
         return (string) $st;
+    }
+
+    private function exportarTituloContaAzulBestEffort(int $contaReceberId, string $evento): void
+    {
+        try {
+            DB::afterCommit(function () use ($contaReceberId, $evento): void {
+                try {
+                    $this->contaAzulExports->titulo($contaReceberId, null, ['evento' => $evento]);
+                } catch (Throwable $e) {
+                    $this->logFalhaExportacaoContaAzul('titulo', [
+                        'conta_receber_id' => $contaReceberId,
+                        'evento' => $evento,
+                    ], $e);
+                }
+            });
+        } catch (Throwable $e) {
+            $this->logFalhaExportacaoContaAzul('titulo', [
+                'conta_receber_id' => $contaReceberId,
+                'evento' => $evento,
+            ], $e);
+        }
+    }
+
+    private function exportarBaixaContaAzulBestEffort(int $pagamentoId, string $evento): void
+    {
+        try {
+            DB::afterCommit(function () use ($pagamentoId, $evento): void {
+                try {
+                    $this->contaAzulExports->baixa($pagamentoId, null, ['evento' => $evento]);
+                } catch (Throwable $e) {
+                    $this->logFalhaExportacaoContaAzul('baixa', [
+                        'pagamento_id' => $pagamentoId,
+                        'evento' => $evento,
+                    ], $e);
+                }
+            });
+        } catch (Throwable $e) {
+            $this->logFalhaExportacaoContaAzul('baixa', [
+                'pagamento_id' => $pagamentoId,
+                'evento' => $evento,
+            ], $e);
+        }
+    }
+
+    /**
+     * @param array<string, mixed> $contexto
+     */
+    private function logFalhaExportacaoContaAzul(string $tipo, array $contexto, Throwable $e): void
+    {
+        Log::warning("Falha ao disparar exportacao Conta Azul para {$tipo}.", $contexto + [
+            'exception' => $e::class,
+            'erro' => $e->getMessage(),
+        ]);
     }
 
     private function syncValores(ContaReceber $conta): void

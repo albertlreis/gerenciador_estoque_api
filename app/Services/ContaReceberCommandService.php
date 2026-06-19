@@ -47,7 +47,7 @@ class ContaReceberCommandService
                 $this->registrarPagamentoInicial($conta->fresh(), $pagamentoInicial);
             }
 
-            $fresh = $conta->fresh(['pedido.cliente', 'categoria', 'centroCusto', 'parcelamento', 'pagamentos.usuario']);
+            $fresh = $conta->fresh(['cliente', 'pedido.cliente', 'categoria', 'centroCusto', 'parcelamento', 'pagamentos.usuario']);
             $this->audit->log('created', $conta, null, $fresh->toArray());
 
             try {
@@ -170,7 +170,7 @@ class ContaReceberCommandService
             $this->syncValores($conta->fresh());
             $this->statusSvc->syncReceber($conta->fresh());
 
-            $fresh = $conta->fresh(['pedido.cliente', 'pagamentos.usuario']);
+            $fresh = $conta->fresh(['cliente', 'pedido.cliente', 'pagamentos.usuario']);
 
             $this->audit->log('reversed', $conta, $antesConta, $fresh->toArray());
             $this->audit->log('ledger_canceled', $pagamento, null, [
@@ -259,7 +259,7 @@ class ContaReceberCommandService
                 $this->registrarPagamentoInicial($target, $pagamentoInicial);
             }
 
-            $fresh = ($target ?: $contas[0])->fresh(['pedido.cliente', 'categoria', 'centroCusto', 'parcelamento', 'pagamentos.usuario']);
+            $fresh = ($target ?: $contas[0])->fresh(['cliente', 'pedido.cliente', 'categoria', 'centroCusto', 'parcelamento', 'pagamentos.usuario']);
             $this->audit->log('created_installments', $parcelamento, null, [
                 'parcelamento' => $parcelamento->fresh()->toArray(),
                 'contas' => collect($contas)->pluck('id')->values()->all(),

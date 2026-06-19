@@ -9,7 +9,9 @@ class ContaReceberResource extends JsonResource
     public function toArray($request): array
     {
         $pedido = $this->relationLoaded('pedido') ? $this->pedido : null;
-        $cliente = $pedido?->relationLoaded('cliente') ? $pedido->cliente : null;
+        $clienteDireto = $this->relationLoaded('cliente') ? $this->cliente : null;
+        $clientePedido = $pedido?->relationLoaded('cliente') ? $pedido->cliente : null;
+        $cliente = $clienteDireto?->id ? $clienteDireto : $clientePedido;
 
         return [
             'id'                => $this->id,
@@ -68,6 +70,11 @@ class ContaReceberResource extends JsonResource
                     'cliente_nome' => $cliente?->nome,
                 ];
             }),
+
+            'cliente' => $this->whenLoaded('cliente', fn() => [
+                'id' => $this->cliente?->id,
+                'nome' => $this->cliente?->nome,
+            ]),
 
             'pagamentos' => $this->whenLoaded('pagamentos', function () {
                 return $this->pagamentos->map(fn($p) => [

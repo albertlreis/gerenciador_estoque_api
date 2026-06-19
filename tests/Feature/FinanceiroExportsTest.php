@@ -84,6 +84,7 @@ class FinanceiroExportsTest extends TestCase
     {
         $clienteDentro = Cliente::create(['nome' => 'Cliente Exportavel', 'tipo' => 'pf']);
         $clienteFora = Cliente::create(['nome' => 'Cliente Fora', 'tipo' => 'pf']);
+        $clienteDireto = Cliente::create(['nome' => 'Cliente Direto Exportavel', 'tipo' => 'pf']);
 
         $pedidoDentro = Pedido::create([
             'id_cliente' => $clienteDentro->id,
@@ -116,6 +117,16 @@ class FinanceiroExportsTest extends TestCase
             'saldo_aberto' => 300,
             'status' => 'ABERTA',
         ]);
+        ContaReceber::create([
+            'cliente_id' => $clienteDireto->id,
+            'descricao' => 'Receber cliente direto',
+            'data_vencimento' => '2026-05-11',
+            'valor_bruto' => 250,
+            'valor_liquido' => 250,
+            'valor_recebido' => 0,
+            'saldo_aberto' => 250,
+            'status' => 'ABERTA',
+        ]);
 
         $params = [
             'cliente' => 'Exportavel',
@@ -124,7 +135,8 @@ class FinanceiroExportsTest extends TestCase
             'data_fim' => '2026-05-31',
         ];
 
-        $this->assertSame(1, ContasReceberExport::query($params)->count());
+        $this->assertSame(2, ContasReceberExport::query($params)->count());
+        $this->assertSame(1, ContasReceberExport::query(['cliente_id' => $clienteDireto->id])->count());
 
         $this->getJson('/api/v1/financeiro/contas-receber?' . http_build_query(['busca' => 'Receber exportavel']))
             ->assertOk()
@@ -132,6 +144,11 @@ class FinanceiroExportsTest extends TestCase
             ->assertJsonPath('data.0.pedido_numero', 'PED-EXP-1')
             ->assertJsonPath('data.0.cliente_id', $clienteDentro->id)
             ->assertJsonPath('data.0.cliente_nome', 'Cliente Exportavel');
+
+        $this->getJson('/api/v1/financeiro/contas-receber?' . http_build_query(['busca' => 'Receber cliente direto']))
+            ->assertOk()
+            ->assertJsonPath('data.0.cliente_id', $clienteDireto->id)
+            ->assertJsonPath('data.0.cliente_nome', 'Cliente Direto Exportavel');
 
         $this->get('/api/v1/financeiro/contas-receber/export/excel?' . http_build_query($params))
             ->assertOk()

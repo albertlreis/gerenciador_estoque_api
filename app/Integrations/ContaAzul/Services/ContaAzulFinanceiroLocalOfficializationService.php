@@ -4,10 +4,12 @@ namespace App\Integrations\ContaAzul\Services;
 
 use App\Enums\LancamentoTipo;
 use App\Integrations\ContaAzul\ContaAzulEntityType;
+use App\Models\Cliente;
 use App\Models\ContaPagar;
 use App\Models\ContaPagarPagamento;
 use App\Models\ContaReceber;
 use App\Models\ContaReceberPagamento;
+use App\Models\Fornecedor;
 use App\Services\FinanceiroLedgerService;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -55,6 +57,19 @@ class ContaAzulFinanceiroLocalOfficializationService
             $resumo['baixas_pagamentos'] = $this->oficializarBaixas($lojaId);
 
             return $resumo;
+        });
+    }
+
+    /**
+     * @return array<string, array<string, int>>
+     */
+    public function backfillPessoasFinanceiras(?int $lojaId = null): array
+    {
+        return DB::transaction(function () use ($lojaId) {
+            return [
+                'contas_receber_clientes' => $this->backfillClientesContasReceber($lojaId),
+                'contas_pagar_fornecedores' => $this->backfillFornecedoresContasPagar($lojaId),
+            ];
         });
     }
 
@@ -248,12 +263,14 @@ class ContaAzulFinanceiroLocalOfficializationService
             $valor = $this->money(data_get($p, 'total', 0));
             $recebido = $this->money(data_get($p, 'pago', 0));
             $descricaoCompleta = $this->str($p, 'descricao', 'Conta Azul ' . $idExterno);
+            $clienteId = $this->resolvePessoaFinanceiraLocal(ContaAzulEntityType::PESSOA, $p, 'cliente', $lojaId);
             $attrs = [
                 'parcelamento_id' => null,
                 'parcela_numero' => null,
                 'parcelas_total' => null,
                 'is_entrada' => false,
                 'pedido_id' => null,
+                'cliente_id' => $clienteId,
                 'descricao' => $this->limit($descricaoCompleta, 180),
                 'numero_documento' => $this->limit($idExterno, 80),
                 'data_emissao' => $this->date($this->str($p, 'data_criacao')),
@@ -291,12 +308,13 @@ class ContaAzulFinanceiroLocalOfficializationService
             $p = $row['payload'];
             $idExterno = (string) $row['identificador_externo'];
             $descricaoCompleta = $this->str($p, 'descricao', 'Conta Azul ' . $idExterno);
+            $fornecedorId = $this->resolvePessoaFinanceiraLocal(ContaAzulEntityType::FORNECEDOR, $p, 'fornecedor', $lojaId);
             $attrs = [
                 'parcelamento_id' => null,
                 'parcela_numero' => null,
                 'parcelas_total' => null,
                 'is_entrada' => false,
-                'fornecedor_id' => null,
+                'fornecedor_id' => $fornecedorId,
                 'descricao' => $this->limit($descricaoCompleta, 180),
                 'numero_documento' => $this->limit($idExterno, 80),
                 'data_emissao' => $this->date($this->str($p, 'data_criacao')),
@@ -451,6 +469,7 @@ class ContaAzulFinanceiroLocalOfficializationService
     {
         $mapping = $this->mapping($tipo, $idExterno, $lojaId);
         if ($mapping && $mapping->id_local && DB::table($table)->where('id', $mapping->id_local)->exists()) {
+            $attrs = $this->preserveExistingPessoaVinculo($table, (int) $mapping->id_local, $attrs);
             DB::table($table)->where('id', $mapping->id_local)->update($attrs + ['updated_at' => now()]);
             return false;
         }
@@ -459,6 +478,30 @@ class ContaAzulFinanceiroLocalOfficializationService
         $this->saveMapping($tipo, $idExterno, $id, $lojaId, $metadata);
 
         return true;
+    }
+
+    /**
+     * @param array<string, mixed> $attrs
+     * @return array<string, mixed>
+     */
+    private function preserveExistingPessoaVinculo(string $table, int $idLocal, array $attrs): array
+    {
+        $field = match ($table) {
+            'contas_receber' => 'cliente_id',
+            'contas_pagar' => 'fornecedor_id',
+            default => null,
+        };
+
+        if (!$field || !array_key_exists($field, $attrs)) {
+            return $attrs;
+        }
+
+        $current = DB::table($table)->where('id', $idLocal)->value($field);
+        if ($current) {
+            $attrs[$field] = $current;
+        }
+
+        return $attrs;
     }
 
     private function saveMapping(string $tipo, string $idExterno, int $idLocal, ?int $lojaId, array $metadata): void
@@ -546,6 +589,174 @@ class ContaAzulFinanceiroLocalOfficializationService
         }
 
         return $formas;
+    }
+
+    /**
+     * @return array<string, int>
+     */
+    private function backfillClientesContasReceber(?int $lojaId): array
+    {
+        $res = $this->emptyResult();
+        $query = DB::table('conta_azul_mapeamentos as m')
+            ->join('contas_receber as cr', 'cr.id', '=', 'm.id_local')
+            ->join('stg_conta_azul_financeiro as stg', function ($join) {
+                $join->on('stg.identificador_externo', '=', 'm.id_externo')
+                    ->where(function ($w) {
+                        $w->whereColumn('stg.loja_id', 'm.loja_id')
+                            ->orWhere(fn ($n) => $n->whereNull('stg.loja_id')->whereNull('m.loja_id'));
+                    });
+            })
+            ->where('m.tipo_entidade', ContaAzulEntityType::TITULO)
+            ->whereNull('cr.cliente_id')
+            ->whereNull('cr.deleted_at')
+            ->select(['cr.id as conta_id', 'm.loja_id', 'stg.payload_json']);
+
+        $lojaId === null ? $query->whereNull('m.loja_id') : $query->where('m.loja_id', $lojaId);
+
+        foreach ($query->orderBy('cr.id')->get() as $row) {
+            $payload = $this->decodePayload($row->payload_json);
+            $clienteId = $this->resolvePessoaFinanceiraLocal(ContaAzulEntityType::PESSOA, $payload, 'cliente', $row->loja_id !== null ? (int) $row->loja_id : null);
+            if (!$clienteId) {
+                $res['ignorados']++;
+                continue;
+            }
+
+            $updated = DB::table('contas_receber')
+                ->where('id', $row->conta_id)
+                ->whereNull('cliente_id')
+                ->update(['cliente_id' => $clienteId, 'updated_at' => now()]);
+            $res[$updated ? 'atualizados' : 'ignorados']++;
+        }
+
+        return $res;
+    }
+
+    /**
+     * @return array<string, int>
+     */
+    private function backfillFornecedoresContasPagar(?int $lojaId): array
+    {
+        $res = $this->emptyResult();
+        $query = DB::table('conta_azul_mapeamentos as m')
+            ->join('contas_pagar as cp', 'cp.id', '=', 'm.id_local')
+            ->join('stg_conta_azul_contas_pagar as stg', function ($join) {
+                $join->on('stg.identificador_externo', '=', 'm.id_externo')
+                    ->where(function ($w) {
+                        $w->whereColumn('stg.loja_id', 'm.loja_id')
+                            ->orWhere(fn ($n) => $n->whereNull('stg.loja_id')->whereNull('m.loja_id'));
+                    });
+            })
+            ->where('m.tipo_entidade', ContaAzulEntityType::CONTA_PAGAR)
+            ->whereNull('cp.fornecedor_id')
+            ->whereNull('cp.deleted_at')
+            ->select(['cp.id as conta_id', 'm.loja_id', 'stg.payload_json']);
+
+        $lojaId === null ? $query->whereNull('m.loja_id') : $query->where('m.loja_id', $lojaId);
+
+        foreach ($query->orderBy('cp.id')->get() as $row) {
+            $payload = $this->decodePayload($row->payload_json);
+            $fornecedorId = $this->resolvePessoaFinanceiraLocal(ContaAzulEntityType::FORNECEDOR, $payload, 'fornecedor', $row->loja_id !== null ? (int) $row->loja_id : null);
+            if (!$fornecedorId) {
+                $res['ignorados']++;
+                continue;
+            }
+
+            $updated = DB::table('contas_pagar')
+                ->where('id', $row->conta_id)
+                ->whereNull('fornecedor_id')
+                ->update(['fornecedor_id' => $fornecedorId, 'updated_at' => now()]);
+            $res[$updated ? 'atualizados' : 'ignorados']++;
+        }
+
+        return $res;
+    }
+
+    private function resolvePessoaFinanceiraLocal(string $tipo, array $payload, string $key, ?int $lojaId): ?int
+    {
+        $person = data_get($payload, $key);
+        if (!is_array($person)) {
+            return null;
+        }
+
+        $idExterno = $this->str($person, 'id');
+        if ($idExterno !== '') {
+            $mapped = $this->mappedId($tipo, $idExterno, $lojaId);
+            if ($mapped && $this->pessoaLocalExists($tipo, $mapped)) {
+                return $mapped;
+            }
+        }
+
+        $idLocal = $tipo === ContaAzulEntityType::FORNECEDOR
+            ? $this->resolveFornecedorLocal($person)
+            : $this->resolveClienteLocal($person);
+
+        if ($idExterno !== '' && $idLocal) {
+            $this->saveMapping($tipo, $idExterno, $idLocal, $lojaId, ['tabela' => $tipo === ContaAzulEntityType::FORNECEDOR ? 'fornecedores' : 'clientes']);
+        }
+
+        return $idLocal;
+    }
+
+    private function resolveClienteLocal(array $person): ?int
+    {
+        $documento = $this->digits($this->str($person, 'documento', $this->str($person, 'cpf', $this->str($person, 'cnpj', $this->str($person, 'cpfCnpj')))));
+        if ($documento !== '') {
+            $id = Cliente::query()->where('documento', $documento)->value('id');
+            if ($id) {
+                return (int) $id;
+            }
+        }
+
+        $nome = $this->limit($this->str($person, 'nome', $this->str($person, 'razaoSocial', 'Cliente Conta Azul')), 255);
+        $cliente = Cliente::create([
+            'nome' => $nome,
+            'nome_fantasia' => $this->limit($this->str($person, 'nomeFantasia'), 255) ?: null,
+            'documento' => $documento ?: null,
+            'tipo' => strlen($documento) > 11 ? 'pj' : 'pf',
+            'email' => $this->limit($this->str($person, 'email', $this->str($person, 'emailPrincipal')), 255) ?: null,
+            'telefone' => $this->limit($this->str($person, 'telefone', $this->str($person, 'celular')), 30) ?: null,
+            'whatsapp' => $this->limit($this->str($person, 'whatsapp', $this->str($person, 'celular')), 30) ?: null,
+        ]);
+
+        return (int) $cliente->id;
+    }
+
+    private function resolveFornecedorLocal(array $person): ?int
+    {
+        $documento = $this->digits($this->str($person, 'cnpj', $this->str($person, 'documento', $this->str($person, 'cpfCnpj'))));
+        if ($documento !== '') {
+            $id = Fornecedor::withTrashed()->where('cnpj', $documento)->value('id');
+            if ($id) {
+                return (int) $id;
+            }
+        }
+
+        $nome = $this->limit($this->str($person, 'nome', $this->str($person, 'razaoSocial', 'Fornecedor Conta Azul')), 255);
+        $fornecedor = Fornecedor::create([
+            'nome' => $nome,
+            'cnpj' => $documento ?: null,
+            'email' => $this->limit($this->str($person, 'email', $this->str($person, 'emailPrincipal')), 150) ?: null,
+            'telefone' => $this->limit($this->str($person, 'telefone', $this->str($person, 'celular')), 30) ?: null,
+            'status' => 1,
+            'observacoes' => 'Criado a partir da Conta Azul',
+        ]);
+
+        return (int) $fornecedor->id;
+    }
+
+    private function pessoaLocalExists(string $tipo, int $idLocal): bool
+    {
+        return $tipo === ContaAzulEntityType::FORNECEDOR
+            ? Fornecedor::withTrashed()->whereKey($idLocal)->exists()
+            : Cliente::query()->whereKey($idLocal)->exists();
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function decodePayload(mixed $payload): array
+    {
+        return is_string($payload) ? (json_decode($payload, true) ?: []) : (array) $payload;
     }
 
     private function categoriaLocalId(array $payload, ?int $lojaId): ?int
@@ -677,6 +888,11 @@ class ContaAzulFinanceiroLocalOfficializationService
     private function money(mixed $value): float
     {
         return round((float) ($value ?? 0), 2);
+    }
+
+    private function digits(string $value): string
+    {
+        return preg_replace('/\D+/', '', $value) ?? '';
     }
 
     private function date(string $value): ?string

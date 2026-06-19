@@ -9,6 +9,7 @@ class ContaAzulOficializarFinanceiroCommand extends Command
 {
     protected $signature = 'conta-azul:oficializar-financeiro
         {--dry-run : Mostra o plano sem gravar dados}
+        {--backfill-pessoas : Preenche cliente/fornecedor em titulos financeiros ja oficializados}
         {--loja= : ID opcional da loja}
         {--confirm-production : Confirma execucao em producao quando a flag de producao estiver ativa}';
 
@@ -28,12 +29,16 @@ class ContaAzulOficializarFinanceiroCommand extends Command
             return self::FAILURE;
         }
 
-        $summary = $this->option('dry-run')
-            ? $service->dryRun($lojaId)
-            : $service->oficializar($lojaId);
+        if ($this->option('dry-run')) {
+            $summary = $service->dryRun($lojaId);
+        } elseif ($this->option('backfill-pessoas')) {
+            $summary = $service->backfillPessoasFinanceiras($lojaId);
+        } else {
+            $summary = $service->oficializar($lojaId);
+        }
 
         $this->table(['entidade', 'criados/previstos', 'atualizados', 'ignorados', 'lancamentos'], $this->rows($summary));
-        $this->info($this->option('dry-run') ? 'Dry-run: nenhum dado foi gravado.' : 'Oficializacao financeira concluida.');
+        $this->info($this->option('dry-run') ? 'Dry-run: nenhum dado foi gravado.' : 'Operacao financeira Conta Azul concluida.');
 
         return self::SUCCESS;
     }

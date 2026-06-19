@@ -320,9 +320,9 @@ class ContaAzulLocalCreationService
      */
     private function previewPessoaFinanceira(string $tipoLocal, array $payload, ?int $lojaId): ?array
     {
-        $externalId = $this->first($payload, $tipoLocal === 'conta_pagar'
-            ? ['idFornecedor', 'fornecedorId', 'idPessoa', 'pessoaId', 'idCliente', 'clienteId']
-            : ['idCliente', 'clienteId', 'idPessoa', 'pessoaId']);
+        $externalId = $this->firstNested($payload, $tipoLocal === 'conta_pagar'
+            ? ['idFornecedor', 'fornecedorId', 'idPessoa', 'pessoaId', 'fornecedor.id', 'idCliente', 'clienteId', 'cliente.id']
+            : ['idCliente', 'clienteId', 'idPessoa', 'pessoaId', 'cliente.id']);
 
         $mapType = $tipoLocal === 'conta_pagar' ? ContaAzulEntityType::FORNECEDOR : ContaAzulEntityType::PESSOA;
         if ($externalId !== '') {
@@ -392,6 +392,9 @@ class ContaAzulLocalCreationService
     {
         $dados = $this->validateFinancialData((array) ($request['dados'] ?? []));
         $pessoa = $this->resolvePessoaFinanceira((array) ($request['pessoa'] ?? []), ContaAzulEntityType::PESSOA, $lojaId);
+        if ($pessoa) {
+            $dados['cliente_id'] = $pessoa['id_local'];
+        }
         if ($pessoa && empty($dados['observacoes'])) {
             $dados['observacoes'] = 'Cliente Conta Azul: ' . $pessoa['label'];
         }

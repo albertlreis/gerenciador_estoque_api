@@ -27,7 +27,7 @@ class ContasReceberExport implements FromCollection, WithHeadings, WithMapping
     public static function query(array $params): Builder
     {
         $q = ContaReceber::query()
-            ->with(['pedido.cliente', 'categoria', 'centroCusto']);
+            ->with(['cliente', 'pedido.cliente', 'categoria', 'centroCusto']);
 
         if (!empty($params['busca'])) {
             $busca = '%' . trim((string) $params['busca']) . '%';
@@ -43,7 +43,18 @@ class ContasReceberExport implements FromCollection, WithHeadings, WithMapping
 
         if (!empty($params['cliente'])) {
             $cliente = '%' . trim((string) $params['cliente']) . '%';
-            $q->whereHas('pedido.cliente', fn ($c) => $c->where('nome', 'like', $cliente));
+            $q->where(fn ($w) => $w
+                ->whereHas('cliente', fn ($c) => $c->where('nome', 'like', $cliente))
+                ->orWhereHas('pedido.cliente', fn ($c) => $c->where('nome', 'like', $cliente))
+            );
+        }
+
+        if (!empty($params['cliente_id'])) {
+            $clienteId = (int) $params['cliente_id'];
+            $q->where(fn ($w) => $w
+                ->where('cliente_id', $clienteId)
+                ->orWhereHas('pedido', fn ($p) => $p->where('id_cliente', $clienteId))
+            );
         }
 
         if (!empty($params['numero_pedido'])) {
@@ -98,7 +109,7 @@ class ContasReceberExport implements FromCollection, WithHeadings, WithMapping
     {
         return [
             $conta->id,
-            $conta->pedido?->cliente?->nome,
+            $conta->cliente?->nome ?: $conta->pedido?->cliente?->nome,
             $conta->pedido?->numero_externo,
             $conta->descricao,
             $conta->numero_documento,

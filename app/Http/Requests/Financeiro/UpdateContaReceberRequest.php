@@ -24,6 +24,8 @@ class UpdateContaReceberRequest extends FormRequest
     public function rules(): array
     {
         return [
+            'pedido_id' => ['sometimes','nullable','integer','exists:pedidos,id'],
+            'cliente_id' => ['sometimes','nullable','integer','exists:clientes,id'],
             'descricao' => ['sometimes','string','max:255'],
             'numero_documento' => ['sometimes','string','max:255'],
             'data_emissao' => ['sometimes','date'],

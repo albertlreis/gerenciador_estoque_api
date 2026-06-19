@@ -25,7 +25,7 @@ class ContaReceberController extends Controller
      * Filtros suportados:
      * - busca (descricao/numero_documento)
      * - status (ABERTA, PARCIAL, PAGA, CANCELADA)
-     * - cliente (nome do cliente no pedido)
+     * - cliente (nome do cliente direto ou do cliente no pedido)
      * - numero_pedido (numero_externo do pedido)
      * - data_ini, data_fim (intervalo por data_vencimento)
      * - vencidas (bool) => vencimento passado e status != PAGA
@@ -47,6 +47,7 @@ class ContaReceberController extends Controller
             'busca'     => 'nullable|string|max:255',
             'status'    => 'nullable|in:ABERTA,PARCIAL,PAGA,CANCELADA',
             'cliente'   => 'nullable|string|max:255',
+            'cliente_id' => 'nullable|integer|exists:clientes,id',
             'numero_pedido' => 'nullable|string|max:80',
             'data_ini'  => 'nullable|date',
             'data_fim'  => 'nullable|date',
@@ -57,7 +58,7 @@ class ContaReceberController extends Controller
         $perPage = $request->integer('per_page', 20);
 
         $q = ContaReceber::query()
-            ->with(['pedido.cliente', 'parcelamento', 'pagamentos.usuario', 'pagamentos.contaFinanceira']);
+            ->with(['cliente', 'pedido.cliente', 'parcelamento', 'pagamentos.usuario', 'pagamentos.contaFinanceira']);
 
         if ($request->filled('busca')) {
             $busca = '%' . $request->string('busca')->toString() . '%';
@@ -73,8 +74,17 @@ class ContaReceberController extends Controller
 
         if ($request->filled('cliente')) {
             $cliente = '%' . $request->string('cliente')->toString() . '%';
-            $q->whereHas('pedido.cliente', fn ($c) =>
-            $c->where('nome', 'like', $cliente)
+            $q->where(fn ($w) => $w
+                ->whereHas('cliente', fn ($c) => $c->where('nome', 'like', $cliente))
+                ->orWhereHas('pedido.cliente', fn ($c) => $c->where('nome', 'like', $cliente))
+            );
+        }
+
+        if ($request->filled('cliente_id')) {
+            $clienteId = $request->integer('cliente_id');
+            $q->where(fn ($w) => $w
+                ->where('cliente_id', $clienteId)
+                ->orWhereHas('pedido', fn ($p) => $p->where('id_cliente', $clienteId))
             );
         }
 
@@ -112,7 +122,7 @@ class ContaReceberController extends Controller
      */
     public function show(ContaReceber $conta): JsonResponse
     {
-        $conta->load(['pedido.cliente', 'categoria', 'centroCusto', 'parcelamento', 'pagamentos.usuario', 'pagamentos.contaFinanceira']);
+        $conta->load(['cliente', 'pedido.cliente', 'categoria', 'centroCusto', 'parcelamento', 'pagamentos.usuario', 'pagamentos.contaFinanceira']);
 
         return response()->json([
             'data' => new ContaReceberResource($conta),
@@ -125,7 +135,7 @@ class ContaReceberController extends Controller
     public function store(StoreContaReceberRequest $request): JsonResponse
     {
         $conta = $this->cmd->criar($request->validated());
-        $conta->load(['pedido.cliente']);
+        $conta->load(['cliente', 'pedido.cliente']);
 
         return response()->json([
             'data' => new ContaReceberResource($conta),
@@ -138,7 +148,7 @@ class ContaReceberController extends Controller
     public function update(UpdateContaReceberRequest $request, ContaReceber $conta): JsonResponse
     {
         $conta = $this->cmd->atualizar($conta, $request->validated());
-        $conta->load(['pedido.cliente', 'pagamentos.usuario']);
+        $conta->load(['cliente', 'pedido.cliente', 'pagamentos.usuario']);
 
         return response()->json([
             'data' => new ContaReceberResource($conta),
@@ -171,7 +181,7 @@ class ContaReceberController extends Controller
         $pagamento = $this->cmd->registrarPagamento($conta, $dados);
 
         // retorna a conta atualizada (padrão similar ao contas a pagar)
-        $conta->refresh()->load(['pedido.cliente', 'pagamentos.usuario', 'pagamentos.contaFinanceira']);
+        $conta->refresh()->load(['cliente', 'pedido.cliente', 'pagamentos.usuario', 'pagamentos.contaFinanceira']);
 
         return response()->json([
             'data' => new ContaReceberResource($conta),
@@ -185,7 +195,7 @@ class ContaReceberController extends Controller
     public function estornarPagamento(ContaReceber $conta, int $pagamento): JsonResponse
     {
         $contaAtualizada = $this->cmd->estornarPagamento($conta, $pagamento);
-        $contaAtualizada->load(['pedido.cliente', 'pagamentos.usuario', 'pagamentos.contaFinanceira']);
+        $contaAtualizada->load(['cliente', 'pedido.cliente', 'pagamentos.usuario', 'pagamentos.contaFinanceira']);
 
         return response()->json([
             'data' => new ContaReceberResource($contaAtualizada),

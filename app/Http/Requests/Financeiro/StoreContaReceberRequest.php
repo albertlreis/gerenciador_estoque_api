@@ -25,6 +25,7 @@ class StoreContaReceberRequest extends FormRequest
     {
         return [
             'pedido_id' => ['nullable','integer','exists:pedidos,id'],
+            'cliente_id' => ['nullable','integer','exists:clientes,id'],
             'descricao' => ['required','string','max:255'],
             'numero_documento' => ['nullable','string','max:255'],
             'data_emissao' => ['nullable','date'],

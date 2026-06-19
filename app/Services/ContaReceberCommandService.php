@@ -333,6 +333,10 @@ class ContaReceberCommandService
         int $quantidade,
         int $intervalo
     ): array {
+        if (!empty($parcelamentoDados['parcelas']) && is_array($parcelamentoDados['parcelas'])) {
+            return $this->parcelasCustomizadasPayload($base, $parcelamento, $parcelamentoDados, $valorTotal, $valorEntrada, $quantidade);
+        }
+
         $payloads = [];
         $descricao = trim((string)($base['descricao'] ?? 'Conta a receber'));
         $entradaDate = Carbon::parse($parcelamentoDados['data_entrada'] ?? $base['data_emissao'] ?? now())->toDateString();
@@ -375,6 +379,82 @@ class ContaReceberCommandService
         }
 
         return $payloads;
+    }
+
+    private function parcelasCustomizadasPayload(
+        array $base,
+        FinanceiroParcelamento $parcelamento,
+        array $parcelamentoDados,
+        float $valorTotal,
+        float $valorEntrada,
+        int $quantidade
+    ): array {
+        $parcelas = collect($parcelamentoDados['parcelas'])
+            ->map(function (array $parcela) {
+                $isEntrada = (bool)($parcela['is_entrada'] ?? false) || (int)($parcela['parcela_numero'] ?? 0) === 0;
+
+                return [
+                    'parcela_numero' => $isEntrada ? 0 : (int)$parcela['parcela_numero'],
+                    'vencimento' => Carbon::parse($parcela['vencimento'])->toDateString(),
+                    'valor' => $this->toDecimalFloat($parcela['valor'] ?? 0),
+                    'is_entrada' => $isEntrada,
+                ];
+            })
+            ->sortBy(fn (array $parcela) => ($parcela['is_entrada'] ? '0' : '1') . str_pad((string)$parcela['parcela_numero'], 3, '0', STR_PAD_LEFT))
+            ->values();
+
+        $totalInformado = $parcelas->sum('valor');
+        if ($this->moneyCents($totalInformado) !== $this->moneyCents($valorTotal)) {
+            throw ValidationException::withMessages([
+                'parcelamento.parcelas' => 'A soma das parcelas deve ser igual ao valor líquido da conta.',
+            ]);
+        }
+
+        $entradas = $parcelas->where('is_entrada', true);
+        $valorEntradaInformado = $entradas->sum('valor');
+        if ($this->moneyCents($valorEntradaInformado) !== $this->moneyCents($valorEntrada)) {
+            throw ValidationException::withMessages([
+                'parcelamento.parcelas' => 'O valor da entrada deve conferir com as parcelas informadas.',
+            ]);
+        }
+
+        if ($valorEntrada > 0 && $entradas->count() !== 1) {
+            throw ValidationException::withMessages([
+                'parcelamento.parcelas' => 'Informe exatamente uma parcela de entrada.',
+            ]);
+        }
+
+        if ($parcelas->where('is_entrada', false)->count() !== $quantidade) {
+            throw ValidationException::withMessages([
+                'parcelamento.quantidade_parcelas' => 'A quantidade de parcelas não confere com a agenda informada.',
+            ]);
+        }
+
+        $descricao = trim((string)($base['descricao'] ?? 'Conta a receber'));
+        $comum = $base;
+        $comum['status'] = ContaStatus::ABERTA->value;
+        $comum['desconto'] = 0;
+        $comum['juros'] = 0;
+        $comum['multa'] = 0;
+        $comum['valor_recebido'] = 0;
+        $comum['parcelamento_id'] = $parcelamento->id;
+        $comum['parcelas_total'] = $quantidade;
+
+        return $parcelas->map(function (array $parcela) use ($comum, $descricao, $quantidade) {
+            $numero = (int)$parcela['parcela_numero'];
+            $isEntrada = (bool)$parcela['is_entrada'];
+
+            return [
+                ...$comum,
+                'descricao' => $isEntrada ? "{$descricao} - Entrada" : "{$descricao} - Parcela {$numero}/{$quantidade}",
+                'data_vencimento' => $parcela['vencimento'],
+                'valor_bruto' => $parcela['valor'],
+                'valor_liquido' => $parcela['valor'],
+                'saldo_aberto' => $parcela['valor'],
+                'parcela_numero' => $numero,
+                'is_entrada' => $isEntrada,
+            ];
+        })->all();
     }
 
     private function registrarPagamentoInicial(ContaReceber $conta, array $dados): void
@@ -492,5 +572,10 @@ class ContaReceberCommandService
         $af = (float)$a;
         $bf = (float)$b;
         return $af <=> $bf;
+    }
+
+    private function moneyCents(float $value): int
+    {
+        return (int) round($value * 100);
     }
 }

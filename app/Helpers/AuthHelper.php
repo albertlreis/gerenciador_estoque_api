@@ -271,6 +271,14 @@ class AuthHelper
     }
 
     /**
+     * Libera ajuste manual auditavel de estoque somente para perfil Desenvolvedor.
+     */
+    public static function podeRegistrarAjusteManualEstoque(): bool
+    {
+        return self::hasAnyPerfilNormalizadoAtual(['Desenvolvedor']);
+    }
+
+    /**
      * Libera somente a area de conexao/autenticacao da Conta Azul.
      */
     public static function podeAutenticarContaAzul(): bool

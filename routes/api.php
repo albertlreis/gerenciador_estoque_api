@@ -195,6 +195,7 @@ Route::middleware(['auth:sanctum', 'senha.nao_obrigatoria'])
         Route::prefix('estoque')->group(function () {
             Route::get('atual', [EstoqueController::class, 'listarEstoqueAtual']);
             Route::get('resumo', [EstoqueController::class, 'resumoEstoque']);
+            Route::post('ajustes-manuais', [EstoqueController::class, 'registrarAjusteManual']);
 
             // padroniza rota "por variação"
             Route::get('variacoes/{variacao}', [EstoqueController::class, 'porVariacao'])

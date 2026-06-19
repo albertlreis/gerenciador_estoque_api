@@ -38,8 +38,14 @@ class ImportacaoPedidoService
     private const PRAZO_IMPORTACAO_PADRAO_DIAS_UTEIS = 60;
     private const MOVIMENTACAO_ENTRADA = 'entrada';
     private const MOVIMENTACAO_SAIDA = 'saida';
-
-    private ?int $categoriaPadraoId = null;
+    private const CATEGORIA_IMPORTACAO_SEM_CATEGORIA = 'Importacao XML - Sem categoria';
+    private const MENSAGEM_CATEGORIA_IMPORTACAO_INVALIDA = 'Selecione uma categoria válida para o produto. A categoria "Importacao XML - Sem categoria" não é permitida.';
+    private const ATRIBUTOS_FISCAIS_NFE = [
+        'observacao',
+        'quantidade_nfe',
+        'unidade_nfe',
+        'valor_unitario_nfe',
+    ];
 
     /**
      * Confirma os dados da importação de um pedido, salvando no banco.
@@ -97,6 +103,7 @@ class ImportacaoPedidoService
             'itens.*.movimentacao_estoque_tipo' => 'nullable|in:entrada,saida',
             'itens.*.atributos'    => 'nullable|array',
             'itens.*.atributos.*'  => 'nullable',
+            'itens.*.atributos_nfe' => 'nullable|array',
             'estrategia_vinculo'   => 'nullable|in:' . implode(',', EstrategiaVinculoImportacao::valores()),
             'itens.*.forcar_produto_novo' => 'nullable|boolean',
         ], [
@@ -123,12 +130,56 @@ class ImportacaoPedidoService
                 return;
             }
 
+            $categoriaIds = collect($itens)
+                ->pluck('id_categoria')
+                ->filter(fn ($value) => is_numeric($value))
+                ->map(fn ($value) => (int) $value)
+                ->unique()
+                ->values();
+
+            $categoriasProibidas = $categoriaIds->isEmpty()
+                ? collect()
+                : Categoria::query()
+                    ->whereIn('id', $categoriaIds)
+                    ->where('nome', self::CATEGORIA_IMPORTACAO_SEM_CATEGORIA)
+                    ->pluck('id')
+                    ->map(fn ($id) => (int) $id)
+                    ->flip();
+
+            $variacaoIds = collect($itens)
+                ->pluck('id_variacao')
+                ->filter(fn ($value) => is_numeric($value))
+                ->map(fn ($value) => (int) $value)
+                ->unique()
+                ->values();
+
+            $variacoesComCategoriaProibida = $variacaoIds->isEmpty()
+                ? collect()
+                : ProdutoVariacao::query()
+                    ->join('produtos', 'produtos.id', '=', 'produto_variacoes.produto_id')
+                    ->join('categorias', 'categorias.id', '=', 'produtos.id_categoria')
+                    ->whereIn('produto_variacoes.id', $variacaoIds)
+                    ->where('categorias.nome', self::CATEGORIA_IMPORTACAO_SEM_CATEGORIA)
+                    ->pluck('produto_variacoes.id')
+                    ->map(fn ($id) => (int) $id)
+                    ->flip();
+
             foreach ($itens as $index => $item) {
-                $atributos = $item['atributos'] ?? [];
-                if (!is_array($atributos)) {
+                $categoriaId = $item['id_categoria'] ?? null;
+                if (is_numeric($categoriaId) && $categoriasProibidas->has((int) $categoriaId)) {
+                    $validator->errors()->add("itens.$index.id_categoria", self::MENSAGEM_CATEGORIA_IMPORTACAO_INVALIDA);
+                }
+
+                $variacaoId = $item['id_variacao'] ?? null;
+                if (is_numeric($variacaoId) && $variacoesComCategoriaProibida->has((int) $variacaoId)) {
+                    $validator->errors()->add("itens.$index.id_categoria", self::MENSAGEM_CATEGORIA_IMPORTACAO_INVALIDA);
+                }
+
+                if (isset($item['atributos']) && !is_array($item['atributos'])) {
                     continue;
                 }
 
+                $atributos = $this->atributosProdutoImportacao($item);
                 $normalizados = [];
                 foreach ($atributos as $atributo => $valor) {
                     $nome = trim((string) $atributo);
@@ -505,7 +556,7 @@ class ImportacaoPedidoService
                         'custo'      => $custoUnit,
                     ]);
 
-                    foreach ($item['atributos'] ?? [] as $atrib => $valor) {
+                    foreach ($this->atributosProdutoImportacao($item) as $atrib => $valor) {
                         if (is_array($valor)) continue;
                         if (is_numeric($valor)) $valor = (string) $valor;
                         if ($valor === null || trim((string)$valor) === '') continue;
@@ -530,7 +581,7 @@ class ImportacaoPedidoService
                     'custo_unitario' => $custoUnit,
                     'subtotal'       => (float)$quantidade * (float)$valorUnit,
                     'id_deposito'    => $item['id_deposito'] ?? null,
-                    'observacoes'    => $item['atributos']['observacao'] ?? null,
+                    'observacoes'    => $item['atributos_nfe']['observacao'] ?? $item['atributos']['observacao'] ?? null,
                 ]);
                 $pedidoItensCriados->push([
                     'item' => $pedidoItem,
@@ -557,6 +608,7 @@ class ImportacaoPedidoService
                         'preco_unitario' => $valorUnit,
                         'custo_unitario' => $custoUnit,
                         'id_deposito' => $item['id_deposito'] ?? null,
+                        'atributos_nfe' => $item['atributos_nfe'] ?? null,
                     ],
                 ]);
             }
@@ -860,6 +912,20 @@ class ImportacaoPedidoService
         return !($value === null || (is_string($value) && trim($value) === ''));
     }
 
+    private function atributosProdutoImportacao(array $item): array
+    {
+        $atributos = $item['atributos'] ?? [];
+        if (!is_array($atributos)) {
+            return [];
+        }
+
+        return array_filter(
+            $atributos,
+            fn ($valor, $chave) => !in_array(strtolower(trim((string) $chave)), self::ATRIBUTOS_FISCAIS_NFE, true),
+            ARRAY_FILTER_USE_BOTH
+        );
+    }
+
     private function aplicarBuscaPorIdentificador($query, string $identificador): void
     {
         $query->where('sku_interno', $identificador)
@@ -920,9 +986,11 @@ class ImportacaoPedidoService
      * @param array $itens
      * @return array
      */
-    public function mesclarItensComVariacoes(array $itens, ?string $estrategiaVinculo = null): array
+    public function mesclarItensComVariacoes(array $itens, ?string $estrategiaVinculo = null, array $opcoes = []): array
     {
-        return collect($itens)->values()->map(function ($item, int $index) {
+        $categoriaSugerida = $this->normalizarCategoriaSugerida($opcoes['categoria_sugerida'] ?? null);
+
+        return collect($itens)->values()->map(function ($item, int $index) use ($categoriaSugerida) {
             $linha = $this->normalizarLinhaItem($item['linha'] ?? null, $index + 1);
 
             $ref = isset($item['codigo']) && trim((string) $item['codigo']) !== ''
@@ -932,7 +1000,7 @@ class ImportacaoPedidoService
 
             if (!$ref && !$codigoBarras) {
                 $item['linha'] = $linha;
-                return $item;
+                return $this->aplicarCategoriaSugerida($item, $categoriaSugerida);
             }
 
             // 1) Código de barras (quando existe) segue fluxo simples (tende a ser único)
@@ -971,10 +1039,10 @@ class ImportacaoPedidoService
                 }
 
                 if ($variacoesPorReferencia->count() > 1) {
-                    $categoriaId = $item['id_categoria'] ?? $this->categoriaPadraoImportacaoId();
-                    $categoriaNome = $item['categoria'] ?? $this->categoriaPadraoNome($categoriaId);
+                    $categoriaId = $item['id_categoria'] ?? null;
+                    $categoriaNome = $item['categoria'] ?? $this->categoriaNome($categoriaId);
 
-                    return array_merge($item, [
+                    $itemMapeado = array_merge($item, [
                         "linha" => $linha,
                         "ref" => $ref,
                         "produto_id" => null,
@@ -988,6 +1056,8 @@ class ImportacaoPedidoService
                         // lista de variações para seleção explícita no front
                         "variacoes_encontradas" => $variacoesEncontradas,
                     ]);
+
+                    return $this->aplicarCategoriaSugerida($itemMapeado, $categoriaSugerida);
                 }
 
                 // Se não houver correspondência por referência, mantém comportamento legado
@@ -1018,20 +1088,60 @@ class ImportacaoPedidoService
             }
 
             // Produto não encontrado → usar dados do PDF
-            $categoriaId = $item['id_categoria'] ?? $this->categoriaPadraoImportacaoId();
+            $categoriaId = $item['id_categoria'] ?? null;
 
-            return array_merge($item, [
+            $itemMapeado = array_merge($item, [
                 "linha"         => $linha,
                 "ref"           => $ref,
                 "produto_id"    => null,
                 "id_variacao"   => null,
                 "variacao_nome" => null,
                 "id_categoria"  => $categoriaId,
-                "categoria"  => $item['categoria'] ?? $this->categoriaPadraoNome($categoriaId),
+                "categoria"  => $item['categoria'] ?? $this->categoriaNome($categoriaId),
                 "atributos"     => $item['atributos'] ?? [],
                 "fixos"         => $item['fixos'] ?? [],
             ]);
+
+            return $this->aplicarCategoriaSugerida($itemMapeado, $categoriaSugerida);
         })->toArray();
+    }
+
+    private function normalizarCategoriaSugerida(mixed $categoria): ?array
+    {
+        if (!is_array($categoria)) {
+            return null;
+        }
+
+        $id = $categoria['id'] ?? $categoria['id_categoria'] ?? null;
+        $nome = trim((string) ($categoria['nome'] ?? $categoria['categoria'] ?? ''));
+
+        if (!is_numeric($id) || (int) $id <= 0 || $nome === '') {
+            return null;
+        }
+
+        return [
+            'id' => (int) $id,
+            'nome' => $nome,
+        ];
+    }
+
+    private function aplicarCategoriaSugerida(array $item, ?array $categoriaSugerida): array
+    {
+        if ($categoriaSugerida === null) {
+            return $item;
+        }
+
+        $categoriaId = $item['id_categoria'] ?? null;
+        $categoriaNome = trim((string) ($item['categoria'] ?? ''));
+
+        if ((is_numeric($categoriaId) && (int) $categoriaId > 0) || $categoriaNome !== '') {
+            return $item;
+        }
+
+        return array_merge($item, [
+            'id_categoria' => $categoriaSugerida['id'],
+            'categoria' => $categoriaSugerida['nome'],
+        ]);
     }
 
     private function mapearItemComVariacaoEncontrada(array $item, int $linha, ?string $ref, ProdutoVariacao $variacao): array
@@ -1059,8 +1169,8 @@ class ImportacaoPedidoService
             array_filter($fixosDb, fn($v) => !is_null($v))
         );
 
-        $categoriaId = $produto?->id_categoria ?? $this->categoriaPadraoImportacaoId();
-        $categoriaNome = $produto?->categoria?->nome ?? $this->categoriaPadraoNome($categoriaId);
+        $categoriaId = $produto?->id_categoria;
+        $categoriaNome = $produto?->categoria?->nome ?? $this->categoriaNome($categoriaId);
 
         return array_merge($item, [
             "linha" => $linha,
@@ -1093,26 +1203,12 @@ class ImportacaoPedidoService
         return $fallback;
     }
 
-    private function categoriaPadraoImportacaoId(): int
+    private function categoriaNome(mixed $categoriaId): ?string
     {
-        if ($this->categoriaPadraoId) {
-            return $this->categoriaPadraoId;
+        if (!is_numeric($categoriaId)) {
+            return null;
         }
 
-        $categoria = Categoria::query()->where('nome', 'Importacao XML - Sem categoria')->first();
-
-        if (!$categoria) {
-            $categoria = Categoria::query()->create([
-                'nome' => 'Importacao XML - Sem categoria',
-            ]);
-        }
-
-        $this->categoriaPadraoId = (int) $categoria->id;
-        return $this->categoriaPadraoId;
-    }
-
-    private function categoriaPadraoNome(int $categoriaId): ?string
-    {
         return Categoria::query()->whereKey($categoriaId)->value('nome');
     }
 

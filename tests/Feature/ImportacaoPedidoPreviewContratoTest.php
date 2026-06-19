@@ -7,6 +7,7 @@ use App\Models\Fornecedor;
 use App\Models\Pedido;
 use App\Models\PedidoImportacao;
 use App\Models\Produto;
+use App\Models\ProdutoVariacao;
 use App\Models\Usuario;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
@@ -172,6 +173,152 @@ class ImportacaoPedidoPreviewContratoTest extends TestCase
         $response->assertJsonPath('dados.pedido.fornecedor_sugerido.nome', 'Móveis Beta');
     }
 
+    public function test_preview_listing_seleciona_fornecedor_por_token_do_nome_estruturado(): void
+    {
+        $usuario = $this->criarUsuario('preview-fornecedor-sierra@example.com');
+        $fornecedor = $this->criarFornecedor([
+            'nome' => 'SIERRA MÓVEIS',
+            'cnpj' => null,
+        ]);
+
+        $arquivo = UploadedFile::fake()->createWithContent(
+            'pedido-sierra.xml',
+            <<<'XML'
+<?xml version="1.0" encoding="UTF-8"?>
+<LISTING>
+  <NUMERO_PEDIDO>12345</NUMERO_PEDIDO>
+  <FORNECEDOR_PEDIDO>Sierra</FORNECEDOR_PEDIDO>
+  <ITEMS>
+    <ITEM DESCRIPTION="Produto Sierra" QUANTITY="1" PRICE="100">
+      <REFERENCES><CODE REFERENCE="REF-SIERRA" /></REFERENCES>
+    </ITEM>
+  </ITEMS>
+</LISTING>
+XML
+        );
+
+        $response = $this->actingAs($usuario, 'sanctum')
+            ->post('/api/v1/pedidos/import', [
+                'tipo_importacao' => 'PRODUTOS_XML_FORNECEDORES',
+                'arquivo' => $arquivo,
+            ]);
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('dados.pedido.id_fornecedor', $fornecedor->id);
+        $response->assertJsonPath('dados.pedido.fornecedor_sugerido.nome', 'Sierra');
+    }
+
+    public function test_preview_listing_sierra_seleciona_fornecedor_por_cnpj_estruturado(): void
+    {
+        $usuario = $this->criarUsuario('preview-fornecedor-sierra-cnpj@example.com');
+        $fornecedor = $this->criarFornecedor([
+            'nome' => 'SIERRA MOVEIS LTDA.',
+            'cnpj' => '92.726.785/0012-55',
+        ]);
+
+        $arquivo = UploadedFile::fake()->createWithContent(
+            '19862 Aleksandra Madeira Pires.xml',
+            <<<'XML'
+<?xml version="1.0" encoding="UTF-8"?>
+<LISTING>
+  <NUMERO_PEDIDO>809</NUMERO_PEDIDO>
+  <CLIENTE_PEDIDO>SIERRA BELEM</CLIENTE_PEDIDO>
+  <LOJA_PEDIDO>SIERRA BELEM - G.P COMERCIO</LOJA_PEDIDO>
+  <LOJA_CNPJ_PEDIDO>54.129.336/0001-88</LOJA_CNPJ_PEDIDO>
+  <FORNECEDOR_PEDIDO>SIERRA MOVEIS LTDA.</FORNECEDOR_PEDIDO>
+  <FORNECEDOR_CNPJ_PEDIDO>92.726.785/0012-55</FORNECEDOR_CNPJ_PEDIDO>
+  <ITEMS>
+    <ITEM DESCRIPTION="POLTRONA" QUANTITY="1" PRICE="100">
+      <REFERENCES><CODE REFERENCE="POL-001" /></REFERENCES>
+    </ITEM>
+  </ITEMS>
+</LISTING>
+XML
+        );
+
+        $response = $this->actingAs($usuario, 'sanctum')
+            ->post('/api/v1/pedidos/import', [
+                'tipo_importacao' => 'PRODUTOS_XML_FORNECEDORES',
+                'arquivo' => $arquivo,
+            ]);
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('dados.pedido.id_fornecedor', $fornecedor->id);
+        $response->assertJsonPath('dados.pedido.fornecedor_sugerido.nome', 'SIERRA MOVEIS LTDA.');
+        $response->assertJsonPath('dados.pedido.fornecedor_sugerido.cnpj', '92726785001255');
+    }
+
+    public function test_preview_xml_seleciona_fornecedor_por_nome_do_arquivo_quando_xml_nao_traz_fornecedor(): void
+    {
+        $usuario = $this->criarUsuario('preview-fornecedor-arquivo@example.com');
+        $fornecedor = $this->criarFornecedor([
+            'nome' => 'Fornecedor Alfa',
+            'cnpj' => null,
+        ]);
+
+        $arquivo = UploadedFile::fake()->createWithContent(
+            'pedido-fornecedor-alfa.xml',
+            <<<'XML'
+<?xml version="1.0" encoding="UTF-8"?>
+<LISTING>
+  <NUMERO_PEDIDO>12345</NUMERO_PEDIDO>
+  <ITEMS>
+    <ITEM DESCRIPTION="Produto Alfa" QUANTITY="1" PRICE="100">
+      <REFERENCES><CODE REFERENCE="REF-ALFA" /></REFERENCES>
+    </ITEM>
+  </ITEMS>
+</LISTING>
+XML
+        );
+
+        $response = $this->actingAs($usuario, 'sanctum')
+            ->post('/api/v1/pedidos/import', [
+                'tipo_importacao' => 'PRODUTOS_XML_FORNECEDORES',
+                'arquivo' => $arquivo,
+            ]);
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('dados.pedido.id_fornecedor', $fornecedor->id);
+        $response->assertJsonPath('dados.pedido.fornecedor_sugerido.nome', null);
+    }
+
+    public function test_preview_xml_nao_seleciona_fornecedor_por_nome_do_arquivo_ambiguo(): void
+    {
+        $usuario = $this->criarUsuario('preview-fornecedor-arquivo-ambiguo@example.com');
+        $this->criarFornecedor([
+            'nome' => 'Sierra Móveis',
+            'cnpj' => null,
+        ]);
+        $this->criarFornecedor([
+            'nome' => 'Sierra Decor',
+            'cnpj' => null,
+        ]);
+
+        $arquivo = UploadedFile::fake()->createWithContent(
+            'pedido-sierra.xml',
+            <<<'XML'
+<?xml version="1.0" encoding="UTF-8"?>
+<LISTING>
+  <NUMERO_PEDIDO>12345</NUMERO_PEDIDO>
+  <ITEMS>
+    <ITEM DESCRIPTION="Produto Ambiguo" QUANTITY="1" PRICE="100">
+      <REFERENCES><CODE REFERENCE="REF-AMBIGUO" /></REFERENCES>
+    </ITEM>
+  </ITEMS>
+</LISTING>
+XML
+        );
+
+        $response = $this->actingAs($usuario, 'sanctum')
+            ->post('/api/v1/pedidos/import', [
+                'tipo_importacao' => 'PRODUTOS_XML_FORNECEDORES',
+                'arquivo' => $arquivo,
+            ]);
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('dados.pedido.id_fornecedor', null);
+    }
+
     public function test_confirmar_sem_itens_retorna_422(): void
     {
         $usuario = Usuario::create([
@@ -233,6 +380,113 @@ class ImportacaoPedidoPreviewContratoTest extends TestCase
 
         $response->assertStatus(422);
         $response->assertJsonValidationErrors('pedido.numero_externo');
+    }
+
+    public function test_confirmar_com_categoria_padrao_importacao_xml_retorna_422(): void
+    {
+        $usuario = $this->criarUsuario('confirm-categoria-proibida@example.com');
+        $fornecedor = $this->criarFornecedor();
+        $categoria = $this->criarCategoria(['nome' => 'Importacao XML - Sem categoria']);
+
+        $response = $this->actingAs($usuario, 'sanctum')
+            ->postJson('/api/v1/pedidos/import/pdf/confirm', [
+                'pedido' => [
+                    'tipo' => 'reposicao',
+                    'numero_externo' => 'CAT-PROIBIDA',
+                    'total' => 100,
+                    'id_fornecedor' => $fornecedor->id,
+                ],
+                'cliente' => [],
+                'itens' => [
+                    [
+                        'nome' => 'Produto Categoria Proibida',
+                        'quantidade' => 1,
+                        'valor' => 100,
+                        'preco_unitario' => 100,
+                        'custo_unitario' => 80,
+                        'id_categoria' => $categoria->id,
+                    ],
+                ],
+            ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors('itens.0.id_categoria');
+    }
+
+    public function test_confirmar_sem_categoria_no_item_retorna_422(): void
+    {
+        $usuario = $this->criarUsuario('confirm-sem-categoria-item@example.com');
+        $fornecedor = $this->criarFornecedor();
+
+        $response = $this->actingAs($usuario, 'sanctum')
+            ->postJson('/api/v1/pedidos/import/pdf/confirm', [
+                'pedido' => [
+                    'tipo' => 'reposicao',
+                    'numero_externo' => 'SEM-CATEGORIA',
+                    'total' => 100,
+                    'id_fornecedor' => $fornecedor->id,
+                ],
+                'cliente' => [],
+                'itens' => [
+                    [
+                        'nome' => 'Produto Sem Categoria',
+                        'quantidade' => 1,
+                        'valor' => 100,
+                        'preco_unitario' => 100,
+                        'custo_unitario' => 80,
+                        'id_categoria' => null,
+                    ],
+                ],
+            ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors('itens.0.id_categoria');
+    }
+
+    public function test_confirmar_com_variacao_em_categoria_padrao_importacao_xml_retorna_422(): void
+    {
+        $usuario = $this->criarUsuario('confirm-variacao-categoria-proibida@example.com');
+        $fornecedor = $this->criarFornecedor();
+        $categoriaProibida = $this->criarCategoria(['nome' => 'Importacao XML - Sem categoria']);
+        $categoriaValida = $this->criarCategoria(['nome' => 'Categoria Valida']);
+        $produto = Produto::create([
+            'nome' => 'Produto Historico Categoria Proibida',
+            'id_categoria' => $categoriaProibida->id,
+            'ativo' => true,
+        ]);
+        $variacao = ProdutoVariacao::create([
+            'produto_id' => $produto->id,
+            'referencia' => 'REF-CAT-PROIBIDA',
+            'nome' => 'Variacao Categoria Proibida',
+            'preco' => 100,
+            'custo' => 80,
+        ]);
+
+        $response = $this->actingAs($usuario, 'sanctum')
+            ->postJson('/api/v1/pedidos/import/pdf/confirm', [
+                'pedido' => [
+                    'tipo' => 'reposicao',
+                    'numero_externo' => 'VAR-CAT-PROIBIDA',
+                    'total' => 100,
+                    'id_fornecedor' => $fornecedor->id,
+                ],
+                'cliente' => [],
+                'itens' => [
+                    [
+                        'id_variacao' => $variacao->id,
+                        'ref' => 'REF-CAT-PROIBIDA',
+                        'nome' => 'Produto Historico Categoria Proibida',
+                        'quantidade' => 1,
+                        'valor' => 100,
+                        'preco_unitario' => 100,
+                        'custo_unitario' => 80,
+                        'id_categoria' => $categoriaValida->id,
+                    ],
+                ],
+            ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors('itens.0.id_categoria');
     }
 
     public function test_confirmar_sem_fornecedor_cria_pedido_e_produto_sem_fornecedor(): void

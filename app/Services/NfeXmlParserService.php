@@ -14,6 +14,19 @@ use InvalidArgumentException;
 class NfeXmlParserService
 {
     private const NS_NFE = 'http://www.portalfiscal.inf.br/nfe';
+    private const UNIDADES_CONTAVEIS = [
+        'UN',
+        'UND',
+        'UNID',
+        'PC',
+        'PCS',
+        'PCA',
+        'PECA',
+    ];
+    private const LINHAS_AVANTI = [
+        'SE2B',
+        'SMAD',
+    ];
 
     /**
      * Extrai dados da NFe no formato: pedido, itens, totais.
@@ -111,6 +124,7 @@ class NfeXmlParserService
             $qCom = $this->nodeText($prod, 'qCom');
             $vUnCom = $this->nodeText($prod, 'vUnCom');
             $vProd = $this->nodeText($prod, 'vProd');
+            $uCom = $this->nodeText($prod, 'uCom') ?: 'UN';
             $cEan = $this->normalizarCodigoBarras(
                 $this->nodeText($prod, 'cEAN') ?: $this->nodeText($prod, 'cEANTrib')
             );
@@ -120,6 +134,25 @@ class NfeXmlParserService
             $qtd = $this->toFloat($qCom, 1.0);
             $vUn = $this->toFloat($vUnCom, 0.0);
             $vTot = $this->toFloat($vProd, $qtd * $vUn);
+            $controlarComoLinhaUnica = !$this->deveManterQuantidadeOriginal($uCom, $qtd);
+            $quantidadeImportacao = $controlarComoLinhaUnica ? '1' : (string) $qtd;
+            $valorUnitarioImportacao = $controlarComoLinhaUnica
+                ? $this->valorOriginalOuFloat($vProd, $vTot)
+                : $this->valorOriginalOuFloat($vUnCom, $vUn);
+            $valorTotalImportacao = $this->valorOriginalOuFloat($vProd, $vTot);
+            $atributos = $this->extrairAtributosComerciais($descricao);
+            $atributosNfe = [
+                'unidade_nfe' => $uCom,
+                'quantidade_nfe' => $qCom ?? (string) $qtd,
+                'valor_unitario_nfe' => $vUnCom ?? (string) $vUn,
+                'observacao' => sprintf(
+                    'NF-e: %s %s x %s = %s.',
+                    $qCom ?? (string) $qtd,
+                    $uCom,
+                    $vUnCom ?? (string) $vUn,
+                    $vProd ?? (string) $vTot
+                ),
+            ];
 
             $itens[] = [
                 'codigo' => $codigo,
@@ -127,14 +160,17 @@ class NfeXmlParserService
                 'codigo_barras' => $cEan,
                 'nome' => $descricao,
                 'descricao' => $descricao,
-                'quantidade' => (string) $qtd,
-                'unidade' => $this->nodeText($prod, 'uCom') ?: 'UN',
-                'preco_unitario' => (string) $vUn,
-                'preco' => (string) $vUn,
-                'custo_unitario' => (string) $vUn,
-                'valor_bruto' => (string) $vTot,
-                'valor_total' => (string) $vTot,
-                'valor_total_linha' => (string) $vTot,
+                'quantidade' => $quantidadeImportacao,
+                'unidade' => $uCom,
+                'valor' => $valorUnitarioImportacao,
+                'preco_unitario' => $valorUnitarioImportacao,
+                'preco' => $valorUnitarioImportacao,
+                'custo_unitario' => $valorUnitarioImportacao,
+                'valor_bruto' => $valorTotalImportacao,
+                'valor_total' => $valorTotalImportacao,
+                'valor_total_linha' => $valorTotalImportacao,
+                'atributos' => $atributos,
+                'atributos_nfe' => $atributosNfe,
             ];
         }
 
@@ -189,6 +225,141 @@ class NfeXmlParserService
         }
 
         return (float) str_replace(',', '.', $value);
+    }
+
+    private function deveManterQuantidadeOriginal(?string $unidade, float $quantidade): bool
+    {
+        return $this->isQuantidadeInteira($quantidade)
+            && $this->isUnidadeContavel($unidade);
+    }
+
+    private function isQuantidadeInteira(float $quantidade): bool
+    {
+        return abs($quantidade - round($quantidade)) < 0.000001;
+    }
+
+    private function isUnidadeContavel(?string $unidade): bool
+    {
+        if ($unidade === null || trim($unidade) === '') {
+            return true;
+        }
+
+        $normalizada = iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $unidade);
+        if ($normalizada === false) {
+            $normalizada = $unidade;
+        }
+
+        $normalizada = strtoupper((string) preg_replace('/[^A-Za-z0-9]/', '', $normalizada));
+
+        return in_array($normalizada, self::UNIDADES_CONTAVEIS, true);
+    }
+
+    private function valorOriginalOuFloat(?string $original, float $fallback): string
+    {
+        if ($original !== null && trim($original) !== '') {
+            return str_replace(',', '.', trim($original));
+        }
+
+        return (string) $fallback;
+    }
+
+    private function extrairAtributosComerciais(string $descricao): array
+    {
+        $descricao = trim((string) preg_replace('/\s+/u', ' ', $descricao));
+        if ($descricao === '') {
+            return [];
+        }
+
+        $tokens = preg_split('/\s+/', $descricao) ?: [];
+        if ($tokens === []) {
+            return [];
+        }
+
+        $atributos = [];
+        $linha = array_shift($tokens);
+        $linha = $linha !== null ? trim($linha) : '';
+        if (!$this->isLinhaAvanti($linha)) {
+            return [];
+        }
+
+        $atributos['linha'] = strtoupper($linha);
+
+        $modeloTokens = [];
+        foreach ($tokens as $token) {
+            $token = trim($token);
+            if ($token === '') {
+                continue;
+            }
+
+            $upper = strtoupper($token);
+            if (!isset($atributos['espessura']) && preg_match('/^\d+(?:[,.]\d+)?MM$/i', $token)) {
+                $atributos['espessura'] = $upper;
+                continue;
+            }
+
+            if (!isset($atributos['gramatura']) && preg_match('/^\d+(?:[,.]\d+)?G$/i', $token)) {
+                $atributos['gramatura'] = $upper;
+                continue;
+            }
+
+            if (!isset($atributos['cor']) && $this->isTokenCor($token)) {
+                $atributos['cor'] = $upper;
+                continue;
+            }
+
+            $modeloTokens[] = $token;
+        }
+
+        $modelo = trim(implode(' ', $modeloTokens));
+        if ($modelo !== '') {
+            $atributos['modelo_referencia'] = $modelo;
+        }
+
+        return $atributos;
+    }
+
+    private function isTokenCor(string $token): bool
+    {
+        $normalizado = iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $token);
+        if ($normalizado === false) {
+            $normalizado = $token;
+        }
+
+        $normalizado = strtoupper((string) preg_replace('/[^A-Za-z]/', '', $normalizado));
+        if ($normalizado === '') {
+            return false;
+        }
+
+        return in_array($normalizado, [
+            'AZUL',
+            'BEGE',
+            'BLACK',
+            'BLUE',
+            'BROWN',
+            'CINZA',
+            'GOLD',
+            'GRAY',
+            'GREEN',
+            'GREY',
+            'MARROM',
+            'OFFWHITE',
+            'RED',
+            'VERDE',
+            'VERMELHO',
+            'WHITE',
+        ], true);
+    }
+
+    private function isLinhaAvanti(string $token): bool
+    {
+        $normalizado = iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $token);
+        if ($normalizado === false) {
+            $normalizado = $token;
+        }
+
+        $normalizado = strtoupper((string) preg_replace('/[^A-Za-z0-9]/', '', $normalizado));
+
+        return in_array($normalizado, self::LINHAS_AVANTI, true);
     }
 
     private function normalizarCodigoBarras(?string $value): ?string

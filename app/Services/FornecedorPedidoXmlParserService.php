@@ -59,11 +59,13 @@ class FornecedorPedidoXmlParserService
         $ordemCompra = $this->texto($xpath, '/LISTING/ORDEM_COMPRA_PEDIDO');
         $loja = $this->texto($xpath, '/LISTING/LOJA_PEDIDO');
         $fornecedor = $this->texto($xpath, '/LISTING/FORNECEDOR_PEDIDO');
+        $fornecedorCnpj = $this->texto($xpath, '/LISTING/FORNECEDOR_CNPJ_PEDIDO');
 
         $observacoes = array_values(array_filter([
             $ordemCompra ? 'Ordem de compra: ' . $ordemCompra : null,
             $loja ? 'Loja: ' . $loja : null,
             $fornecedor ? 'Fornecedor: ' . $fornecedor : null,
+            $fornecedorCnpj ? 'CNPJ fornecedor: ' . $fornecedorCnpj : null,
         ]));
 
         return [
@@ -74,7 +76,7 @@ class FornecedorPedidoXmlParserService
             'cliente' => $cliente ?: $loja ?: $fornecedor ?: 'Fornecedor',
             'fornecedor_sugerido' => [
                 'nome' => $fornecedor,
-                'cnpj' => null,
+                'cnpj' => $fornecedorCnpj,
             ],
             'observacoes' => implode(' | ', $observacoes),
         ];

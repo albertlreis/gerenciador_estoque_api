@@ -8,6 +8,7 @@ use App\Http\Requests\UpdatePedidoRequest;
 use App\Http\Resources\PedidoCompletoResource;
 use App\Enums\EstrategiaVinculoImportacao;
 use App\Enums\TipoImportacao;
+use App\Models\Categoria;
 use App\Models\Deposito;
 use App\Models\Estoque;
 use App\Models\EstoqueReserva;
@@ -45,6 +46,12 @@ use Symfony\Component\HttpFoundation\BinaryFileResponse;
  */
 class PedidoController extends Controller
 {
+    private const NS_NFE = 'http://www.portalfiscal.inf.br/nfe';
+    private const FORNECEDOR_AVANTI_TOKEN = 'avanti';
+    private const FORNECEDOR_AVANTI_CNPJS = ['09341891000467'];
+    private const FORNECEDOR_AVANTI_RAZOES_SOCIAIS = ['snl industria e comercio textil'];
+    private const CATEGORIA_SUGERIDA_AVANTI = 'Tapete';
+
     protected PedidoService $pedidoService;
     protected PedidoUpdateService $pedidoUpdateService;
     protected ImportacaoPedidoService $importacaoService;
@@ -246,6 +253,21 @@ class PedidoController extends Controller
 
         try {
             $arquivo = $request->file('arquivo');
+            $tipoImportacaoSolicitado = $tipoImportacao;
+            $tipoDetectado = $this->detectarTipoImportacaoXml($arquivo->getRealPath());
+
+            if ($tipoDetectado !== null && $tipoDetectado !== $tipoImportacao) {
+                Log::info('Importação de pedido - tipo ajustado por layout XML', [
+                    'request_id' => $requestId,
+                    'usuario_id' => auth()->id(),
+                    'tipo_importacao_solicitado' => $tipoImportacaoSolicitado,
+                    'tipo_importacao_detectado' => $tipoDetectado,
+                    'arquivo_nome' => $arquivo->getClientOriginalName(),
+                ]);
+
+                $tipoImportacao = $tipoDetectado;
+            }
+
             $hashArquivo = hash_file('sha256', $arquivo->getRealPath());
             // IMPORTANTE:
             // - A mesma importação (mesmo arquivo) deve poder ser reprocessada N vezes.
@@ -258,6 +280,7 @@ class PedidoController extends Controller
                 'etapa' => 'upload',
                 'usuario_id' => auth()->id(),
                 'tipo_importacao' => $tipoImportacao,
+                'tipo_importacao_solicitado' => $tipoImportacaoSolicitado,
                 'arquivo_nome' => $arquivo->getClientOriginalName(),
                 'arquivo_tamanho' => $arquivo->getSize(),
                 'arquivo_hash' => $hash,
@@ -302,9 +325,29 @@ class PedidoController extends Controller
             }
 
             $estrategiaVinculo = EstrategiaVinculoImportacao::REF_SELECAO->value;
+            $fornecedorSugerido = is_array($pedido['fornecedor_sugerido'] ?? null)
+                ? $pedido['fornecedor_sugerido']
+                : [];
+            $fornecedorResolvidoXml = $this->resolverFornecedorSugerido($fornecedorSugerido);
+            $fornecedorVinculado = $this->resolverFornecedorImportacao(
+                $fornecedorSugerido,
+                $fornecedorResolvidoXml,
+                $arquivo->getClientOriginalName()
+            );
+            $categoriaSugerida = $this->resolverCategoriaSugeridaImportacao(
+                $fornecedorSugerido,
+                $fornecedorVinculado,
+                $arquivo->getClientOriginalName()
+            );
+            $opcoesMesclagem = $categoriaSugerida
+                ? ['categoria_sugerida' => [
+                    'id' => $categoriaSugerida->id,
+                    'nome' => $categoriaSugerida->nome,
+                ]]
+                : [];
 
             $itens = app(ImportacaoPedidoService::class)
-                ->mesclarItensComVariacoes($itens, $estrategiaVinculo);
+                ->mesclarItensComVariacoes($itens, $estrategiaVinculo, $opcoesMesclagem);
 
             $cliente = [
                 'nome' => $pedido['cliente'] ?? '',
@@ -315,10 +358,6 @@ class PedidoController extends Controller
             ];
 
             $numeroExtraido = trim((string) ($pedido['numero_pedido'] ?? ''));
-            $fornecedorSugerido = is_array($pedido['fornecedor_sugerido'] ?? null)
-                ? $pedido['fornecedor_sugerido']
-                : [];
-            $fornecedorVinculado = $this->resolverFornecedorSugerido($fornecedorSugerido);
 
             $pedidoFormatado = [
                 'numero_externo' => '',
@@ -423,6 +462,41 @@ class PedidoController extends Controller
                 'erro' => $e->getMessage(),
             ], 500);
         }
+    }
+
+    private function detectarTipoImportacaoXml(?string $path): ?string
+    {
+        if ($path === null || !is_file($path)) {
+            return null;
+        }
+
+        $dom = new \DOMDocument();
+        $dom->preserveWhiteSpace = false;
+        $dom->formatOutput = false;
+
+        libxml_use_internal_errors(true);
+        $loaded = $dom->load($path, LIBXML_NONET);
+        libxml_clear_errors();
+
+        if (!$loaded || !$dom->documentElement) {
+            return null;
+        }
+
+        $root = $dom->documentElement;
+        $localName = $root->localName ?: $root->nodeName;
+
+        if (strtoupper($localName) === 'LISTING') {
+            return TipoImportacao::PRODUTOS_XML_FORNECEDORES->value;
+        }
+
+        if (
+            in_array($localName, ['nfeProc', 'NFe'], true)
+            && $root->namespaceURI === self::NS_NFE
+        ) {
+            return TipoImportacao::ADORNOS_XML_NFE->value;
+        }
+
+        return null;
     }
 
     /**
@@ -1292,6 +1366,164 @@ class PedidoController extends Controller
         return "{$base}:{$acao}";
     }
 
+    private function resolverCategoriaSugeridaImportacao(
+        array $fornecedorSugerido,
+        ?Fornecedor $fornecedorVinculado,
+        ?string $nomeArquivo
+    ): ?Categoria {
+        if (!$this->isContextoFornecedorAvanti($fornecedorSugerido, $fornecedorVinculado, $nomeArquivo)) {
+            return null;
+        }
+
+        $categoria = Categoria::query()
+            ->where('nome', self::CATEGORIA_SUGERIDA_AVANTI)
+            ->first();
+
+        if (!$categoria) {
+            Log::info('Importacao de pedido - categoria sugerida Avanti indisponivel', [
+                'categoria_sugerida' => self::CATEGORIA_SUGERIDA_AVANTI,
+                'fornecedor_sugerido' => $fornecedorSugerido['nome'] ?? null,
+                'fornecedor_vinculado_id' => $fornecedorVinculado?->id,
+                'arquivo_nome' => $nomeArquivo,
+            ]);
+        }
+
+        return $categoria;
+    }
+
+    private function isContextoFornecedorAvanti(
+        array $fornecedorSugerido,
+        ?Fornecedor $fornecedorVinculado,
+        ?string $nomeArquivo
+    ): bool {
+        $documentos = [
+            $fornecedorSugerido['cnpj'] ?? null,
+            $fornecedorVinculado?->cnpj,
+        ];
+
+        foreach ($documentos as $documento) {
+            $normalizado = $this->normalizarDocumentoFornecedor($documento);
+            if ($normalizado && in_array($normalizado, self::FORNECEDOR_AVANTI_CNPJS, true)) {
+                return true;
+            }
+        }
+
+        $nomes = [
+            $fornecedorSugerido['nome'] ?? null,
+            $fornecedorVinculado?->nome,
+            $nomeArquivo,
+        ];
+
+        foreach ($nomes as $nome) {
+            $normalizado = $this->normalizarNomeFornecedor($nome);
+            if (
+                $normalizado
+                && (
+                    str_contains(" {$normalizado} ", ' ' . self::FORNECEDOR_AVANTI_TOKEN . ' ')
+                    || $this->isRazaoSocialAvanti($normalizado)
+                )
+            ) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function isRazaoSocialAvanti(string $nomeNormalizado): bool
+    {
+        foreach (self::FORNECEDOR_AVANTI_RAZOES_SOCIAIS as $razaoSocial) {
+            if (str_contains(" {$nomeNormalizado} ", " {$razaoSocial} ")) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function resolverFornecedorImportacao(
+        array $fornecedorSugerido,
+        ?Fornecedor $fornecedorResolvidoXml,
+        ?string $nomeArquivo
+    ): ?Fornecedor {
+        if ($this->isContextoFornecedorAvanti($fornecedorSugerido, $fornecedorResolvidoXml, $nomeArquivo)) {
+            return $this->resolverFornecedorAvantiExistente($fornecedorSugerido, $fornecedorResolvidoXml, $nomeArquivo);
+        }
+
+        if ($fornecedorResolvidoXml) {
+            return $fornecedorResolvidoXml;
+        }
+
+        return $this->resolverFornecedorPorNomeArquivo($fornecedorSugerido, $nomeArquivo);
+    }
+
+    private function resolverFornecedorAvantiExistente(
+        array $fornecedorSugerido,
+        ?Fornecedor $fornecedorResolvidoXml,
+        ?string $nomeArquivo
+    ): ?Fornecedor {
+        $fornecedoresAtivos = Fornecedor::query()
+            ->where('status', 1)
+            ->get();
+
+        $matchesExatos = $fornecedoresAtivos
+            ->filter(fn (Fornecedor $fornecedor) => $this->normalizarNomeFornecedor($fornecedor->nome) === self::FORNECEDOR_AVANTI_TOKEN)
+            ->values();
+
+        if ($matchesExatos->count() === 1) {
+            return $matchesExatos->first();
+        }
+
+        if ($matchesExatos->count() > 1) {
+            $this->logFornecedorAvantiNaoSelecionado(
+                'multiplos_matches_exatos',
+                $fornecedorSugerido,
+                $fornecedorResolvidoXml,
+                $nomeArquivo,
+                $matchesExatos->pluck('id')->all()
+            );
+
+            return null;
+        }
+
+        $matchesPorToken = $fornecedoresAtivos
+            ->filter(function (Fornecedor $fornecedor) {
+                $normalizado = $this->normalizarNomeFornecedor($fornecedor->nome);
+                return $normalizado && str_contains(" {$normalizado} ", ' ' . self::FORNECEDOR_AVANTI_TOKEN . ' ');
+            })
+            ->values();
+
+        if ($matchesPorToken->count() === 1) {
+            return $matchesPorToken->first();
+        }
+
+        $this->logFornecedorAvantiNaoSelecionado(
+            $matchesPorToken->isEmpty() ? 'nao_encontrado' : 'multiplos_matches_por_token',
+            $fornecedorSugerido,
+            $fornecedorResolvidoXml,
+            $nomeArquivo,
+            $matchesPorToken->pluck('id')->all()
+        );
+
+        return null;
+    }
+
+    private function logFornecedorAvantiNaoSelecionado(
+        string $motivo,
+        array $fornecedorSugerido,
+        ?Fornecedor $fornecedorResolvidoXml,
+        ?string $nomeArquivo,
+        array $fornecedorIds
+    ): void {
+        Log::info('Importacao de pedido - fornecedor Avanti nao selecionado automaticamente', [
+            'motivo' => $motivo,
+            'fornecedor_sugerido' => $fornecedorSugerido['nome'] ?? null,
+            'fornecedor_resolvido_xml_id' => $fornecedorResolvidoXml?->id,
+            'arquivo_nome' => $nomeArquivo,
+            'fornecedor_ids_candidatos' => $fornecedorIds,
+        ]);
+    }
+
     private function resolverFornecedorSugerido(array $fornecedorSugerido): ?Fornecedor
     {
         $cnpj = $this->normalizarDocumentoFornecedor($fornecedorSugerido['cnpj'] ?? null);
@@ -1304,6 +1536,17 @@ class PedidoController extends Controller
             if ($porCnpj->count() === 1) {
                 return $porCnpj->first();
             }
+
+            if ($porCnpj->count() > 1) {
+                $this->logFornecedorNaoSelecionado(
+                    'cnpj_ambiguo',
+                    $fornecedorSugerido,
+                    null,
+                    $porCnpj->pluck('id')->all()
+                );
+
+                return null;
+            }
         }
 
         $nomeNormalizado = $this->normalizarNomeFornecedor($fornecedorSugerido['nome'] ?? null);
@@ -1311,13 +1554,174 @@ class PedidoController extends Controller
             return null;
         }
 
-        $matches = Fornecedor::query()
+        $fornecedoresAtivos = Fornecedor::query()
             ->where('status', 1)
-            ->get()
+            ->get();
+
+        $matchesExatos = $fornecedoresAtivos
             ->filter(fn (Fornecedor $fornecedor) => $this->normalizarNomeFornecedor($fornecedor->nome) === $nomeNormalizado)
             ->values();
 
-        return $matches->count() === 1 ? $matches->first() : null;
+        if ($matchesExatos->count() === 1) {
+            return $matchesExatos->first();
+        }
+
+        if ($matchesExatos->count() > 1) {
+            $this->logFornecedorNaoSelecionado(
+                'nome_estruturado_exato_ambiguo',
+                $fornecedorSugerido,
+                null,
+                $matchesExatos->pluck('id')->all()
+            );
+
+            return null;
+        }
+
+        $matchesPorNome = $this->filtrarFornecedoresPorTexto($fornecedoresAtivos, $nomeNormalizado);
+        if ($matchesPorNome->count() === 1) {
+            return $matchesPorNome->first();
+        }
+
+        if ($matchesPorNome->count() > 1) {
+            $this->logFornecedorNaoSelecionado(
+                'nome_estruturado_ambiguo',
+                $fornecedorSugerido,
+                null,
+                $matchesPorNome->pluck('id')->all()
+            );
+        }
+
+        $matchesPorToken = $this->filtrarFornecedoresPorPrimeiroToken($fornecedoresAtivos, $nomeNormalizado);
+        if ($matchesPorToken->count() === 1) {
+            return $matchesPorToken->first();
+        }
+
+        if ($matchesPorToken->count() > 1) {
+            $this->logFornecedorNaoSelecionado(
+                'nome_estruturado_token_ambiguo',
+                $fornecedorSugerido,
+                null,
+                $matchesPorToken->pluck('id')->all()
+            );
+        }
+
+        return null;
+    }
+
+    private function resolverFornecedorPorNomeArquivo(array $fornecedorSugerido, ?string $nomeArquivo): ?Fornecedor
+    {
+        $nomeArquivoNormalizado = $this->normalizarNomeFornecedor($nomeArquivo);
+        if (!$nomeArquivoNormalizado) {
+            return null;
+        }
+
+        $fornecedoresAtivos = Fornecedor::query()
+            ->where('status', 1)
+            ->get();
+
+        $matchesPorNomeCompleto = $fornecedoresAtivos
+            ->filter(function (Fornecedor $fornecedor) use ($nomeArquivoNormalizado) {
+                $fornecedorNormalizado = $this->normalizarNomeFornecedor($fornecedor->nome);
+                if (!$fornecedorNormalizado) {
+                    return false;
+                }
+
+                return str_contains(" {$nomeArquivoNormalizado} ", " {$fornecedorNormalizado} ");
+            })
+            ->values();
+
+        if ($matchesPorNomeCompleto->count() === 1) {
+            return $matchesPorNomeCompleto->first();
+        }
+
+        if ($matchesPorNomeCompleto->count() > 1) {
+            $this->logFornecedorNaoSelecionado(
+                'nome_arquivo_ambiguo',
+                $fornecedorSugerido,
+                $nomeArquivo,
+                $matchesPorNomeCompleto->pluck('id')->all()
+            );
+
+            return null;
+        }
+
+        $matchesPorToken = $fornecedoresAtivos
+            ->filter(function (Fornecedor $fornecedor) use ($nomeArquivoNormalizado) {
+                $fornecedorNormalizado = $this->normalizarNomeFornecedor($fornecedor->nome);
+                if (!$fornecedorNormalizado) {
+                    return false;
+                }
+
+                return str_contains(" {$nomeArquivoNormalizado} ", ' ' . $this->primeiroTokenFornecedor($fornecedorNormalizado) . ' ');
+            })
+            ->values();
+
+        if ($matchesPorToken->count() === 1) {
+            return $matchesPorToken->first();
+        }
+
+        $this->logFornecedorNaoSelecionado(
+            $matchesPorToken->isEmpty() ? 'nome_arquivo_nao_encontrado' : 'nome_arquivo_token_ambiguo',
+            $fornecedorSugerido,
+            $nomeArquivo,
+            $matchesPorToken->pluck('id')->all()
+        );
+
+        return null;
+    }
+
+    private function filtrarFornecedoresPorTexto(Collection $fornecedores, string $textoNormalizado): Collection
+    {
+        return $fornecedores
+            ->filter(function (Fornecedor $fornecedor) use ($textoNormalizado) {
+                $fornecedorNormalizado = $this->normalizarNomeFornecedor($fornecedor->nome);
+                if (!$fornecedorNormalizado) {
+                    return false;
+                }
+
+                return str_contains(" {$fornecedorNormalizado} ", " {$textoNormalizado} ")
+                    || str_contains(" {$textoNormalizado} ", " {$fornecedorNormalizado} ");
+            })
+            ->values();
+    }
+
+    private function filtrarFornecedoresPorPrimeiroToken(Collection $fornecedores, string $textoNormalizado): Collection
+    {
+        $token = $this->primeiroTokenFornecedor($textoNormalizado);
+
+        return $fornecedores
+            ->filter(function (Fornecedor $fornecedor) use ($token) {
+                $fornecedorNormalizado = $this->normalizarNomeFornecedor($fornecedor->nome);
+                if (!$fornecedorNormalizado) {
+                    return false;
+                }
+
+                return str_contains(" {$fornecedorNormalizado} ", " {$token} ");
+            })
+            ->values();
+    }
+
+    private function primeiroTokenFornecedor(string $nomeNormalizado): string
+    {
+        $tokens = preg_split('/\s+/', trim($nomeNormalizado)) ?: [];
+        $primeiro = $tokens[0] ?? '';
+
+        return mb_strlen($primeiro) >= 3 ? $primeiro : $nomeNormalizado;
+    }
+
+    private function logFornecedorNaoSelecionado(
+        string $motivo,
+        array $fornecedorSugerido,
+        ?string $nomeArquivo,
+        array $fornecedorIds
+    ): void {
+        Log::info('Importacao de pedido - fornecedor nao selecionado automaticamente', [
+            'motivo' => $motivo,
+            'fornecedor_sugerido' => $fornecedorSugerido['nome'] ?? null,
+            'fornecedor_sugerido_cnpj' => $this->normalizarDocumentoFornecedor($fornecedorSugerido['cnpj'] ?? null),
+            'arquivo_nome' => $nomeArquivo,
+            'fornecedor_ids_candidatos' => $fornecedorIds,
+        ]);
     }
 
     private function normalizarDocumentoFornecedor(mixed $value): ?string

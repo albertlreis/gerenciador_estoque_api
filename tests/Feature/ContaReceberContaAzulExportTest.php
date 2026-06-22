@@ -5,12 +5,16 @@ namespace Tests\Feature;
 use App\Enums\ContaStatus;
 use App\Enums\LancamentoStatus;
 use App\Enums\LancamentoTipo;
+use App\Integrations\ContaAzul\ContaAzulEntityType;
 use App\Integrations\ContaAzul\Exceptions\ContaAzulException;
 use App\Integrations\ContaAzul\Models\ContaAzulConexao;
+use App\Integrations\ContaAzul\Models\ContaAzulMapeamento;
+use App\Integrations\ContaAzul\Models\ContaAzulToken;
 use App\Integrations\ContaAzul\Services\ContaAzulConnectionService;
 use App\Integrations\ContaAzul\Services\ContaAzulExportDispatchService;
 use App\Integrations\ContaAzul\Services\ExportacaoContaAzulService;
 use App\Jobs\ContaAzul\ExportBaixaContaAzulJob;
+use App\Jobs\ContaAzul\ExportTituloContaAzulJob;
 use App\Models\ContaFinanceira;
 use App\Models\ContaReceber;
 use App\Models\ContaReceberPagamento;
@@ -19,6 +23,7 @@ use App\Services\AuditoriaLogService;
 use App\Services\ContaReceberCommandService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Queue;
 use Mockery;
 use RuntimeException;
 use Tests\TestCase;
@@ -34,8 +39,20 @@ class ContaReceberContaAzulExportTest extends TestCase
     /** @var array<int, int> */
     private array $contaFinanceiraIds = [];
 
+    /** @var array<int, int> */
+    private array $mapeamentoIds = [];
+
+    /** @var array<int, int> */
+    private array $conexaoIds = [];
+
     protected function tearDown(): void
     {
+        if ($this->mapeamentoIds !== []) {
+            ContaAzulMapeamento::query()
+                ->whereIn('id', $this->mapeamentoIds)
+                ->delete();
+        }
+
         if ($this->pagamentoIds !== []) {
             LancamentoFinanceiro::query()
                 ->where('pagamento_type', ContaReceberPagamento::class)
@@ -84,6 +101,12 @@ class ContaReceberContaAzulExportTest extends TestCase
         if ($this->contaFinanceiraIds !== []) {
             ContaFinanceira::query()
                 ->whereIn('id', $this->contaFinanceiraIds)
+                ->delete();
+        }
+
+        if ($this->conexaoIds !== []) {
+            ContaAzulConexao::query()
+                ->whereIn('id', $this->conexaoIds)
                 ->delete();
         }
 
@@ -158,8 +181,7 @@ class ContaReceberContaAzulExportTest extends TestCase
             ->once()
             ->andThrow(new RuntimeException('Fila Conta Azul indisponivel para baixa'));
         $exports->shouldReceive('titulo')
-            ->once()
-            ->andThrow(new RuntimeException('Fila Conta Azul indisponivel para titulo'));
+            ->never();
 
         $this->app->instance(ContaAzulExportDispatchService::class, $exports);
 
@@ -194,7 +216,100 @@ class ContaReceberContaAzulExportTest extends TestCase
         ]);
 
         Log::shouldHaveReceived('warning')
-            ->twice();
+            ->once();
+    }
+
+    public function test_pagamento_sem_titulo_mapeado_enfileira_titulo_antes_da_baixa(): void
+    {
+        Queue::fake();
+        $this->criarConexaoContaAzul();
+
+        $conta = $this->criarContaReceber('Pagamento Conta Azul Encadeado', '150.00');
+        $contaFinanceira = $this->criarContaFinanceira('Banco Exportacao Encadeada');
+
+        $pagamento = app(ContaReceberCommandService::class)->registrarPagamento($conta, [
+            'data_pagamento' => '2026-06-19',
+            'valor' => '100.00',
+            'forma_pagamento' => 'PIX',
+            'conta_financeira_id' => $contaFinanceira->id,
+        ]);
+        $this->pagamentoIds[] = (int) $pagamento->id;
+
+        Queue::assertPushedWithChain(
+            ExportTituloContaAzulJob::class,
+            [ExportBaixaContaAzulJob::class],
+            fn (ExportTituloContaAzulJob $job) => $job->contaReceberId === (int) $conta->id
+        );
+
+        Queue::assertPushed(ExportTituloContaAzulJob::class, function (ExportTituloContaAzulJob $job) use ($pagamento) {
+            $chain = collect($job->chained)
+                ->map(fn (string $serialized) => unserialize($serialized))
+                ->values();
+
+            return $chain->count() === 1
+                && $chain[0] instanceof ExportBaixaContaAzulJob
+                && $chain[0]->pagamentoId === (int) $pagamento->id;
+        });
+        Queue::assertNotPushed(ExportBaixaContaAzulJob::class);
+    }
+
+    public function test_pagamento_com_titulo_mapeado_enfileira_somente_baixa(): void
+    {
+        Queue::fake();
+        $this->criarConexaoContaAzul();
+
+        $conta = $this->criarContaReceber('Pagamento Conta Azul Mapeado', '150.00');
+        $contaFinanceira = $this->criarContaFinanceira('Banco Exportacao Mapeada');
+        $this->mapearTitulo($conta, 'titulo-externo-1');
+
+        $pagamento = app(ContaReceberCommandService::class)->registrarPagamento($conta, [
+            'data_pagamento' => '2026-06-19',
+            'valor' => '100.00',
+            'forma_pagamento' => 'PIX',
+            'conta_financeira_id' => $contaFinanceira->id,
+        ]);
+        $this->pagamentoIds[] = (int) $pagamento->id;
+
+        Queue::assertPushedWithoutChain(
+            ExportBaixaContaAzulJob::class,
+            fn (ExportBaixaContaAzulJob $job) => $job->pagamentoId === (int) $pagamento->id
+        );
+        Queue::assertNotPushed(ExportTituloContaAzulJob::class);
+    }
+
+    public function test_criar_conta_com_pagamento_inicial_enfileira_um_titulo_encadeado_com_baixa(): void
+    {
+        Queue::fake();
+        $this->criarConexaoContaAzul();
+
+        $contaFinanceira = $this->criarContaFinanceira('Banco Exportacao Inicial Encadeada');
+
+        $conta = app(ContaReceberCommandService::class)->criar([
+            'descricao' => 'Conta Inicial Conta Azul Encadeada',
+            'data_emissao' => '2026-06-19',
+            'data_vencimento' => '2026-06-30',
+            'valor_bruto' => '200.00',
+            'pagamento_inicial' => [
+                'data_pagamento' => '2026-06-19',
+                'valor' => '200.00',
+                'forma_pagamento' => 'PIX',
+                'conta_financeira_id' => $contaFinanceira->id,
+            ],
+        ]);
+        $this->contaReceberIds[] = (int) $conta->id;
+
+        $pagamentoId = (int) ContaReceberPagamento::query()
+            ->where('conta_receber_id', $conta->id)
+            ->value('id');
+        $this->pagamentoIds[] = $pagamentoId;
+
+        Queue::assertPushed(ExportTituloContaAzulJob::class, 1);
+        Queue::assertPushedWithChain(
+            ExportTituloContaAzulJob::class,
+            [ExportBaixaContaAzulJob::class],
+            fn (ExportTituloContaAzulJob $job) => $job->contaReceberId === (int) $conta->id
+        );
+        Queue::assertNotPushed(ExportBaixaContaAzulJob::class);
     }
 
     public function test_job_de_baixa_registra_auditoria_quando_exportacao_falha(): void
@@ -285,5 +400,37 @@ class ContaReceberContaAzulExportTest extends TestCase
         $this->contaFinanceiraIds[] = (int) $conta->id;
 
         return $conta;
+    }
+
+    private function criarConexaoContaAzul(): ContaAzulConexao
+    {
+        $conexao = ContaAzulConexao::create([
+            'status' => 'ativa',
+            'ambiente' => 'homologacao',
+        ]);
+        $this->conexaoIds[] = (int) $conexao->id;
+
+        ContaAzulToken::create([
+            'conexao_id' => $conexao->id,
+            'access_token' => 'token-valido',
+            'refresh_token' => 'refresh-valido',
+            'expires_at' => now()->addHour(),
+        ]);
+
+        return $conexao;
+    }
+
+    private function mapearTitulo(ContaReceber $conta, string $idExterno): ContaAzulMapeamento
+    {
+        $mapeamento = ContaAzulMapeamento::create([
+            'tipo_entidade' => ContaAzulEntityType::TITULO,
+            'id_local' => $conta->id,
+            'id_externo' => $idExterno,
+            'origem_inicial' => 'test',
+            'sincronizado_em' => now(),
+        ]);
+        $this->mapeamentoIds[] = (int) $mapeamento->id;
+
+        return $mapeamento;
     }
 }

@@ -17,6 +17,7 @@ class ContaFinanceiraResource extends JsonResource
             'ativo' => (bool)$this->ativo,
             'padrao' => (bool)$this->padrao,
             'saldo_inicial' => $this->saldo_inicial !== null ? (string)$this->saldo_inicial : null,
+            'data_saldo_inicial' => $this->data_saldo_inicial?->format('Y-m-d'),
 
             'banco_nome' => $this->banco_nome,
             'banco_codigo' => $this->banco_codigo,

@@ -19,10 +19,15 @@ class FinanceiroExtratoService
         $inicio = Carbon::parse($validated['data_inicio'])->startOfDay();
         $fim = Carbon::parse($validated['data_fim'])->endOfDay();
         $conta = ContaFinanceira::query()->findOrFail((int) $validated['conta_id']);
+        $dataSaldoInicial = $conta->data_saldo_inicial
+            ? Carbon::parse($conta->data_saldo_inicial)->startOfDay()
+            : Carbon::parse('1900-01-01')->startOfDay();
+        $inicioLancamentos = $inicio->greaterThan($dataSaldoInicial) ? $inicio : $dataSaldoInicial;
 
         $saldoInicial = (float) $conta->saldo_inicial + (float) LancamentoFinanceiro::query()
             ->where('conta_id', $conta->id)
             ->where('status', LancamentoStatus::CONFIRMADO->value)
+            ->where('data_movimento', '>=', $dataSaldoInicial)
             ->where('data_movimento', '<', $inicio)
             ->get()
             ->sum(fn (LancamentoFinanceiro $l) => $this->signedValue($l));
@@ -30,7 +35,7 @@ class FinanceiroExtratoService
         $lancamentos = LancamentoFinanceiro::query()
             ->with(['categoria', 'referencia', 'pagamento'])
             ->where('conta_id', $conta->id)
-            ->whereBetween('data_movimento', [$inicio, $fim])
+            ->whereBetween('data_movimento', [$inicioLancamentos, $fim])
             ->orderBy('data_movimento')
             ->orderBy('id')
             ->get();
@@ -67,6 +72,14 @@ class FinanceiroExtratoService
         $despesasRealizadas = abs($linhas->where('valor', '<', 0)->where('cancelado', false)->sum('valor'));
         $totalPeriodo = $receitasRealizadas - $despesasRealizadas;
         $cancelados = abs($linhas->where('cancelado', true)->sum('valor'));
+        $saldosPeriodo = $this->saldosPeriodo(
+            conta: $conta,
+            inicio: $inicio,
+            fim: $fim,
+            totalPeriodo: $totalPeriodo,
+            saldoInicialLivro: $saldoInicial,
+            saldoFinalLivro: $saldo
+        );
 
         return [
             'empresa' => [
@@ -92,6 +105,7 @@ class FinanceiroExtratoService
                 'perdidos' => $cancelados,
                 'saldo_realizado' => $saldo,
                 'saldo_inicial' => $saldoInicial,
+                ...$saldosPeriodo,
             ],
             'usuario' => auth()->user()?->nome ?? auth()->user()?->name ?? '-',
         ];
@@ -120,8 +134,76 @@ class FinanceiroExtratoService
                 'despesas_realizadas' => $dados['resumo']['despesas_realizadas'],
                 'total_periodo' => $dados['resumo']['total_periodo'],
                 'saldo_final' => $dados['resumo']['saldo_realizado'],
+                'saldo_atual' => $dados['resumo']['saldo_atual'],
+                'saldo_atual_em' => $dados['resumo']['saldo_atual_em'],
+                'saldo_antes_periodo' => $dados['resumo']['saldo_antes_periodo'],
+                'saldo_apos_periodo' => $dados['resumo']['saldo_apos_periodo'],
+                'saldo_base_origem' => $dados['resumo']['saldo_base_origem'],
             ];
         })->all();
+    }
+
+    private function saldosPeriodo(
+        ContaFinanceira $conta,
+        Carbon $inicio,
+        Carbon $fim,
+        float $totalPeriodo,
+        float $saldoInicialLivro,
+        float $saldoFinalLivro
+    ): array {
+        if ($conta->saldo_atual !== null && $conta->saldo_atual_em !== null) {
+            $saldoAtual = (float) $conta->saldo_atual;
+            $saldoAtualEm = Carbon::parse($conta->saldo_atual_em);
+            $saldoAposPeriodo = $this->saldoAtualProjetadoParaData($conta, $saldoAtual, $saldoAtualEm, $fim);
+
+            return [
+                'saldo_atual' => $saldoAtual,
+                'saldo_atual_em' => $saldoAtualEm->format('Y-m-d H:i:s'),
+                'saldo_antes_periodo' => $saldoAposPeriodo - $totalPeriodo,
+                'saldo_apos_periodo' => $saldoAposPeriodo,
+                'saldo_base_origem' => 'saldo_atual',
+            ];
+        }
+
+        return [
+            'saldo_atual' => $conta->saldo_atual !== null ? (float) $conta->saldo_atual : null,
+            'saldo_atual_em' => $conta->saldo_atual_em?->format('Y-m-d H:i:s'),
+            'saldo_antes_periodo' => $saldoInicialLivro,
+            'saldo_apos_periodo' => $saldoFinalLivro,
+            'saldo_base_origem' => 'saldo_livro',
+        ];
+    }
+
+    private function saldoAtualProjetadoParaData(
+        ContaFinanceira $conta,
+        float $saldoAtual,
+        Carbon $saldoAtualEm,
+        Carbon $dataFimPeriodo
+    ): float {
+        if ($saldoAtualEm->lt($dataFimPeriodo)) {
+            return $saldoAtual + $this->movimentosConfirmadosEntre($conta, $saldoAtualEm, $dataFimPeriodo);
+        }
+
+        if ($saldoAtualEm->gt($dataFimPeriodo)) {
+            return $saldoAtual - $this->movimentosConfirmadosEntre($conta, $dataFimPeriodo, $saldoAtualEm);
+        }
+
+        return $saldoAtual;
+    }
+
+    private function movimentosConfirmadosEntre(ContaFinanceira $conta, Carbon $exclusiveStart, Carbon $inclusiveEnd): float
+    {
+        if ($exclusiveStart->greaterThanOrEqualTo($inclusiveEnd)) {
+            return 0.0;
+        }
+
+        return (float) LancamentoFinanceiro::query()
+            ->where('conta_id', $conta->id)
+            ->where('status', LancamentoStatus::CONFIRMADO->value)
+            ->where('data_movimento', '>', $exclusiveStart)
+            ->where('data_movimento', '<=', $inclusiveEnd)
+            ->get()
+            ->sum(fn (LancamentoFinanceiro $l) => $this->signedValue($l));
     }
 
     private function signedValue(LancamentoFinanceiro $l): float

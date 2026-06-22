@@ -15,6 +15,7 @@ class ContaFinanceiraUpsertRequest extends FormRequest
             'slug' => $this->input('slug') ? trim((string)$this->input('slug')) : null,
             'tipo' => $this->input('tipo') ? strtolower(trim((string)$this->input('tipo'))) : null,
             'moeda' => $this->input('moeda') ? strtoupper(trim((string)$this->input('moeda'))) : 'BRL',
+            'data_saldo_inicial' => $this->input('data_saldo_inicial') ? trim((string)$this->input('data_saldo_inicial')) : null,
             'ativo' => $this->toBoolOrNull($this->input('ativo')) ?? true,
             'padrao' => $this->toBoolOrNull($this->input('padrao')) ?? false,
         ]);
@@ -36,6 +37,7 @@ class ContaFinanceiraUpsertRequest extends FormRequest
             'ativo' => ['nullable', 'boolean'],
             'padrao' => ['nullable', 'boolean'],
             'saldo_inicial' => ['nullable', 'numeric'],
+            'data_saldo_inicial' => ['required', 'date'],
             'banco_nome' => ['nullable', 'string', 'max:80'],
             'banco_codigo' => ['nullable', 'string', 'max:20'],
             'agencia' => ['nullable', 'string', 'max:20'],

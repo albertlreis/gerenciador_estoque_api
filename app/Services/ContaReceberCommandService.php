@@ -61,7 +61,9 @@ class ContaReceberCommandService
                 ]);
             }
 
-            $this->exportarTituloContaAzulBestEffort((int) $fresh->id, 'conta_receber_criada');
+            if (!is_array($pagamentoInicial)) {
+                $this->exportarTituloContaAzulBestEffort((int) $fresh->id, 'conta_receber_criada');
+            }
 
             return $fresh;
         });

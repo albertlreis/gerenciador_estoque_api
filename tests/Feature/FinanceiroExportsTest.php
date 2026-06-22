@@ -270,6 +270,240 @@ class FinanceiroExportsTest extends TestCase
             ->assertHeader('content-disposition');
     }
 
+    public function test_extrato_json_retorna_conta_periodo_resumo_e_linhas(): void
+    {
+        $conta = ContaFinanceira::create([
+            'nome' => 'Conta Azul',
+            'tipo' => 'banco',
+            'moeda' => 'BRL',
+            'ativo' => true,
+            'padrao' => false,
+            'saldo_inicial' => 100,
+        ]);
+
+        LancamentoFinanceiro::create([
+            'descricao' => 'Receita no extrato',
+            'tipo' => 'receita',
+            'status' => 'confirmado',
+            'conta_id' => $conta->id,
+            'valor' => 250,
+            'data_movimento' => '2026-05-10 10:00:00',
+        ]);
+
+        $params = [
+            'conta_id' => $conta->id,
+            'data_inicio' => '2026-05-01',
+            'data_fim' => '2026-05-31',
+        ];
+
+        $this->getJson('/api/v1/financeiro/extrato?' . http_build_query($params))
+            ->assertOk()
+            ->assertJsonPath('data.conta.nome', 'Conta Azul')
+            ->assertJsonPath('data.periodo.inicio', '01/05/2026')
+            ->assertJsonPath('data.periodo.fim', '31/05/2026')
+            ->assertJsonPath('data.resumo.saldo_inicial', 100)
+            ->assertJsonPath('data.resumo.saldo_realizado', 350)
+            ->assertJsonPath('data.linhas.0.descricao', 'Receita no extrato')
+            ->assertJsonPath('data.linhas.0.valor', 250)
+            ->assertJsonPath('data.linhas.0.saldo', 350);
+    }
+
+    public function test_extrato_considera_lancamentos_apenas_a_partir_da_data_saldo_inicial(): void
+    {
+        $conta = ContaFinanceira::create([
+            'nome' => 'Conta Data Base',
+            'tipo' => 'banco',
+            'moeda' => 'BRL',
+            'ativo' => true,
+            'padrao' => false,
+            'saldo_inicial' => 100,
+            'data_saldo_inicial' => '2026-05-10',
+        ]);
+
+        LancamentoFinanceiro::create([
+            'descricao' => 'Receita antes da data base',
+            'tipo' => 'receita',
+            'status' => 'confirmado',
+            'conta_id' => $conta->id,
+            'valor' => 999,
+            'data_movimento' => '2026-05-05 10:00:00',
+        ]);
+
+        LancamentoFinanceiro::create([
+            'descricao' => 'Receita apos data base',
+            'tipo' => 'receita',
+            'status' => 'confirmado',
+            'conta_id' => $conta->id,
+            'valor' => 25,
+            'data_movimento' => '2026-05-12 10:00:00',
+        ]);
+
+        $params = [
+            'conta_id' => $conta->id,
+            'data_inicio' => '2026-05-01',
+            'data_fim' => '2026-05-31',
+        ];
+
+        $this->getJson('/api/v1/financeiro/extrato?' . http_build_query($params))
+            ->assertOk()
+            ->assertJsonPath('data.resumo.saldo_inicial', 100)
+            ->assertJsonPath('data.resumo.saldo_realizado', 125)
+            ->assertJsonCount(1, 'data.linhas')
+            ->assertJsonPath('data.linhas.0.descricao', 'Receita apos data base')
+            ->assertJsonPath('data.linhas.0.saldo', 125);
+    }
+
+    public function test_extrato_resumo_projeta_saldos_do_periodo_a_partir_do_saldo_atual_para_data_anterior(): void
+    {
+        $conta = ContaFinanceira::create([
+            'nome' => 'Conta Saldo Atual',
+            'tipo' => 'banco',
+            'moeda' => 'BRL',
+            'ativo' => true,
+            'padrao' => false,
+            'saldo_inicial' => 0,
+            'saldo_atual' => 1000,
+            'saldo_atual_em' => '2026-06-20 12:00:00',
+        ]);
+
+        LancamentoFinanceiro::create([
+            'descricao' => 'Receita no periodo',
+            'tipo' => 'receita',
+            'status' => 'confirmado',
+            'conta_id' => $conta->id,
+            'valor' => 100,
+            'data_movimento' => '2026-06-17 10:00:00',
+        ]);
+
+        LancamentoFinanceiro::create([
+            'descricao' => 'Despesa no periodo',
+            'tipo' => 'despesa',
+            'status' => 'confirmado',
+            'conta_id' => $conta->id,
+            'valor' => 40,
+            'data_movimento' => '2026-06-19 10:00:00',
+        ]);
+
+        LancamentoFinanceiro::create([
+            'descricao' => 'Despesa depois do periodo',
+            'tipo' => 'despesa',
+            'status' => 'confirmado',
+            'conta_id' => $conta->id,
+            'valor' => 10,
+            'data_movimento' => '2026-06-20 10:00:00',
+        ]);
+
+        $params = [
+            'conta_id' => $conta->id,
+            'data_inicio' => '2026-06-17',
+            'data_fim' => '2026-06-19',
+        ];
+
+        $this->getJson('/api/v1/financeiro/extrato/resumo?' . http_build_query($params))
+            ->assertOk()
+            ->assertJsonPath('data.0.saldo_atual', 1000)
+            ->assertJsonPath('data.0.saldo_atual_em', '2026-06-20 12:00:00')
+            ->assertJsonPath('data.0.total_periodo', 60)
+            ->assertJsonPath('data.0.saldo_apos_periodo', 1010)
+            ->assertJsonPath('data.0.saldo_antes_periodo', 950)
+            ->assertJsonPath('data.0.saldo_base_origem', 'saldo_atual');
+    }
+
+    public function test_extrato_resumo_projeta_saldos_do_periodo_a_partir_do_saldo_atual_para_data_futura(): void
+    {
+        $conta = ContaFinanceira::create([
+            'nome' => 'Conta Saldo Futuro',
+            'tipo' => 'banco',
+            'moeda' => 'BRL',
+            'ativo' => true,
+            'padrao' => false,
+            'saldo_inicial' => 0,
+            'saldo_atual' => 1000,
+            'saldo_atual_em' => '2026-06-19 10:00:00',
+        ]);
+
+        LancamentoFinanceiro::create([
+            'descricao' => 'Receita antes do saldo atual',
+            'tipo' => 'receita',
+            'status' => 'confirmado',
+            'conta_id' => $conta->id,
+            'valor' => 100,
+            'data_movimento' => '2026-06-18 10:00:00',
+        ]);
+
+        LancamentoFinanceiro::create([
+            'descricao' => 'Receita depois do saldo atual',
+            'tipo' => 'receita',
+            'status' => 'confirmado',
+            'conta_id' => $conta->id,
+            'valor' => 25,
+            'data_movimento' => '2026-06-20 10:00:00',
+        ]);
+
+        $params = [
+            'conta_id' => $conta->id,
+            'data_inicio' => '2026-06-17',
+            'data_fim' => '2026-06-21',
+        ];
+
+        $this->getJson('/api/v1/financeiro/extrato/resumo?' . http_build_query($params))
+            ->assertOk()
+            ->assertJsonPath('data.0.total_periodo', 125)
+            ->assertJsonPath('data.0.saldo_apos_periodo', 1025)
+            ->assertJsonPath('data.0.saldo_antes_periodo', 900)
+            ->assertJsonPath('data.0.saldo_base_origem', 'saldo_atual');
+    }
+
+    public function test_extrato_resumo_mantem_fallback_de_saldo_livro_quando_nao_ha_saldo_atual(): void
+    {
+        $conta = ContaFinanceira::create([
+            'nome' => 'Conta Sem Saldo Atual',
+            'tipo' => 'banco',
+            'moeda' => 'BRL',
+            'ativo' => true,
+            'padrao' => false,
+            'saldo_inicial' => 100,
+        ]);
+
+        LancamentoFinanceiro::create([
+            'descricao' => 'Receita anterior',
+            'tipo' => 'receita',
+            'status' => 'confirmado',
+            'conta_id' => $conta->id,
+            'valor' => 50,
+            'data_movimento' => '2026-06-16 10:00:00',
+        ]);
+
+        LancamentoFinanceiro::create([
+            'descricao' => 'Receita no periodo',
+            'tipo' => 'receita',
+            'status' => 'confirmado',
+            'conta_id' => $conta->id,
+            'valor' => 25,
+            'data_movimento' => '2026-06-17 10:00:00',
+        ]);
+
+        $params = [
+            'conta_id' => $conta->id,
+            'data_inicio' => '2026-06-17',
+            'data_fim' => '2026-06-19',
+        ];
+
+        $this->getJson('/api/v1/financeiro/extrato/resumo?' . http_build_query($params))
+            ->assertOk()
+            ->assertJsonPath('data.0.total_periodo', 25)
+            ->assertJsonPath('data.0.saldo_antes_periodo', 150)
+            ->assertJsonPath('data.0.saldo_apos_periodo', 175)
+            ->assertJsonPath('data.0.saldo_base_origem', 'saldo_livro');
+    }
+
+    public function test_extrato_json_valida_parametros_obrigatorios(): void
+    {
+        $this->getJson('/api/v1/financeiro/extrato')
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['conta_id', 'data_inicio', 'data_fim']);
+    }
+
     public function test_devedores_exports_usam_rota_de_relatorios(): void
     {
         $cliente = Cliente::create(['nome' => 'Cliente Devedor', 'tipo' => 'pf']);

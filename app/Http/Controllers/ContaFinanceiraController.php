@@ -20,7 +20,7 @@ class ContaFinanceiraController extends Controller
         $f = $request->validated();
 
         $items = ContaFinanceira::query()
-            ->select(['id','nome','slug','tipo','ativo','padrao','moeda'])
+            ->select(['id','nome','slug','tipo','ativo','padrao','moeda','data_saldo_inicial','saldo_atual','saldo_atual_em'])
             ->when(!empty($f['tipo']), fn($q) => $q->where('tipo', $f['tipo']))
             ->when(array_key_exists('ativo', $f) && $f['ativo'] !== null, fn($q) => $q->where('ativo', (bool)$f['ativo']))
             ->when(!empty($f['q']), function ($q) use ($f) {

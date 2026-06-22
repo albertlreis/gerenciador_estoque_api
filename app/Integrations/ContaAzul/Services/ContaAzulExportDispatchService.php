@@ -3,12 +3,15 @@
 namespace App\Integrations\ContaAzul\Services;
 
 use App\Integrations\ContaAzul\ContaAzulEntityType;
+use App\Integrations\ContaAzul\Models\ContaAzulMapeamento;
 use App\Jobs\ContaAzul\ExportBaixaContaAzulJob;
 use App\Jobs\ContaAzul\ExportClienteContaAzulJob;
 use App\Jobs\ContaAzul\ExportPedidoContaAzulJob;
 use App\Jobs\ContaAzul\ExportProdutoContaAzulJob;
 use App\Jobs\ContaAzul\ExportTituloContaAzulJob;
+use App\Models\ContaReceberPagamento;
 use App\Services\AuditoriaLogService;
+use Illuminate\Support\Facades\Bus;
 
 class ContaAzulExportDispatchService
 {
@@ -78,13 +81,35 @@ class ContaAzulExportDispatchService
      */
     public function baixa(int $pagamentoId, ?int $lojaId = null, array $contexto = []): void
     {
+        $pagamento = ContaReceberPagamento::query()
+            ->select(['id', 'conta_receber_id'])
+            ->find($pagamentoId);
+        $contaReceberId = $pagamento?->conta_receber_id !== null
+            ? (int) $pagamento->conta_receber_id
+            : null;
+        $tituloSemMapeamento = $contaReceberId !== null
+            && !ContaAzulMapeamento::idExternoPorLocal(ContaAzulEntityType::TITULO, $contaReceberId, $lojaId);
+
         $this->dispatch(
             ContaAzulEntityType::BAIXA,
             $pagamentoId,
             $lojaId,
-            $contexto,
-            fn () => ExportBaixaContaAzulJob::dispatch($pagamentoId, $lojaId)
+            array_filter($contexto + [
+                'conta_receber_id' => $contaReceberId,
+                'titulo_dependente' => $tituloSemMapeamento ? true : null,
+            ], fn ($value) => $value !== null),
+            fn () => $tituloSemMapeamento && $contaReceberId !== null
+                ? $this->dispatchBaixaDepoisDoTitulo($contaReceberId, $pagamentoId, $lojaId)
+                : ExportBaixaContaAzulJob::dispatch($pagamentoId, $lojaId)
         );
+    }
+
+    private function dispatchBaixaDepoisDoTitulo(int $contaReceberId, int $pagamentoId, ?int $lojaId): void
+    {
+        Bus::chain([
+            (new ExportTituloContaAzulJob($contaReceberId, $lojaId))->afterCommit(),
+            new ExportBaixaContaAzulJob($pagamentoId, $lojaId),
+        ])->dispatch();
     }
 
     /**
@@ -125,7 +150,10 @@ class ContaAzulExportDispatchService
         }
 
         $this->log($tipoEntidade, $idLocal, $lojaId, 'enfileirado', null, $contexto);
-        $jobFactory()->afterCommit();
+        $pending = $jobFactory();
+        if (is_object($pending) && method_exists($pending, 'afterCommit')) {
+            $pending->afterCommit();
+        }
     }
 
     /**

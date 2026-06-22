@@ -15,6 +15,13 @@ class FinanceiroExtratoController extends Controller
 {
     public function __construct(private readonly FinanceiroExtratoService $service) {}
 
+    public function show(Request $request): JsonResponse
+    {
+        return response()->json([
+            'data' => $this->service->montar($this->validated($request)),
+        ]);
+    }
+
     public function exportPdf(Request $request): Response
     {
         $dados = $this->service->montar($this->validated($request));

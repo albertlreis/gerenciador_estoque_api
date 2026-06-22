@@ -16,6 +16,9 @@ class ContaFinanceiraOptionResource extends JsonResource
             'ativo'  => (bool) $this->ativo,
             'padrao' => (bool) $this->padrao,
             'moeda'  => (string) $this->moeda,
+            'data_saldo_inicial' => $this->data_saldo_inicial?->format('Y-m-d'),
+            'saldo_atual' => $this->saldo_atual !== null ? (string) $this->saldo_atual : null,
+            'saldo_atual_em' => $this->saldo_atual_em !== null ? (string) $this->saldo_atual_em : null,
 
             'label'  => (string) $this->nome,
             'value'  => (int) $this->id,

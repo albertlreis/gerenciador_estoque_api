@@ -226,13 +226,21 @@ class FinanceiroExportsTest extends TestCase
         $dto = new FiltroLancamentoFinanceiroDTO($params);
         $this->assertSame(1, app(LancamentoFinanceiroService::class)->listarParaExportacao($dto)->count());
 
-        $this->get('/api/v1/financeiro/lancamentos/export/excel?' . http_build_query($params))
+        $excelResponse = $this->get('/api/v1/financeiro/lancamentos/export/excel?' . http_build_query($params))
             ->assertOk()
             ->assertHeader('content-disposition');
+        $this->assertStringContainsString(
+            'extrato_movimentacoes.xlsx',
+            $excelResponse->headers->get('content-disposition')
+        );
 
-        $this->get('/api/v1/financeiro/lancamentos/export/pdf?' . http_build_query($params))
+        $pdfResponse = $this->get('/api/v1/financeiro/lancamentos/export/pdf?' . http_build_query($params))
             ->assertOk()
             ->assertHeader('content-disposition');
+        $this->assertStringContainsString(
+            'extrato_movimentacoes.pdf',
+            $pdfResponse->headers->get('content-disposition')
+        );
     }
 
     public function test_extrato_pdf_e_excel_retornam_arquivo(): void

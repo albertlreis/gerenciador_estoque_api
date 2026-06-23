@@ -777,7 +777,7 @@ class PedidoController extends Controller
             $data['cliente_endereco_id'] ?? null
         );
 
-        $selecionados = $this->normalizarItensNotaEntrega($data['itens']);
+        $selecionados = $this->normalizarItensNotaEntrega($data['itens'], $registrarEntrega);
 
         if ($selecionados->isEmpty()) {
             throw ValidationException::withMessages([
@@ -941,7 +941,7 @@ class PedidoController extends Controller
         ];
     }
 
-    private function normalizarItensNotaEntrega(array $itens): Collection
+    private function normalizarItensNotaEntrega(array $itens, bool $registrarEntrega = false): Collection
     {
         return collect($itens)
             ->map(function (array $item) {
@@ -965,7 +965,7 @@ class PedidoController extends Controller
                     ? max(0, (int) ($item['quantidade'] ?? 0))
                     : null;
 
-                if ($entregarExpedido <= 0 && $alocacoes->isEmpty() && array_key_exists('quantidade', $item)) {
+                if ($registrarEntrega && $entregarExpedido <= 0 && $alocacoes->isEmpty() && array_key_exists('quantidade', $item)) {
                     $entregarExpedido = (int) ($item['quantidade'] ?? 0);
                 }
 
@@ -1068,6 +1068,37 @@ class PedidoController extends Controller
 
             $pendenteTotal = max(0, (int) $item->quantidade_total - (int) $item->quantidade_entregue);
             $pendenteExpedido = max(0, (int) $item->quantidade_expedida - (int) $item->quantidade_entregue);
+            $quantidadeDocumental = $selecionado['quantidade'] ?? null;
+
+            if (
+                ! $registrarEntrega
+                && $quantidadeDocumental !== null
+                && $entregarExpedidoSolicitado <= 0
+                && collect($selecionado['alocacoes'] ?? [])->isEmpty()
+            ) {
+                $quantidadeDocumental = (int) $quantidadeDocumental;
+
+                if ($quantidadeDocumental <= 0) {
+                    throw ValidationException::withMessages([
+                        'itens' => ["Informe uma quantidade para o item de entrega #{$item->id}."],
+                    ]);
+                }
+
+                if ($quantidadeDocumental > $pendenteTotal) {
+                    throw ValidationException::withMessages([
+                        'itens' => ["A quantidade do item de entrega #{$item->id} excede o pendente total de entrega ({$pendenteTotal})."],
+                    ]);
+                }
+
+                $item->setAttribute('nota_quantidade', $quantidadeDocumental);
+                $item->setAttribute('nota_entregar_expedido', 0);
+                $item->setAttribute('nota_entregar_expedido_registrado', false);
+                $item->setAttribute('nota_alocacoes', []);
+                $item->setAttribute('nota_modo', 'pendente_documental');
+                $itens->push($item);
+
+                continue;
+            }
 
             if ($entregarExpedidoNovo > $pendenteExpedido) {
                 throw ValidationException::withMessages([

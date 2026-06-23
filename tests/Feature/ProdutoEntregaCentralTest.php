@@ -335,6 +335,72 @@ class ProdutoEntregaCentralTest extends TestCase
         $this->assertSame(1, EstoqueMovimentacao::query()->where('pedido_id', $pedido->id)->count());
     }
 
+    public function test_nota_entrega_pdf_sem_registrar_aceita_pendente_sem_saldo_sem_movimentar_estoque(): void
+    {
+        [$usuario, $pedido] = $this->criarPedidoComItem(1);
+
+        Sanctum::actingAs($usuario);
+
+        $entrega = app(EntregaProdutoService::class)
+            ->criarDemandaPedido($pedido, $usuario->id, false)
+            ->firstOrFail();
+
+        $response = $this->postJson("/api/v1/pedidos/{$pedido->id}/pdf/nota-entrega", [
+            'registrar_entrega' => false,
+            'observacao' => 'PDF documental sem saldo',
+            'itens' => [
+                [
+                    'produto_entrega_item_id' => $entrega->id,
+                    'quantidade' => 1,
+                ],
+            ],
+        ]);
+
+        $response->assertOk();
+        $this->assertStringContainsString('application/pdf', (string) $response->headers->get('content-type'));
+
+        $entrega = $entrega->fresh();
+        $this->assertSame(0, (int) $entrega->quantidade_expedida);
+        $this->assertSame(0, (int) $entrega->quantidade_entregue);
+        $this->assertSame(0, EstoqueMovimentacao::query()->where('pedido_id', $pedido->id)->count());
+        $this->assertSame(0, ProdutoEntregaEvento::query()
+            ->where('produto_entrega_item_id', $entrega->id)
+            ->whereIn('tipo_evento', [
+                ProdutoEntregaEvento::EXPEDIDO_CLIENTE,
+                ProdutoEntregaEvento::ENTREGUE_CLIENTE,
+            ])
+            ->count());
+    }
+
+    public function test_nota_entrega_registrar_sem_saldo_continua_bloqueado(): void
+    {
+        [$usuario, $pedido] = $this->criarPedidoComItem(1);
+
+        Sanctum::actingAs($usuario);
+
+        $entrega = app(EntregaProdutoService::class)
+            ->criarDemandaPedido($pedido, $usuario->id, false)
+            ->firstOrFail();
+
+        $this->postJson("/api/v1/pedidos/{$pedido->id}/pdf/nota-entrega", [
+            'registrar_entrega' => true,
+            'idempotency_key' => 'nota-entrega-sem-saldo',
+            'observacao' => 'Tentativa de registro sem saldo',
+            'itens' => [
+                [
+                    'produto_entrega_item_id' => $entrega->id,
+                    'quantidade' => 1,
+                ],
+            ],
+        ])->assertStatus(422)
+            ->assertJsonValidationErrors('itens');
+
+        $entrega = $entrega->fresh();
+        $this->assertSame(0, (int) $entrega->quantidade_expedida);
+        $this->assertSame(0, (int) $entrega->quantidade_entregue);
+        $this->assertSame(0, EstoqueMovimentacao::query()->where('pedido_id', $pedido->id)->count());
+    }
+
     public function test_nota_entrega_pdf_exige_endereco_quando_cliente_tem_multiplos_enderecos(): void
     {
         [$usuario, $pedido, $variacao, $deposito] = $this->criarPedidoComItem(1);

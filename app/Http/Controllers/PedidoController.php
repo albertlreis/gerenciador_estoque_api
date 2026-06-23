@@ -677,9 +677,21 @@ class PedidoController extends Controller
     /**
      * Retorna os itens que podem compor uma nota de entrega.
      */
-    public function notaEntregaItens(int $pedidoId, EstoqueDisponibilidadeService $disponibilidade): JsonResponse
+    public function notaEntregaItens(
+        int $pedidoId,
+        EstoqueDisponibilidadeService $disponibilidade,
+        EntregaProdutoService $entregaService
+    ): JsonResponse
     {
         $pedido = Pedido::with('cliente.enderecos')->findOrFail($pedidoId);
+
+        if (
+            $pedido->isVenda()
+            && ! ProdutoEntregaItem::query()->where('pedido_id', $pedido->id)->exists()
+        ) {
+            $usuarioId = auth()->id();
+            $entregaService->criarDemandaPedido($pedido, $usuarioId ? (int) $usuarioId : null, false);
+        }
 
         $queryBase = fn () => ProdutoEntregaItem::query()
             ->with([

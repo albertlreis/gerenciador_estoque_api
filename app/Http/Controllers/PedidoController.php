@@ -944,7 +944,7 @@ class PedidoController extends Controller
     private function normalizarItensNotaEntrega(array $itens, bool $registrarEntrega = false): Collection
     {
         return collect($itens)
-            ->map(function (array $item) {
+            ->map(function (array $item) use ($registrarEntrega) {
                 $alocacoes = collect((array) ($item['alocacoes'] ?? []))
                     ->map(fn (array $alocacao) => [
                         'deposito_id' => (int) ($alocacao['deposito_id'] ?? 0),

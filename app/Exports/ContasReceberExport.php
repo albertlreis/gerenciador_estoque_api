@@ -75,11 +75,23 @@ class ContasReceberExport implements FromCollection, WithHeadings, WithMapping
 
         if (array_key_exists('vencidas', $params) && filter_var($params['vencidas'], FILTER_VALIDATE_BOOLEAN)) {
             $q->whereDate('data_vencimento', '<', now()->toDateString())
-                ->where('status', '!=', 'PAGA');
+                ->whereNotIn('status', ['PAGA', 'CANCELADA']);
+        }
+
+        if (array_key_exists('em_aberto', $params) && filter_var($params['em_aberto'], FILTER_VALIDATE_BOOLEAN)) {
+            $q->whereNotIn('status', ['PAGA', 'CANCELADA']);
         }
 
         if (!empty($params['forma_recebimento'])) {
             $q->where('forma_recebimento', (string) $params['forma_recebimento']);
+        }
+
+        if (!empty($params['centro_custo_id'])) {
+            $q->where('centro_custo_id', (int) $params['centro_custo_id']);
+        }
+
+        if (!empty($params['categoria_id'])) {
+            $q->where('categoria_id', (int) $params['categoria_id']);
         }
 
         return $q->orderBy('data_vencimento')->orderBy('id');

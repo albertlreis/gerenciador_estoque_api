@@ -33,6 +33,9 @@ class ContasPagarExport implements FromCollection, WithHeadings, WithMapping
             vencidas: array_key_exists('vencidas', $this->params)
                 ? filter_var($this->params['vencidas'], FILTER_VALIDATE_BOOLEAN)
                 : false,
+            em_aberto: array_key_exists('em_aberto', $this->params)
+                ? filter_var($this->params['em_aberto'], FILTER_VALIDATE_BOOLEAN)
+                : false,
         );
 
         $q = ContaPagar::query()->with(['fornecedor', 'categoria', 'centroCusto']);
@@ -52,9 +55,13 @@ class ContasPagarExport implements FromCollection, WithHeadings, WithMapping
         if ($f->data_ini) $q->whereDate('data_vencimento', '>=', $f->data_ini);
         if ($f->data_fim) $q->whereDate('data_vencimento', '<=', $f->data_fim);
 
+        if ($f->em_aberto) {
+            $q->whereNotIn('status', ['PAGA', 'CANCELADA']);
+        }
+
         if ($f->vencidas) {
             $q->whereDate('data_vencimento', '<', now()->toDateString())
-                ->where('status', '!=', 'PAGA');
+                ->whereNotIn('status', ['PAGA', 'CANCELADA']);
         }
 
         return $q->orderBy('data_vencimento')->orderBy('id');

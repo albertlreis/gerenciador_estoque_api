@@ -30,10 +30,12 @@ class ContaPagarController extends Controller
      */
     public function index(Request $request): AnonymousResourceCollection
     {
-        if ($request->has('vencidas')) {
-            $request->merge([
-                'vencidas' => filter_var($request->input('vencidas'), FILTER_VALIDATE_BOOLEAN),
-            ]);
+        foreach (['vencidas', 'em_aberto'] as $booleanFilter) {
+            if ($request->has($booleanFilter)) {
+                $request->merge([
+                    $booleanFilter => filter_var($request->input($booleanFilter), FILTER_VALIDATE_BOOLEAN),
+                ]);
+            }
         }
 
         $request->validate([
@@ -52,6 +54,7 @@ class ContaPagarController extends Controller
 
             'status'       => 'nullable|in:ABERTA,PARCIAL,PAGA,CANCELADA',
             'vencidas'     => 'nullable|boolean',
+            'em_aberto'    => 'nullable|boolean',
         ]);
 
         $filtro = new FiltroContaPagarDTO(
@@ -64,6 +67,7 @@ class ContaPagarController extends Controller
             data_ini: $request->string('data_ini')->toString() ?: null,
             data_fim: $request->string('data_fim')->toString() ?: null,
             vencidas: $request->boolean('vencidas', false),
+            em_aberto: $request->boolean('em_aberto', false),
         );
 
         $page = $request->integer('page', 1);
@@ -197,10 +201,12 @@ class ContaPagarController extends Controller
      */
     public function kpis(Request $request): JsonResponse
     {
-        if ($request->has('vencidas')) {
-            $request->merge([
-                'vencidas' => filter_var($request->input('vencidas'), FILTER_VALIDATE_BOOLEAN),
-            ]);
+        foreach (['vencidas', 'em_aberto'] as $booleanFilter) {
+            if ($request->has($booleanFilter)) {
+                $request->merge([
+                    $booleanFilter => filter_var($request->input($booleanFilter), FILTER_VALIDATE_BOOLEAN),
+                ]);
+            }
         }
 
         $request->validate([
@@ -213,6 +219,7 @@ class ContaPagarController extends Controller
             'data_ini'      => 'nullable|date',
             'data_fim'      => 'nullable|date',
             'vencidas'      => 'nullable|boolean',
+            'em_aberto'     => 'nullable|boolean',
         ]);
 
         $f = new FiltroContaPagarDTO(
@@ -225,6 +232,7 @@ class ContaPagarController extends Controller
             data_ini: $request->string('data_ini')->toString() ?: null,
             data_fim: $request->string('data_fim')->toString() ?: null,
             vencidas: $request->boolean('vencidas', false),
+            em_aberto: $request->boolean('em_aberto', false),
         );
 
         $query = ContaPagar::query()->with('pagamentos');
@@ -245,24 +253,39 @@ class ContaPagarController extends Controller
         if ($f->data_ini)      $query->whereDate('data_vencimento', '>=', $f->data_ini);
         if ($f->data_fim)      $query->whereDate('data_vencimento', '<=', $f->data_fim);
 
+        if ($f->em_aberto) {
+            $query->whereNotIn('status', ['PAGA', 'CANCELADA']);
+        }
+
         if ($f->vencidas) {
             $query->whereDate('data_vencimento', '<', now()->toDateString())
-                ->where('status', '!=', 'PAGA');
+                ->whereNotIn('status', ['PAGA', 'CANCELADA']);
         }
 
         $linhas = $query->get();
 
         $totalLiquido = $linhas->sum(fn($c) => $c->valor_bruto - $c->desconto + $c->juros + $c->multa);
-        $valorPagoPeriodo = $linhas->sum(fn($c) => $c->pagamentos->sum('valor'));
+        $totalPago = $linhas->sum(fn($c) => $c->pagamentos->sum('valor'));
+        $totalAberto = $linhas->sum(fn($c) => (float) $c->saldo_aberto);
         $contasPagas = $linhas->filter(fn($c) => ($c->status?->value ?? $c->status) === 'PAGA')->count();
-        $contasVencidas = $linhas->filter(fn($c) =>
-            (($c->status?->value ?? $c->status) !== 'PAGA') && $c->data_vencimento && $c->data_vencimento->lt(now())
+        $contasAbertas = $linhas->filter(fn($c) => in_array(($c->status?->value ?? $c->status), ['ABERTA', 'PARCIAL'], true))->count();
+        $linhasVencidas = $linhas->filter(fn($c) =>
+            in_array(($c->status?->value ?? $c->status), ['ABERTA', 'PARCIAL'], true) && $c->data_vencimento && $c->data_vencimento->lt(now()->startOfDay())
         )->count();
+        $totalVencido = $linhas->filter(fn($c) =>
+            in_array(($c->status?->value ?? $c->status), ['ABERTA', 'PARCIAL'], true) && $c->data_vencimento && $c->data_vencimento->lt(now()->startOfDay())
+        )->sum(fn($c) => (float) $c->saldo_aberto);
 
         return response()->json([
             'total_liquido'      => (float) $totalLiquido,
-            'valor_pago_periodo' => (float) $valorPagoPeriodo,
-            'contas_vencidas'    => $contasVencidas,
+            'total_aberto'       => (float) $totalAberto,
+            'total_vencido'      => (float) $totalVencido,
+            'total_pago'         => (float) $totalPago,
+            'qtd_abertas'        => $contasAbertas,
+            'qtd_vencidas'       => $linhasVencidas,
+            'qtd_pagas'          => $contasPagas,
+            'valor_pago_periodo' => (float) $totalPago,
+            'contas_vencidas'    => $linhasVencidas,
             'contas_pagas'       => $contasPagas,
         ], 200);
     }

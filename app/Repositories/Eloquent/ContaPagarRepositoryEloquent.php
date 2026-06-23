@@ -30,7 +30,8 @@ class ContaPagarRepositoryEloquent implements ContaPagarRepository
         if ($filtro->categoria_id) $q->where('categoria_id', $filtro->categoria_id);
         if ($filtro->data_ini) $q->whereDate('data_vencimento','>=',$filtro->data_ini);
         if ($filtro->data_fim) $q->whereDate('data_vencimento','<=',$filtro->data_fim);
-        if ($filtro->vencidas) $q->whereDate('data_vencimento','<', now()->toDateString())->where('status','!=','PAGA');
+        if ($filtro->em_aberto) $q->whereNotIn('status', ['PAGA', 'CANCELADA']);
+        if ($filtro->vencidas) $q->whereDate('data_vencimento','<', now()->toDateString())->whereNotIn('status', ['PAGA', 'CANCELADA']);
 
         $q->orderBy('data_vencimento', 'desc')->orderBy('id');
 

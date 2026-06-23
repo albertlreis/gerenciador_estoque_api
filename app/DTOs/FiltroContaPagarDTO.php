@@ -14,5 +14,6 @@ class FiltroContaPagarDTO
         public readonly ?string $data_ini = null,
         public readonly ?string $data_fim = null,
         public readonly ?bool $vencidas = null,
+        public readonly ?bool $em_aberto = null,
     ) {}
 }

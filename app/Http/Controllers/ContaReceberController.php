@@ -35,10 +35,12 @@ class ContaReceberController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        if ($request->has('vencidas')) {
-            $request->merge([
-                'vencidas' => filter_var($request->input('vencidas'), FILTER_VALIDATE_BOOLEAN),
-            ]);
+        foreach (['vencidas', 'em_aberto'] as $booleanFilter) {
+            if ($request->has($booleanFilter)) {
+                $request->merge([
+                    $booleanFilter => filter_var($request->input($booleanFilter), FILTER_VALIDATE_BOOLEAN),
+                ]);
+            }
         }
 
         $request->validate([
@@ -49,9 +51,13 @@ class ContaReceberController extends Controller
             'cliente'   => 'nullable|string|max:255',
             'cliente_id' => 'nullable|integer|exists:clientes,id',
             'numero_pedido' => 'nullable|string|max:80',
+            'forma_recebimento' => 'nullable|string|max:50',
+            'centro_custo_id' => 'nullable|integer|exists:centros_custo,id',
+            'categoria_id' => 'nullable|integer|exists:categorias_financeiras,id',
             'data_ini'  => 'nullable|date',
             'data_fim'  => 'nullable|date',
             'vencidas'  => 'nullable|boolean',
+            'em_aberto' => 'nullable|boolean',
         ]);
 
         $page = $request->integer('page', 1);
@@ -95,6 +101,18 @@ class ContaReceberController extends Controller
             );
         }
 
+        if ($request->filled('forma_recebimento')) {
+            $q->where('forma_recebimento', $request->string('forma_recebimento')->toString());
+        }
+
+        if ($request->filled('centro_custo_id')) {
+            $q->where('centro_custo_id', $request->integer('centro_custo_id'));
+        }
+
+        if ($request->filled('categoria_id')) {
+            $q->where('categoria_id', $request->integer('categoria_id'));
+        }
+
         if ($request->filled('data_ini')) {
             $q->whereDate('data_vencimento', '>=', $request->string('data_ini')->toString());
         }
@@ -105,7 +123,11 @@ class ContaReceberController extends Controller
 
         if ($request->boolean('vencidas', false)) {
             $q->whereDate('data_vencimento', '<', now()->toDateString())
-                ->where('status', '!=', ContaStatus::PAGA->value);
+                ->whereNotIn('status', [ContaStatus::PAGA->value, ContaStatus::CANCELADA->value]);
+        }
+
+        if ($request->boolean('em_aberto', false)) {
+            $q->whereNotIn('status', [ContaStatus::PAGA->value, ContaStatus::CANCELADA->value]);
         }
 
         $q->orderBy('data_vencimento')->orderBy('id');

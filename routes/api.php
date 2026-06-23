@@ -13,6 +13,7 @@ use App\Http\Controllers\{AreaEstoqueController,
     CategoriaFinanceiraController,
     CentroCustoController,
     ClienteController,
+    ConciliacaoBancariaController,
     ConfiguracaoController,
     ConsignacaoController,
     ConsignacaoRelatorioController,
@@ -547,6 +548,21 @@ Route::middleware(['auth:sanctum', 'senha.nao_obrigatoria'])
             Route::get('extrato/resumo', [FinanceiroExtratoController::class, 'resumo']);
             Route::get('extrato/export/pdf', [FinanceiroExtratoController::class, 'exportPdf']);
             Route::get('extrato/export/excel', [FinanceiroExtratoController::class, 'exportExcel']);
+
+            Route::prefix('conciliacao-bancaria')->group(function () {
+                Route::post('ofx', [ConciliacaoBancariaController::class, 'importarOfx']);
+                Route::get('importacoes/{importacao}', [ConciliacaoBancariaController::class, 'showImportacao'])
+                    ->whereNumber('importacao');
+                Route::post('importacoes/{importacao}/reanalisar', [ConciliacaoBancariaController::class, 'reanalisarImportacao'])
+                    ->whereNumber('importacao');
+                Route::post('importacoes/{importacao}/confirmar', [ConciliacaoBancariaController::class, 'confirmarImportacao'])
+                    ->whereNumber('importacao');
+                Route::get('transacoes', [ConciliacaoBancariaController::class, 'transacoes']);
+                Route::patch('transacoes/{transacao}/candidato', [ConciliacaoBancariaController::class, 'definirCandidato'])
+                    ->whereNumber('transacao');
+                Route::post('transacoes/{transacao}/confirmar', [ConciliacaoBancariaController::class, 'confirmarTransacao'])
+                    ->whereNumber('transacao');
+            });
 
             Route::apiResource('categorias-financeiras', CategoriaFinanceiraController::class)
                 ->parameters(['categorias-financeiras' => 'categoria_financeira'])

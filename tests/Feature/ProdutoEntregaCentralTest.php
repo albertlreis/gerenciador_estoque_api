@@ -372,7 +372,7 @@ class ProdutoEntregaCentralTest extends TestCase
             ->count());
     }
 
-    public function test_nota_entrega_registrar_sem_saldo_continua_bloqueado(): void
+    public function test_nota_entrega_registrar_sem_saldo_entrega_sem_movimentar_estoque(): void
     {
         [$usuario, $pedido] = $this->criarPedidoComItem(1);
 
@@ -382,7 +382,7 @@ class ProdutoEntregaCentralTest extends TestCase
             ->criarDemandaPedido($pedido, $usuario->id, false)
             ->firstOrFail();
 
-        $this->postJson("/api/v1/pedidos/{$pedido->id}/pdf/nota-entrega", [
+        $payload = [
             'registrar_entrega' => true,
             'idempotency_key' => 'nota-entrega-sem-saldo',
             'observacao' => 'Tentativa de registro sem saldo',
@@ -392,13 +392,20 @@ class ProdutoEntregaCentralTest extends TestCase
                     'quantidade' => 1,
                 ],
             ],
-        ])->assertStatus(422)
-            ->assertJsonValidationErrors('itens');
+        ];
+
+        $this->postJson("/api/v1/pedidos/{$pedido->id}/pdf/nota-entrega", $payload)->assertOk();
+        $this->postJson("/api/v1/pedidos/{$pedido->id}/pdf/nota-entrega", $payload)->assertOk();
 
         $entrega = $entrega->fresh();
         $this->assertSame(0, (int) $entrega->quantidade_expedida);
-        $this->assertSame(0, (int) $entrega->quantidade_entregue);
+        $this->assertSame(1, (int) $entrega->quantidade_entregue);
         $this->assertSame(0, EstoqueMovimentacao::query()->where('pedido_id', $pedido->id)->count());
+        $this->assertSame(1, ProdutoEntregaEvento::query()
+            ->where('idempotency_key', "nota-entrega:nota-entrega-sem-saldo:item:{$entrega->id}:entregar")
+            ->where('tipo_evento', ProdutoEntregaEvento::ENTREGUE_CLIENTE)
+            ->whereNull('estoque_movimentacao_id')
+            ->count());
     }
 
     public function test_nota_entrega_pdf_exige_endereco_quando_cliente_tem_multiplos_enderecos(): void

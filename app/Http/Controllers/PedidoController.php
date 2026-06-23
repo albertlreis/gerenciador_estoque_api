@@ -846,6 +846,20 @@ class PedidoController extends Controller
                         );
                     }
 
+                    $entregarSemExpedicao = (int) $item->getAttribute('nota_entregar_sem_expedicao');
+                    $entregarSemExpedicaoRegistrado = (bool) $item->getAttribute('nota_entregar_sem_expedicao_registrado');
+
+                    if ($entregarSemExpedicao > 0 && ! $entregarSemExpedicaoRegistrado) {
+                        $entregaService->entregarItem(
+                            $item,
+                            $entregarSemExpedicao,
+                            auth()->id(),
+                            $data['observacao'] ?? 'Entrega registrada via nota de entrega sem saldo em estoque.',
+                            $this->notaEntregaEventoKey($idempotencyKey, (int) $item->id),
+                            true
+                        );
+                    }
+
                     foreach ((array) $item->getAttribute('nota_alocacoes') as $alocacao) {
                         if (! empty($alocacao['entrega_registrada'])) {
                             continue;
@@ -887,6 +901,7 @@ class PedidoController extends Controller
                 'pedido_item_id' => $item->pedido_item_id,
                 'quantidade' => (int) $item->getAttribute('nota_quantidade'),
                 'entregar_expedido' => (int) $item->getAttribute('nota_entregar_expedido'),
+                'entregar_sem_expedicao' => (int) $item->getAttribute('nota_entregar_sem_expedicao'),
                 'alocacoes' => $item->getAttribute('nota_alocacoes') ?? [],
             ])->values()->all(),
         ]);
@@ -944,7 +959,7 @@ class PedidoController extends Controller
     private function normalizarItensNotaEntrega(array $itens, bool $registrarEntrega = false): Collection
     {
         return collect($itens)
-            ->map(function (array $item) use ($registrarEntrega) {
+            ->map(function (array $item) {
                 $alocacoes = collect((array) ($item['alocacoes'] ?? []))
                     ->map(fn (array $alocacao) => [
                         'deposito_id' => (int) ($alocacao['deposito_id'] ?? 0),
@@ -964,10 +979,6 @@ class PedidoController extends Controller
                 $quantidade = array_key_exists('quantidade', $item)
                     ? max(0, (int) ($item['quantidade'] ?? 0))
                     : null;
-
-                if ($registrarEntrega && $entregarExpedido <= 0 && $alocacoes->isEmpty() && array_key_exists('quantidade', $item)) {
-                    $entregarExpedido = (int) ($item['quantidade'] ?? 0);
-                }
 
                 return [
                     'id' => (int) ($item['produto_entrega_item_id'] ?? 0),
@@ -1070,31 +1081,45 @@ class PedidoController extends Controller
             $pendenteExpedido = max(0, (int) $item->quantidade_expedida - (int) $item->quantidade_entregue);
             $quantidadeDocumental = $selecionado['quantidade'] ?? null;
 
-            if (
-                ! $registrarEntrega
-                && $quantidadeDocumental !== null
+            if ($quantidadeDocumental !== null
                 && $entregarExpedidoSolicitado <= 0
-                && collect($selecionado['alocacoes'] ?? [])->isEmpty()
-            ) {
+                && collect($selecionado['alocacoes'] ?? [])->isEmpty()) {
+                $eventoEntregaDireta = $registrarEntrega
+                    ? ProdutoEntregaEvento::query()
+                        ->where('idempotency_key', $this->notaEntregaEventoKey($idempotencyKey, (int) $item->id))
+                        ->first()
+                    : null;
                 $quantidadeDocumental = (int) $quantidadeDocumental;
+                $quantidadeNota = $eventoEntregaDireta
+                    ? (int) $eventoEntregaDireta->quantidade
+                    : $quantidadeDocumental;
 
-                if ($quantidadeDocumental <= 0) {
+                if ($quantidadeNota <= 0) {
                     throw ValidationException::withMessages([
                         'itens' => ["Informe uma quantidade para o item de entrega #{$item->id}."],
                     ]);
                 }
 
-                if ($quantidadeDocumental > $pendenteTotal) {
+                if (! $eventoEntregaDireta && $quantidadeNota > $pendenteTotal) {
                     throw ValidationException::withMessages([
                         'itens' => ["A quantidade do item de entrega #{$item->id} excede o pendente total de entrega ({$pendenteTotal})."],
                     ]);
                 }
 
-                $item->setAttribute('nota_quantidade', $quantidadeDocumental);
-                $item->setAttribute('nota_entregar_expedido', 0);
-                $item->setAttribute('nota_entregar_expedido_registrado', false);
+                $entregarExpedidoDireto = $registrarEntrega && $quantidadeNota <= $pendenteExpedido
+                    ? $quantidadeNota
+                    : 0;
+                $entregarSemExpedicao = $registrarEntrega
+                    ? max(0, $quantidadeNota - $entregarExpedidoDireto)
+                    : 0;
+
+                $item->setAttribute('nota_quantidade', $quantidadeNota);
+                $item->setAttribute('nota_entregar_expedido', $entregarExpedidoDireto);
+                $item->setAttribute('nota_entregar_expedido_registrado', (bool) $eventoEntregaDireta);
+                $item->setAttribute('nota_entregar_sem_expedicao', $entregarSemExpedicao);
+                $item->setAttribute('nota_entregar_sem_expedicao_registrado', (bool) $eventoEntregaDireta);
                 $item->setAttribute('nota_alocacoes', []);
-                $item->setAttribute('nota_modo', 'pendente_documental');
+                $item->setAttribute('nota_modo', $registrarEntrega && $entregarSemExpedicao > 0 ? 'entrega_sem_saldo' : 'pendente_documental');
                 $itens->push($item);
 
                 continue;
@@ -1184,6 +1209,8 @@ class PedidoController extends Controller
             $item->setAttribute('nota_quantidade', $quantidadeTotalNota);
             $item->setAttribute('nota_entregar_expedido', $entregarExpedido);
             $item->setAttribute('nota_entregar_expedido_registrado', $entregarExpedidoRegistrado);
+            $item->setAttribute('nota_entregar_sem_expedicao', 0);
+            $item->setAttribute('nota_entregar_sem_expedicao_registrado', false);
             $item->setAttribute('nota_alocacoes', $alocacoesEfetivas->values()->all());
             $itens->push($item);
         }
@@ -1213,8 +1240,19 @@ class PedidoController extends Controller
 
         $temQuantidade = false;
         $entregarExpedido = (int) ($selecionado['entregar_expedido'] ?? 0);
+        $quantidadeDireta = (int) ($selecionado['quantidade'] ?? 0);
 
         if ($entregarExpedido > 0) {
+            $temQuantidade = true;
+
+            if (! ProdutoEntregaEvento::query()
+                ->where('idempotency_key', $this->notaEntregaEventoKey($idempotencyKey, (int) $item->id))
+                ->exists()) {
+                return false;
+            }
+        }
+
+        if ($quantidadeDireta > 0 && $entregarExpedido <= 0 && collect($selecionado['alocacoes'] ?? [])->isEmpty()) {
             $temQuantidade = true;
 
             if (! ProdutoEntregaEvento::query()

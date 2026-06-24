@@ -33,6 +33,7 @@ use App\Http\Controllers\{AreaEstoqueController,
     FeriadoController,
     FinanceiroDashboardController,
     FinanceiroExtratoController,
+    FinanceiroRelatorioController,
     FornecedorController,
     FormaPagamentoController,
     ImportEstoqueController,
@@ -548,6 +549,9 @@ Route::middleware(['auth:sanctum', 'senha.nao_obrigatoria'])
             Route::get('extrato/resumo', [FinanceiroExtratoController::class, 'resumo']);
             Route::get('extrato/export/pdf', [FinanceiroExtratoController::class, 'exportPdf']);
             Route::get('extrato/export/excel', [FinanceiroExtratoController::class, 'exportExcel']);
+            Route::get('relatorios/{tipo}', [FinanceiroRelatorioController::class, 'show']);
+            Route::get('relatorios/{tipo}/export/excel', [FinanceiroRelatorioController::class, 'exportExcel']);
+            Route::get('relatorios/{tipo}/export/pdf', [FinanceiroRelatorioController::class, 'exportPdf']);
 
             Route::prefix('conciliacao-bancaria')->group(function () {
                 Route::post('ofx', [ConciliacaoBancariaController::class, 'importarOfx']);

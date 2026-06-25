@@ -548,7 +548,7 @@ XML
                     'tipo' => 'reposicao',
                     'numero_externo' => 'MAN-001',
                     'id_fornecedor' => $fornecedor->id,
-                    'total' => 100,
+                    'total' => 0,
                 ],
                 'cliente' => [],
                 'itens' => [
@@ -569,6 +569,7 @@ XML
         $pedido = Pedido::findOrFail($response->json('id'));
         $this->assertSame(Pedido::TIPO_REPOSICAO, $pedido->tipo);
         $this->assertSame($fornecedor->id, $pedido->id_fornecedor);
+        $this->assertSame(100.0, (float) $pedido->valor_total);
         $this->assertNull(PedidoImportacao::query()->where('pedido_id', $pedido->id)->first());
     }
 }

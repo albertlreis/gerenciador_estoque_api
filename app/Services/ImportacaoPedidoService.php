@@ -312,8 +312,18 @@ class ImportacaoPedidoService
                 $clienteId = $cliente->id;
             }
 
-            $valorTotal = $dadosPedido['total']
-                ?? collect($itens)->sum(fn($i) => (float) ($i['quantidade'] ?? 0) * (float) ($i['valor'] ?? 0));
+            $totalItens = collect($itens)->sum(
+                fn($i) => $this->toDecimal($i['quantidade'] ?? 0)
+                    * $this->toDecimal($i['valor'] ?? ($i['preco_unitario'] ?? 0))
+            );
+            $fluxoManualSemStaging = empty($importacaoId) && !$this->hasValue($request->input('tipo_importacao'));
+            $valorTotal = $this->hasValue($dadosPedido['total'] ?? null)
+                ? $this->toDecimal($dadosPedido['total'])
+                : $totalItens;
+
+            if ($fluxoManualSemStaging && $valorTotal <= 0 && $totalItens > 0) {
+                $valorTotal = $totalItens;
+            }
 
             $numeroExterno = isset($dadosPedido['numero_externo'])
                 ? trim((string) $dadosPedido['numero_externo'])

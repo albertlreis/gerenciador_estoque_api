@@ -518,6 +518,13 @@ class FinanceiroExportsTest extends TestCase
             ->assertJsonCount(1, 'data.linhas')
             ->assertJsonPath('data.linhas.0.descricao', 'Receita apos data base')
             ->assertJsonPath('data.linhas.0.saldo', 125);
+
+        $this->getJson('/api/v1/financeiro/extrato/resumo?' . http_build_query($params))
+            ->assertOk()
+            ->assertJsonPath('data.0.saldo_inicial', 100)
+            ->assertJsonPath('data.0.total_periodo', 25)
+            ->assertJsonPath('data.0.saldo_final', 125)
+            ->assertJsonPath('data.0.saldo_base_origem', 'saldo_livro');
     }
 
     public function test_extrato_resumo_projeta_saldos_do_periodo_a_partir_do_saldo_atual_para_data_anterior(): void
@@ -700,3 +707,4 @@ class FinanceiroExportsTest extends TestCase
             ->assertHeader('content-disposition');
     }
 }
+

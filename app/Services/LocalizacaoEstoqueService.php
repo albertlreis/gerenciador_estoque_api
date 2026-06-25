@@ -17,11 +17,17 @@ class LocalizacaoEstoqueService
         $query = LocalizacaoEstoque::query()
             ->where('deposito_id', $deposito->id)
             ->withCount('estoques as ocupacao_itens')
-            ->withSum('estoques as ocupacao_pecas', 'quantidade')
-            ->orderBy('codigo_composto');
+            ->withSum('estoques as ocupacao_pecas', 'quantidade');
 
         if (array_key_exists('ativo', $filtros) && $filtros['ativo'] !== null && $filtros['ativo'] !== '') {
             $query->where('ativo', filter_var($filtros['ativo'], FILTER_VALIDATE_BOOLEAN));
+        }
+
+        $ocupacao = (string) ($filtros['ocupacao'] ?? 'todas');
+        if ($ocupacao === 'ocupadas') {
+            $query->has('estoques');
+        } elseif ($ocupacao === 'vazias') {
+            $query->doesntHave('estoques');
         }
 
         $busca = trim((string) ($filtros['q'] ?? ''));
@@ -39,7 +45,13 @@ class LocalizacaoEstoqueService
 
         $perPage = max(1, min(200, (int) ($filtros['per_page'] ?? 20)));
 
-        return $query->paginate($perPage);
+        return $query
+            ->orderBy('area')
+            ->orderBy('corredor')
+            ->orderBy('setor')
+            ->orderBy('coluna')
+            ->orderBy('codigo_composto')
+            ->paginate($perPage);
     }
 
     public function criar(Deposito $deposito, array $dados): LocalizacaoEstoque

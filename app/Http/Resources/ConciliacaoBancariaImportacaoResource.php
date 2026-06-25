@@ -22,6 +22,8 @@ class ConciliacaoBancariaImportacaoResource extends JsonResource
             'saldo_final' => $this->saldo_final !== null ? (float) $this->saldo_final : null,
             'saldo_final_em' => $this->saldo_final_em?->toDateTimeString(),
             'arquivo_hash' => $this->arquivo_hash,
+            'origem' => $this->origem ?: 'ofx',
+            'origem_referencia' => $this->origem_referencia,
             'status' => $this->status,
             'resumo' => $this->resumo_json ?: [
                 'total' => 0,

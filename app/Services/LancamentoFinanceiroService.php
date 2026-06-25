@@ -202,6 +202,7 @@ class LancamentoFinanceiroService
             'valor',
             'data_pagamento','data_movimento','competencia',
             'observacoes',
+            'recibo_pessoa_nome','recibo_pessoa_documento',
             'referencia_type','referencia_id',
             'pagamento_type','pagamento_id',
             'created_by',
@@ -224,6 +225,13 @@ class LancamentoFinanceiroService
             $p['status'] = strtolower((string)$p['status']);
         }
 
+        foreach (['recibo_pessoa_nome', 'recibo_pessoa_documento'] as $campo) {
+            if (array_key_exists($campo, $p)) {
+                $valor = trim((string)($p[$campo] ?? ''));
+                $p[$campo] = $valor !== '' ? $valor : null;
+            }
+        }
+
         if (array_key_exists('data_pagamento', $p)) {
             $p['data_pagamento'] = $p['data_pagamento'] ? Carbon::parse($p['data_pagamento']) : null;
         }
@@ -237,5 +245,197 @@ class LancamentoFinanceiroService
         }
 
         return $p;
+    }
+
+    public function dadosRecibo(LancamentoFinanceiro $lancamento): array
+    {
+        $this->validarPodeEmitirRecibo($lancamento);
+
+        $tipo = $lancamento->tipo?->value ?? (string) $lancamento->tipo;
+        $empresa = [
+            'nome' => config('app.empresa_nome', 'G. P COMERCIO VAREJISTA DE MOVEIS LTDA'),
+            'documento' => config('app.empresa_documento', '54.129.336/0001-88'),
+            'ie' => config('app.empresa_ie', config('app.empresa_inscricao_estadual', '')),
+            'endereco' => config('app.empresa_endereco', 'TV RUI BARBOSA, 1820'),
+            'telefone' => config('app.empresa_telefone', '91984278816'),
+            'cep' => config('app.empresa_cep', '66035-220'),
+            'cidade' => config('app.empresa_cidade', 'Belém'),
+            'uf' => config('app.empresa_uf', 'PA'),
+        ];
+
+        $pessoaNome = trim((string) $lancamento->recibo_pessoa_nome);
+        $valorExtenso = ucfirst($this->valorPorExtenso((float) $lancamento->valor));
+        $descricao = trim((string) $lancamento->descricao);
+        $dataMovimento = $lancamento->data_movimento
+            ? Carbon::parse($lancamento->data_movimento)
+            : now();
+
+        if ($tipo === LancamentoTipo::DESPESA->value) {
+            $texto = "Recebi de {$empresa['nome']} a importância de {$valorExtenso} referente ao pagamento de {$descricao}.";
+            $assinatura = $pessoaNome;
+        } else {
+            $texto = "Recebemos de {$pessoaNome} a importância de {$valorExtenso} referente ao pagamento de {$descricao}.";
+            $assinatura = $empresa['nome'];
+        }
+
+        return [
+            'lancamento' => $lancamento,
+            'empresa' => $empresa,
+            'pessoa_nome' => $pessoaNome,
+            'pessoa_documento' => $lancamento->recibo_pessoa_documento,
+            'valor_formatado' => number_format((float) $lancamento->valor, 2, ',', '.'),
+            'valor_extenso' => $valorExtenso,
+            'texto' => $texto,
+            'cidade_data' => 'Belém (PA), ' . $this->dataPorExtenso($dataMovimento),
+            'assinatura' => $assinatura,
+        ];
+    }
+
+    private function validarPodeEmitirRecibo(LancamentoFinanceiro $lancamento): void
+    {
+        $tipo = $lancamento->tipo?->value ?? (string) $lancamento->tipo;
+        $status = $lancamento->status?->value ?? (string) $lancamento->status;
+
+        if (!in_array($tipo, [LancamentoTipo::RECEITA->value, LancamentoTipo::DESPESA->value], true)) {
+            throw ValidationException::withMessages([
+                'lancamento' => 'Recibo disponível apenas para receitas e despesas.',
+            ]);
+        }
+
+        if ($status !== LancamentoStatus::CONFIRMADO->value) {
+            throw ValidationException::withMessages([
+                'lancamento' => 'Recibo disponível apenas para movimentos confirmados.',
+            ]);
+        }
+
+        if (trim((string) $lancamento->recibo_pessoa_nome) === '') {
+            throw ValidationException::withMessages([
+                'recibo_pessoa_nome' => 'Informe a pessoa do recibo antes de emitir.',
+            ]);
+        }
+    }
+
+    private function valorPorExtenso(float $valor): string
+    {
+        $centavos = (int) round(($valor - floor($valor)) * 100);
+        $reais = (int) floor($valor);
+        $partes = [];
+
+        if ($reais > 0) {
+            $partes[] = $this->numeroPorExtenso($reais) . ' ' . ($reais === 1 ? 'real' : 'reais');
+        }
+
+        if ($centavos > 0) {
+            $partes[] = $this->numeroPorExtenso($centavos) . ' ' . ($centavos === 1 ? 'centavo' : 'centavos');
+        }
+
+        return $partes ? implode(' e ', $partes) : 'zero reais';
+    }
+
+    private function numeroPorExtenso(int $numero): string
+    {
+        if ($numero === 0) {
+            return 'zero';
+        }
+
+        $unidades = [
+            1 => 'um',
+            2 => 'dois',
+            3 => 'três',
+            4 => 'quatro',
+            5 => 'cinco',
+            6 => 'seis',
+            7 => 'sete',
+            8 => 'oito',
+            9 => 'nove',
+            10 => 'dez',
+            11 => 'onze',
+            12 => 'doze',
+            13 => 'treze',
+            14 => 'quatorze',
+            15 => 'quinze',
+            16 => 'dezesseis',
+            17 => 'dezessete',
+            18 => 'dezoito',
+            19 => 'dezenove',
+        ];
+        $dezenas = [
+            20 => 'vinte',
+            30 => 'trinta',
+            40 => 'quarenta',
+            50 => 'cinquenta',
+            60 => 'sessenta',
+            70 => 'setenta',
+            80 => 'oitenta',
+            90 => 'noventa',
+        ];
+        $centenas = [
+            100 => 'cem',
+            200 => 'duzentos',
+            300 => 'trezentos',
+            400 => 'quatrocentos',
+            500 => 'quinhentos',
+            600 => 'seiscentos',
+            700 => 'setecentos',
+            800 => 'oitocentos',
+            900 => 'novecentos',
+        ];
+
+        if ($numero < 20) {
+            return $unidades[$numero];
+        }
+
+        if ($numero < 100) {
+            $dezena = intdiv($numero, 10) * 10;
+            $resto = $numero % 10;
+
+            return $dezenas[$dezena] . ($resto ? ' e ' . $this->numeroPorExtenso($resto) : '');
+        }
+
+        if ($numero < 1000) {
+            if ($numero === 100) {
+                return 'cem';
+            }
+
+            $centena = intdiv($numero, 100) * 100;
+            $resto = $numero % 100;
+            $prefixo = $centena === 100 ? 'cento' : $centenas[$centena];
+
+            return $prefixo . ($resto ? ' e ' . $this->numeroPorExtenso($resto) : '');
+        }
+
+        if ($numero < 1000000) {
+            $milhares = intdiv($numero, 1000);
+            $resto = $numero % 1000;
+            $prefixo = $milhares === 1 ? 'mil' : $this->numeroPorExtenso($milhares) . ' mil';
+
+            return $prefixo . ($resto ? ($resto < 100 ? ' e ' : ' ') . $this->numeroPorExtenso($resto) : '');
+        }
+
+        $milhoes = intdiv($numero, 1000000);
+        $resto = $numero % 1000000;
+        $prefixo = $this->numeroPorExtenso($milhoes) . ' ' . ($milhoes === 1 ? 'milhão' : 'milhões');
+
+        return $prefixo . ($resto ? ($resto < 100 ? ' e ' : ' ') . $this->numeroPorExtenso($resto) : '');
+    }
+
+    private function dataPorExtenso(Carbon $data): string
+    {
+        $meses = [
+            1 => 'janeiro',
+            2 => 'fevereiro',
+            3 => 'março',
+            4 => 'abril',
+            5 => 'maio',
+            6 => 'junho',
+            7 => 'julho',
+            8 => 'agosto',
+            9 => 'setembro',
+            10 => 'outubro',
+            11 => 'novembro',
+            12 => 'dezembro',
+        ];
+
+        return $data->format('d') . ' de ' . $meses[(int) $data->format('n')] . ' de ' . $data->format('Y');
     }
 }

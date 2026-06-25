@@ -12,7 +12,9 @@ class StoreDespesaRecorrenteRequest extends FormRequest
     public function rules(): array
     {
         return [
+            'direcao' => ['nullable', Rule::in(['PAGAR','RECEBER'])],
             'fornecedor_id' => ['nullable', 'integer'],
+            'cliente_id' => ['nullable', 'integer', 'exists:clientes,id'],
             'descricao' => ['required', 'string', 'max:180'],
             'numero_documento' => ['nullable', 'string', 'max:80'],
             'centro_custo_id' => ['nullable', 'integer', 'exists:centros_custo,id'],
@@ -33,6 +35,7 @@ class StoreDespesaRecorrenteRequest extends FormRequest
             'data_fim' => ['nullable', 'date', 'after_or_equal:data_inicio'],
 
             'criar_conta_pagar_auto' => ['nullable', 'boolean'],
+            'ocorrencias_total' => ['nullable', 'integer', 'min:1', 'max:366'],
             'dias_antecedencia' => ['nullable', 'integer', 'min:0', 'max:365'],
             'status' => ['nullable', Rule::in(['ATIVA','PAUSADA','CANCELADA'])],
 
@@ -44,6 +47,7 @@ class StoreDespesaRecorrenteRequest extends FormRequest
     {
         $data = parent::validated($key, $default);
         $data['intervalo'] = (int)($data['intervalo'] ?? 1);
+        $data['direcao'] = $data['direcao'] ?? 'PAGAR';
         $data['status'] = $data['status'] ?? 'ATIVA';
         return $data;
     }

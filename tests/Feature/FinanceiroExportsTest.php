@@ -8,7 +8,9 @@ use App\Exports\ContasReceberExport;
 use App\Models\Cliente;
 use App\Models\ContaFinanceira;
 use App\Models\ContaPagar;
+use App\Models\ContaPagarPagamento;
 use App\Models\ContaReceber;
+use App\Models\ContaReceberPagamento;
 use App\Models\Fornecedor;
 use App\Models\LancamentoFinanceiro;
 use App\Models\Pedido;
@@ -16,6 +18,11 @@ use App\Models\Usuario;
 use App\Services\LancamentoFinanceiroService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
+use Maatwebsite\Excel\Concerns\ShouldAutoSize;
+use Maatwebsite\Excel\Concerns\WithColumnFormatting;
+use Maatwebsite\Excel\Concerns\WithEvents;
+use Maatwebsite\Excel\Concerns\WithStyles;
+use Maatwebsite\Excel\Events\AfterSheet;
 use Tests\TestCase;
 
 class FinanceiroExportsTest extends TestCase
@@ -185,6 +192,158 @@ class FinanceiroExportsTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.0.fornecedor.nome', 'Fornecedor Historico')
             ->assertJsonPath('data.0.fornecedor_nome', 'Fornecedor Historico');
+    }
+
+    public function test_titulos_exports_respeitam_conta_financeira_id(): void
+    {
+        $contaAlvo = ContaFinanceira::create([
+            'nome' => 'Conta Alvo Export',
+            'tipo' => 'banco',
+            'moeda' => 'BRL',
+            'ativo' => true,
+            'padrao' => false,
+            'saldo_inicial' => 0,
+        ]);
+        $contaFora = ContaFinanceira::create([
+            'nome' => 'Conta Fora Export',
+            'tipo' => 'banco',
+            'moeda' => 'BRL',
+            'ativo' => true,
+            'padrao' => false,
+            'saldo_inicial' => 0,
+        ]);
+
+        $pagarAlvo = ContaPagar::create([
+            'descricao' => 'Pagar conta alvo export',
+            'data_vencimento' => '2026-06-10',
+            'valor_bruto' => 100,
+            'desconto' => 0,
+            'juros' => 0,
+            'multa' => 0,
+            'status' => 'PAGA',
+            'forma_pagamento' => 'PIX',
+        ]);
+        $pagarFora = ContaPagar::create([
+            'descricao' => 'Pagar conta fora export',
+            'data_vencimento' => '2026-06-10',
+            'valor_bruto' => 120,
+            'desconto' => 0,
+            'juros' => 0,
+            'multa' => 0,
+            'status' => 'PAGA',
+            'forma_pagamento' => 'PIX',
+        ]);
+
+        ContaPagarPagamento::create([
+            'conta_pagar_id' => $pagarAlvo->id,
+            'data_pagamento' => '2026-06-11',
+            'valor' => 100,
+            'forma_pagamento' => 'PIX',
+            'usuario_id' => $this->usuario->id,
+            'conta_financeira_id' => $contaAlvo->id,
+        ]);
+        ContaPagarPagamento::create([
+            'conta_pagar_id' => $pagarFora->id,
+            'data_pagamento' => '2026-06-11',
+            'valor' => 120,
+            'forma_pagamento' => 'PIX',
+            'usuario_id' => $this->usuario->id,
+            'conta_financeira_id' => $contaFora->id,
+        ]);
+
+        $receberAlvo = ContaReceber::create([
+            'descricao' => 'Receber conta alvo export',
+            'data_vencimento' => '2026-06-12',
+            'valor_bruto' => 200,
+            'valor_liquido' => 200,
+            'valor_recebido' => 200,
+            'saldo_aberto' => 0,
+            'status' => 'PAGA',
+            'forma_recebimento' => 'BOLETO',
+        ]);
+        $receberFora = ContaReceber::create([
+            'descricao' => 'Receber conta fora export',
+            'data_vencimento' => '2026-06-12',
+            'valor_bruto' => 220,
+            'valor_liquido' => 220,
+            'valor_recebido' => 220,
+            'saldo_aberto' => 0,
+            'status' => 'PAGA',
+            'forma_recebimento' => 'BOLETO',
+        ]);
+
+        ContaReceberPagamento::create([
+            'conta_receber_id' => $receberAlvo->id,
+            'data_pagamento' => '2026-06-13',
+            'valor' => 200,
+            'forma_pagamento' => 'BOLETO',
+            'usuario_id' => $this->usuario->id,
+            'conta_financeira_id' => $contaAlvo->id,
+        ]);
+        ContaReceberPagamento::create([
+            'conta_receber_id' => $receberFora->id,
+            'data_pagamento' => '2026-06-13',
+            'valor' => 220,
+            'forma_pagamento' => 'BOLETO',
+            'usuario_id' => $this->usuario->id,
+            'conta_financeira_id' => $contaFora->id,
+        ]);
+
+        $params = [
+            'conta_financeira_id' => $contaAlvo->id,
+            'data_ini' => '2026-06-01',
+            'data_fim' => '2026-06-30',
+        ];
+
+        $this->assertSame(1, (new ContasPagarExport($params))->collection()->count());
+        $this->assertSame(1, ContasReceberExport::query($params)->count());
+
+        $this->get('/api/v1/financeiro/contas-pagar/export/excel?' . http_build_query($params))
+            ->assertOk()
+            ->assertHeader('content-disposition');
+        $this->get('/api/v1/financeiro/contas-pagar/export/pdf?' . http_build_query($params))
+            ->assertOk()
+            ->assertHeader('content-disposition');
+        $this->get('/api/v1/financeiro/contas-receber/export/excel?' . http_build_query($params))
+            ->assertOk()
+            ->assertHeader('content-disposition');
+        $this->get('/api/v1/financeiro/contas-receber/export/pdf?' . http_build_query($params))
+            ->assertOk()
+            ->assertHeader('content-disposition');
+
+        $pagarPdf = view('pdf.contas_pagar', [
+            'linhas' => collect([$pagarAlvo->fresh(['fornecedor', 'pagamentos'])]),
+            'gerado_em' => '24/06/2026 10:00',
+        ])->render();
+        $this->assertStringContainsString('Resumo do lancamento', $pagarPdf);
+        $this->assertStringContainsString('A pagar (R$)', $pagarPdf);
+        $this->assertStringNotContainsString('<th class="right">Bruto</th>', $pagarPdf);
+
+        $receberPdf = view('pdf.contas-receber', [
+            'contas' => collect([$receberAlvo->fresh(['cliente', 'pedido.cliente', 'pagamentos'])]),
+            'dataGeracao' => '24/06/2026 10:00',
+        ])->render();
+        $this->assertStringContainsString('Resumo do lancamento', $receberPdf);
+        $this->assertStringContainsString('A receber (R$)', $receberPdf);
+    }
+
+    public function test_titulos_exports_usam_formatacao_excel(): void
+    {
+        $pagar = new ContasPagarExport();
+        $receber = new ContasReceberExport();
+
+        foreach ([$pagar, $receber] as $export) {
+            $this->assertInstanceOf(ShouldAutoSize::class, $export);
+            $this->assertInstanceOf(WithColumnFormatting::class, $export);
+            $this->assertInstanceOf(WithEvents::class, $export);
+            $this->assertInstanceOf(WithStyles::class, $export);
+            $this->assertArrayHasKey(AfterSheet::class, $export->registerEvents());
+        }
+
+        $this->assertArrayHasKey('G', $pagar->columnFormats());
+        $this->assertArrayHasKey('M', $pagar->columnFormats());
+        $this->assertArrayHasKey('H', $receber->columnFormats());
+        $this->assertArrayHasKey('J', $receber->columnFormats());
     }
 
     public function test_lancamentos_exports_respeitam_filtros_e_retornam_arquivo(): void

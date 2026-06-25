@@ -14,6 +14,8 @@ class ConciliacaoBancariaTransacaoResource extends JsonResource
             'conta_financeira_id' => (int) $this->conta_financeira_id,
             'fit_id' => $this->fit_id,
             'identificador' => $this->identificador,
+            'origem' => $this->origem ?: 'ofx',
+            'origem_transacao_id' => $this->origem_transacao_id,
             'data_movimento' => $this->data_movimento?->format('Y-m-d'),
             'valor' => (float) $this->valor,
             'tipo_ofx' => $this->tipo_ofx,

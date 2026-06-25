@@ -102,4 +102,12 @@ class LancamentoFinanceiroController extends Controller
 
         return $pdf->download('extrato_movimentacoes.pdf');
     }
+
+    public function recibo(LancamentoFinanceiro $lancamento): Response
+    {
+        $pdf = Pdf::loadView('pdf.financeiro-recibo', $this->service->dadosRecibo($lancamento))
+            ->setPaper('a4', 'portrait');
+
+        return $pdf->download("recibo-movimento-{$lancamento->id}.pdf");
+    }
 }

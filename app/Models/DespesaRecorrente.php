@@ -14,7 +14,9 @@ class DespesaRecorrente extends Model
     protected $table = 'despesas_recorrentes';
 
     protected $fillable = [
+        'direcao',
         'fornecedor_id',
+        'cliente_id',
         'descricao',
         'numero_documento',
         'categoria_id',
@@ -31,6 +33,7 @@ class DespesaRecorrente extends Model
         'data_inicio',
         'data_fim',
         'criar_conta_pagar_auto',
+        'ocorrencias_total',
         'dias_antecedencia',
         'status',
         'observacoes',
@@ -46,6 +49,7 @@ class DespesaRecorrente extends Model
         'dia_vencimento' => 'integer',
         'mes_vencimento' => 'integer',
         'criar_conta_pagar_auto' => 'boolean',
+        'ocorrencias_total' => 'integer',
         'dias_antecedencia' => 'integer',
         'data_inicio' => 'date',
         'data_fim' => 'date',
@@ -69,6 +73,11 @@ class DespesaRecorrente extends Model
     public function fornecedor(): BelongsTo
     {
         return $this->belongsTo(Fornecedor::class, 'fornecedor_id')->withDefault();
+    }
+
+    public function cliente(): BelongsTo
+    {
+        return $this->belongsTo(Cliente::class, 'cliente_id')->withDefault();
     }
 
      public function usuario(): BelongsTo

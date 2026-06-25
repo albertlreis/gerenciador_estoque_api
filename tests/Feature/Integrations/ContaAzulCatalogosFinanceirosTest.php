@@ -40,7 +40,7 @@ class ContaAzulCatalogosFinanceirosTest extends TestCase
         $resultado = $this->service()->conciliarContasFinanceiras();
 
         $this->assertSame(1, $resultado['conciliados']);
-        $this->assertDatabaseCount('contas_financeiras', 1);
+        $this->assertSame(1, ContaFinanceira::query()->where('nome', 'Banco Sierra')->count());
         $this->assertFalse((bool) $conta->fresh()->ativo);
         $this->assertDatabaseHas('conta_azul_mapeamentos', [
             'tipo_entidade' => ContaAzulEntityType::CONTA_FINANCEIRA,

@@ -3,9 +3,7 @@
 namespace App\Services\Dashboard\Queries;
 
 use App\Enums\PedidoStatus;
-use App\Helpers\ConfiguracaoHelper;
-use App\Helpers\PedidoHelper;
-use App\Models\Pedido;
+use App\Services\PedidoStatusFluxoService;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use Illuminate\Database\Query\Builder;
@@ -196,19 +194,20 @@ class AdminDashboardQuery
         $pedidoIds = $pedidos->pluck('id')->map(fn ($id) => (int) $id)->all();
         $historicos = $this->historicosPorPedido($pedidoIds);
         $previsoesManuais = $this->previsoesManuaisPorPedido($pedidoIds);
-        $prazos = ConfiguracaoHelper::prazos();
+        $statusFluxo = app(PedidoStatusFluxoService::class);
         $hoje = now()->startOfDay();
 
         return $pedidos
-            ->map(function ($pedido) use ($historicos, $previsoesManuais, $prazos, $hoje) {
+            ->map(function ($pedido) use ($historicos, $previsoesManuais, $statusFluxo, $hoje) {
                 $pedidoId = (int) $pedido->id;
                 $statusAtual = $pedido->status ?: 'sem_status';
                 $datasHistorico = $historicos[$pedidoId] ?? [];
                 $manuais = $previsoesManuais[$pedidoId] ?? [];
-                $fluxo = $this->fluxoPedido($statusAtual);
+                $tipoFluxo = $statusFluxo->tipoFluxoPorStatus($statusAtual);
+                $fluxo = $statusFluxo->fluxoDetalhadoPorTipo($tipoFluxo);
                 $proximoStatus = $this->proximoStatusPendente($fluxo, array_keys($datasHistorico));
-                $previsoes = PedidoHelper::previsoes($datasHistorico, $prazos, $manuais);
-                $dataPrevista = $proximoStatus ? ($previsoes[$proximoStatus->value] ?? null) : null;
+                $previsoes = $statusFluxo->previsoesPorTipo($tipoFluxo, $datasHistorico, $manuais);
+                $dataPrevista = $proximoStatus ? ($previsoes[$proximoStatus['codigo']] ?? null) : null;
                 $dataPrevista = $dataPrevista ? CarbonImmutable::parse($dataPrevista)->startOfDay() : null;
                 $prioridade = $this->prioridadePedido($dataPrevista, $hoje);
 
@@ -219,15 +218,15 @@ class AdminDashboardQuery
                     'valor_total' => (float) ($pedido->valor_total ?? 0),
                     'status' => $statusAtual,
                     'status_label' => $this->statusLabel($statusAtual),
-                    'proximo_status' => $proximoStatus?->value,
-                    'proximo_status_label' => $proximoStatus?->label(),
+                    'proximo_status' => $proximoStatus['codigo'] ?? null,
+                    'proximo_status_label' => $proximoStatus['label'] ?? null,
                     'data_pedido' => $pedido->data_pedido,
                     'data_prevista' => $dataPrevista?->toDateString(),
                     'dias_para_previsao' => $dataPrevista ? $hoje->diffInDays($dataPrevista, false) : null,
                     'prioridade' => $prioridade['key'],
                     'prioridade_label' => $prioridade['label'],
                     'prioridade_ordem' => $prioridade['ordem'],
-                    'previsao_manual' => $proximoStatus ? array_key_exists($proximoStatus->value, $manuais) : false,
+                    'previsao_manual' => $proximoStatus ? array_key_exists($proximoStatus['codigo'], $manuais) : false,
                 ];
             })
             ->sortBy([
@@ -283,34 +282,23 @@ class AdminDashboardQuery
             ->all();
     }
 
-    /**
-     * @return PedidoStatus[]
-     */
     private function fluxoPedido(?string $statusAtual): array
     {
-        if (in_array($statusAtual, [
-            PedidoStatus::CONSIGNADO->value,
-            PedidoStatus::DEVOLUCAO_CONSIGNACAO->value,
-        ], true)) {
-            return [
-                PedidoStatus::PEDIDO_CRIADO,
-                PedidoStatus::CONSIGNADO,
-                PedidoStatus::DEVOLUCAO_CONSIGNACAO,
-                PedidoStatus::FINALIZADO,
-            ];
-        }
+        $statusFluxo = app(PedidoStatusFluxoService::class);
 
-        return PedidoHelper::fluxoPorTipo(new Pedido());
+        return $statusFluxo
+            ->fluxoDetalhadoPorTipo($statusFluxo->tipoFluxoPorStatus($statusAtual))
+            ->all();
     }
 
     /**
-     * @param PedidoStatus[] $fluxo
+     * @param array<int, array<string, mixed>> $fluxo
      * @param string[] $statusRegistrados
      */
-    private function proximoStatusPendente(array $fluxo, array $statusRegistrados): ?PedidoStatus
+    private function proximoStatusPendente(iterable $fluxo, array $statusRegistrados): ?array
     {
         foreach ($fluxo as $status) {
-            if (!in_array($status->value, $statusRegistrados, true)) {
+            if (!in_array($status['codigo'], $statusRegistrados, true)) {
                 return $status;
             }
         }
@@ -343,7 +331,7 @@ class AdminDashboardQuery
 
     private function statusLabel(?string $status): string
     {
-        return PedidoStatus::tryFrom((string) $status)?->label()
+        return app(PedidoStatusFluxoService::class)->statusMeta($status)['label']
             ?? ucfirst(str_replace('_', ' ', (string) ($status ?: 'sem_status')));
     }
 

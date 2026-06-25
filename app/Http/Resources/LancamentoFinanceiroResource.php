@@ -53,6 +53,8 @@ class LancamentoFinanceiroResource extends JsonResource
             ]),
 
             'observacoes'      => $this->observacoes,
+            'recibo_pessoa_nome' => $this->recibo_pessoa_nome,
+            'recibo_pessoa_documento' => $this->recibo_pessoa_documento,
 
             'referencia_type'  => $this->referencia_type,
             'referencia_id'    => $this->referencia_id ? (int) $this->referencia_id : null,

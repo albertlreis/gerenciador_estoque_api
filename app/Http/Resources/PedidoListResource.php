@@ -3,6 +3,7 @@
 namespace App\Http\Resources;
 
 use App\Enums\PedidoStatus;
+use App\Services\PedidoStatusFluxoService;
 use App\Traits\PedidoStatusTrait;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
@@ -36,9 +37,9 @@ class PedidoListResource extends JsonResource
     public function toArray($request): array
     {
         $entregaResumo = app(\App\Services\EntregaProdutoService::class)->resumoPedido($this->resource);
-        $statusAtualEnum  = $this->getStatusAtualEnum($this->resource);
-        $statusAtualRaw   = $this->statusAtual?->getRawOriginal('status');
-        $statusAtualValue = $statusAtualEnum?->value ?? (is_string($statusAtualRaw) ? $statusAtualRaw : null);
+        $statusFluxo = app(PedidoStatusFluxoService::class);
+        $statusAtualValue = $this->getStatusAtualCodigo($this->resource);
+        $statusAtualMeta = $statusFluxo->statusMeta($statusAtualValue);
 
         $dataUltimoStatus = $this->getDataUltimoStatus($this->resource);
         $proximoStatus    = $this->getProximoStatus($this->resource);
@@ -82,9 +83,9 @@ class PedidoListResource extends JsonResource
             'valor_total'            => $this->valor_total,
 
             'status'                 => $statusAtualValue,
-            'status_label'           => $statusAtualEnum?->label(),
-            'proximo_status'         => $proximoStatus?->value,
-            'proximo_status_label'   => $proximoStatus?->label(),
+            'status_label'           => $statusAtualValue ? $statusAtualMeta['label'] : null,
+            'proximo_status'         => $proximoStatus['codigo'] ?? null,
+            'proximo_status_label'   => $proximoStatus['label'] ?? null,
             'previsao'               => $previsao?->toDateString(),
             'atrasado'               => $atrasadoFluxo,
 

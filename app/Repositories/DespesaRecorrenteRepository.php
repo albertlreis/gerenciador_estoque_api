@@ -14,8 +14,12 @@ class DespesaRecorrenteRepository
     public function queryBase(array $filtros = []): Builder
     {
         $q = DespesaRecorrente::query()
-            ->with(['fornecedor', 'usuario'])
+            ->with(['fornecedor', 'cliente', 'usuario'])
             ->orderByDesc('id');
+
+        if (!empty($filtros['direcao'])) {
+            $q->where('direcao', $filtros['direcao']);
+        }
 
         if (!empty($filtros['status'])) {
             $q->where('status', $filtros['status']);
@@ -31,6 +35,10 @@ class DespesaRecorrenteRepository
 
         if (!empty($filtros['fornecedor_id'])) {
             $q->where('fornecedor_id', (int) $filtros['fornecedor_id']);
+        }
+
+        if (!empty($filtros['cliente_id'])) {
+            $q->where('cliente_id', (int) $filtros['cliente_id']);
         }
 
         if (!empty($filtros['categoria_id'])) {

@@ -16,11 +16,14 @@ class ConciliacaoBancariaTransacao extends Model
         'fit_id',
         'identificador',
         'hash_unico',
+        'origem',
+        'origem_transacao_id',
         'data_movimento',
         'valor',
         'tipo_ofx',
         'checknum',
         'memo',
+        'raw_json',
         'status',
         'candidato_tipo',
         'candidato_id',
@@ -39,6 +42,7 @@ class ConciliacaoBancariaTransacao extends Model
     protected $casts = [
         'data_movimento' => 'date',
         'valor' => 'decimal:2',
+        'raw_json' => 'array',
         'candidato_json' => 'array',
         'conciliado_em' => 'datetime',
     ];

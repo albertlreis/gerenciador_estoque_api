@@ -111,13 +111,14 @@ class PedidoHelper
     public static function proximoStatusEsperado(Pedido $pedido): ?PedidoStatus
     {
         $fluxo = self::fluxoPorTipo($pedido);
-        $statusAtual = $pedido->statusAtual?->status;
+        $statusAtual = $pedido->statusAtual?->getRawOriginal('status') ?? $pedido->statusAtual?->status;
+        $statusAtual = $statusAtual instanceof PedidoStatus ? $statusAtual->value : $statusAtual;
 
         if (!$statusAtual) {
             return null;
         }
 
-        $indice = array_search($statusAtual, $fluxo, true);
+        $indice = array_search($statusAtual, array_map(fn (PedidoStatus $status) => $status->value, $fluxo), true);
         return $indice !== false && isset($fluxo[$indice + 1])
             ? $fluxo[$indice + 1]
             : null;
@@ -131,7 +132,8 @@ class PedidoHelper
      */
     public static function previsaoProximoStatus(Pedido $pedido): ?Carbon
     {
-        $statusAtual = $pedido->statusAtual?->status;
+        $statusAtual = $pedido->statusAtual?->getRawOriginal('status') ?? $pedido->statusAtual?->status;
+        $statusAtual = $statusAtual instanceof PedidoStatus ? $statusAtual->value : $statusAtual;
         $dataUltimoStatus = $pedido->statusAtual?->data_status;
         $proximoStatus = self::proximoStatusEsperado($pedido);
 
@@ -140,7 +142,7 @@ class PedidoHelper
         }
 
         $previsaoManual = $pedido->relationLoaded('statusPrevisoes')
-            ? $pedido->statusPrevisoes->first(fn ($previsao) => ($previsao->status?->value ?? $previsao->status) === $proximoStatus->value)
+            ? $pedido->statusPrevisoes->first(fn ($previsao) => ($previsao->getRawOriginal('status') ?? $previsao->status) === $proximoStatus->value)
             : $pedido->statusPrevisoes()->where('status', $proximoStatus->value)->first();
 
         if ($previsaoManual?->data_prevista) {

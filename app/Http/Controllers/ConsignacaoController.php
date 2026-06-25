@@ -228,7 +228,7 @@ class ConsignacaoController extends Controller
                 ->lockForUpdate()
                 ->findOrFail($pedido->id);
 
-            $statusAtual = $pedidoAtual->statusAtual?->status?->value ?? $pedidoAtual->statusAtual?->status;
+            $statusAtual = $pedidoAtual->statusAtual?->getRawOriginal('status') ?? $pedidoAtual->statusAtual?->status;
             if ($statusAtual === PedidoStatus::CANCELADO->value) {
                 abort(422, 'Nao e possivel adicionar produtos a um pedido cancelado.');
             }
@@ -1098,7 +1098,7 @@ class ConsignacaoController extends Controller
 
     private function isRoteiroDeDevolucao(Pedido $pedido): bool
     {
-        $statusAtual = $pedido->statusAtual?->status?->value ?? $pedido->statusAtual?->status;
+        $statusAtual = $pedido->statusAtual?->getRawOriginal('status') ?? $pedido->statusAtual?->status;
         if ($statusAtual === 'devolucao_consignacao') {
             return true;
         }

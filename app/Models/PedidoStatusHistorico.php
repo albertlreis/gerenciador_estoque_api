@@ -2,7 +2,7 @@
 
 namespace App\Models;
 
-use App\Enums\PedidoStatus;
+use BackedEnum;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -26,8 +26,12 @@ class PedidoStatusHistorico extends Model
 
     protected $casts = [
         'data_status' => 'datetime',
-        'status' => PedidoStatus::class,
     ];
+
+    public function setStatusAttribute(mixed $value): void
+    {
+        $this->attributes['status'] = $value instanceof BackedEnum ? $value->value : $value;
+    }
 
     /**
      * Pedido relacionado ao status.

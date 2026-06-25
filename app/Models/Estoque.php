@@ -4,7 +4,6 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Support\Facades\DB;
 
 class Estoque extends Model
@@ -17,9 +16,7 @@ class Estoque extends Model
         'quantidade',
         'data_entrada_estoque_atual',
         'ultima_venda_em',
-        'corredor',
-        'prateleira',
-        'nivel',
+        'localizacao_id',
     ];
 
     protected $casts = [
@@ -40,10 +37,10 @@ class Estoque extends Model
         return $this->belongsTo(Deposito::class, 'id_deposito')->withDefault();
     }
 
-    /** @return HasOne<LocalizacaoEstoque> */
-    public function localizacao(): HasOne
+    /** @return BelongsTo<LocalizacaoEstoque,Estoque> */
+    public function localizacao(): BelongsTo
     {
-        return $this->hasOne(LocalizacaoEstoque::class, 'estoque_id');
+        return $this->belongsTo(LocalizacaoEstoque::class, 'localizacao_id');
     }
 
     public function quantidadeReservadaAberta(): int

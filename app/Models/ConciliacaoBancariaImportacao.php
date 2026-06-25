@@ -23,6 +23,8 @@ class ConciliacaoBancariaImportacao extends Model
         'saldo_final',
         'saldo_final_em',
         'arquivo_hash',
+        'origem',
+        'origem_referencia',
         'status',
         'resumo_json',
         'created_by',

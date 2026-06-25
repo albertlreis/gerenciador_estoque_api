@@ -66,7 +66,7 @@ class FinanceiroTitulosKpisTest extends TestCase
             'forma_pagamento' => 'PIX',
         ]);
 
-        ContaPagar::create([
+        $parcial = ContaPagar::create([
             'fornecedor_id' => $fornecedor->id,
             'categoria_id' => $categoria->id,
             'centro_custo_id' => $centro->id,
@@ -78,6 +78,15 @@ class FinanceiroTitulosKpisTest extends TestCase
             'multa' => 0,
             'status' => 'PARCIAL',
             'forma_pagamento' => 'PIX',
+        ]);
+
+        ContaPagarPagamento::create([
+            'conta_pagar_id' => $parcial->id,
+            'data_pagamento' => now()->toDateString(),
+            'valor' => 40,
+            'forma_pagamento' => 'PIX',
+            'usuario_id' => $this->usuario->id,
+            'conta_financeira_id' => $this->contaFinanceira->id,
         ]);
 
         $paga = ContaPagar::create([
@@ -105,6 +114,34 @@ class FinanceiroTitulosKpisTest extends TestCase
 
         ContaPagar::create([
             'fornecedor_id' => $fornecedor->id,
+            'categoria_id' => $categoria->id,
+            'centro_custo_id' => $centro->id,
+            'descricao' => 'Pagar vencendo hoje KPI',
+            'data_vencimento' => now()->toDateString(),
+            'valor_bruto' => 30,
+            'desconto' => 0,
+            'juros' => 0,
+            'multa' => 0,
+            'status' => 'ABERTA',
+            'forma_pagamento' => 'PIX',
+        ]);
+
+        ContaPagar::create([
+            'fornecedor_id' => $fornecedor->id,
+            'categoria_id' => $categoria->id,
+            'centro_custo_id' => $centro->id,
+            'descricao' => 'Pagar cancelada KPI',
+            'data_vencimento' => now()->subDay()->toDateString(),
+            'valor_bruto' => 500,
+            'desconto' => 0,
+            'juros' => 0,
+            'multa' => 0,
+            'status' => 'CANCELADA',
+            'forma_pagamento' => 'PIX',
+        ]);
+
+        ContaPagar::create([
+            'fornecedor_id' => $fornecedor->id,
             'descricao' => 'Pagar fora dos filtros',
             'data_vencimento' => now()->subDay()->toDateString(),
             'valor_bruto' => 999,
@@ -124,21 +161,43 @@ class FinanceiroTitulosKpisTest extends TestCase
 
         $this->getJson('/api/v1/financeiro/contas-pagar/kpis?' . http_build_query($params))
             ->assertOk()
-            ->assertJsonPath('total_liquido', 350)
-            ->assertJsonPath('total_aberto', 300)
+            ->assertJsonPath('total_liquido', 380)
+            ->assertJsonPath('total_periodo', 380)
+            ->assertJsonPath('total_aberto', 290)
             ->assertJsonPath('total_vencido', 100)
-            ->assertJsonPath('total_pago', 50)
-            ->assertJsonPath('qtd_abertas', 2)
+            ->assertJsonPath('total_pago', 90)
+            ->assertJsonPath('total_vencendo_hoje', 30)
+            ->assertJsonPath('total_a_vencer', 160)
+            ->assertJsonPath('qtd_abertas', 3)
             ->assertJsonPath('qtd_vencidas', 1)
+            ->assertJsonPath('qtd_vencendo_hoje', 1)
+            ->assertJsonPath('qtd_a_vencer', 1)
             ->assertJsonPath('qtd_pagas', 1)
-            ->assertJsonPath('valor_pago_periodo', 50)
+            ->assertJsonPath('valor_pago_periodo', 90)
             ->assertJsonPath('contas_vencidas', 1)
             ->assertJsonPath('contas_pagas', 1);
 
         $this->getJson('/api/v1/financeiro/contas-pagar?' . http_build_query([...$params, 'em_aberto' => true]))
             ->assertOk()
-            ->assertJsonCount(2, 'data')
+            ->assertJsonCount(3, 'data')
             ->assertJsonMissing(['descricao' => 'Pagar quitada KPI']);
+
+        $paramsComConta = [...$params, 'conta_financeira_id' => $this->contaFinanceira->id];
+
+        $this->getJson('/api/v1/financeiro/contas-pagar/kpis?' . http_build_query($paramsComConta))
+            ->assertOk()
+            ->assertJsonPath('total_liquido', 250)
+            ->assertJsonPath('total_aberto', 160)
+            ->assertJsonPath('total_vencido', 0)
+            ->assertJsonPath('total_pago', 90)
+            ->assertJsonPath('total_a_vencer', 160)
+            ->assertJsonPath('qtd_abertas', 1)
+            ->assertJsonPath('qtd_pagas', 1);
+
+        $this->getJson('/api/v1/financeiro/contas-pagar?' . http_build_query([...$paramsComConta, 'em_aberto' => true]))
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonMissing(['descricao' => 'Pagar vencida KPI']);
     }
 
     public function test_kpis_contas_receber_usam_contrato_padronizado_e_filtros_operacionais(): void
@@ -161,7 +220,7 @@ class FinanceiroTitulosKpisTest extends TestCase
             'forma_recebimento' => 'BOLETO',
         ]);
 
-        ContaReceber::create([
+        $parcial = ContaReceber::create([
             'cliente_id' => $cliente->id,
             'categoria_id' => $categoria->id,
             'centro_custo_id' => $centro->id,
@@ -173,6 +232,15 @@ class FinanceiroTitulosKpisTest extends TestCase
             'multa' => 0,
             'status' => 'PARCIAL',
             'forma_recebimento' => 'BOLETO',
+        ]);
+
+        ContaReceberPagamento::create([
+            'conta_receber_id' => $parcial->id,
+            'data_pagamento' => now()->toDateString(),
+            'valor' => 25,
+            'forma_pagamento' => 'BOLETO',
+            'usuario_id' => $this->usuario->id,
+            'conta_financeira_id' => $this->contaFinanceira->id,
         ]);
 
         $recebida = ContaReceber::create([
@@ -200,6 +268,34 @@ class FinanceiroTitulosKpisTest extends TestCase
 
         ContaReceber::create([
             'cliente_id' => $cliente->id,
+            'categoria_id' => $categoria->id,
+            'centro_custo_id' => $centro->id,
+            'descricao' => 'Receber vencendo hoje KPI',
+            'data_vencimento' => now()->toDateString(),
+            'valor_bruto' => 30,
+            'desconto' => 0,
+            'juros' => 0,
+            'multa' => 0,
+            'status' => 'ABERTA',
+            'forma_recebimento' => 'BOLETO',
+        ]);
+
+        ContaReceber::create([
+            'cliente_id' => $cliente->id,
+            'categoria_id' => $categoria->id,
+            'centro_custo_id' => $centro->id,
+            'descricao' => 'Receber cancelada KPI',
+            'data_vencimento' => now()->subDay()->toDateString(),
+            'valor_bruto' => 500,
+            'desconto' => 0,
+            'juros' => 0,
+            'multa' => 0,
+            'status' => 'CANCELADA',
+            'forma_recebimento' => 'BOLETO',
+        ]);
+
+        ContaReceber::create([
+            'cliente_id' => $cliente->id,
             'descricao' => 'Receber fora dos filtros',
             'data_vencimento' => now()->subDay()->toDateString(),
             'valor_bruto' => 999,
@@ -219,17 +315,39 @@ class FinanceiroTitulosKpisTest extends TestCase
 
         $this->getJson('/api/v1/financeiro/contas-receber/kpis?' . http_build_query($params))
             ->assertOk()
-            ->assertJsonPath('total_liquido', 270)
-            ->assertJsonPath('total_aberto', 200)
+            ->assertJsonPath('total_liquido', 300)
+            ->assertJsonPath('total_periodo', 300)
+            ->assertJsonPath('total_aberto', 205)
             ->assertJsonPath('total_vencido', 120)
-            ->assertJsonPath('total_recebido', 70)
-            ->assertJsonPath('qtd_abertas', 2)
+            ->assertJsonPath('total_recebido', 95)
+            ->assertJsonPath('total_vencendo_hoje', 30)
+            ->assertJsonPath('total_a_vencer', 55)
+            ->assertJsonPath('qtd_abertas', 3)
             ->assertJsonPath('qtd_vencidas', 1)
+            ->assertJsonPath('qtd_vencendo_hoje', 1)
+            ->assertJsonPath('qtd_a_vencer', 1)
             ->assertJsonPath('qtd_recebidas', 1);
 
         $this->getJson('/api/v1/financeiro/contas-receber?' . http_build_query([...$params, 'em_aberto' => true]))
             ->assertOk()
-            ->assertJsonCount(2, 'data')
+            ->assertJsonCount(3, 'data')
             ->assertJsonMissing(['descricao' => 'Receber quitada KPI']);
+
+        $paramsComConta = [...$params, 'conta_financeira_id' => $this->contaFinanceira->id];
+
+        $this->getJson('/api/v1/financeiro/contas-receber/kpis?' . http_build_query($paramsComConta))
+            ->assertOk()
+            ->assertJsonPath('total_liquido', 150)
+            ->assertJsonPath('total_aberto', 55)
+            ->assertJsonPath('total_vencido', 0)
+            ->assertJsonPath('total_recebido', 95)
+            ->assertJsonPath('total_a_vencer', 55)
+            ->assertJsonPath('qtd_abertas', 1)
+            ->assertJsonPath('qtd_recebidas', 1);
+
+        $this->getJson('/api/v1/financeiro/contas-receber?' . http_build_query([...$paramsComConta, 'em_aberto' => true]))
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonMissing(['descricao' => 'Receber vencida KPI']);
     }
 }

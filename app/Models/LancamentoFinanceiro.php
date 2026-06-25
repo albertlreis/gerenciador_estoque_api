@@ -31,6 +31,8 @@ class LancamentoFinanceiro extends Model
         'competencia',
 
         'observacoes',
+        'recibo_pessoa_nome',
+        'recibo_pessoa_documento',
 
         'referencia_type',
         'referencia_id',

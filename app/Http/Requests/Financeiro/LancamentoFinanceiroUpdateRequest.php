@@ -10,11 +10,29 @@ class LancamentoFinanceiroUpdateRequest extends FormRequest
 
     protected function prepareForValidation(): void
     {
-        $this->merge([
-            'descricao' => $this->input('descricao') !== null ? trim((string)$this->input('descricao')) : null,
-            'tipo'      => $this->input('tipo') ? strtolower((string)$this->input('tipo')) : null,
-            'status'    => $this->input('status') ? strtolower((string)$this->input('status')) : null,
-        ]);
+        $input = $this->all();
+        $data = [];
+
+        if (array_key_exists('descricao', $input)) {
+            $data['descricao'] = $this->input('descricao') !== null ? trim((string)$this->input('descricao')) : null;
+        }
+
+        if (array_key_exists('tipo', $input)) {
+            $data['tipo'] = $this->input('tipo') ? strtolower((string)$this->input('tipo')) : null;
+        }
+
+        if (array_key_exists('status', $input)) {
+            $data['status'] = $this->input('status') ? strtolower((string)$this->input('status')) : null;
+        }
+
+        foreach (['recibo_pessoa_nome', 'recibo_pessoa_documento'] as $campo) {
+            if (array_key_exists($campo, $input)) {
+                $valor = trim((string)($this->input($campo) ?? ''));
+                $data[$campo] = $valor !== '' ? $valor : null;
+            }
+        }
+
+        $this->merge($data);
     }
 
     public function rules(): array
@@ -34,6 +52,8 @@ class LancamentoFinanceiroUpdateRequest extends FormRequest
             'competencia'    => ['sometimes', 'nullable', 'date'],
 
             'observacoes'    => ['sometimes', 'nullable', 'string'],
+            'recibo_pessoa_nome' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'recibo_pessoa_documento' => ['sometimes', 'nullable', 'string', 'max:60'],
 
             'referencia_type'=> ['sometimes', 'nullable', 'string', 'max:120'],
             'referencia_id'  => ['sometimes', 'nullable', 'integer', 'min:1'],

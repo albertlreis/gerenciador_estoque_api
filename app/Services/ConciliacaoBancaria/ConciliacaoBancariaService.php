@@ -35,9 +35,28 @@ class ConciliacaoBancariaService
         $raw = (string) file_get_contents($file->getRealPath());
         $parsed = $this->parser->parse($raw);
 
-        $this->validarContaOfx($conta, $parsed);
+        return $this->importarExtratoNormalizado($conta, $parsed, 'ofx', null, $raw);
+    }
 
-        return DB::transaction(function () use ($raw, $parsed, $conta) {
+    /**
+     * @param array<string,mixed> $parsed
+     */
+    public function importarExtratoNormalizado(
+        ContaFinanceira|int $contaFinanceira,
+        array $parsed,
+        string $origem,
+        ?string $origemReferencia = null,
+        ?string $rawHashSource = null
+    ): ConciliacaoBancariaImportacao {
+        $conta = $contaFinanceira instanceof ContaFinanceira
+            ? $contaFinanceira
+            : ContaFinanceira::query()->findOrFail($contaFinanceira);
+
+        $this->validarContaExtrato($conta, $parsed);
+        $hashSource = $rawHashSource ?: json_encode($parsed, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        $hashSource = is_string($hashSource) ? $hashSource : serialize($parsed);
+
+        return DB::transaction(function () use ($hashSource, $parsed, $conta, $origem, $origemReferencia) {
             $importacao = ConciliacaoBancariaImportacao::create([
                 'conta_financeira_id' => $conta->id,
                 'banco_codigo' => $parsed['banco_codigo'],
@@ -50,12 +69,14 @@ class ConciliacaoBancariaService
                 'data_fim' => $parsed['data_fim'],
                 'saldo_final' => $parsed['saldo_final'],
                 'saldo_final_em' => $parsed['saldo_final_em'],
-                'arquivo_hash' => hash('sha256', $raw),
+                'arquivo_hash' => hash('sha256', $hashSource),
+                'origem' => $origem,
+                'origem_referencia' => $origemReferencia,
                 'status' => 'processada',
                 'created_by' => auth()->id(),
             ]);
 
-            foreach ($parsed['transacoes'] as $transaction) {
+            foreach (($parsed['transacoes'] ?? []) as $transaction) {
                 $this->upsertTransacao($importacao, $conta, $transaction);
             }
 
@@ -284,11 +305,14 @@ class ConciliacaoBancariaService
             'fit_id' => $transaction['fit_id'] ?? null,
             'identificador' => $transaction['identificador'],
             'hash_unico' => $transaction['hash_unico'],
+            'origem' => $transaction['origem'] ?? $importacao->origem ?? 'ofx',
+            'origem_transacao_id' => $transaction['origem_transacao_id'] ?? null,
             'data_movimento' => $transaction['data_movimento'],
             'valor' => $transaction['valor'],
             'tipo_ofx' => $transaction['tipo_ofx'] ?? null,
             'checknum' => $transaction['checknum'] ?? null,
             'memo' => $transaction['memo'] ?? null,
+            'raw_json' => $transaction['raw_json'] ?? null,
             'forma_pagamento' => $existing?->forma_pagamento ?: $this->matcher->inferFormaPagamento($transaction['memo'] ?? null),
         ];
 
@@ -428,13 +452,13 @@ class ConciliacaoBancariaService
     /**
      * @param array<string,mixed> $parsed
      */
-    private function validarContaOfx(ContaFinanceira $conta, array $parsed): void
+    private function validarContaExtrato(ContaFinanceira $conta, array $parsed): void
     {
         $bankLocal = $this->digits($conta->banco_codigo);
         $bankOfx = $this->digits($parsed['banco_codigo'] ?? null);
         if ($bankLocal !== '' && $bankOfx !== '' && ltrim($bankLocal, '0') !== ltrim($bankOfx, '0')) {
             throw ValidationException::withMessages([
-                'conta_financeira_id' => 'O banco do OFX nao corresponde a conta financeira selecionada.',
+                'conta_financeira_id' => 'O banco do extrato nao corresponde a conta financeira selecionada.',
             ]);
         }
 
@@ -453,7 +477,7 @@ class ConciliacaoBancariaService
 
         if (!$matches) {
             throw ValidationException::withMessages([
-                'conta_financeira_id' => 'A conta bancaria do OFX nao corresponde a conta financeira selecionada.',
+                'conta_financeira_id' => 'A conta bancaria do extrato nao corresponde a conta financeira selecionada.',
             ]);
         }
     }

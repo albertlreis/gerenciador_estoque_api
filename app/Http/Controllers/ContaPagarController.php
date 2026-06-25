@@ -48,6 +48,7 @@ class ContaPagarController extends Controller
 
             'centro_custo_id' => 'nullable|integer|exists:centros_custo,id',
             'categoria_id'    => 'nullable|integer|exists:categorias_financeiras,id',
+            'conta_financeira_id' => 'nullable|integer|exists:contas_financeiras,id',
 
             'data_ini'     => 'nullable|date',
             'data_fim'     => 'nullable|date',
@@ -55,6 +56,7 @@ class ContaPagarController extends Controller
             'status'       => 'nullable|in:ABERTA,PARCIAL,PAGA,CANCELADA',
             'vencidas'     => 'nullable|boolean',
             'em_aberto'    => 'nullable|boolean',
+            'origem'       => 'nullable|in:recorrente',
         ]);
 
         $filtro = new FiltroContaPagarDTO(
@@ -68,6 +70,8 @@ class ContaPagarController extends Controller
             data_fim: $request->string('data_fim')->toString() ?: null,
             vencidas: $request->boolean('vencidas', false),
             em_aberto: $request->boolean('em_aberto', false),
+            origem: $request->string('origem')->toString() ?: null,
+            conta_financeira_id: $request->integer('conta_financeira_id') ?: null,
         );
 
         $page = $request->integer('page', 1);
@@ -97,6 +101,7 @@ class ContaPagarController extends Controller
             'categoria:id,nome,tipo',
             'centroCusto:id,nome',
             'parcelamento',
+            'recorrencia',
             'pagamentos' => function ($q) {
                 $q->orderByDesc('data_pagamento')
                     ->with([
@@ -145,7 +150,7 @@ class ContaPagarController extends Controller
 
         // retorna conta atualizada (status real)
         $conta_pagar->refresh()->load([
-            'fornecedor', 'categoria', 'centroCusto',
+            'fornecedor', 'categoria', 'centroCusto', 'recorrencia',
             'pagamentos.usuario', 'pagamentos.contaFinanceira'
         ]);
 
@@ -163,7 +168,7 @@ class ContaPagarController extends Controller
         $this->cmd->estornarPagamento($conta_pagar, $pagamento);
 
         $conta_pagar->refresh()->load([
-            'fornecedor', 'categoria', 'centroCusto',
+            'fornecedor', 'categoria', 'centroCusto', 'recorrencia',
             'pagamentos.usuario', 'pagamentos.contaFinanceira'
         ]);
 
@@ -191,7 +196,7 @@ class ContaPagarController extends Controller
         $pdf = Pdf::loadView('pdf.contas_pagar', [
             'linhas' => $dados,
             'gerado_em' => now()->format('d/m/Y H:i'),
-        ])->setPaper('a4', 'portrait');
+        ])->setPaper('a4', 'landscape');
 
         return $pdf->download('contas_pagar.pdf');
     }
@@ -216,10 +221,12 @@ class ContaPagarController extends Controller
             'status'        => 'nullable|in:ABERTA,PARCIAL,PAGA,CANCELADA',
             'centro_custo_id'  => 'nullable|integer|exists:centros_custo,id',
             'categoria_id'     => 'nullable|integer|exists:categorias_financeiras,id',
+            'conta_financeira_id' => 'nullable|integer|exists:contas_financeiras,id',
             'data_ini'      => 'nullable|date',
             'data_fim'      => 'nullable|date',
             'vencidas'      => 'nullable|boolean',
             'em_aberto'     => 'nullable|boolean',
+            'origem'        => 'nullable|in:recorrente',
         ]);
 
         $f = new FiltroContaPagarDTO(
@@ -233,6 +240,8 @@ class ContaPagarController extends Controller
             data_fim: $request->string('data_fim')->toString() ?: null,
             vencidas: $request->boolean('vencidas', false),
             em_aberto: $request->boolean('em_aberto', false),
+            origem: $request->string('origem')->toString() ?: null,
+            conta_financeira_id: $request->integer('conta_financeira_id') ?: null,
         );
 
         $query = ContaPagar::query()->with('pagamentos');
@@ -250,6 +259,10 @@ class ContaPagarController extends Controller
         if ($f->forma_pagamento) $query->where('forma_pagamento', $f->forma_pagamento);
         if ($f->centro_custo_id)  $query->where('centro_custo_id', $f->centro_custo_id);
         if ($f->categoria_id)     $query->where('categoria_id', $f->categoria_id);
+        if ($f->conta_financeira_id) {
+            $query->whereHas('pagamentos', fn ($q) => $q->where('conta_financeira_id', $f->conta_financeira_id));
+        }
+        if ($f->origem === 'recorrente') $query->whereNotNull('despesa_recorrente_id');
         if ($f->data_ini)      $query->whereDate('data_vencimento', '>=', $f->data_ini);
         if ($f->data_fim)      $query->whereDate('data_vencimento', '<=', $f->data_fim);
 
@@ -263,30 +276,43 @@ class ContaPagarController extends Controller
         }
 
         $linhas = $query->get();
+        $hoje = now()->startOfDay();
+        $status = static fn($c): string => (string) ($c->status?->value ?? $c->status);
+        $valorLiquido = static fn($c): float => max(
+            0,
+            (float) $c->valor_bruto - (float) $c->desconto + (float) $c->juros + (float) $c->multa
+        );
+        $valorPago = static fn($c): float => (float) $c->pagamentos->sum('valor');
+        $saldoAberto = static fn($c): float => max(0, $valorLiquido($c) - $valorPago($c));
+        $titulosAbertos = $linhas->filter(fn($c) => in_array($status($c), ['ABERTA', 'PARCIAL'], true));
+        $titulosPagos = $linhas->filter(fn($c) => $status($c) === 'PAGA');
+        $titulosVencidos = $titulosAbertos->filter(fn($c) => $c->data_vencimento && $c->data_vencimento->lt($hoje));
+        $titulosVencendoHoje = $titulosAbertos->filter(fn($c) => $c->data_vencimento && $c->data_vencimento->isSameDay($hoje));
+        $titulosAVencer = $titulosAbertos->filter(fn($c) => $c->data_vencimento && $c->data_vencimento->gt($hoje));
 
-        $totalLiquido = $linhas->sum(fn($c) => $c->valor_bruto - $c->desconto + $c->juros + $c->multa);
-        $totalPago = $linhas->sum(fn($c) => $c->pagamentos->sum('valor'));
-        $totalAberto = $linhas->sum(fn($c) => (float) $c->saldo_aberto);
-        $contasPagas = $linhas->filter(fn($c) => ($c->status?->value ?? $c->status) === 'PAGA')->count();
-        $contasAbertas = $linhas->filter(fn($c) => in_array(($c->status?->value ?? $c->status), ['ABERTA', 'PARCIAL'], true))->count();
-        $linhasVencidas = $linhas->filter(fn($c) =>
-            in_array(($c->status?->value ?? $c->status), ['ABERTA', 'PARCIAL'], true) && $c->data_vencimento && $c->data_vencimento->lt(now()->startOfDay())
-        )->count();
-        $totalVencido = $linhas->filter(fn($c) =>
-            in_array(($c->status?->value ?? $c->status), ['ABERTA', 'PARCIAL'], true) && $c->data_vencimento && $c->data_vencimento->lt(now()->startOfDay())
-        )->sum(fn($c) => (float) $c->saldo_aberto);
+        $totalAberto = $titulosAbertos->sum($saldoAberto);
+        $totalPago = $linhas->sum($valorPago);
+        $totalLiquido = $totalAberto + $totalPago;
+        $totalVencido = $titulosVencidos->sum($saldoAberto);
+        $totalVencendoHoje = $titulosVencendoHoje->sum($saldoAberto);
+        $totalAVencer = $titulosAVencer->sum($saldoAberto);
 
         return response()->json([
             'total_liquido'      => (float) $totalLiquido,
+            'total_periodo'      => (float) $totalLiquido,
             'total_aberto'       => (float) $totalAberto,
             'total_vencido'      => (float) $totalVencido,
             'total_pago'         => (float) $totalPago,
-            'qtd_abertas'        => $contasAbertas,
-            'qtd_vencidas'       => $linhasVencidas,
-            'qtd_pagas'          => $contasPagas,
+            'total_vencendo_hoje'=> (float) $totalVencendoHoje,
+            'total_a_vencer'     => (float) $totalAVencer,
+            'qtd_abertas'        => $titulosAbertos->count(),
+            'qtd_vencidas'       => $titulosVencidos->count(),
+            'qtd_vencendo_hoje'  => $titulosVencendoHoje->count(),
+            'qtd_a_vencer'       => $titulosAVencer->count(),
+            'qtd_pagas'          => $titulosPagos->count(),
             'valor_pago_periodo' => (float) $totalPago,
-            'contas_vencidas'    => $linhasVencidas,
-            'contas_pagas'       => $contasPagas,
+            'contas_vencidas'    => $titulosVencidos->count(),
+            'contas_pagas'       => $titulosPagos->count(),
         ], 200);
     }
 }

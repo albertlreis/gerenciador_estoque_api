@@ -8,11 +8,14 @@ use App\Http\Requests\Financeiro\ConciliacaoBancariaConfirmarTransacaoRequest;
 use App\Http\Requests\Financeiro\ConciliacaoBancariaOfxRequest;
 use App\Http\Resources\ConciliacaoBancariaImportacaoResource;
 use App\Http\Resources\ConciliacaoBancariaTransacaoResource;
+use App\Integrations\Bancos\BancoDoBrasil\BancoDoBrasilExtratosService;
+use App\Integrations\Bancos\Exceptions\BancoDoBrasilIntegrationException;
 use App\Models\ConciliacaoBancariaImportacao;
 use App\Models\ConciliacaoBancariaTransacao;
 use App\Services\ConciliacaoBancaria\ConciliacaoBancariaService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 
 class ConciliacaoBancariaController extends Controller
 {
@@ -29,6 +32,47 @@ class ConciliacaoBancariaController extends Controller
 
         return response()->json([
             'data' => new ConciliacaoBancariaImportacaoResource($importacao),
+        ], 201);
+    }
+
+    public function sincronizarBanco(Request $request, BancoDoBrasilExtratosService $bbExtratos): JsonResponse
+    {
+        $validated = $request->validate([
+            'conta_financeira_id' => ['required', 'integer', 'exists:contas_financeiras,id'],
+            'days' => ['nullable', 'integer', 'min:1', 'max:90'],
+            'data_inicio' => ['nullable', 'date'],
+            'data_fim' => ['nullable', 'date'],
+        ]);
+
+        $end = !empty($validated['data_fim'])
+            ? Carbon::parse($validated['data_fim'])
+            : Carbon::today();
+        $start = !empty($validated['data_inicio'])
+            ? Carbon::parse($validated['data_inicio'])
+            : $end->copy()->subDays(((int) ($validated['days'] ?? 7)) - 1);
+
+        try {
+            $importacao = $bbExtratos->sincronizar(
+                (int) $validated['conta_financeira_id'],
+                $start,
+                $end
+            );
+        } catch (BancoDoBrasilIntegrationException $e) {
+            return response()->json([
+                'ok' => false,
+                'message' => $e->getMessage(),
+                'reason' => $e->reason,
+            ], 422);
+        }
+
+        $importacao->load([
+            'contaFinanceira',
+            'transacoes' => fn ($q) => $q->orderBy('data_movimento')->orderBy('id'),
+        ]);
+
+        return response()->json([
+            'data' => new ConciliacaoBancariaImportacaoResource($importacao),
+            'conexao' => $bbExtratos->status((int) $validated['conta_financeira_id'])['conexao'] ?? null,
         ], 201);
     }
 

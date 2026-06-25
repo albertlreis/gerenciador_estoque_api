@@ -8,6 +8,7 @@ use App\Models\Pedido;
 use App\Models\PedidoStatusHistorico;
 use App\Models\Usuario;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
@@ -15,6 +16,20 @@ use Tests\TestCase;
 class PedidoStatusPrevisaoAtualizacaoTest extends TestCase
 {
     use RefreshDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        Carbon::setTestNow(Carbon::create(2026, 6, 24, 14, 30, 45, config('app.timezone', 'America/Belem')));
+    }
+
+    protected function tearDown(): void
+    {
+        Carbon::setTestNow();
+
+        parent::tearDown();
+    }
 
     public function test_exige_previsao_para_status_editavel(): void
     {
@@ -58,6 +73,28 @@ class PedidoStatusPrevisaoAtualizacaoTest extends TestCase
         ]);
     }
 
+    public function test_salva_data_status_informada_no_historico(): void
+    {
+        [, $pedido] = $this->criarPedidoBase();
+
+        $response = $this->patchJson("/api/v1/pedidos/{$pedido->id}/status", [
+            'status' => PedidoStatus::ENVIADO_FABRICA->value,
+            'data_status' => '2026-06-20',
+        ]);
+
+        $response
+            ->assertOk()
+            ->assertJsonPath('data_status', '2026-06-20');
+
+        $historico = PedidoStatusHistorico::query()
+            ->where('pedido_id', $pedido->id)
+            ->where('status', PedidoStatus::ENVIADO_FABRICA->value)
+            ->firstOrFail();
+
+        $this->assertSame('2026-06-20', $historico->data_status->toDateString());
+        $this->assertSame('14:30:45', $historico->data_status->format('H:i:s'));
+    }
+
     public function test_status_sem_previsao_editavel_nao_exige_data_prevista(): void
     {
         [, $pedido] = $this->criarPedidoBase();
@@ -66,17 +103,54 @@ class PedidoStatusPrevisaoAtualizacaoTest extends TestCase
             'status' => PedidoStatus::ENVIADO_FABRICA->value,
         ]);
 
-        $response->assertOk();
+        $response
+            ->assertOk()
+            ->assertJsonPath('data_status', '2026-06-24');
 
         $this->assertDatabaseHas('pedido_status_historico', [
             'pedido_id' => $pedido->id,
             'status' => PedidoStatus::ENVIADO_FABRICA->value,
         ]);
 
+        $historico = PedidoStatusHistorico::query()
+            ->where('pedido_id', $pedido->id)
+            ->where('status', PedidoStatus::ENVIADO_FABRICA->value)
+            ->firstOrFail();
+
+        $this->assertSame('2026-06-24', $historico->data_status->toDateString());
+
         $this->assertDatabaseMissing('pedido_status_previsoes', [
             'pedido_id' => $pedido->id,
             'status' => PedidoStatus::ENVIADO_FABRICA->value,
         ]);
+    }
+
+    public function test_bloqueia_data_status_futura(): void
+    {
+        [, $pedido] = $this->criarPedidoBase();
+
+        $response = $this->patchJson("/api/v1/pedidos/{$pedido->id}/status", [
+            'status' => PedidoStatus::ENVIADO_FABRICA->value,
+            'data_status' => '2026-06-25',
+        ]);
+
+        $response
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['data_status']);
+    }
+
+    public function test_bloqueia_data_status_anterior_ao_ultimo_status(): void
+    {
+        [, $pedido] = $this->criarPedidoBase();
+
+        $response = $this->patchJson("/api/v1/pedidos/{$pedido->id}/status", [
+            'status' => PedidoStatus::ENVIADO_FABRICA->value,
+            'data_status' => '2026-06-13',
+        ]);
+
+        $response
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['data_status']);
     }
 
     public function test_mantem_bloqueio_para_status_duplicado(): void
@@ -135,7 +209,7 @@ class PedidoStatusPrevisaoAtualizacaoTest extends TestCase
         PedidoStatusHistorico::create([
             'pedido_id' => $pedido->id,
             'status' => PedidoStatus::PEDIDO_CRIADO,
-            'data_status' => now(),
+            'data_status' => now()->subDays(10),
             'usuario_id' => $usuario->id,
         ]);
 

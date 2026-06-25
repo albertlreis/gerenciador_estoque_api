@@ -2,7 +2,7 @@
 
 namespace App\Models;
 
-use App\Enums\PedidoStatus;
+use BackedEnum;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
@@ -18,9 +18,13 @@ class PedidoStatusPrevisao extends Model
     ];
 
     protected $casts = [
-        'status' => PedidoStatus::class,
         'data_prevista' => 'date',
     ];
+
+    public function setStatusAttribute(mixed $value): void
+    {
+        $this->attributes['status'] = $value instanceof BackedEnum ? $value->value : $value;
+    }
 
     public function pedido(): BelongsTo
     {

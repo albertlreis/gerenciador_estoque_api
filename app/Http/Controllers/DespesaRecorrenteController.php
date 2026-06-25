@@ -24,7 +24,7 @@ class DespesaRecorrenteController extends Controller
 
     public function show(int $id): JsonResponse
     {
-        $model = DespesaRecorrente::with(['fornecedor','usuario','execucoes'])->findOrFail($id);
+        $model = DespesaRecorrente::with(['fornecedor','cliente','usuario','execucoes'])->findOrFail($id);
         return response()->json(new DespesaRecorrenteShowResource($model));
     }
 

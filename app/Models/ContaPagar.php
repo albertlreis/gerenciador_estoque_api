@@ -17,6 +17,7 @@ class ContaPagar extends Model
 
     protected $fillable = [
         'parcelamento_id','parcela_numero','parcelas_total','is_entrada',
+        'despesa_recorrente_id','recorrencia_competencia',
         'fornecedor_id','descricao','numero_documento','data_emissao','data_vencimento',
         'valor_bruto','desconto','juros','multa','status','forma_pagamento',
         'categoria_id','centro_custo_id','observacoes'
@@ -25,6 +26,7 @@ class ContaPagar extends Model
     protected $casts = [
         'data_emissao' => 'date',
         'data_vencimento' => 'date',
+        'recorrencia_competencia' => 'date',
         'valor_bruto' => 'decimal:2',
         'desconto' => 'decimal:2',
         'juros' => 'decimal:2',
@@ -36,6 +38,11 @@ class ContaPagar extends Model
     public function parcelamento(): BelongsTo
     {
         return $this->belongsTo(FinanceiroParcelamento::class, 'parcelamento_id')->withDefault();
+    }
+
+    public function recorrencia(): BelongsTo
+    {
+        return $this->belongsTo(DespesaRecorrente::class, 'despesa_recorrente_id')->withDefault();
     }
 
     public function categoria(): BelongsTo

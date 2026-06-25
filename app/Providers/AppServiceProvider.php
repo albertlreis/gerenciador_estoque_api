@@ -14,6 +14,7 @@ use App\Integrations\ContaAzul\Import\ProdutoContaAzulImportAdapter;
 use App\Integrations\ContaAzul\Import\TituloContaAzulImportAdapter;
 use App\Integrations\ContaAzul\Import\VendaContaAzulImportAdapter;
 use App\Integrations\ContaAzul\Mappers\ContaAzulBaixaMapper;
+use App\Integrations\ContaAzul\Mappers\ContaAzulCobrancaMapper;
 use App\Integrations\ContaAzul\Mappers\ContaAzulPedidoMapper;
 use App\Integrations\ContaAzul\Mappers\ContaAzulPessoaMapper;
 use App\Integrations\ContaAzul\Mappers\ContaAzulProdutoMapper;
@@ -21,10 +22,12 @@ use App\Integrations\ContaAzul\Mappers\ContaAzulTituloMapper;
 use App\Integrations\ContaAzul\Services\ConciliacaoContaAzulService;
 use App\Integrations\ContaAzul\Services\ContaAzulConnectionService;
 use App\Integrations\ContaAzul\Services\ContaAzulAutoMatchService;
+use App\Integrations\ContaAzul\Services\ContaAzulCobrancaService;
 use App\Integrations\ContaAzul\Services\ContaAzulLocalCreationService;
 use App\Integrations\ContaAzul\Services\ExportacaoContaAzulService;
 use App\Integrations\ContaAzul\Services\ImportacaoContaAzulService;
 use App\Integrations\ContaAzul\Services\ReconciliacaoContaAzulService;
+use App\Integrations\Bancos\BancoDoBrasil\BancoDoBrasilExtratosClient;
 use App\Integrations\GoogleCalendar\Auth\GoogleCalendarOAuthService;
 use App\Integrations\GoogleCalendar\Clients\GoogleCalendarClient;
 use App\Integrations\GoogleCalendar\Services\GoogleCalendarConnectionService;
@@ -32,6 +35,7 @@ use App\Integrations\GoogleCalendar\Services\GoogleCalendarEventService;
 use App\Repositories\Contracts\ContaPagarRepository;
 use App\Repositories\Eloquent\ContaPagarRepositoryEloquent;
 use App\Services\FinanceiroLedgerService;
+use App\Services\AuditoriaLogService;
 use Illuminate\Database\QueryException;
 use Illuminate\Filesystem\Filesystem;
 use Illuminate\Support\Facades\DB;
@@ -49,6 +53,10 @@ class AppServiceProvider extends ServiceProvider
     public function register()
     {
         $this->app->bind(ContaPagarRepository::class, ContaPagarRepositoryEloquent::class);
+
+        $this->app->singleton(BancoDoBrasilExtratosClient::class, function ($app) {
+            return new BancoDoBrasilExtratosClient($app['config']->get('banco_do_brasil.extratos', []));
+        });
 
         $this->app->singleton(ContaAzulClient::class, function ($app) {
             return new ContaAzulClient($app['config']->get('conta_azul', []));
@@ -71,6 +79,7 @@ class AppServiceProvider extends ServiceProvider
         $this->app->singleton(ContaAzulPedidoMapper::class, fn () => new ContaAzulPedidoMapper());
         $this->app->singleton(ContaAzulTituloMapper::class, fn () => new ContaAzulTituloMapper());
         $this->app->singleton(ContaAzulBaixaMapper::class, fn () => new ContaAzulBaixaMapper());
+        $this->app->singleton(ContaAzulCobrancaMapper::class, fn () => new ContaAzulCobrancaMapper());
         $this->app->singleton(PessoaContaAzulImportAdapter::class, fn () => new PessoaContaAzulImportAdapter());
         $this->app->singleton(ProdutoContaAzulImportAdapter::class, fn () => new ProdutoContaAzulImportAdapter());
         $this->app->singleton(VendaContaAzulImportAdapter::class, fn () => new VendaContaAzulImportAdapter());
@@ -122,6 +131,17 @@ class AppServiceProvider extends ServiceProvider
                 $app->make(ContaAzulPedidoMapper::class),
                 $app->make(ContaAzulTituloMapper::class),
                 $app->make(ContaAzulBaixaMapper::class)
+            );
+        });
+
+        $this->app->singleton(ContaAzulCobrancaService::class, function ($app) {
+            return new ContaAzulCobrancaService(
+                $app['config']->get('conta_azul', []),
+                $app->make(ContaAzulConnectionService::class),
+                $app->make(ContaAzulClient::class),
+                $app->make(ExportacaoContaAzulService::class),
+                $app->make(ContaAzulCobrancaMapper::class),
+                $app->make(AuditoriaLogService::class)
             );
         });
 

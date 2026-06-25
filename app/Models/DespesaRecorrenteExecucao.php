@@ -15,6 +15,7 @@ class DespesaRecorrenteExecucao extends Model
         'data_prevista',
         'data_geracao',
         'conta_pagar_id',
+        'conta_receber_id',
         'status',
         'erro_msg',
         'meta_json',
@@ -35,5 +36,10 @@ class DespesaRecorrenteExecucao extends Model
     public function contaPagar(): BelongsTo
     {
         return $this->belongsTo(ContaPagar::class, 'conta_pagar_id')->withDefault();
+    }
+
+    public function contaReceber(): BelongsTo
+    {
+        return $this->belongsTo(ContaReceber::class, 'conta_receber_id')->withDefault();
     }
 }

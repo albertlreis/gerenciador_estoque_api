@@ -521,7 +521,7 @@ class PedidoController extends Controller
         // Regra de negócio:
         // - Pedido consignado = status atual consignado (e/ou existe consignação)
         // Eu priorizo statusAtual por ser determinístico e mais barato.
-        $status = $pedidoBase->statusAtual?->status?->value ?? $pedidoBase->statusAtual?->status;
+        $status = $pedidoBase->statusAtual?->getRawOriginal('status') ?? $pedidoBase->statusAtual?->status;
         $tipoRoteiro = $this->normalizarTipoRoteiro($request->query('tipo_roteiro'));
         $isConsignado = in_array($status, ['consignado', 'devolucao_consignacao'], true);
         if (!$isConsignado) {
@@ -552,7 +552,7 @@ class PedidoController extends Controller
                 'consignacoes.produtoVariacao.atributos',
 
                 // localização
-                'consignacoes.produtoVariacao.estoquesComLocalizacao.localizacao.area',
+                'consignacoes.produtoVariacao.estoquesComLocalizacao.localizacao',
             ])->findOrFail($pedidoId);
 
             $consignacaoIds = collect((array) $request->query('consignacao_ids', []))
@@ -617,7 +617,7 @@ class PedidoController extends Controller
             'itens.variacao.atributos',
 
             // localização
-            'itens.variacao.estoquesComLocalizacao.localizacao.area',
+            'itens.variacao.estoquesComLocalizacao.localizacao',
         ])->findOrFail($pedidoId);
 
         $itemIds = collect((array) $request->query('item_ids', []))
@@ -1866,7 +1866,7 @@ class PedidoController extends Controller
 
     private function isRoteiroConsignacaoDevolucao(Pedido $pedido): bool
     {
-        $statusAtual = $pedido->statusAtual?->status?->value ?? $pedido->statusAtual?->status;
+        $statusAtual = $pedido->statusAtual?->getRawOriginal('status') ?? $pedido->statusAtual?->status;
         if ($statusAtual === 'devolucao_consignacao') {
             return true;
         }

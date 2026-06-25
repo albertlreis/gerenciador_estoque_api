@@ -11,6 +11,7 @@ use App\Models\LancamentoFinanceiro;
 use App\Models\Usuario;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\DB;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
@@ -24,6 +25,8 @@ class ConciliacaoBancariaOfxTest extends TestCase
     {
         parent::setUp();
 
+        $this->resetFinanceiroConciliacaoState();
+
         $this->usuario = Usuario::create([
             'nome' => 'Usuario Conciliacao',
             'email' => 'conciliacao-' . uniqid('', true) . '@example.test',
@@ -32,6 +35,33 @@ class ConciliacaoBancariaOfxTest extends TestCase
         ]);
 
         Sanctum::actingAs($this->usuario);
+    }
+
+    protected function tearDown(): void
+    {
+        $this->resetFinanceiroConciliacaoState();
+
+        parent::tearDown();
+    }
+
+    private function resetFinanceiroConciliacaoState(): void
+    {
+        DB::statement('SET FOREIGN_KEY_CHECKS=0');
+
+        foreach ([
+            'conciliacao_bancaria_transacoes',
+            'conciliacao_bancaria_importacoes',
+            'contas_pagar_pagamentos',
+            'lancamentos_financeiros',
+            'transferencias_financeiras',
+            'contas_pagar',
+            'contas_financeiras',
+            'fornecedores',
+        ] as $table) {
+            DB::table($table)->truncate();
+        }
+
+        DB::statement('SET FOREIGN_KEY_CHECKS=1');
     }
 
     public function test_importa_ofx_sugere_match_e_nao_duplica_transacoes(): void

@@ -15,5 +15,7 @@ class FiltroContaPagarDTO
         public readonly ?string $data_fim = null,
         public readonly ?bool $vencidas = null,
         public readonly ?bool $em_aberto = null,
+        public readonly ?string $origem = null,
+        public readonly ?int $conta_financeira_id = null,
     ) {}
 }

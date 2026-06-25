@@ -138,6 +138,13 @@ return [
         'venda_create' => env('CONTA_AZUL_PATH_VENDA_CREATE', '/v1/venda'),
         'titulos_create' => env('CONTA_AZUL_PATH_TITULOS_CREATE', env('CONTA_AZUL_PATH_FIN_CREATE', '/v1/financeiro/eventos-financeiros/contas-a-receber')),
         'baixa_create' => env('CONTA_AZUL_PATH_BAIXA_CREATE', '/v1/financeiro/eventos-financeiros/parcelas/{parcela_id}/baixa'),
+        'cobranca_create' => env('CONTA_AZUL_PATH_COBRANCA_CREATE', '/v1/financeiro/eventos-financeiros/contas-a-receber/gerar-cobranca'),
+    ],
+
+    'cobranca' => [
+        'tipo_pagamento' => env('CONTA_AZUL_COBRANCA_TIPO_PAGAMENTO', 'BOLETO'),
+        'maximo_parcelas' => (int) env('CONTA_AZUL_COBRANCA_MAXIMO_PARCELAS', 1),
+        'evento_id_field' => env('CONTA_AZUL_COBRANCA_EVENTO_ID_FIELD', 'id_evento_financeiro'),
     ],
 
     /** URL do front para onde o callback OAuth redireciona (ex.: http://localhost:5173/integracoes/conta-azul). */

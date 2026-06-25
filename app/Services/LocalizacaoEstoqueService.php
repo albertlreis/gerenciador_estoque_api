@@ -2,146 +2,194 @@
 
 namespace App\Services;
 
+use App\Models\Deposito;
+use App\Models\Estoque;
 use App\Models\LocalizacaoEstoque;
-use App\Models\LocalizacaoValor;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Database\Eloquent\Collection;
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
-/**
- * Serviço de Localização de Estoque.
- * - Persiste campos essenciais + dimensões dinâmicas.
- * - Gera e mantém o "codigo_composto" (ex.: 6-B1).
- */
 class LocalizacaoEstoqueService
 {
-    public function listar(int $perPage = 20): LengthAwarePaginator
+    public function listarPorDeposito(Deposito $deposito, array $filtros = []): LengthAwarePaginator
     {
-        return LocalizacaoEstoque::with(['area', 'valores.dimensao'])
-            ->orderByDesc('id')
-            ->paginate($perPage);
-    }
+        $query = LocalizacaoEstoque::query()
+            ->where('deposito_id', $deposito->id)
+            ->withCount('estoques as ocupacao_itens')
+            ->withSum('estoques as ocupacao_pecas', 'quantidade')
+            ->orderBy('codigo_composto');
 
-    /**
-     * @throws \Illuminate\Database\Eloquent\ModelNotFoundException
-     */
-    public function visualizar(int $id): Builder|array|Collection|Model
-    {
-        return LocalizacaoEstoque::with(['area', 'valores.dimensao'])->findOrFail($id);
-    }
-
-    public function criar(array $dados): LocalizacaoEstoque
-    {
-        return DB::transaction(function () use ($dados) {
-            $loc = LocalizacaoEstoque::create([
-                'estoque_id'   => $dados['estoque_id'],
-                'setor'        => $dados['setor']        ?? null,
-                'coluna'       => $dados['coluna']       ?? null,
-                'nivel'        => $dados['nivel']        ?? null,
-                'area_id'      => $dados['area_id']      ?? null,
-                'observacoes'  => $dados['observacoes']  ?? null,
-                'codigo_composto' => $this->montarCodigo($dados),
-            ]);
-
-            $this->sincronizarDimensoes($loc, $dados['dimensoes'] ?? []);
-            return $loc;
-        });
-    }
-
-    public function atualizar(int $id, array $dados): LocalizacaoEstoque
-    {
-        return DB::transaction(function () use ($id, $dados) {
-            $loc = LocalizacaoEstoque::findOrFail($id);
-            $loc->update([
-                'estoque_id'   => $dados['estoque_id'],
-                'setor'        => $dados['setor']        ?? null,
-                'coluna'       => $dados['coluna']       ?? null,
-                'nivel'        => $dados['nivel']        ?? null,
-                'area_id'      => $dados['area_id']      ?? null,
-                'observacoes'  => $dados['observacoes']  ?? null,
-                'codigo_composto' => $this->montarCodigo($dados),
-            ]);
-
-            $this->sincronizarDimensoes($loc, $dados['dimensoes'] ?? []);
-            return $loc;
-        });
-    }
-
-    public function excluir(int $id): void
-    {
-        DB::transaction(function () use ($id) {
-            $loc = LocalizacaoEstoque::findOrFail($id);
-            $loc->valores()->delete();
-            $loc->delete();
-        });
-    }
-
-    /**
-     * Monta o código composto no formato "Setor-ColunaNível".
-     * Regras:
-     * - Se houver área, não gera código (retorna null);
-     * - Campos físicos são opcionais; se houver qualquer um, gera com placeholders:
-     *    - esquerda = setor ou "-"
-     *    - direita  = (coluna ou "-") + (nivel ou "")
-     * Exemplos:
-     *  setor=6, coluna=B, nivel=1   => "6-B1"
-     *  setor=6, coluna=B, nivel=''  => "6-B"
-     *  setor=null, coluna=B, nivel=1=> "-B1"
-     *  setor=6, coluna=null, nivel=null => "6--"
-     *  nenhum informado             => null
-     */
-    private function montarCodigo(array $d): ?string
-    {
-        if (!empty($d['area_id'])) {
-            return null; // Exclusividade: com área não há código físico
+        if (array_key_exists('ativo', $filtros) && $filtros['ativo'] !== null && $filtros['ativo'] !== '') {
+            $query->where('ativo', filter_var($filtros['ativo'], FILTER_VALIDATE_BOOLEAN));
         }
 
-        $setor = $this->trimOrNull($d['setor'] ?? null);
-        $col   = $this->trimOrNull($d['coluna'] ?? null);
-        $niv   = $this->trimOrNull($d['nivel'] ?? null);
+        $busca = trim((string) ($filtros['q'] ?? ''));
+        if ($busca !== '') {
+            $like = '%' . $this->escapeLike($busca) . '%';
+            $query->where(function (Builder $q) use ($like) {
+                $q->whereRaw("codigo_composto LIKE ? ESCAPE '\\\\'", [$like])
+                    ->orWhereRaw("area LIKE ? ESCAPE '\\\\'", [$like])
+                    ->orWhereRaw("corredor LIKE ? ESCAPE '\\\\'", [$like])
+                    ->orWhereRaw("setor LIKE ? ESCAPE '\\\\'", [$like])
+                    ->orWhereRaw("coluna LIKE ? ESCAPE '\\\\'", [$like])
+                    ->orWhereRaw("observacoes LIKE ? ESCAPE '\\\\'", [$like]);
+            });
+        }
 
-        if ($setor === null && $col === null && $niv === null) {
+        $perPage = max(1, min(200, (int) ($filtros['per_page'] ?? 20)));
+
+        return $query->paginate($perPage);
+    }
+
+    public function criar(Deposito $deposito, array $dados): LocalizacaoEstoque
+    {
+        $payload = $this->payload($deposito, $dados);
+        $this->validarCodigoUnico($deposito, $payload['codigo_composto']);
+
+        return LocalizacaoEstoque::create($payload);
+    }
+
+    public function atualizar(Deposito $deposito, LocalizacaoEstoque $localizacao, array $dados): LocalizacaoEstoque
+    {
+        $this->assertLocalizacaoDoDeposito($deposito, $localizacao);
+        $payload = $this->payload($deposito, $dados, $localizacao);
+        $this->validarCodigoUnico($deposito, $payload['codigo_composto'], $localizacao->id);
+
+        $localizacao->update($payload);
+
+        return $localizacao->refresh();
+    }
+
+    public function excluir(Deposito $deposito, LocalizacaoEstoque $localizacao): ?LocalizacaoEstoque
+    {
+        $this->assertLocalizacaoDoDeposito($deposito, $localizacao);
+
+        if ($localizacao->estoques()->exists()) {
+            $localizacao->update(['ativo' => false]);
+
+            return $localizacao->refresh();
+        }
+
+        $localizacao->delete();
+
+        return null;
+    }
+
+    public function atribuirAoEstoque(Estoque $estoque, ?int $localizacaoId): Estoque
+    {
+        return DB::transaction(function () use ($estoque, $localizacaoId) {
+            if ($localizacaoId === null) {
+                $estoque->update(['localizacao_id' => null]);
+
+                return $estoque->refresh()->load(['deposito', 'localizacao']);
+            }
+
+            $localizacao = LocalizacaoEstoque::query()->findOrFail($localizacaoId);
+            if ((int) $localizacao->deposito_id !== (int) $estoque->id_deposito) {
+                throw ValidationException::withMessages([
+                    'localizacao_id' => ['A localizacao deve pertencer ao mesmo deposito do estoque.'],
+                ]);
+            }
+
+            if (!$localizacao->ativo) {
+                throw ValidationException::withMessages([
+                    'localizacao_id' => ['A localizacao selecionada esta inativa.'],
+                ]);
+            }
+
+            $estoque->update(['localizacao_id' => $localizacao->id]);
+
+            return $estoque->refresh()->load(['deposito', 'localizacao']);
+        });
+    }
+
+    public static function montarCodigo(?string $area, ?string $corredor, ?string $setor, ?string $coluna): ?string
+    {
+        $parts = [
+            self::trimStatic($area),
+            self::trimStatic($corredor),
+            self::trimStatic($setor),
+            self::trimStatic($coluna),
+        ];
+
+        if (count(array_filter($parts, fn ($part) => $part !== null)) === 0) {
             return null;
         }
 
-        $left  = $setor ?? '-';
-        $right = ($col ?? '-') . ($niv ?? '');
-        return "{$left}-{$right}";
+        return implode('-', array_map(fn ($part) => $part ?? '-', $parts));
     }
 
-    /** Helper já existente nos seus seeders; inclua aqui se precisar */
-    private function trimOrNull(?string $v): ?string
+    private function payload(Deposito $deposito, array $dados, ?LocalizacaoEstoque $localizacao = null): array
     {
-        if ($v === null) return null;
-        $t = trim($v);
-        return $t === '' ? null : $t;
+        $area = $this->trimOrNull($dados['area'] ?? $localizacao?->area);
+        $corredor = $this->trimOrNull($dados['corredor'] ?? $localizacao?->corredor);
+        $setor = $this->trimOrNull($dados['setor'] ?? $localizacao?->setor);
+        $coluna = $this->trimOrNull($dados['coluna'] ?? $localizacao?->coluna);
+        $codigo = self::montarCodigo($area, $corredor, $setor, $coluna);
+
+        if ($codigo === null) {
+            throw ValidationException::withMessages([
+                'localizacao' => ['Informe area, corredor, setor ou coluna.'],
+            ]);
+        }
+
+        return [
+            'deposito_id' => $deposito->id,
+            'area' => $area,
+            'corredor' => $corredor,
+            'setor' => $setor,
+            'coluna' => $coluna,
+            'codigo_composto' => $codigo,
+            'observacoes' => array_key_exists('observacoes', $dados)
+                ? $this->trimOrNull($dados['observacoes'])
+                : $localizacao?->observacoes,
+            'ativo' => array_key_exists('ativo', $dados)
+                ? filter_var($dados['ativo'], FILTER_VALIDATE_BOOLEAN)
+                : ($localizacao?->ativo ?? true),
+        ];
     }
 
-    /**
-     * Sincroniza valores de dimensões dinâmicas.
-     * @param LocalizacaoEstoque $loc
-     * @param array<int,string|null> $dimensoes
-     */
-    private function sincronizarDimensoes(LocalizacaoEstoque $loc, array $dimensoes): void
+    private function validarCodigoUnico(Deposito $deposito, string $codigo, ?int $ignorarId = null): void
     {
-        $ids = array_keys($dimensoes);
-        if (empty($ids)) {
-            $loc->valores()->delete();
-            return;
+        $existe = LocalizacaoEstoque::query()
+            ->where('deposito_id', $deposito->id)
+            ->where('codigo_composto', $codigo)
+            ->when($ignorarId, fn (Builder $q) => $q->whereKeyNot($ignorarId))
+            ->exists();
+
+        if ($existe) {
+            throw ValidationException::withMessages([
+                'codigo_composto' => ['Ja existe uma localizacao com este codigo neste deposito.'],
+            ]);
+        }
+    }
+
+    private function assertLocalizacaoDoDeposito(Deposito $deposito, LocalizacaoEstoque $localizacao): void
+    {
+        if ((int) $localizacao->deposito_id !== (int) $deposito->id) {
+            abort(404);
+        }
+    }
+
+    private function trimOrNull(mixed $value): ?string
+    {
+        return self::trimStatic($value);
+    }
+
+    private static function trimStatic(mixed $value): ?string
+    {
+        if ($value === null) {
+            return null;
         }
 
-        // Remove dimensões não informadas
-        $loc->valores()->whereNotIn('dimensao_id', $ids)->delete();
+        $trimmed = trim((string) $value);
 
-        // Upsert simples por (localizacao_id, dimensao_id)
-        foreach ($dimensoes as $dimId => $valor) {
-            $valor = $valor !== null && trim($valor) === '' ? null : $valor;
-            LocalizacaoValor::updateOrCreate(
-                ['localizacao_id' => $loc->id, 'dimensao_id' => (int)$dimId],
-                ['valor' => $valor]
-            );
-        }
+        return $trimmed === '' ? null : $trimmed;
+    }
+
+    private function escapeLike(string $value): string
+    {
+        return str_replace(['\\', '%', '_'], ['\\\\', '\%', '\_'], $value);
     }
 }

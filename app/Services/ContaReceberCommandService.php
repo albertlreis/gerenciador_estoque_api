@@ -25,10 +25,21 @@ class ContaReceberCommandService
         private readonly FinanceiroAuditoriaService $audit,
         private readonly ComunicacaoApiClient $comms,
         private readonly ContaAzulExportDispatchService $contaAzulExports,
+        private readonly RecorrenciaFinanceiraService $recorrencias,
     ) {}
 
     public function criar(array $dados): ContaReceber
     {
+        if (!empty($dados['recorrencia']) && !empty($dados['parcelamento'])) {
+            throw ValidationException::withMessages([
+                'recorrencia' => 'RecorrÃªncia e parcelamento nÃ£o podem ser usados no mesmo lanÃ§amento.',
+            ]);
+        }
+
+        if (!empty($dados['recorrencia']) && is_array($dados['recorrencia'])) {
+            return $this->criarRecorrente($dados);
+        }
+
         if (!empty($dados['parcelamento']) && is_array($dados['parcelamento'])) {
             return $this->criarParcelado($dados);
         }
@@ -49,7 +60,7 @@ class ContaReceberCommandService
                 $this->registrarPagamentoInicial($conta->fresh(), $pagamentoInicial);
             }
 
-            $fresh = $conta->fresh(['cliente', 'pedido.cliente', 'categoria', 'centroCusto', 'parcelamento', 'pagamentos.usuario']);
+            $fresh = $conta->fresh(['cliente', 'pedido.cliente', 'categoria', 'centroCusto', 'parcelamento', 'recorrencia', 'pagamentos.usuario']);
             $this->audit->log('created', $conta, null, $fresh->toArray());
 
             try {
@@ -80,7 +91,7 @@ class ContaReceberCommandService
             $this->syncValores($conta);
             $this->statusSvc->syncReceber($conta->fresh());
 
-            $fresh = $conta->fresh();
+            $fresh = $conta->fresh(['recorrencia']);
             $this->audit->log('updated', $conta, $antes, $fresh->toArray());
 
             $this->exportarTituloContaAzulBestEffort((int) $fresh->id, 'conta_receber_atualizada');
@@ -174,7 +185,7 @@ class ContaReceberCommandService
             $this->syncValores($conta->fresh());
             $this->statusSvc->syncReceber($conta->fresh());
 
-            $fresh = $conta->fresh(['cliente', 'pedido.cliente', 'pagamentos.usuario']);
+            $fresh = $conta->fresh(['cliente', 'pedido.cliente', 'recorrencia', 'pagamentos.usuario']);
 
             $this->audit->log('reversed', $conta, $antesConta, $fresh->toArray());
             $this->audit->log('ledger_canceled', $pagamento, null, [
@@ -316,11 +327,70 @@ class ContaReceberCommandService
                 $this->registrarPagamentoInicial($target, $pagamentoInicial);
             }
 
-            $fresh = ($target ?: $contas[0])->fresh(['cliente', 'pedido.cliente', 'categoria', 'centroCusto', 'parcelamento', 'pagamentos.usuario']);
+            $fresh = ($target ?: $contas[0])->fresh(['cliente', 'pedido.cliente', 'categoria', 'centroCusto', 'parcelamento', 'recorrencia', 'pagamentos.usuario']);
             $this->audit->log('created_installments', $parcelamento, null, [
                 'parcelamento' => $parcelamento->fresh()->toArray(),
                 'contas' => collect($contas)->pluck('id')->values()->all(),
             ]);
+
+            return $fresh;
+        });
+    }
+
+    private function criarRecorrente(array $dados): ContaReceber
+    {
+        return DB::transaction(function () use ($dados) {
+            $recorrenciaDados = $dados['recorrencia'] ?? [];
+            $pagamentoInicial = $dados['pagamento_inicial'] ?? null;
+            unset($dados['recorrencia'], $dados['parcelamento'], $dados['pagamento_inicial']);
+
+            $dados = $this->normalizarDados($dados);
+            $dados['status'] = ContaStatus::ABERTA->value;
+
+            $datas = $this->recorrencias->datas($recorrenciaDados, (string) $dados['data_vencimento']);
+            $serie = $this->recorrencias->criarSerie($dados, $recorrenciaDados, 'RECEBER', auth()->id());
+
+            $contas = [];
+            foreach ($datas as $data) {
+                $payload = $dados;
+                $payload['data_vencimento'] = $data->toDateString();
+                $payload['despesa_recorrente_id'] = $serie->id;
+                $payload['recorrencia_competencia'] = $data->toDateString();
+
+                $conta = ContaReceber::create($payload);
+                $this->syncValores($conta);
+                $this->statusSvc->syncReceber($conta->fresh());
+                $freshConta = $conta->fresh();
+                $this->recorrencias->registrarExecucao($serie, $freshConta, $data);
+                $contas[] = $freshConta;
+            }
+
+            $primeiraConta = $contas[0] ?? null;
+            if ($primeiraConta && is_array($pagamentoInicial)) {
+                $this->registrarPagamentoInicial($primeiraConta, $pagamentoInicial);
+            }
+
+            $fresh = $primeiraConta->fresh(['cliente', 'pedido.cliente', 'categoria', 'centroCusto', 'recorrencia', 'pagamentos.usuario']);
+            $this->audit->log('created_recurring', $serie, null, [
+                'recorrencia' => $serie->fresh()->toArray(),
+                'contas' => collect($contas)->pluck('id')->values()->all(),
+            ]);
+
+            try {
+                $this->comms->enviarCobranca($fresh);
+            } catch (\Throwable $e) {
+                logger()->warning('[Comunicacao] Falha ao enfileirar cobranÃ§a recorrente', [
+                    'conta_id' => $fresh->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+
+            foreach ($contas as $idx => $conta) {
+                if (is_array($pagamentoInicial) && $idx === 0) {
+                    continue;
+                }
+                $this->exportarTituloContaAzulBestEffort((int) $conta->id, 'conta_receber_recorrente_criada');
+            }
 
             return $fresh;
         });

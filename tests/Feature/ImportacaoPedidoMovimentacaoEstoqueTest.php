@@ -172,22 +172,75 @@ class ImportacaoPedidoMovimentacaoEstoqueTest extends TestCase
     {
         [$usuario, $cliente, $categoria, $variacao, $deposito] = $this->criarContexto();
 
+        $payload = $this->payloadImportacao(
+            tipo: 'venda',
+            clienteId: $cliente->id,
+            categoriaId: $categoria->id,
+            variacaoId: $variacao->id,
+            depositoId: $deposito->id,
+            quantidade: 2,
+            entregue: true,
+            movimentarEstoque: true,
+            movimentacaoTipo: 'entrada',
+        );
+        $payload['itens'][0]['nome'] = 'MESA APOIO NIX';
+        $payload['itens'][0]['ref'] = 'E66008';
+
         $response = $this->actingAs($usuario, 'sanctum')
-            ->postJson('/api/v1/pedidos/import/pdf/confirm', $this->payloadImportacao(
-                tipo: 'venda',
-                clienteId: $cliente->id,
-                categoriaId: $categoria->id,
-                variacaoId: $variacao->id,
-                depositoId: $deposito->id,
-                quantidade: 2,
-                entregue: true,
-                movimentarEstoque: true,
-                movimentacaoTipo: 'entrada',
-            ));
+            ->postJson('/api/v1/pedidos/import/pdf/confirm', $payload);
 
         $response
             ->assertStatus(422)
             ->assertJsonValidationErrors('itens');
+
+        $mensagem = $response->json('errors.itens.0');
+
+        $this->assertStringContainsString('Pedido entregue', $mensagem);
+        $this->assertStringContainsString('Saída', $mensagem);
+        $this->assertStringContainsString('Salvar sem movimentar', $mensagem);
+        $this->assertStringContainsString('Item pendente: Item 1', $mensagem);
+        $this->assertStringNotContainsString('MESA APOIO NIX', $mensagem);
+        $this->assertStringNotContainsString('E66008', $mensagem);
+    }
+
+    public function test_venda_entregue_com_varios_itens_em_entrada_resume_lista_na_validacao(): void
+    {
+        [$usuario, $cliente, $categoria, $variacao, $deposito] = $this->criarContexto();
+
+        $payload = $this->payloadImportacao(
+            tipo: 'venda',
+            clienteId: $cliente->id,
+            categoriaId: $categoria->id,
+            variacaoId: $variacao->id,
+            depositoId: $deposito->id,
+            quantidade: 1,
+            entregue: true,
+            movimentarEstoque: true,
+            movimentacaoTipo: 'entrada',
+        );
+        $payload['itens'] = array_map(
+            fn ($index) => array_merge($payload['itens'][0], [
+                'nome' => "Produto {$index}",
+                'ref' => "REF-{$index}",
+            ]),
+            range(1, 5)
+        );
+
+        $response = $this->actingAs($usuario, 'sanctum')
+            ->postJson('/api/v1/pedidos/import/pdf/confirm', $payload);
+
+        $response
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('itens');
+
+        $mensagem = $response->json('errors.itens.0');
+
+        $this->assertStringContainsString('Pedido entregue: 5 itens precisam estar como Saída', $mensagem);
+        $this->assertStringContainsString('Aplicar a todos > Saída', $mensagem);
+        $this->assertStringContainsString('Salvar sem movimentar', $mensagem);
+        $this->assertStringContainsString('Itens pendentes: Item 1, Item 2, Item 3 e mais 2.', $mensagem);
+        $this->assertStringNotContainsString('Produto 1', $mensagem);
+        $this->assertStringNotContainsString('REF-1', $mensagem);
     }
 
     public function test_venda_entregue_sem_movimentacao_cria_demanda_pendente_sem_baixa(): void
@@ -417,6 +470,64 @@ class ImportacaoPedidoMovimentacaoEstoqueTest extends TestCase
         $response
             ->assertStatus(422)
             ->assertJsonValidationErrors('itens');
+    }
+
+    public function test_referencia_ambigua_retorna_validacao_com_produto_e_referencia(): void
+    {
+        [$usuario, $cliente, $categoria, $variacao, $deposito] = $this->criarContexto();
+        $referenciaAmbigua = 'REF-AMBIGUA-IMPORTACAO';
+        $nomeProduto = 'Mesa Jantar Spider';
+
+        $produto = Produto::create([
+            'nome' => 'Produto Ambiguo Importacao',
+            'id_categoria' => $categoria->id,
+            'id_fornecedor' => $this->fornecedorId,
+            'ativo' => true,
+        ]);
+
+        ProdutoVariacao::create([
+            'produto_id' => $produto->id,
+            'referencia' => $referenciaAmbigua,
+            'nome' => 'Variacao A',
+            'preco' => 100,
+            'custo' => 50,
+        ]);
+
+        ProdutoVariacao::create([
+            'produto_id' => $produto->id,
+            'referencia' => $referenciaAmbigua,
+            'nome' => 'Variacao B',
+            'preco' => 100,
+            'custo' => 50,
+        ]);
+
+        $payload = $this->payloadImportacao(
+            tipo: 'venda',
+            clienteId: $cliente->id,
+            categoriaId: $categoria->id,
+            variacaoId: $variacao->id,
+            depositoId: $deposito->id,
+            quantidade: 1,
+            entregue: false,
+            movimentarEstoque: false,
+        );
+        $payload['itens'][0]['nome'] = $nomeProduto;
+        $payload['itens'][0]['ref'] = $referenciaAmbigua;
+        unset($payload['itens'][0]['id_variacao']);
+
+        $response = $this->actingAs($usuario, 'sanctum')
+            ->postJson('/api/v1/pedidos/import/pdf/confirm', $payload);
+
+        $response
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('itens.0.selecao_variacao');
+
+        $mensagem = $response->json('errors')['itens.0.selecao_variacao'][0] ?? null;
+
+        $this->assertIsString($mensagem);
+        $this->assertStringContainsString("Produto 1: {$nomeProduto}", $mensagem);
+        $this->assertStringContainsString("(Ref. {$referenciaAmbigua})", $mensagem);
+        $this->assertStringContainsString('múltiplas variações', $mensagem);
     }
 
     private function criarContexto(): array

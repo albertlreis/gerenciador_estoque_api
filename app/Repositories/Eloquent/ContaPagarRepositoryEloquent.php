@@ -14,7 +14,7 @@ class ContaPagarRepositoryEloquent implements ContaPagarRepository
 {
     public function listar(FiltroContaPagarDTO $filtro, int $page = 1, int $perPage = 15): LengthAwarePaginator
     {
-        $q = ContaPagar::query()->with(['fornecedor', 'parcelamento']);
+        $q = ContaPagar::query()->with(['fornecedor', 'parcelamento', 'recorrencia', 'pagamentos.contaFinanceira']);
 
         if ($filtro->busca) {
             $busca = "%{$filtro->busca}%";
@@ -28,9 +28,14 @@ class ContaPagarRepositoryEloquent implements ContaPagarRepository
         if ($filtro->forma_pagamento) $q->where('forma_pagamento', $filtro->forma_pagamento);
         if ($filtro->centro_custo_id) $q->where('centro_custo_id', $filtro->centro_custo_id);
         if ($filtro->categoria_id) $q->where('categoria_id', $filtro->categoria_id);
+        if ($filtro->conta_financeira_id) {
+            $q->whereHas('pagamentos', fn ($pagamento) => $pagamento->where('conta_financeira_id', $filtro->conta_financeira_id));
+        }
+        if ($filtro->origem === 'recorrente') $q->whereNotNull('despesa_recorrente_id');
         if ($filtro->data_ini) $q->whereDate('data_vencimento','>=',$filtro->data_ini);
         if ($filtro->data_fim) $q->whereDate('data_vencimento','<=',$filtro->data_fim);
-        if ($filtro->vencidas) $q->whereDate('data_vencimento','<', now()->toDateString())->where('status','!=','PAGA');
+        if ($filtro->em_aberto) $q->whereNotIn('status', ['PAGA', 'CANCELADA']);
+        if ($filtro->vencidas) $q->whereDate('data_vencimento','<', now()->toDateString())->whereNotIn('status', ['PAGA', 'CANCELADA']);
 
         $q->orderBy('data_vencimento', 'desc')->orderBy('id');
 
@@ -40,7 +45,7 @@ class ContaPagarRepositoryEloquent implements ContaPagarRepository
 
     public function encontrar(int $id): Builder|array|Collection|Model
     {
-        return ContaPagar::with(['fornecedor','parcelamento','pagamentos.usuario'])->find($id);
+        return ContaPagar::with(['fornecedor','parcelamento','recorrencia','pagamentos.usuario'])->find($id);
     }
 
     public function criar(array $dados): ContaPagar

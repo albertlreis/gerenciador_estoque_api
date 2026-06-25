@@ -111,9 +111,7 @@ class EstoqueMovimentacaoService
             $query->whereExists(function ($sub) use ($localizacaoLike) {
                 $sub->selectRaw('1')
                     ->from('estoque as e')
-                    ->join('localizacoes_estoque as le', 'le.estoque_id', '=', 'e.id')
-                    ->leftJoin('areas_estoque as ae', 'ae.id', '=', 'le.area_id')
-                    ->leftJoin('localizacao_valores as lv', 'lv.localizacao_id', '=', 'le.id')
+                    ->join('localizacoes_estoque as le', 'le.id', '=', 'e.localizacao_id')
                     ->whereColumn('e.id_variacao', 'estoque_movimentacoes.id_variacao')
                     ->where(function ($depositoQuery) {
                         $depositoQuery
@@ -123,12 +121,11 @@ class EstoqueMovimentacaoService
                     ->where(function ($localizacaoQuery) use ($localizacaoLike) {
                         $localizacaoQuery
                             ->whereRaw("le.codigo_composto LIKE ? ESCAPE '\\\\'", [$localizacaoLike])
+                            ->orWhereRaw("le.area LIKE ? ESCAPE '\\\\'", [$localizacaoLike])
+                            ->orWhereRaw("le.corredor LIKE ? ESCAPE '\\\\'", [$localizacaoLike])
                             ->orWhereRaw("le.setor LIKE ? ESCAPE '\\\\'", [$localizacaoLike])
                             ->orWhereRaw("le.coluna LIKE ? ESCAPE '\\\\'", [$localizacaoLike])
-                            ->orWhereRaw("le.nivel LIKE ? ESCAPE '\\\\'", [$localizacaoLike])
-                            ->orWhereRaw("le.observacoes LIKE ? ESCAPE '\\\\'", [$localizacaoLike])
-                            ->orWhereRaw("ae.nome LIKE ? ESCAPE '\\\\'", [$localizacaoLike])
-                            ->orWhereRaw("lv.valor LIKE ? ESCAPE '\\\\'", [$localizacaoLike]);
+                            ->orWhereRaw("le.observacoes LIKE ? ESCAPE '\\\\'", [$localizacaoLike]);
                     });
             });
         }
@@ -725,6 +722,7 @@ class EstoqueMovimentacaoService
                 // cria itens com snapshot de localização no depósito de origem (já validado e lockado acima)
                 foreach ($consolidados as $variacaoId => $qtd) {
                     $row = Estoque::query()
+                        ->with('localizacao')
                         ->where('id_variacao', (int) $variacaoId)
                         ->where('id_deposito', (int) $origem)
                         ->lockForUpdate()
@@ -734,9 +732,9 @@ class EstoqueMovimentacaoService
                         'transferencia_id' => $transferencia->id,
                         'id_variacao' => (int) $variacaoId,
                         'quantidade' => (int) $qtd,
-                        'corredor' => $row?->corredor,
-                        'prateleira' => $row?->prateleira,
-                        'nivel' => $row?->nivel,
+                        'corredor' => $row?->localizacao?->corredor,
+                        'prateleira' => null,
+                        'nivel' => null,
                     ]);
                 }
             }

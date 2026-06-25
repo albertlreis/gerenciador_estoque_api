@@ -9,6 +9,7 @@ use App\Models\LocalizacaoValor;
 use App\Support\InitialData\InventoryInitialDataService;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 /**
  * Seeder de Localizações de Estoque (regras atuais).
@@ -34,6 +35,15 @@ class LocalizacaoEstoqueSeeder extends Seeder
      */
     public function run(): void
     {
+        if (
+            !Schema::hasTable('localizacoes_estoque') ||
+            !Schema::hasColumn('localizacoes_estoque', 'estoque_id') ||
+            !Schema::hasTable('localizacao_dimensoes') ||
+            !Schema::hasTable('localizacao_valores')
+        ) {
+            return;
+        }
+
         // 1) Garante áreas padrão
         $areasIds = $this->seedAreasPadrao();
 

@@ -521,7 +521,7 @@ class PedidoController extends Controller
         // Regra de negócio:
         // - Pedido consignado = status atual consignado (e/ou existe consignação)
         // Eu priorizo statusAtual por ser determinístico e mais barato.
-        $status = $pedidoBase->statusAtual?->status?->value ?? $pedidoBase->statusAtual?->status;
+        $status = $pedidoBase->statusAtual?->getRawOriginal('status') ?? $pedidoBase->statusAtual?->status;
         $tipoRoteiro = $this->normalizarTipoRoteiro($request->query('tipo_roteiro'));
         $isConsignado = in_array($status, ['consignado', 'devolucao_consignacao'], true);
         if (!$isConsignado) {
@@ -552,7 +552,7 @@ class PedidoController extends Controller
                 'consignacoes.produtoVariacao.atributos',
 
                 // localização
-                'consignacoes.produtoVariacao.estoquesComLocalizacao.localizacao.area',
+                'consignacoes.produtoVariacao.estoquesComLocalizacao.localizacao',
             ])->findOrFail($pedidoId);
 
             $consignacaoIds = collect((array) $request->query('consignacao_ids', []))
@@ -617,7 +617,7 @@ class PedidoController extends Controller
             'itens.variacao.atributos',
 
             // localização
-            'itens.variacao.estoquesComLocalizacao.localizacao.area',
+            'itens.variacao.estoquesComLocalizacao.localizacao',
         ])->findOrFail($pedidoId);
 
         $itemIds = collect((array) $request->query('item_ids', []))
@@ -677,9 +677,21 @@ class PedidoController extends Controller
     /**
      * Retorna os itens que podem compor uma nota de entrega.
      */
-    public function notaEntregaItens(int $pedidoId, EstoqueDisponibilidadeService $disponibilidade): JsonResponse
+    public function notaEntregaItens(
+        int $pedidoId,
+        EstoqueDisponibilidadeService $disponibilidade,
+        EntregaProdutoService $entregaService
+    ): JsonResponse
     {
         $pedido = Pedido::with('cliente.enderecos')->findOrFail($pedidoId);
+
+        if (
+            $pedido->isVenda()
+            && ! ProdutoEntregaItem::query()->where('pedido_id', $pedido->id)->exists()
+        ) {
+            $usuarioId = auth()->id();
+            $entregaService->criarDemandaPedido($pedido, $usuarioId ? (int) $usuarioId : null, false);
+        }
 
         $queryBase = fn () => ProdutoEntregaItem::query()
             ->with([
@@ -765,7 +777,7 @@ class PedidoController extends Controller
             $data['cliente_endereco_id'] ?? null
         );
 
-        $selecionados = $this->normalizarItensNotaEntrega($data['itens']);
+        $selecionados = $this->normalizarItensNotaEntrega($data['itens'], $registrarEntrega);
 
         if ($selecionados->isEmpty()) {
             throw ValidationException::withMessages([
@@ -834,6 +846,20 @@ class PedidoController extends Controller
                         );
                     }
 
+                    $entregarSemExpedicao = (int) $item->getAttribute('nota_entregar_sem_expedicao');
+                    $entregarSemExpedicaoRegistrado = (bool) $item->getAttribute('nota_entregar_sem_expedicao_registrado');
+
+                    if ($entregarSemExpedicao > 0 && ! $entregarSemExpedicaoRegistrado) {
+                        $entregaService->entregarItem(
+                            $item,
+                            $entregarSemExpedicao,
+                            auth()->id(),
+                            $data['observacao'] ?? 'Entrega registrada via nota de entrega sem saldo em estoque.',
+                            $this->notaEntregaEventoKey($idempotencyKey, (int) $item->id),
+                            true
+                        );
+                    }
+
                     foreach ((array) $item->getAttribute('nota_alocacoes') as $alocacao) {
                         if (! empty($alocacao['entrega_registrada'])) {
                             continue;
@@ -875,6 +901,7 @@ class PedidoController extends Controller
                 'pedido_item_id' => $item->pedido_item_id,
                 'quantidade' => (int) $item->getAttribute('nota_quantidade'),
                 'entregar_expedido' => (int) $item->getAttribute('nota_entregar_expedido'),
+                'entregar_sem_expedicao' => (int) $item->getAttribute('nota_entregar_sem_expedicao'),
                 'alocacoes' => $item->getAttribute('nota_alocacoes') ?? [],
             ])->values()->all(),
         ]);
@@ -929,7 +956,7 @@ class PedidoController extends Controller
         ];
     }
 
-    private function normalizarItensNotaEntrega(array $itens): Collection
+    private function normalizarItensNotaEntrega(array $itens, bool $registrarEntrega = false): Collection
     {
         return collect($itens)
             ->map(function (array $item) {
@@ -952,10 +979,6 @@ class PedidoController extends Controller
                 $quantidade = array_key_exists('quantidade', $item)
                     ? max(0, (int) ($item['quantidade'] ?? 0))
                     : null;
-
-                if ($entregarExpedido <= 0 && $alocacoes->isEmpty() && array_key_exists('quantidade', $item)) {
-                    $entregarExpedido = (int) ($item['quantidade'] ?? 0);
-                }
 
                 return [
                     'id' => (int) ($item['produto_entrega_item_id'] ?? 0),
@@ -1056,6 +1079,51 @@ class PedidoController extends Controller
 
             $pendenteTotal = max(0, (int) $item->quantidade_total - (int) $item->quantidade_entregue);
             $pendenteExpedido = max(0, (int) $item->quantidade_expedida - (int) $item->quantidade_entregue);
+            $quantidadeDocumental = $selecionado['quantidade'] ?? null;
+
+            if ($quantidadeDocumental !== null
+                && $entregarExpedidoSolicitado <= 0
+                && collect($selecionado['alocacoes'] ?? [])->isEmpty()) {
+                $eventoEntregaDireta = $registrarEntrega
+                    ? ProdutoEntregaEvento::query()
+                        ->where('idempotency_key', $this->notaEntregaEventoKey($idempotencyKey, (int) $item->id))
+                        ->first()
+                    : null;
+                $quantidadeDocumental = (int) $quantidadeDocumental;
+                $quantidadeNota = $eventoEntregaDireta
+                    ? (int) $eventoEntregaDireta->quantidade
+                    : $quantidadeDocumental;
+
+                if ($quantidadeNota <= 0) {
+                    throw ValidationException::withMessages([
+                        'itens' => ["Informe uma quantidade para o item de entrega #{$item->id}."],
+                    ]);
+                }
+
+                if (! $eventoEntregaDireta && $quantidadeNota > $pendenteTotal) {
+                    throw ValidationException::withMessages([
+                        'itens' => ["A quantidade do item de entrega #{$item->id} excede o pendente total de entrega ({$pendenteTotal})."],
+                    ]);
+                }
+
+                $entregarExpedidoDireto = $registrarEntrega && $quantidadeNota <= $pendenteExpedido
+                    ? $quantidadeNota
+                    : 0;
+                $entregarSemExpedicao = $registrarEntrega
+                    ? max(0, $quantidadeNota - $entregarExpedidoDireto)
+                    : 0;
+
+                $item->setAttribute('nota_quantidade', $quantidadeNota);
+                $item->setAttribute('nota_entregar_expedido', $entregarExpedidoDireto);
+                $item->setAttribute('nota_entregar_expedido_registrado', (bool) $eventoEntregaDireta);
+                $item->setAttribute('nota_entregar_sem_expedicao', $entregarSemExpedicao);
+                $item->setAttribute('nota_entregar_sem_expedicao_registrado', (bool) $eventoEntregaDireta);
+                $item->setAttribute('nota_alocacoes', []);
+                $item->setAttribute('nota_modo', $registrarEntrega && $entregarSemExpedicao > 0 ? 'entrega_sem_saldo' : 'pendente_documental');
+                $itens->push($item);
+
+                continue;
+            }
 
             if ($entregarExpedidoNovo > $pendenteExpedido) {
                 throw ValidationException::withMessages([
@@ -1141,6 +1209,8 @@ class PedidoController extends Controller
             $item->setAttribute('nota_quantidade', $quantidadeTotalNota);
             $item->setAttribute('nota_entregar_expedido', $entregarExpedido);
             $item->setAttribute('nota_entregar_expedido_registrado', $entregarExpedidoRegistrado);
+            $item->setAttribute('nota_entregar_sem_expedicao', 0);
+            $item->setAttribute('nota_entregar_sem_expedicao_registrado', false);
             $item->setAttribute('nota_alocacoes', $alocacoesEfetivas->values()->all());
             $itens->push($item);
         }
@@ -1170,8 +1240,19 @@ class PedidoController extends Controller
 
         $temQuantidade = false;
         $entregarExpedido = (int) ($selecionado['entregar_expedido'] ?? 0);
+        $quantidadeDireta = (int) ($selecionado['quantidade'] ?? 0);
 
         if ($entregarExpedido > 0) {
+            $temQuantidade = true;
+
+            if (! ProdutoEntregaEvento::query()
+                ->where('idempotency_key', $this->notaEntregaEventoKey($idempotencyKey, (int) $item->id))
+                ->exists()) {
+                return false;
+            }
+        }
+
+        if ($quantidadeDireta > 0 && $entregarExpedido <= 0 && collect($selecionado['alocacoes'] ?? [])->isEmpty()) {
             $temQuantidade = true;
 
             if (! ProdutoEntregaEvento::query()
@@ -1785,7 +1866,7 @@ class PedidoController extends Controller
 
     private function isRoteiroConsignacaoDevolucao(Pedido $pedido): bool
     {
-        $statusAtual = $pedido->statusAtual?->status?->value ?? $pedido->statusAtual?->status;
+        $statusAtual = $pedido->statusAtual?->getRawOriginal('status') ?? $pedido->statusAtual?->status;
         if ($statusAtual === 'devolucao_consignacao') {
             return true;
         }

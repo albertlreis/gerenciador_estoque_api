@@ -3,6 +3,7 @@
 namespace App\Http\Resources;
 
 use App\Services\BusinessDayService;
+use App\Services\PedidoStatusFluxoService;
 use App\Support\Pdf\ClienteEnderecoPdf;
 use App\Traits\PedidoStatusTrait;
 use Carbon\Carbon;
@@ -33,12 +34,13 @@ class PedidoCompletoResource extends JsonResource
             $dataLimiteCalculada = $dataLimite->toDateString();
         }
 
-        $statusAtualEnum = optional($this->statusAtual)->status;
+        $statusAtualValor = $this->getStatusAtualCodigo($this->resource);
+        $statusAtualMeta = app(PedidoStatusFluxoService::class)->statusMeta($statusAtualValor);
 
         $diasUteisRestantes = null;
         $atrasadoEntrega = false;
 
-        if ($dataLimite && $this->contaPrazoEntrega($statusAtualEnum)) {
+        if ($dataLimite && $this->contaPrazoEntrega($statusAtualValor)) {
             $diasUteisRestantes = $agoraBelem->diffInWeekdays($dataLimite, false);
             $atrasadoEntrega    = $agoraBelem->greaterThan($dataLimite);
         }
@@ -48,7 +50,8 @@ class PedidoCompletoResource extends JsonResource
             'numero'      => $this->numero_externo,
             'numero_externo' => $this->numero_externo,
             'data_pedido' => $this->data_pedido,
-            'status'      => $statusAtualEnum,
+            'status'      => $statusAtualValor,
+            'status_label' => $statusAtualValor ? $statusAtualMeta['label'] : null,
             'tipo'        => $this->tipo,
 
             'id_cliente'  => $this->id_cliente,

@@ -3,8 +3,8 @@
 namespace App\Traits;
 
 use App\Enums\PedidoStatus;
-use App\Helpers\PedidoHelper;
 use App\Models\Pedido;
+use App\Services\PedidoStatusFluxoService;
 use Illuminate\Support\Carbon;
 
 /**
@@ -20,7 +20,20 @@ trait PedidoStatusTrait
      */
     protected function getStatusAtualEnum(Pedido $pedido): ?PedidoStatus
     {
-        return optional($pedido->statusAtual)->status;
+        return PedidoStatus::tryFrom((string) $this->getStatusAtualCodigo($pedido));
+    }
+
+    protected function getStatusAtualCodigo(Pedido $pedido): ?string
+    {
+        $statusAtual = $pedido->statusAtual;
+
+        if (!$statusAtual) {
+            return null;
+        }
+
+        return app(PedidoStatusFluxoService::class)->normalizarStatus(
+            $statusAtual->getRawOriginal('status') ?: $statusAtual->status
+        );
     }
 
     /**
@@ -38,11 +51,11 @@ trait PedidoStatusTrait
      * Retorna o próximo status esperado no fluxo.
      *
      * @param Pedido $pedido
-     * @return \App\Enums\PedidoStatus|null
+     * @return array<string, mixed>|null
      */
-    protected function getProximoStatus(Pedido $pedido): ?PedidoStatus
+    protected function getProximoStatus(Pedido $pedido): ?array
     {
-        return PedidoHelper::proximoStatusEsperado($pedido);
+        return app(PedidoStatusFluxoService::class)->proximoStatusDetalhado($pedido);
     }
 
     /**
@@ -53,7 +66,7 @@ trait PedidoStatusTrait
      */
     protected function getPrevisaoProximoStatus(Pedido $pedido): ?Carbon
     {
-        return PedidoHelper::previsaoProximoStatus($pedido);
+        return app(PedidoStatusFluxoService::class)->previsaoProximoStatus($pedido);
     }
 
     /**
@@ -65,27 +78,31 @@ trait PedidoStatusTrait
     protected function isAtrasado(Pedido $pedido): bool
     {
         $previsao = $this->getPrevisaoProximoStatus($pedido);
-        return $previsao && Carbon::now()->greaterThan($previsao);
+        return $previsao && Carbon::now(config('app.timezone', 'America/Belem'))->greaterThan($previsao);
     }
 
     /**
      * Informa se o status atual do pedido ainda deve contar para o prazo de entrega ao cliente.
      */
-    protected function contaPrazoEntrega(?PedidoStatus $status): bool
+    protected function contaPrazoEntrega(mixed $status): bool
     {
-        if (!$status) return false;
+        $status = app(PedidoStatusFluxoService::class)->normalizarStatus($status);
+
+        if (!$status) {
+            return false;
+        }
 
         return in_array($status, [
-            PedidoStatus::PEDIDO_CRIADO,
-            PedidoStatus::ENVIADO_FABRICA,
-            PedidoStatus::NOTA_EMITIDA,
-            PedidoStatus::PREVISAO_EMBARQUE_FABRICA,
-            PedidoStatus::EMBARQUE_FABRICA,
-            PedidoStatus::NOTA_RECEBIDA_COMPRA,
-            PedidoStatus::PREVISAO_ENTREGA_ESTOQUE,
-            PedidoStatus::ENTREGA_ESTOQUE,
-            PedidoStatus::PREVISAO_ENVIO_CLIENTE,
-            PedidoStatus::ENVIO_CLIENTE,
+            PedidoStatus::PEDIDO_CRIADO->value,
+            PedidoStatus::ENVIADO_FABRICA->value,
+            PedidoStatus::NOTA_EMITIDA->value,
+            PedidoStatus::PREVISAO_EMBARQUE_FABRICA->value,
+            PedidoStatus::EMBARQUE_FABRICA->value,
+            PedidoStatus::NOTA_RECEBIDA_COMPRA->value,
+            PedidoStatus::PREVISAO_ENTREGA_ESTOQUE->value,
+            PedidoStatus::ENTREGA_ESTOQUE->value,
+            PedidoStatus::PREVISAO_ENVIO_CLIENTE->value,
+            PedidoStatus::ENVIO_CLIENTE->value,
         ], true);
     }
 }

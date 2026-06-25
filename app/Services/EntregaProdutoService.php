@@ -629,16 +629,19 @@ class EntregaProdutoService
         ?int $quantidade = null,
         ?int $usuarioId = null,
         ?string $observacao = null,
-        ?string $idempotencyKey = null
+        ?string $idempotencyKey = null,
+        bool $permitirSemExpedicao = false
     ): ProdutoEntregaItem {
-        return DB::transaction(function () use ($item, $quantidade, $usuarioId, $observacao, $idempotencyKey) {
+        return DB::transaction(function () use ($item, $quantidade, $usuarioId, $observacao, $idempotencyKey, $permitirSemExpedicao) {
             $entrega = $this->lockItem($item);
 
             if ($entrega->status === ProdutoEntregaItem::STATUS_CANCELADO) {
                 return $entrega;
             }
 
-            $baseEntregavel = (int) $entrega->quantidade_expedida;
+            $baseEntregavel = $permitirSemExpedicao
+                ? (int) $entrega->quantidade_total
+                : (int) $entrega->quantidade_expedida;
             $pendente = max(0, $baseEntregavel - (int) $entrega->quantidade_entregue);
             $quantidade = $quantidade !== null ? min((int) $quantidade, $pendente) : $pendente;
             if ($quantidade <= 0) {

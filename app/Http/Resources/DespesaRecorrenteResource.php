@@ -12,7 +12,9 @@ class DespesaRecorrenteResource extends JsonResource
         return [
             'id' => $this->id,
 
+            'direcao' => $this->direcao ?: 'PAGAR',
             'fornecedor_id' => $this->fornecedor_id,
+            'cliente_id' => $this->cliente_id,
             'descricao' => $this->descricao,
             'numero_documento' => $this->numero_documento,
 
@@ -34,6 +36,7 @@ class DespesaRecorrenteResource extends JsonResource
             'data_fim' => optional($this->data_fim)->format('Y-m-d'),
 
             'criar_conta_pagar_auto' => (bool) $this->criar_conta_pagar_auto,
+            'ocorrencias_total' => $this->ocorrencias_total,
             'dias_antecedencia' => $this->dias_antecedencia,
             'status' => $this->status,
 
@@ -43,6 +46,13 @@ class DespesaRecorrenteResource extends JsonResource
                 return [
                     'id' => $this->fornecedor?->id,
                     'nome' => $this->fornecedor?->nome ?? null,
+                ];
+            }),
+
+            'cliente' => $this->whenLoaded('cliente', function () {
+                return [
+                    'id' => $this->cliente?->id,
+                    'nome' => $this->cliente?->nome ?? null,
                 ];
             }),
 

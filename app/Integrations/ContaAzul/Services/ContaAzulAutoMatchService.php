@@ -6,6 +6,7 @@ use App\Enums\ContaStatus;
 use App\Enums\LancamentoTipo;
 use App\Integrations\ContaAzul\ContaAzulEntityType;
 use App\Integrations\ContaAzul\Models\ContaAzulMapeamento;
+use App\Integrations\ContaAzul\Support\ContaAzulMoney;
 use App\Models\CategoriaFinanceira;
 use App\Models\Cliente;
 use App\Models\CentroCusto;
@@ -384,7 +385,7 @@ class ContaAzulAutoMatchService
             return ['status' => 'pendente', 'observacao' => 'Saldo sem conta financeira local mapeada'];
         }
 
-        $saldo = $this->parseMoney($this->firstStringNested($payload, ['saldo_atual', 'saldoAtual', 'saldo', 'valor', 'balance']));
+        $saldo = ContaAzulMoney::parseFromPayload($payload, ['saldo_atual', 'saldoAtual', 'saldo', 'valor', 'balance']);
         if ($saldo === null) {
             return ['status' => 'pendente', 'observacao' => 'Payload de saldo sem valor reconhecido'];
         }
@@ -863,24 +864,7 @@ class ContaAzulAutoMatchService
 
     private function parseMoney(?string $value): ?float
     {
-        if ($value === null || trim($value) === '') {
-            return null;
-        }
-
-        $value = trim($value);
-        if (is_numeric($value)) {
-            return (float) $value;
-        }
-
-        $normalized = str_contains($value, ',')
-            ? str_replace(',', '.', str_replace(['.', ' '], ['', ''], $value))
-            : str_replace([' ', ','], ['', ''], $value);
-
-        if (!is_numeric($normalized)) {
-            return null;
-        }
-
-        return (float) $normalized;
+        return ContaAzulMoney::parse($value);
     }
 
     private function parseDate(?string $value): ?\DateTimeImmutable

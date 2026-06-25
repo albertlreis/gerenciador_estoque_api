@@ -4,7 +4,9 @@ namespace App\Integrations\ContaAzul\Services;
 
 use App\Enums\LancamentoTipo;
 use App\Integrations\ContaAzul\ContaAzulEntityType;
+use App\Integrations\ContaAzul\Support\ContaAzulMoney;
 use App\Models\Cliente;
+use App\Models\ContaFinanceira;
 use App\Models\ContaPagar;
 use App\Models\ContaPagarPagamento;
 use App\Models\ContaReceber;
@@ -122,11 +124,21 @@ class ContaAzulFinanceiroLocalOfficializationService
                 continue;
             }
 
-            DB::table('contas_financeiras')->where('id', $contaId)->update([
-                'saldo_atual' => $this->money(data_get($p, 'saldo_atual', data_get($p, 'saldo', 0))),
-                'saldo_atual_em' => $this->datetime($this->str($p, 'consultado_em')) ?? now(),
-                'updated_at' => now(),
-            ]);
+            $conta = ContaFinanceira::query()->find($contaId);
+            if (!$conta) {
+                $res['ignorados']++;
+                continue;
+            }
+
+            $meta = is_array($conta->meta_json) ? $conta->meta_json : [];
+            $meta['conta_azul_saldo'] = $p;
+            $consultadoEm = $this->str($p, 'consultado_em', $this->str($p, 'dataConsulta', $this->str($p, 'updatedAt')));
+
+            $conta->forceFill([
+                'saldo_atual' => ContaAzulMoney::parseFromPayload($p, ['saldo_atual', 'saldoAtual', 'saldo', 'valor', 'balance']) ?? 0,
+                'saldo_atual_em' => $this->datetime($consultadoEm) ?? now(),
+                'meta_json' => $meta,
+            ])->save();
             $res['atualizados']++;
         }
 
@@ -887,7 +899,7 @@ class ContaAzulFinanceiroLocalOfficializationService
 
     private function money(mixed $value): float
     {
-        return round((float) ($value ?? 0), 2);
+        return ContaAzulMoney::parseOrZero($value);
     }
 
     private function digits(string $value): string

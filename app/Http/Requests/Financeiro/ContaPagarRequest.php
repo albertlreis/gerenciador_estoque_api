@@ -3,6 +3,7 @@
 namespace App\Http\Requests\Financeiro;
 
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class ContaPagarRequest extends FormRequest
 {
@@ -25,6 +26,12 @@ class ContaPagarRequest extends FormRequest
             'categoria_id' => ['nullable','integer','exists:categorias_financeiras,id'],
             'centro_custo_id' => ['nullable','integer','exists:centros_custo,id'],
             'observacoes' => ['nullable','string'],
+            'recorrencia' => ['nullable','array'],
+            'recorrencia.frequencia' => ['required_with:recorrencia', Rule::in(['DIARIA','SEMANAL','MENSAL','ANUAL'])],
+            'recorrencia.intervalo' => ['nullable','integer','min:1','max:365'],
+            'recorrencia.termino_tipo' => ['nullable', Rule::in(['OCORRENCIAS','DATA'])],
+            'recorrencia.ocorrencias' => ['nullable','integer','min:1','max:366'],
+            'recorrencia.data_fim' => ['nullable','date'],
             'parcelamento' => ['nullable','array'],
             'parcelamento.quantidade_parcelas' => ['nullable','integer','min:1','max:120'],
             'parcelamento.valor_entrada' => ['nullable','numeric','min:0'],
@@ -43,5 +50,14 @@ class ContaPagarRequest extends FormRequest
             'pagamento_inicial.conta_financeira_id' => ['required_with:pagamento_inicial','integer','exists:contas_financeiras,id'],
             'pagamento_inicial.observacoes' => ['nullable','string'],
         ];
+    }
+
+    public function withValidator($validator): void
+    {
+        $validator->after(function ($v) {
+            if ($this->filled('recorrencia') && $this->filled('parcelamento')) {
+                $v->errors()->add('recorrencia', 'Recorrência e parcelamento não podem ser usados no mesmo lançamento.');
+            }
+        });
     }
 }

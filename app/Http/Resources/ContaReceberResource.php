@@ -16,6 +16,9 @@ class ContaReceberResource extends JsonResource
         return [
             'id'                => $this->id,
             'parcelamento_id'   => $this->parcelamento_id ? (int) $this->parcelamento_id : null,
+            'despesa_recorrente_id' => $this->despesa_recorrente_id ? (int) $this->despesa_recorrente_id : null,
+            'recorrencia_competencia' => optional($this->recorrencia_competencia)->format('Y-m-d'),
+            'origem' => $this->despesa_recorrente_id ? 'recorrente' : 'manual',
             'parcela_numero'    => $this->parcela_numero !== null ? (int) $this->parcela_numero : null,
             'parcelas_total'    => $this->parcelas_total !== null ? (int) $this->parcelas_total : null,
             'is_entrada'        => (bool) $this->is_entrada,
@@ -55,7 +58,28 @@ class ContaReceberResource extends JsonResource
                 'valor_entrada' => (float) ($this->parcelamento?->valor_entrada ?? 0),
                 'quantidade_parcelas' => (int) ($this->parcelamento?->quantidade_parcelas ?? 0),
             ]),
+            'recorrencia' => $this->whenLoaded('recorrencia', fn() => [
+                'id' => $this->recorrencia?->id,
+                'direcao' => $this->recorrencia?->direcao ?: 'RECEBER',
+                'descricao' => $this->recorrencia?->descricao,
+                'status' => $this->recorrencia?->status,
+                'frequencia' => $this->recorrencia?->frequencia,
+            ]),
             'observacoes'       => $this->observacoes,
+
+            'cobranca_conta_azul' => $this->whenLoaded('cobrancaContaAzul', fn() => $this->cobrancaContaAzul ? [
+                'id' => $this->cobrancaContaAzul->id,
+                'tipo' => $this->cobrancaContaAzul->tipo,
+                'status' => $this->cobrancaContaAzul->status,
+                'id_externo' => $this->cobrancaContaAzul->id_externo,
+                'url' => $this->cobrancaContaAzul->url,
+                'linha_digitavel' => $this->cobrancaContaAzul->linha_digitavel,
+                'codigo_barras' => $this->cobrancaContaAzul->codigo_barras,
+                'erro_codigo' => $this->cobrancaContaAzul->erro_codigo,
+                'erro_mensagem' => $this->cobrancaContaAzul->erro_mensagem,
+                'emitida_em' => optional($this->cobrancaContaAzul->emitida_em)->format('Y-m-d H:i:s'),
+                'ultima_tentativa_em' => optional($this->cobrancaContaAzul->ultima_tentativa_em)->format('Y-m-d H:i:s'),
+            ] : null),
 
             'pedido' => $this->whenLoaded('pedido', function () {
                 $cliente = $this->pedido?->relationLoaded('cliente') ? $this->pedido->cliente : null;

@@ -4,9 +4,6 @@ namespace App\Http\Resources;
 
 use Illuminate\Http\Resources\Json\JsonResource;
 
-/**
- * Resource da localização de estoque (essencial + dimensões).
- */
 class LocalizacaoEstoqueResource extends JsonResource
 {
     /**
@@ -16,25 +13,21 @@ class LocalizacaoEstoqueResource extends JsonResource
     public function toArray($request): array
     {
         return [
-            'id'             => $this->id,
-            'estoque_id'     => $this->estoque_id,
-            'setor'          => $this->setor,
-            'coluna'         => $this->coluna,
-            'nivel'          => $this->nivel,
-            'area_id'        => $this->area_id,
-            'codigo_composto'=> $this->codigo_composto,
-            'observacoes'    => $this->observacoes,
-            'area'           => $this->whenLoaded('area', fn () => [
-                'id' => $this->area?->id,
-                'nome' => $this->area?->nome,
-            ]),
-            'dimensoes'      => $this->whenLoaded('valores', function () {
-                return $this->valores->map(fn($v) => [
-                    'dimensao_id' => $v->dimensao_id,
-                    'nome'        => $v->dimensao?->nome,
-                    'valor'       => $v->valor,
-                ]);
-            })
+            'id' => $this->id,
+            'deposito_id' => $this->deposito_id,
+            'area' => $this->area,
+            'corredor' => $this->corredor,
+            'setor' => $this->setor,
+            'coluna' => $this->coluna,
+            'codigo_composto' => $this->codigo_composto,
+            'observacoes' => $this->observacoes,
+            'ativo' => (bool) $this->ativo,
+            'ocupacao' => [
+                'itens' => (int) ($this->ocupacao_itens ?? 0),
+                'pecas' => (int) ($this->ocupacao_pecas ?? 0),
+            ],
+            'created_at' => $this->created_at?->toISOString(),
+            'updated_at' => $this->updated_at?->toISOString(),
         ];
     }
 }

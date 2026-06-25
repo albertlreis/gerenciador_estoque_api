@@ -48,7 +48,7 @@ class LancamentoFinanceiroController extends Controller
         $model = $this->service->criar($request->validated());
 
         return response()->json([
-            'message' => 'Lançamento criado com sucesso.',
+            'message' => 'Movimento criado com sucesso.',
             'data'    => new LancamentoFinanceiroResource($model),
         ], 201);
     }
@@ -58,7 +58,7 @@ class LancamentoFinanceiroController extends Controller
         $model = $this->service->atualizar($lancamento, $request->validated());
 
         return response()->json([
-            'message' => 'Lançamento atualizado com sucesso.',
+            'message' => 'Movimento atualizado com sucesso.',
             'data'    => new LancamentoFinanceiroResource($model),
         ]);
     }
@@ -67,7 +67,7 @@ class LancamentoFinanceiroController extends Controller
     {
         $this->service->remover($lancamento);
 
-        return response()->json(['message' => 'Lançamento removido com sucesso.']);
+        return response()->json(['message' => 'Movimento removido com sucesso.']);
     }
 
     public function totais(LancamentoFinanceiroIndexRequest $request): JsonResponse
@@ -85,7 +85,7 @@ class LancamentoFinanceiroController extends Controller
 
         return Excel::download(
             new LancamentosFinanceirosExport($this->service->listarParaExportacao($dto)),
-            'lancamentos_financeiros.xlsx'
+            'extrato_movimentacoes.xlsx'
         );
     }
 
@@ -100,6 +100,14 @@ class LancamentoFinanceiroController extends Controller
             'gerado_em' => now()->format('d/m/Y H:i'),
         ])->setPaper('a4', 'landscape');
 
-        return $pdf->download('lancamentos_financeiros.pdf');
+        return $pdf->download('extrato_movimentacoes.pdf');
+    }
+
+    public function recibo(LancamentoFinanceiro $lancamento): Response
+    {
+        $pdf = Pdf::loadView('pdf.financeiro-recibo', $this->service->dadosRecibo($lancamento))
+            ->setPaper('a4', 'portrait');
+
+        return $pdf->download("recibo-movimento-{$lancamento->id}.pdf");
     }
 }

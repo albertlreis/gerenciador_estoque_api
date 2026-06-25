@@ -23,10 +23,21 @@ class ContaPagarCommandService
         private readonly ContaStatusService $statusSvc,
         private readonly FinanceiroLedgerService $ledger,
         private readonly FinanceiroAuditoriaService $audit,
+        private readonly RecorrenciaFinanceiraService $recorrencias,
     ) {}
 
     public function criar(array $dados): ContaPagarResource
     {
+        if (!empty($dados['recorrencia']) && !empty($dados['parcelamento'])) {
+            throw ValidationException::withMessages([
+                'recorrencia' => 'RecorrÃªncia e parcelamento nÃ£o podem ser usados no mesmo lanÃ§amento.',
+            ]);
+        }
+
+        if (!empty($dados['recorrencia']) && is_array($dados['recorrencia'])) {
+            return $this->criarRecorrente($dados);
+        }
+
         if (!empty($dados['parcelamento']) && is_array($dados['parcelamento'])) {
             return $this->criarParcelado($dados);
         }
@@ -44,7 +55,7 @@ class ContaPagarCommandService
             $this->registrarPagamentoInicial($conta->fresh(), $pagamentoInicial);
         }
 
-        $fresh = $conta->fresh(['fornecedor', 'categoria', 'centroCusto', 'parcelamento', 'pagamentos.usuario']);
+        $fresh = $conta->fresh(['fornecedor', 'categoria', 'centroCusto', 'parcelamento', 'recorrencia', 'pagamentos.usuario']);
         $this->audit->log('created', $conta, null, $fresh->toArray());
 
         return new ContaPagarResource($fresh);
@@ -58,7 +69,7 @@ class ContaPagarCommandService
 
         $this->statusSvc->syncPagar($conta->fresh());
 
-        $fresh = $conta->fresh(['fornecedor', 'pagamentos.usuario']);
+        $fresh = $conta->fresh(['fornecedor', 'recorrencia', 'pagamentos.usuario']);
         $this->audit->log('updated', $conta, $antes, $fresh->toArray());
 
         return new ContaPagarResource($fresh);
@@ -216,9 +227,50 @@ class ContaPagarCommandService
                 $this->registrarPagamentoInicial($target, $pagamentoInicial);
             }
 
-            $fresh = ($target ?: $contas[0])->fresh(['fornecedor', 'categoria', 'centroCusto', 'parcelamento', 'pagamentos.usuario']);
+            $fresh = ($target ?: $contas[0])->fresh(['fornecedor', 'categoria', 'centroCusto', 'parcelamento', 'recorrencia', 'pagamentos.usuario']);
             $this->audit->log('created_installments', $parcelamento, null, [
                 'parcelamento' => $parcelamento->fresh()->toArray(),
+                'contas' => collect($contas)->pluck('id')->values()->all(),
+            ]);
+
+            return new ContaPagarResource($fresh);
+        });
+    }
+
+    private function criarRecorrente(array $dados): ContaPagarResource
+    {
+        return DB::transaction(function () use ($dados) {
+            $recorrenciaDados = $dados['recorrencia'] ?? [];
+            $pagamentoInicial = $dados['pagamento_inicial'] ?? null;
+            unset($dados['recorrencia'], $dados['parcelamento'], $dados['pagamento_inicial']);
+
+            $dados['status'] = ContaStatus::ABERTA->value;
+
+            $datas = $this->recorrencias->datas($recorrenciaDados, (string) $dados['data_vencimento']);
+            $serie = $this->recorrencias->criarSerie($dados, $recorrenciaDados, 'PAGAR', auth()->id());
+
+            $contas = [];
+            foreach ($datas as $data) {
+                $payload = $dados;
+                $payload['data_vencimento'] = $data->toDateString();
+                $payload['despesa_recorrente_id'] = $serie->id;
+                $payload['recorrencia_competencia'] = $data->toDateString();
+
+                $conta = $this->repo->criar($payload);
+                $this->statusSvc->syncPagar($conta->fresh());
+                $freshConta = $conta->fresh();
+                $this->recorrencias->registrarExecucao($serie, $freshConta, $data);
+                $contas[] = $freshConta;
+            }
+
+            $primeiraConta = $contas[0] ?? null;
+            if ($primeiraConta && is_array($pagamentoInicial)) {
+                $this->registrarPagamentoInicial($primeiraConta, $pagamentoInicial);
+            }
+
+            $fresh = $primeiraConta->fresh(['fornecedor', 'categoria', 'centroCusto', 'recorrencia', 'pagamentos.usuario']);
+            $this->audit->log('created_recurring', $serie, null, [
+                'recorrencia' => $serie->fresh()->toArray(),
                 'contas' => collect($contas)->pluck('id')->values()->all(),
             ]);
 

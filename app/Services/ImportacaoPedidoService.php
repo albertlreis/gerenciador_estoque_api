@@ -385,7 +385,9 @@ class ImportacaoPedidoService
 
                 if ($itensSemSaida !== []) {
                     throw ValidationException::withMessages([
-                        'itens' => ['Pedidos de cliente marcados como entregues devem movimentar os itens como saida: ' . implode(', ', $itensSemSaida) . '.'],
+                        'itens' => [
+                            $this->mensagemVendaEntregueItensSemSaida($itensSemSaida),
+                        ],
                     ]);
                 }
             }
@@ -533,7 +535,7 @@ class ImportacaoPedidoService
                     } elseif ($variacoesPorIdentificador->count() > 1) {
                         throw ValidationException::withMessages([
                             "itens.{$index}.selecao_variacao" => [
-                                'A referência informada corresponde a múltiplas variações. Selecione a variação correta na tela de importação.',
+                                $this->mensagemReferenciaAmbiguaImportacao($item, $index),
                             ],
                         ]);
                     }
@@ -1201,6 +1203,60 @@ class ImportacaoPedidoService
         }
 
         return $fallback;
+    }
+
+    private function mensagemReferenciaAmbiguaImportacao(array $item, int $index): string
+    {
+        $rotulo = $this->rotuloItemImportacao($item, $index);
+        $referencia = isset($item['ref']) ? trim((string) $item['ref']) : '';
+
+        if ($referencia !== '') {
+            $rotulo .= " (Ref. {$referencia})";
+        }
+
+        return "{$rotulo}: a referência corresponde a múltiplas variações. Selecione a variação correta na tela de importação.";
+    }
+
+    private function rotuloItemImportacao(array $item, int $index): string
+    {
+        $prefixo = 'Produto ' . ($index + 1);
+
+        foreach (['nome_completo', 'nome', 'descricao'] as $campo) {
+            $valor = $this->normalizarTextoMensagemImportacao($item[$campo] ?? null);
+
+            if ($valor !== '') {
+                return "{$prefixo}: {$valor}";
+            }
+        }
+
+        return $prefixo;
+    }
+
+    /**
+     * @param list<string> $itensSemSaida
+     */
+    private function mensagemVendaEntregueItensSemSaida(array $itensSemSaida): string
+    {
+        $total = count($itensSemSaida);
+
+        if ($total === 1) {
+            return 'Pedido entregue: este item precisa estar como Saída para baixar o estoque. Altere para Saída ou use "Salvar sem movimentar". Item pendente: ' . $itensSemSaida[0] . '.';
+        }
+
+        $itensVisiveis = array_slice($itensSemSaida, 0, 3);
+        $restantes = $total - count($itensVisiveis);
+        $resumoItens = implode(', ', $itensVisiveis);
+
+        if ($restantes > 0) {
+            $resumoItens .= " e mais {$restantes}";
+        }
+
+        return "Pedido entregue: {$total} itens precisam estar como Saída para baixar o estoque. Use \"Aplicar a todos > Saída\" ou \"Salvar sem movimentar\". Itens pendentes: {$resumoItens}.";
+    }
+
+    private function normalizarTextoMensagemImportacao(mixed $valor): string
+    {
+        return trim((string) preg_replace('/\s+/u', ' ', (string) $valor));
     }
 
     private function categoriaNome(mixed $categoriaId): ?string

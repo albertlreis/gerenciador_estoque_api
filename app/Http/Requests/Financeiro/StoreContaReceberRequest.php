@@ -3,6 +3,7 @@
 namespace App\Http\Requests\Financeiro;
 
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class StoreContaReceberRequest extends FormRequest
 {
@@ -40,6 +41,12 @@ class StoreContaReceberRequest extends FormRequest
             'centro_custo_id' => ['nullable','integer','exists:centros_custo,id'],
             'observacoes' => ['nullable','string'],
             'status' => ['nullable','in:ABERTA,PARCIAL,PAGA,CANCELADA'],
+            'recorrencia' => ['nullable','array'],
+            'recorrencia.frequencia' => ['required_with:recorrencia', Rule::in(['DIARIA','SEMANAL','MENSAL','ANUAL'])],
+            'recorrencia.intervalo' => ['nullable','integer','min:1','max:365'],
+            'recorrencia.termino_tipo' => ['nullable', Rule::in(['OCORRENCIAS','DATA'])],
+            'recorrencia.ocorrencias' => ['nullable','integer','min:1','max:366'],
+            'recorrencia.data_fim' => ['nullable','date'],
             'parcelamento' => ['nullable','array'],
             'parcelamento.quantidade_parcelas' => ['nullable','integer','min:1','max:120'],
             'parcelamento.valor_entrada' => ['nullable','numeric','min:0'],
@@ -73,6 +80,9 @@ class StoreContaReceberRequest extends FormRequest
                 } catch (\Throwable $e) {
                     // deixa o validator padrão lidar com formato inválido
                 }
+            }
+            if ($this->filled('recorrencia') && $this->filled('parcelamento')) {
+                $v->errors()->add('recorrencia', 'Recorrência e parcelamento não podem ser usados no mesmo lançamento.');
             }
         });
     }

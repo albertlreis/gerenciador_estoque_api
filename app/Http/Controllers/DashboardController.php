@@ -49,7 +49,7 @@ class DashboardController extends Controller
 
             $statusCount = $pedidos->groupBy(function ($pedido) {
                 $status = optional($pedido->statusAtual)->status;
-                return $status instanceof PedidoStatus ? $status->value : 'sem_status';
+                return $status instanceof PedidoStatus ? $status->value : ((string) $status ?: 'sem_status');
             });
 
             $ultimosPedidos = Pedido::with(['cliente', 'statusAtual'])
@@ -61,7 +61,7 @@ class DashboardController extends Controller
                     return [
                         'cliente' => optional($p->cliente)->nome ?? 'Cliente não informado',
                         'valor'   => number_format($p->valor_total ?? 0, 2, ',', '.'),
-                        'status'  => optional($p->statusAtual)->status ?? 'sem_status',
+                        'status'  => (string) (optional($p->statusAtual)->status ?? 'sem_status'),
                     ];
                 });
 

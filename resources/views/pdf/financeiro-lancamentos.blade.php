@@ -2,7 +2,7 @@
 <html lang="pt-BR">
 <head>
     <meta charset="utf-8">
-    <title>Relatorio de Lancamentos Financeiros</title>
+    <title>Relatório de extrato de movimentações</title>
     <style>
         body { font-family: DejaVu Sans, sans-serif; font-size: 11px; color: #333; }
         table { width: 100%; border-collapse: collapse; margin-top: 10px; }
@@ -13,7 +13,7 @@
     </style>
 </head>
 <body>
-<h2>Relatorio de Lancamentos Financeiros</h2>
+<h2>Relatório de extrato de movimentações</h2>
 <p>Gerado em: {{ $gerado_em }}</p>
 
 <div class="summary">
@@ -53,7 +53,7 @@
         </tr>
     @empty
         <tr>
-            <td colspan="9">Nenhum lancamento encontrado.</td>
+            <td colspan="9">Nenhum movimento encontrado.</td>
         </tr>
     @endforelse
     </tbody>

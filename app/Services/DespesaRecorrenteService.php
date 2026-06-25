@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\ContaPagar;
+use App\Models\ContaReceber;
 use App\Models\DespesaRecorrente;
 use App\Repositories\DespesaRecorrenteExecucaoRepository;
 use App\Repositories\DespesaRecorrenteRepository;
@@ -29,6 +30,7 @@ class DespesaRecorrenteService
      */
     public function criar(array $data, int $usuarioId): DespesaRecorrente
     {
+        $data['direcao'] = $data['direcao'] ?? 'PAGAR';
         $data['usuario_id'] = $usuarioId;
 
         $this->validarRegrasDeRecorrencia($data);
@@ -45,7 +47,7 @@ class DespesaRecorrenteService
 
         // regra simples: não mudar chave de recorrência se já teve execuções
         if ($model->execucoes()->exists()) {
-            foreach (['frequencia','intervalo','dia_vencimento','mes_vencimento','data_inicio'] as $field) {
+            foreach (['direcao','frequencia','intervalo','dia_vencimento','mes_vencimento','data_inicio'] as $field) {
                 if (array_key_exists($field, $data) && $data[$field] != $model->$field) {
                     throw ValidationException::withMessages([
                         $field => 'Não é permitido alterar este campo após existirem execuções.'
@@ -114,40 +116,67 @@ class DespesaRecorrenteService
                 ]);
             }
 
-            $conta = ContaPagar::create([
-                'fornecedor_id'    => $despesa->fornecedor_id,
-                'descricao'        => $despesa->descricao,
+            $direcao = $despesa->direcao ?: 'PAGAR';
+            $valores = [
+                'valor_bruto' => (float) $valorBruto,
+                'desconto' => (float) ($payload['desconto'] ?? $despesa->desconto ?? 0),
+                'juros' => (float) ($payload['juros'] ?? $despesa->juros ?? 0),
+                'multa' => (float) ($payload['multa'] ?? $despesa->multa ?? 0),
+            ];
+
+            $baseConta = [
+                'descricao' => $despesa->descricao,
                 'numero_documento' => $despesa->numero_documento,
-                'data_emissao'     => Carbon::now()->toDateString(),
-                'data_vencimento'  => $dataVenc->toDateString(),
-                'valor_bruto'      => (float) $valorBruto,
-                'desconto'         => (float) ($payload['desconto'] ?? $despesa->desconto ?? 0),
-                'juros'            => (float) ($payload['juros'] ?? $despesa->juros ?? 0),
-                'multa'            => (float) ($payload['multa'] ?? $despesa->multa ?? 0),
-                'status'           => 'ABERTA',
-                'centro_custo_id'  => $payload['centro_custo_id'] ?? $despesa->centro_custo_id,
-                'categoria_id'     => $payload['categoria_id'] ?? $despesa->categoria_id,
-                'observacoes'      => $payload['observacoes'] ?? $despesa->observacoes,
-            ]);
+                'data_emissao' => Carbon::now()->toDateString(),
+                'data_vencimento' => $dataVenc->toDateString(),
+                ...$valores,
+                'status' => 'ABERTA',
+                'centro_custo_id' => $payload['centro_custo_id'] ?? $despesa->centro_custo_id,
+                'categoria_id' => $payload['categoria_id'] ?? $despesa->categoria_id,
+                'observacoes' => $payload['observacoes'] ?? $despesa->observacoes,
+                'despesa_recorrente_id' => $despesa->id,
+                'recorrencia_competencia' => $competencia->toDateString(),
+            ];
+
+            if ($direcao === 'RECEBER') {
+                $valorLiquido = max(0, $valores['valor_bruto'] - $valores['desconto'] + $valores['juros'] + $valores['multa']);
+                $conta = ContaReceber::create([
+                    ...$baseConta,
+                    'cliente_id' => $payload['cliente_id'] ?? $despesa->cliente_id,
+                    'valor_liquido' => $valorLiquido,
+                    'valor_recebido' => 0,
+                    'saldo_aberto' => $valorLiquido,
+                ]);
+            } else {
+                $conta = ContaPagar::create([
+                    ...$baseConta,
+                    'fornecedor_id' => $despesa->fornecedor_id,
+                ]);
+            }
 
             $exec = $this->execRepo->create([
                 'despesa_recorrente_id' => $despesa->id,
                 'competencia' => $competencia->toDateString(),
                 'data_prevista' => $dataVenc->toDateString(),
                 'data_geracao' => Carbon::now(),
-                'conta_pagar_id' => $conta->id,
+                'conta_pagar_id' => $direcao === 'PAGAR' ? $conta->id : null,
+                'conta_receber_id' => $direcao === 'RECEBER' ? $conta->id : null,
                 'status' => 'GERADA',
                 'meta_json' => [
                     'manual' => true,
+                    'direcao' => $direcao,
                     'valor_bruto' => (float) $valorBruto,
                 ],
             ]);
 
-            return [
+            $result = [
                 'despesa_recorrente' => $despesa->fresh(),
-                'conta_pagar' => $conta,
                 'execucao' => $exec,
             ];
+
+            $result[$direcao === 'RECEBER' ? 'conta_receber' : 'conta_pagar'] = $conta;
+
+            return $result;
         });
     }
 

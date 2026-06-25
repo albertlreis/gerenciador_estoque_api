@@ -18,6 +18,7 @@ class DespesaRecorrenteExecucaoResource extends JsonResource
             'data_geracao' => optional($this->data_geracao)?->toISOString(),
 
             'conta_pagar_id' => $this->conta_pagar_id,
+            'conta_receber_id' => $this->conta_receber_id,
             'status' => $this->status,
             'erro_msg' => $this->erro_msg,
 

@@ -7,45 +7,42 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
- * Localização essencial + extensível:
- * - Essencial: setor, coluna, nivel, area_id, codigo_composto.
- * - Extensível: localizacao_valores (chave/valor por dimensao configurável).
- *
  * @property int $id
- * @property int $estoque_id
+ * @property int $deposito_id
+ * @property string|null $area
+ * @property string|null $corredor
  * @property string|null $setor
  * @property string|null $coluna
- * @property string|null $nivel
- * @property int|null $area_id
- * @property string|null $codigo_composto
+ * @property string $codigo_composto
  * @property string|null $observacoes
+ * @property bool $ativo
  */
 class LocalizacaoEstoque extends Model
 {
     protected $table = 'localizacoes_estoque';
 
     protected $fillable = [
-        'estoque_id',
+        'deposito_id',
+        'area',
+        'corredor',
         'setor',
         'coluna',
-        'nivel',
-        'area_id',
         'codigo_composto',
         'observacoes',
+        'ativo',
     ];
 
-    public function estoque(): BelongsTo
+    protected $casts = [
+        'ativo' => 'boolean',
+    ];
+
+    public function deposito(): BelongsTo
     {
-        return $this->belongsTo(Estoque::class, 'estoque_id');
+        return $this->belongsTo(Deposito::class, 'deposito_id');
     }
 
-    public function area(): BelongsTo
+    public function estoques(): HasMany
     {
-        return $this->belongsTo(AreaEstoque::class, 'area_id');
-    }
-
-    public function valores(): HasMany
-    {
-        return $this->hasMany(LocalizacaoValor::class, 'localizacao_id');
+        return $this->hasMany(Estoque::class, 'localizacao_id');
     }
 }

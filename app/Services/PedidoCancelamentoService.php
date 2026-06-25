@@ -28,7 +28,7 @@ final class PedidoCancelamentoService
                 ->lockForUpdate()
                 ->findOrFail($pedido->id);
 
-            $statusAtual = $pedido->statusAtual?->status?->value ?? $pedido->statusAtual?->status;
+            $statusAtual = $pedido->statusAtual?->getRawOriginal('status') ?? $pedido->statusAtual?->status;
             if ($statusAtual === PedidoStatus::CANCELADO->value) {
                 throw ValidationException::withMessages([
                     'pedido' => ['Pedido ja esta cancelado.'],

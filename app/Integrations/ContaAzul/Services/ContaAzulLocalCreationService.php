@@ -7,6 +7,7 @@ use App\Enums\LancamentoTipo;
 use App\Integrations\ContaAzul\ContaAzulEntityType;
 use App\Integrations\ContaAzul\Exceptions\ContaAzulException;
 use App\Integrations\ContaAzul\Models\ContaAzulMapeamento;
+use App\Integrations\ContaAzul\Support\ContaAzulMoney;
 use App\Models\Categoria;
 use App\Models\Cliente;
 use App\Models\ContaFinanceira;
@@ -1069,10 +1070,11 @@ class ContaAzulLocalCreationService
      */
     private function validateBaixa(array $baixa, float $valorLiquido): ?array
     {
-        $valor = (float) ($baixa['valor'] ?? 0);
+        $valor = ContaAzulMoney::parse($baixa['valor'] ?? 0) ?? 0.0;
         if ($valor <= 0) {
             return null;
         }
+        $baixa['valor'] = $this->decimal($valor);
 
         $validated = Validator::make($baixa, [
             'data_pagamento' => ['required', 'date'],
@@ -1313,19 +1315,7 @@ class ContaAzulLocalCreationService
 
     private function money(string $value): ?float
     {
-        if (trim($value) === '') {
-            return null;
-        }
-
-        if (is_numeric($value)) {
-            return (float) $value;
-        }
-
-        $normalized = str_contains($value, ',')
-            ? str_replace(',', '.', str_replace(['.', ' '], ['', ''], $value))
-            : str_replace([' ', ','], ['', ''], $value);
-
-        return is_numeric($normalized) ? (float) $normalized : null;
+        return ContaAzulMoney::parse($value);
     }
 
     private function date(string $value): ?string

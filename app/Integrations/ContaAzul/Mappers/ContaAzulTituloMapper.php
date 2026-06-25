@@ -18,7 +18,7 @@ class ContaAzulTituloMapper
     public function fromLocal(ContaReceber $conta, ?int $lojaId = null): array
     {
         if ($conta->exists || $conta->pedido_id || $conta->relationLoaded('pedido')) {
-            $conta->loadMissing(['pedido.cliente']);
+            $conta->loadMissing(['cliente', 'pedido.cliente']);
         }
 
         // Valor líquido segue o accessor do modelo Sierra (bruto − desconto + juros + multa).
@@ -40,7 +40,7 @@ class ContaAzulTituloMapper
                 $lojaId
             );
         }
-        $cid = $pedido?->id_cliente;
+        $cid = $conta->cliente_id ?: $pedido?->id_cliente;
         if ($cid) {
             $idClienteExt = ContaAzulMapeamento::idExternoPorLocal(
                 ContaAzulEntityType::PESSOA,

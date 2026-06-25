@@ -3,17 +3,18 @@
 namespace App\Services\Import;
 
 use App\Enums\EstoqueMovimentacaoTipo;
-use App\Models\AreaEstoque;
 use App\Models\Categoria;
 use App\Models\Deposito;
 use App\Models\Estoque;
 use App\Models\EstoqueImport;
 use App\Models\EstoqueImportRow;
 use App\Models\Fornecedor;
+use App\Models\LocalizacaoEstoque;
 use App\Models\OutletFormaPagamento;
 use App\Models\OutletMotivo;
 use App\Models\ProdutoVariacaoOutlet;
 use App\Models\ProdutoVariacaoOutletPagamento;
+use App\Services\LocalizacaoEstoqueService;
 use App\Services\EstoqueMovimentacaoService;
 use Carbon\Carbon;
 use DateTimeInterface;
@@ -588,25 +589,39 @@ final class EstoqueImportService
                     }
 
                     if ($locParsed && in_array($locParsed['tipo'] ?? null, ['posicao', 'area'], true)) {
-                        $areaId = null;
-                        $areaNome = (string)($locParsed['area'] ?? '');
-                        if ($areaNome !== '') {
-                            $area = AreaEstoque::firstOrCreate([
-                                'nome' => mb_convert_case($areaNome, MB_CASE_TITLE, 'UTF-8')
-                            ]);
-                            $areaId = $area->id;
-                        }
-
-                        $estoque->localizacao()->updateOrCreate(
-                            ['estoque_id' => $estoque->id],
-                            [
-                                'setor' => $locParsed['setor'] ?? null,
-                                'coluna' => $locParsed['coluna'] ?? null,
-                                'nivel' => $locParsed['nivel'] ?? null,
-                                'area_id' => $areaId,
-                                'codigo_composto' => $locParsed['codigo'] ?? null,
-                            ]
+                        $area = trim((string) ($locParsed['area'] ?? ''));
+                        $setor = isset($locParsed['setor']) ? (string) $locParsed['setor'] : null;
+                        $coluna = isset($locParsed['coluna']) ? (string) $locParsed['coluna'] : null;
+                        $codigo = LocalizacaoEstoqueService::montarCodigo(
+                            $area !== '' ? mb_convert_case($area, MB_CASE_TITLE, 'UTF-8') : null,
+                            null,
+                            $setor,
+                            $coluna
                         );
+
+                        if ($codigo !== null) {
+                            $observacoesLocalizacao = [];
+                            if (!empty($locParsed['nivel'])) {
+                                $observacoesLocalizacao[] = 'Nivel legado: ' . $locParsed['nivel'];
+                            }
+                            if (!empty($primeira->localizacao)) {
+                                $observacoesLocalizacao[] = 'Importado de: ' . $primeira->localizacao;
+                            }
+
+                            $localizacao = LocalizacaoEstoque::query()->firstOrCreate(
+                                ['deposito_id' => $depositoId, 'codigo_composto' => $codigo],
+                                [
+                                    'area' => $area !== '' ? mb_convert_case($area, MB_CASE_TITLE, 'UTF-8') : null,
+                                    'corredor' => null,
+                                    'setor' => $setor,
+                                    'coluna' => $coluna,
+                                    'observacoes' => $observacoesLocalizacao ? implode("\n", $observacoesLocalizacao) : null,
+                                    'ativo' => true,
+                                ]
+                            );
+
+                            $estoque->update(['localizacao_id' => $localizacao->id]);
+                        }
                     }
 
                     if ($qtdTotal > 0 && !$dryRun) {

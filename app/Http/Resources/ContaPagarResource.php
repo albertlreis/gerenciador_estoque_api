@@ -13,6 +13,9 @@ class ContaPagarResource extends JsonResource
         return [
             'id' => $this->id,
             'parcelamento_id' => $this->parcelamento_id ? (int) $this->parcelamento_id : null,
+            'despesa_recorrente_id' => $this->despesa_recorrente_id ? (int) $this->despesa_recorrente_id : null,
+            'recorrencia_competencia' => optional($this->recorrencia_competencia)->format('Y-m-d'),
+            'origem' => $this->despesa_recorrente_id ? 'recorrente' : 'manual',
             'parcela_numero' => $this->parcela_numero !== null ? (int) $this->parcela_numero : null,
             'parcelas_total' => $this->parcelas_total !== null ? (int) $this->parcelas_total : null,
             'is_entrada' => (bool) $this->is_entrada,
@@ -51,6 +54,13 @@ class ContaPagarResource extends JsonResource
                 'valor_total' => (float) ($this->parcelamento?->valor_total ?? 0),
                 'valor_entrada' => (float) ($this->parcelamento?->valor_entrada ?? 0),
                 'quantidade_parcelas' => (int) ($this->parcelamento?->quantidade_parcelas ?? 0),
+            ]),
+            'recorrencia' => $this->whenLoaded('recorrencia', fn() => [
+                'id' => $this->recorrencia?->id,
+                'direcao' => $this->recorrencia?->direcao ?: 'PAGAR',
+                'descricao' => $this->recorrencia?->descricao,
+                'status' => $this->recorrencia?->status,
+                'frequencia' => $this->recorrencia?->frequencia,
             ]),
 
             'observacoes' => $this->observacoes,

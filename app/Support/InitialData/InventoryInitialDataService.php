@@ -3,7 +3,6 @@
 namespace App\Support\InitialData;
 
 use App\Models\AssistenciaDefeito;
-use App\Models\AreaEstoque;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
@@ -18,8 +17,6 @@ class InventoryInitialDataService
             'Formas de pagamento obrigatórias' => 'seedFormasPagamento',
             'Catálogos de outlet' => 'seedOutletCatalogos',
             'Catálogo de defeitos de assistência' => 'seedAssistenciaDefeitos',
-            'Áreas padrão de estoque' => 'seedAreasEstoque',
-            'Dimensões padrão de localização' => 'seedLocalizacaoDimensoes',
             'Depósito sistêmico de assistência' => 'ensureAssistenciaDeposito',
         ];
 
@@ -250,6 +247,57 @@ class InventoryInitialDataService
         }
     }
 
+    public function seedAreasEstoque(): array
+    {
+        if (!Schema::hasTable('areas_estoque')) {
+            return [];
+        }
+
+        $now = now();
+        $rows = [
+            'Assistência',
+            'Devolução',
+            'Tampos Avariados',
+            'Tampos Clientes',
+            'Avarias',
+        ];
+
+        foreach ($rows as $nome) {
+            DB::table('areas_estoque')->updateOrInsert(
+                ['nome' => $nome],
+                ['nome' => $nome, 'created_at' => $now, 'updated_at' => $now]
+            );
+        }
+
+        return DB::table('areas_estoque')
+            ->whereIn('nome', $rows)
+            ->orderBy('nome')
+            ->pluck('id')
+            ->map(fn ($id) => (int) $id)
+            ->all();
+    }
+
+    public function seedLocalizacaoDimensoes(): void
+    {
+        if (!Schema::hasTable('localizacao_dimensoes')) {
+            return;
+        }
+
+        $now = now();
+        $rows = [
+            ['nome' => 'Corredor', 'placeholder' => 'Ex.: 1', 'ordem' => 1],
+            ['nome' => 'Prateleira', 'placeholder' => 'Ex.: A', 'ordem' => 2],
+            ['nome' => 'Nivel', 'placeholder' => 'Ex.: 3', 'ordem' => 3],
+        ];
+
+        foreach ($rows as $row) {
+            DB::table('localizacao_dimensoes')->updateOrInsert(
+                ['nome' => $row['nome']],
+                $row + ['ativo' => true, 'created_at' => $now, 'updated_at' => $now]
+            );
+        }
+    }
+
     public function seedAssistenciaDefeitos(): void
     {
         $rows = [
@@ -271,50 +319,6 @@ class InventoryInitialDataService
         }
     }
 
-    public function seedAreasEstoque(): array
-    {
-        $rows = [
-            ['nome' => 'Assistência', 'descricao' => null],
-            ['nome' => 'Devolução', 'descricao' => null],
-            ['nome' => 'Tampos Avariados', 'descricao' => null],
-            ['nome' => 'Tampos Clientes', 'descricao' => null],
-            ['nome' => 'Avarias', 'descricao' => null],
-        ];
-
-        $ids = [];
-        foreach ($rows as $row) {
-            $area = AreaEstoque::query()->updateOrCreate(
-                ['nome' => $row['nome']],
-                ['descricao' => $row['descricao']]
-            );
-
-            $ids[] = (int) $area->id;
-        }
-
-        return $ids;
-    }
-
-    public function seedLocalizacaoDimensoes(): void
-    {
-        $now = now();
-
-        $rows = [
-            ['nome' => 'Corredor', 'placeholder' => '1', 'ordem' => 1, 'ativo' => true],
-            ['nome' => 'Prateleira', 'placeholder' => 'A', 'ordem' => 2, 'ativo' => true],
-            ['nome' => 'Nível', 'placeholder' => '1', 'ordem' => 3, 'ativo' => true],
-        ];
-
-        foreach ($rows as &$row) {
-            $row['created_at'] = $now;
-            $row['updated_at'] = $now;
-        }
-
-        DB::table('localizacao_dimensoes')->upsert(
-            $rows,
-            ['nome'],
-            ['placeholder', 'ordem', 'ativo', 'updated_at']
-        );
-    }
 
     public function ensureAssistenciaDeposito(): void
     {

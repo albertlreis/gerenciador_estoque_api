@@ -269,7 +269,7 @@ class RecriarEntregasCommand extends Command
             ->orderBy('id')
             ->chunkById(200, function ($pedidos) {
                 foreach ($pedidos as $pedido) {
-                    $status = $pedido->statusAtual?->status?->value ?? $pedido->statusAtual?->status;
+                    $status = $pedido->statusAtual?->getRawOriginal('status') ?? $pedido->statusAtual?->status;
                     $itens = ProdutoEntregaItem::query()->where('pedido_id', $pedido->id)->get();
 
                     foreach ($itens as $item) {

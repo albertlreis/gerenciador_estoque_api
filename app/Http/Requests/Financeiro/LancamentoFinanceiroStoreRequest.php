@@ -14,6 +14,12 @@ class LancamentoFinanceiroStoreRequest extends FormRequest
             'descricao' => $this->input('descricao') ? trim((string)$this->input('descricao')) : null,
             'tipo'      => $this->input('tipo') ? strtolower((string)$this->input('tipo')) : null,
             'status'    => $this->input('status') ? strtolower((string)$this->input('status')) : null,
+            'recibo_pessoa_nome' => $this->input('recibo_pessoa_nome') !== null
+                ? trim((string)$this->input('recibo_pessoa_nome')) ?: null
+                : null,
+            'recibo_pessoa_documento' => $this->input('recibo_pessoa_documento') !== null
+                ? trim((string)$this->input('recibo_pessoa_documento')) ?: null
+                : null,
         ]);
     }
 
@@ -34,6 +40,8 @@ class LancamentoFinanceiroStoreRequest extends FormRequest
             'competencia'    => ['nullable', 'date'], // ou date_format:Y-m-d se quiser travar
 
             'observacoes'    => ['nullable', 'string'],
+            'recibo_pessoa_nome' => ['nullable', 'string', 'max:255'],
+            'recibo_pessoa_documento' => ['nullable', 'string', 'max:60'],
 
             'referencia_type'=> ['nullable', 'string', 'max:120'],
             'referencia_id'  => ['nullable', 'integer', 'min:1'],

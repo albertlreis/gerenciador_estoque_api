@@ -7,7 +7,6 @@ use App\Enums\ImportacaoNormalizadaAcaoLinha;
 use App\Enums\ImportacaoNormalizadaLinhaStatus;
 use App\Enums\ImportacaoNormalizadaStatus;
 use App\Enums\StatusRevisaoCadastro;
-use App\Models\AreaEstoque;
 use App\Models\Categoria;
 use App\Models\Deposito;
 use App\Models\Estoque;
@@ -16,9 +15,11 @@ use App\Models\Fornecedor;
 use App\Models\ImportacaoNormalizada;
 use App\Models\ImportacaoNormalizadaConflito;
 use App\Models\ImportacaoNormalizadaLinha;
+use App\Models\LocalizacaoEstoque;
 use App\Models\Produto;
 use App\Models\ProdutoVariacao;
 use App\Services\EstoqueMovimentacaoService;
+use App\Services\LocalizacaoEstoqueService;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Support\Collection;
@@ -1422,25 +1423,35 @@ final class ImportacaoNormalizadaPipelineService
             return;
         }
 
-        $areaId = null;
-        if (!empty($parsed['area'])) {
-            $area = AreaEstoque::firstOrCreate([
-                'nome' => mb_convert_case((string) $parsed['area'], MB_CASE_TITLE, 'UTF-8'),
-            ]);
-            $areaId = (int) $area->id;
+        $area = trim((string) ($parsed['area'] ?? ''));
+        $area = $area !== '' ? mb_convert_case($area, MB_CASE_TITLE, 'UTF-8') : null;
+        $setor = isset($parsed['setor']) ? (string) $parsed['setor'] : null;
+        $coluna = isset($parsed['coluna']) ? (string) $parsed['coluna'] : null;
+        $codigo = LocalizacaoEstoqueService::montarCodigo($area, null, $setor, $coluna);
+
+        if ($codigo === null) {
+            return;
         }
 
-        $estoque->localizacao()->updateOrCreate(
-            ['estoque_id' => $estoque->id],
+        $observacoes = ['Aplicado automaticamente pela importacao normalizada.'];
+        if (!empty($parsed['nivel'])) {
+            $observacoes[] = 'Nivel legado: ' . $parsed['nivel'];
+        }
+        $observacoes[] = 'Importado de: ' . $localizacao;
+
+        $localizacaoEstoque = LocalizacaoEstoque::query()->firstOrCreate(
+            ['deposito_id' => $depositoId, 'codigo_composto' => $codigo],
             [
-                'setor' => $parsed['setor'] ?? null,
-                'coluna' => $parsed['coluna'] ?? null,
-                'nivel' => $parsed['nivel'] ?? null,
-                'area_id' => $areaId,
-                'codigo_composto' => $parsed['codigo'] ?? null,
-                'observacoes' => 'Aplicado automaticamente pela importação normalizada.',
+                'area' => $area,
+                'corredor' => null,
+                'setor' => $setor,
+                'coluna' => $coluna,
+                'observacoes' => implode("\n", $observacoes),
+                'ativo' => true,
             ]
         );
+
+        $estoque->update(['localizacao_id' => $localizacaoEstoque->id]);
     }
 
     private function montarObservacaoMovimentacao(ImportacaoNormalizada $importacao, ImportacaoNormalizadaLinha $linha): string

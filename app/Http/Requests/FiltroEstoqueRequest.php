@@ -29,6 +29,7 @@ class FiltroEstoqueRequest extends FormRequest
             'fornecedor' => ['nullable', 'integer', 'min:1'],
 
             'produto' => ['nullable', 'string', 'max:255'],
+            'localizacao' => ['nullable', 'string', 'max:255'],
 
             'periodo' => ['nullable', 'array', 'size:2'],
             'periodo.0' => ['nullable', 'date_format:Y-m-d'],
@@ -57,7 +58,7 @@ class FiltroEstoqueRequest extends FormRequest
     {
         $input = $this->all();
 
-        foreach (['produto', 'tipo', 'sort_field', 'sort_order', 'export'] as $k) {
+        foreach (['produto', 'localizacao', 'tipo', 'sort_field', 'sort_order', 'export'] as $k) {
             if (array_key_exists($k, $input) && is_string($input[$k])) {
                 $input[$k] = trim($input[$k]);
                 if ($input[$k] === '') $input[$k] = null;

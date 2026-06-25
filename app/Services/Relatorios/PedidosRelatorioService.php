@@ -5,6 +5,7 @@ namespace App\Services\Relatorios;
 use App\Models\Pedido;
 use Illuminate\Support\Carbon;
 use App\Enums\PedidoStatus;
+use App\Services\PedidoStatusFluxoService;
 use Throwable;
 
 
@@ -44,15 +45,15 @@ class PedidosRelatorioService
 
             // Resolve label de forma defensiva
             if ($statusValue instanceof PedidoStatus) {
-                $statusLabel = $statusValue->label();
+                $statusLabel = app(PedidoStatusFluxoService::class)->statusMeta($statusValue->value)['label'];
                 $statusStr   = $statusValue->value;
             } elseif (is_string($statusValue) && $statusValue !== '') {
                 try {
                     $statusEnum  = PedidoStatus::from($statusValue);
-                    $statusLabel = $statusEnum->label();
+                    $statusLabel = app(PedidoStatusFluxoService::class)->statusMeta($statusEnum->value)['label'];
                     $statusStr   = $statusEnum->value;
                 } catch (Throwable) {
-                    $statusLabel = ucfirst(str_replace('_', ' ', $statusValue)); // fallback legível
+                    $statusLabel = app(PedidoStatusFluxoService::class)->statusMeta($statusValue)['label'];
                     $statusStr   = $statusValue;
                 }
             } else {

@@ -3,13 +3,10 @@
 namespace Tests\Feature;
 
 use App\Enums\EstoqueMovimentacaoTipo;
-use App\Models\AreaEstoque;
 use App\Models\Categoria;
 use App\Models\Deposito;
 use App\Models\Estoque;
-use App\Models\LocalizacaoDimensao;
 use App\Models\LocalizacaoEstoque;
-use App\Models\LocalizacaoValor;
 use App\Models\Produto;
 use App\Models\ProdutoVariacao;
 use App\Models\Usuario;
@@ -180,14 +177,6 @@ class EstoqueMovimentacaoIndicadoresTest extends TestCase
 
         $categoria = Categoria::create(['nome' => 'Categoria Localizacao']);
         $deposito = Deposito::create(['nome' => 'Deposito Localizacao']);
-        $areaAlvo = AreaEstoque::create(['nome' => 'Showroom Norte']);
-        $areaOutra = AreaEstoque::create(['nome' => 'Estoque Sul']);
-        $dimensao = LocalizacaoDimensao::create([
-            'nome' => 'Rua',
-            'placeholder' => 'Rua',
-            'ordem' => 1,
-            'ativo' => true,
-        ]);
 
         $produtoAlvo = Produto::create([
             'nome' => 'Produto Localizacao Alvo',
@@ -227,27 +216,27 @@ class EstoqueMovimentacaoIndicadoresTest extends TestCase
         );
 
         $localizacaoAlvo = LocalizacaoEstoque::create([
-            'estoque_id' => $estoqueAlvo->id,
-            'area_id' => $areaAlvo->id,
+            'deposito_id' => $deposito->id,
+            'area' => 'Showroom Norte',
+            'corredor' => 'Corredor Especial',
             'setor' => 'A',
             'coluna' => '01',
-            'nivel' => '02',
-            'codigo_composto' => 'A-01-02',
+            'codigo_composto' => 'Showroom Norte-Corredor Especial-A-01',
             'observacoes' => 'Perto da entrada',
+            'ativo' => true,
         ]);
-        LocalizacaoEstoque::create([
-            'estoque_id' => $estoqueOutro->id,
-            'area_id' => $areaOutra->id,
+        $localizacaoOutra = LocalizacaoEstoque::create([
+            'deposito_id' => $deposito->id,
+            'area' => 'Estoque Sul',
+            'corredor' => 'Corredor Comum',
             'setor' => 'B',
             'coluna' => '09',
-            'nivel' => '01',
-            'codigo_composto' => 'B-09-01',
+            'codigo_composto' => 'Estoque Sul-Corredor Comum-B-09',
+            'ativo' => true,
         ]);
-        LocalizacaoValor::create([
-            'localizacao_id' => $localizacaoAlvo->id,
-            'dimensao_id' => $dimensao->id,
-            'valor' => 'Corredor Especial',
-        ]);
+
+        $estoqueAlvo->update(['localizacao_id' => $localizacaoAlvo->id]);
+        $estoqueOutro->update(['localizacao_id' => $localizacaoOutra->id]);
 
         $service = app(EstoqueMovimentacaoService::class);
         $service->registrarMovimentacaoManual([

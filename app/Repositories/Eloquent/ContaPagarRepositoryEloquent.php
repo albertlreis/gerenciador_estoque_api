@@ -5,6 +5,7 @@ namespace App\Repositories\Eloquent;
 use App\DTOs\FiltroContaPagarDTO;
 use App\Models\ContaPagar;
 use App\Repositories\Contracts\ContaPagarRepository;
+use App\Support\FinanceiroTituloSearch;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
@@ -16,13 +17,8 @@ class ContaPagarRepositoryEloquent implements ContaPagarRepository
     {
         $q = ContaPagar::query()->with(['fornecedor', 'parcelamento', 'recorrencia', 'pagamentos.contaFinanceira']);
 
-        if ($filtro->busca) {
-            $busca = "%{$filtro->busca}%";
-            $q->where(fn($w) => $w
-                ->where('descricao','like',$busca)
-                ->orWhere('numero_documento','like',$busca)
-            );
-        }
+        FinanceiroTituloSearch::applyContaPagar($q, $filtro->busca);
+
         if ($filtro->fornecedor_id) $q->where('fornecedor_id', $filtro->fornecedor_id);
         if ($filtro->status) $q->where('status', $filtro->status);
         if ($filtro->forma_pagamento) $q->where('forma_pagamento', $filtro->forma_pagamento);

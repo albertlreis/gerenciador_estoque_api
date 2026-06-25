@@ -11,6 +11,7 @@ use App\Http\Requests\Financeiro\UpdateContaReceberRequest;
 use App\Http\Resources\ContaReceberResource;
 use App\Models\ContaReceber;
 use App\Services\ContaReceberCommandService;
+use App\Support\FinanceiroTituloSearch;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -26,7 +27,7 @@ class ContaReceberController extends Controller
      * Lista contas a receber com filtros e paginação.
      *
      * Filtros suportados:
-     * - busca (descricao/numero_documento)
+     * - busca (titulo, pessoa, pedido, categoria, centro, conta financeira e recorrencia)
      * - status (ABERTA, PARCIAL, PAGA, CANCELADA)
      * - cliente (nome do cliente direto ou do cliente no pedido)
      * - numero_pedido (numero_externo do pedido)
@@ -71,13 +72,7 @@ class ContaReceberController extends Controller
         $q = ContaReceber::query()
             ->with(['cliente', 'pedido.cliente', 'parcelamento', 'recorrencia', 'pagamentos.usuario', 'pagamentos.contaFinanceira', 'cobrancaContaAzul']);
 
-        if ($request->filled('busca')) {
-            $busca = '%' . $request->string('busca')->toString() . '%';
-            $q->where(fn ($w) => $w
-                ->where('descricao', 'like', $busca)
-                ->orWhere('numero_documento', 'like', $busca)
-            );
-        }
+        FinanceiroTituloSearch::applyContaReceber($q, $request->string('busca')->toString() ?: null);
 
         if ($request->filled('status')) {
             $q->where('status', $request->string('status')->toString());

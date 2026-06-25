@@ -198,4 +198,169 @@ class ImportacaoPedidoEstrategiaVinculoTest extends TestCase
         $this->assertStringContainsString('Produto 1: o valor do atributo', $conteudo);
         $this->assertStringNotContainsString('SQLSTATE', $conteudo);
     }
+
+    public function test_forcar_produto_novo_sem_referencia_retorna_422_sem_criar_registros(): void
+    {
+        $usuario = Usuario::create([
+            'nome' => 'Usuario Novo Sem Ref',
+            'email' => 'usuario_novo_sem_ref_' . Str::random(6) . '@example.com',
+            'senha' => 'teste',
+            'ativo' => 1,
+        ]);
+
+        $categoria = Categoria::create(['nome' => 'Cat Novo Sem Ref']);
+        $fornecedor = Fornecedor::create(['nome' => 'Fornecedor Novo Sem Ref', 'status' => 1]);
+        $pedidosAntes = Pedido::query()->count();
+        $produtosAntes = Produto::query()->count();
+        $variacoesAntes = ProdutoVariacao::query()->count();
+
+        $payload = [
+            'importacao_id' => null,
+            'cliente' => [],
+            'pedido' => [
+                'tipo' => 'reposicao',
+                'numero_externo' => 'IMP-SEM-REF-' . Str::random(8),
+                'id_fornecedor' => $fornecedor->id,
+                'total' => 120,
+                'data_pedido' => '2024-02-01',
+            ],
+            'movimentar_estoque' => false,
+            'itens' => [
+                [
+                    'ref' => '',
+                    'nome' => 'Mesa Sem Referencia',
+                    'quantidade' => 1,
+                    'valor' => 120,
+                    'preco_unitario' => 120,
+                    'custo_unitario' => 60,
+                    'id_categoria' => $categoria->id,
+                    'forcar_produto_novo' => true,
+                ],
+            ],
+        ];
+
+        $response = $this->actingAs($usuario, 'sanctum')
+            ->postJson('/api/v1/pedidos/import/pdf/confirm', $payload);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors('itens.0.ref');
+        $this->assertStringNotContainsString('SQLSTATE', $response->getContent());
+
+        $this->assertSame($pedidosAntes, Pedido::query()->count());
+        $this->assertSame($produtosAntes, Produto::query()->count());
+        $this->assertSame($variacoesAntes, ProdutoVariacao::query()->count());
+    }
+
+    public function test_item_sem_vinculo_e_sem_referencia_retorna_422_sem_criar_registros(): void
+    {
+        $usuario = Usuario::create([
+            'nome' => 'Usuario Sem Vinculo Sem Ref',
+            'email' => 'usuario_sem_vinculo_sem_ref_' . Str::random(6) . '@example.com',
+            'senha' => 'teste',
+            'ativo' => 1,
+        ]);
+
+        $categoria = Categoria::create(['nome' => 'Cat Sem Vinculo Sem Ref']);
+        $fornecedor = Fornecedor::create(['nome' => 'Fornecedor Sem Vinculo Sem Ref', 'status' => 1]);
+        $pedidosAntes = Pedido::query()->count();
+        $produtosAntes = Produto::query()->count();
+        $variacoesAntes = ProdutoVariacao::query()->count();
+
+        $payload = [
+            'importacao_id' => null,
+            'cliente' => [],
+            'pedido' => [
+                'tipo' => 'reposicao',
+                'numero_externo' => 'IMP-SEM-VINC-' . Str::random(8),
+                'id_fornecedor' => $fornecedor->id,
+                'total' => 120,
+                'data_pedido' => '2024-02-01',
+            ],
+            'movimentar_estoque' => false,
+            'itens' => [
+                [
+                    'nome' => 'Mesa Sem Vinculo',
+                    'quantidade' => 1,
+                    'valor' => 120,
+                    'preco_unitario' => 120,
+                    'custo_unitario' => 60,
+                    'id_categoria' => $categoria->id,
+                ],
+            ],
+        ];
+
+        $response = $this->actingAs($usuario, 'sanctum')
+            ->postJson('/api/v1/pedidos/import/pdf/confirm', $payload);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors('itens.0.ref');
+        $this->assertStringNotContainsString('SQLSTATE', $response->getContent());
+
+        $this->assertSame($pedidosAntes, Pedido::query()->count());
+        $this->assertSame($produtosAntes, Produto::query()->count());
+        $this->assertSame($variacoesAntes, ProdutoVariacao::query()->count());
+    }
+
+    public function test_item_vinculado_por_variacao_nao_exige_referencia(): void
+    {
+        $usuario = Usuario::create([
+            'nome' => 'Usuario Vinculo Sem Ref',
+            'email' => 'usuario_vinculo_sem_ref_' . Str::random(6) . '@example.com',
+            'senha' => 'teste',
+            'ativo' => 1,
+        ]);
+
+        $categoria = Categoria::create(['nome' => 'Cat Vinculo Sem Ref']);
+        $fornecedor = Fornecedor::create(['nome' => 'Fornecedor Vinculo Sem Ref', 'status' => 1]);
+        $produto = Produto::create([
+            'nome' => 'Mesa Vinculada',
+            'id_categoria' => $categoria->id,
+            'id_fornecedor' => $fornecedor->id,
+            'ativo' => true,
+        ]);
+
+        $variacao = ProdutoVariacao::create([
+            'produto_id' => $produto->id,
+            'referencia' => 'REF-VINCULADA',
+            'nome' => 'Var vinculada',
+            'preco' => 120,
+            'custo' => 60,
+        ]);
+        $variacoesAntes = ProdutoVariacao::query()->count();
+
+        $payload = [
+            'importacao_id' => null,
+            'cliente' => [],
+            'pedido' => [
+                'tipo' => 'reposicao',
+                'numero_externo' => 'IMP-VINC-SEM-REF-' . Str::random(8),
+                'id_fornecedor' => $fornecedor->id,
+                'total' => 120,
+                'data_pedido' => '2024-02-01',
+            ],
+            'movimentar_estoque' => false,
+            'itens' => [
+                [
+                    'id_variacao' => $variacao->id,
+                    'ref' => '',
+                    'nome' => 'Mesa Vinculada',
+                    'quantidade' => 1,
+                    'valor' => 120,
+                    'preco_unitario' => 120,
+                    'custo_unitario' => 60,
+                    'id_categoria' => $categoria->id,
+                ],
+            ],
+        ];
+
+        $response = $this->actingAs($usuario, 'sanctum')
+            ->postJson('/api/v1/pedidos/import/pdf/confirm', $payload);
+
+        $response->assertStatus(200);
+
+        $pedido = Pedido::where('numero_externo', $payload['pedido']['numero_externo'])->first();
+        $this->assertNotNull($pedido);
+        $this->assertSame($variacao->id, $pedido->itens()->first()?->id_variacao);
+        $this->assertSame($variacoesAntes, ProdutoVariacao::query()->count());
+    }
 }

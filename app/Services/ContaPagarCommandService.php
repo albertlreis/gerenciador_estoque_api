@@ -6,6 +6,7 @@ use App\Enums\ContaStatus;
 use App\Enums\LancamentoTipo;
 use App\Http\Resources\ContaPagarResource;
 use App\Http\Resources\ContaPagarPagamentoResource;
+use App\Integrations\ContaAzul\Services\ContaAzulExportDispatchService;
 use App\Models\ContaPagar;
 use App\Models\ContaPagarPagamento;
 use App\Models\FinanceiroParcelamento;
@@ -13,8 +14,10 @@ use App\Repositories\Contracts\ContaPagarRepository;
 use BackedEnum;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
+use Throwable;
 
 class ContaPagarCommandService
 {
@@ -24,6 +27,7 @@ class ContaPagarCommandService
         private readonly FinanceiroLedgerService $ledger,
         private readonly FinanceiroAuditoriaService $audit,
         private readonly RecorrenciaFinanceiraService $recorrencias,
+        private readonly ContaAzulExportDispatchService $contaAzulExports,
     ) {}
 
     public function criar(array $dados): ContaPagarResource
@@ -58,6 +62,10 @@ class ContaPagarCommandService
         $fresh = $conta->fresh(['fornecedor', 'categoria', 'centroCusto', 'parcelamento', 'recorrencia', 'pagamentos.usuario']);
         $this->audit->log('created', $conta, null, $fresh->toArray());
 
+        if (!is_array($pagamentoInicial)) {
+            $this->exportarContaPagarContaAzulBestEffort((int) $fresh->id, 'conta_pagar_criada');
+        }
+
         return new ContaPagarResource($fresh);
     }
 
@@ -71,6 +79,8 @@ class ContaPagarCommandService
 
         $fresh = $conta->fresh(['fornecedor', 'recorrencia', 'pagamentos.usuario']);
         $this->audit->log('updated', $conta, $antes, $fresh->toArray());
+
+        $this->exportarContaPagarContaAzulBestEffort((int) $fresh->id, 'conta_pagar_atualizada');
 
         return new ContaPagarResource($fresh);
     }
@@ -133,6 +143,7 @@ class ContaPagarCommandService
 
             $this->audit->log('paid', $conta, $antesConta, $depoisConta);
             $this->audit->log('ledger_created', $lancamento, null, $lancamento->fresh()->toArray());
+            $this->exportarBaixaContaPagarContaAzulBestEffort((int) $pagamento->id, 'pagamento_conta_pagar_registrado');
 
             return new ContaPagarPagamentoResource($pagamento->fresh(['usuario', 'contaFinanceira']));
         });
@@ -184,6 +195,59 @@ class ContaPagarCommandService
         return (string) $st;
     }
 
+    private function exportarContaPagarContaAzulBestEffort(int $contaPagarId, string $evento): void
+    {
+        try {
+            DB::afterCommit(function () use ($contaPagarId, $evento): void {
+                try {
+                    $this->contaAzulExports->contaPagar($contaPagarId, null, ['evento' => $evento]);
+                } catch (Throwable $e) {
+                    $this->logFalhaExportacaoContaAzul('conta_pagar', [
+                        'conta_pagar_id' => $contaPagarId,
+                        'evento' => $evento,
+                    ], $e);
+                }
+            });
+        } catch (Throwable $e) {
+            $this->logFalhaExportacaoContaAzul('conta_pagar', [
+                'conta_pagar_id' => $contaPagarId,
+                'evento' => $evento,
+            ], $e);
+        }
+    }
+
+    private function exportarBaixaContaPagarContaAzulBestEffort(int $pagamentoId, string $evento): void
+    {
+        try {
+            DB::afterCommit(function () use ($pagamentoId, $evento): void {
+                try {
+                    $this->contaAzulExports->baixaContaPagar($pagamentoId, null, ['evento' => $evento]);
+                } catch (Throwable $e) {
+                    $this->logFalhaExportacaoContaAzul('baixa_conta_pagar', [
+                        'pagamento_id' => $pagamentoId,
+                        'evento' => $evento,
+                    ], $e);
+                }
+            });
+        } catch (Throwable $e) {
+            $this->logFalhaExportacaoContaAzul('baixa_conta_pagar', [
+                'pagamento_id' => $pagamentoId,
+                'evento' => $evento,
+            ], $e);
+        }
+    }
+
+    /**
+     * @param array<string, mixed> $contexto
+     */
+    private function logFalhaExportacaoContaAzul(string $tipo, array $contexto, Throwable $e): void
+    {
+        Log::warning("Falha ao disparar exportacao Conta Azul para {$tipo}.", $contexto + [
+            'exception' => $e::class,
+            'erro' => $e->getMessage(),
+        ]);
+    }
+
     private function criarParcelado(array $dados): ContaPagarResource
     {
         return DB::transaction(function () use ($dados) {
@@ -233,6 +297,13 @@ class ContaPagarCommandService
                 'contas' => collect($contas)->pluck('id')->values()->all(),
             ]);
 
+            foreach ($contas as $conta) {
+                if (is_array($pagamentoInicial) && $target && (int) $conta->id === (int) $target->id) {
+                    continue;
+                }
+                $this->exportarContaPagarContaAzulBestEffort((int) $conta->id, 'conta_pagar_parcelada_criada');
+            }
+
             return new ContaPagarResource($fresh);
         });
     }
@@ -273,6 +344,13 @@ class ContaPagarCommandService
                 'recorrencia' => $serie->fresh()->toArray(),
                 'contas' => collect($contas)->pluck('id')->values()->all(),
             ]);
+
+            foreach ($contas as $idx => $conta) {
+                if (is_array($pagamentoInicial) && $idx === 0) {
+                    continue;
+                }
+                $this->exportarContaPagarContaAzulBestEffort((int) $conta->id, 'conta_pagar_recorrente_criada');
+            }
 
             return new ContaPagarResource($fresh);
         });

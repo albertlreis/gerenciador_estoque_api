@@ -4,11 +4,14 @@ namespace App\Integrations\ContaAzul\Services;
 
 use App\Integrations\ContaAzul\ContaAzulEntityType;
 use App\Integrations\ContaAzul\Models\ContaAzulMapeamento;
+use App\Jobs\ContaAzul\ExportBaixaContaPagarContaAzulJob;
 use App\Jobs\ContaAzul\ExportBaixaContaAzulJob;
+use App\Jobs\ContaAzul\ExportContaPagarContaAzulJob;
 use App\Jobs\ContaAzul\ExportClienteContaAzulJob;
 use App\Jobs\ContaAzul\ExportPedidoContaAzulJob;
 use App\Jobs\ContaAzul\ExportProdutoContaAzulJob;
 use App\Jobs\ContaAzul\ExportTituloContaAzulJob;
+use App\Models\ContaPagarPagamento;
 use App\Models\ContaReceberPagamento;
 use App\Services\AuditoriaLogService;
 use Illuminate\Support\Facades\Bus;
@@ -79,6 +82,43 @@ class ContaAzulExportDispatchService
     /**
      * @param  array<string, mixed>  $contexto
      */
+    public function contaPagar(int $contaPagarId, ?int $lojaId = null, array $contexto = []): void
+    {
+        $this->dispatch(
+            ContaAzulEntityType::CONTA_PAGAR,
+            $contaPagarId,
+            $lojaId,
+            $contexto,
+            fn () => ExportContaPagarContaAzulJob::dispatch($contaPagarId, $lojaId)
+        );
+    }
+
+    /**
+     * @param  array<int, int>  $pagamentoIds
+     * @param  array<string, mixed>  $contexto
+     */
+    public function contaPagarComBaixas(int $contaPagarId, array $pagamentoIds, ?int $lojaId = null, array $contexto = []): void
+    {
+        $this->dispatch(
+            ContaAzulEntityType::CONTA_PAGAR,
+            $contaPagarId,
+            $lojaId,
+            array_filter($contexto + [
+                'pagamentos_conta_pagar_ids' => array_values($pagamentoIds),
+            ], fn ($value) => $value !== null && $value !== []),
+            fn () => Bus::chain(array_merge(
+                [(new ExportContaPagarContaAzulJob($contaPagarId, $lojaId))->afterCommit()],
+                array_map(
+                    fn (int $pagamentoId) => new ExportBaixaContaPagarContaAzulJob($pagamentoId, $lojaId),
+                    array_values($pagamentoIds)
+                )
+            ))->dispatch()
+        );
+    }
+
+    /**
+     * @param  array<string, mixed>  $contexto
+     */
     public function baixa(int $pagamentoId, ?int $lojaId = null, array $contexto = []): void
     {
         $pagamento = ContaReceberPagamento::query()
@@ -104,11 +144,47 @@ class ContaAzulExportDispatchService
         );
     }
 
+    /**
+     * @param  array<string, mixed>  $contexto
+     */
+    public function baixaContaPagar(int $pagamentoId, ?int $lojaId = null, array $contexto = []): void
+    {
+        $pagamento = ContaPagarPagamento::query()
+            ->select(['id', 'conta_pagar_id'])
+            ->find($pagamentoId);
+        $contaPagarId = $pagamento?->conta_pagar_id !== null
+            ? (int) $pagamento->conta_pagar_id
+            : null;
+        $contaSemMapeamento = $contaPagarId !== null
+            && !ContaAzulMapeamento::idExternoPorLocal(ContaAzulEntityType::CONTA_PAGAR, $contaPagarId, $lojaId);
+
+        $this->dispatch(
+            ContaAzulEntityType::BAIXA_CONTA_PAGAR,
+            $pagamentoId,
+            $lojaId,
+            array_filter($contexto + [
+                'conta_pagar_id' => $contaPagarId,
+                'conta_pagar_dependente' => $contaSemMapeamento ? true : null,
+            ], fn ($value) => $value !== null),
+            fn () => $contaSemMapeamento && $contaPagarId !== null
+                ? $this->dispatchBaixaContaPagarDepoisDaConta($contaPagarId, $pagamentoId, $lojaId)
+                : ExportBaixaContaPagarContaAzulJob::dispatch($pagamentoId, $lojaId)
+        );
+    }
+
     private function dispatchBaixaDepoisDoTitulo(int $contaReceberId, int $pagamentoId, ?int $lojaId): void
     {
         Bus::chain([
             (new ExportTituloContaAzulJob($contaReceberId, $lojaId))->afterCommit(),
             new ExportBaixaContaAzulJob($pagamentoId, $lojaId),
+        ])->dispatch();
+    }
+
+    private function dispatchBaixaContaPagarDepoisDaConta(int $contaPagarId, int $pagamentoId, ?int $lojaId): void
+    {
+        Bus::chain([
+            (new ExportContaPagarContaAzulJob($contaPagarId, $lojaId))->afterCommit(),
+            new ExportBaixaContaPagarContaAzulJob($pagamentoId, $lojaId),
         ])->dispatch();
     }
 

@@ -17,6 +17,8 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use InvalidArgumentException;
+use RuntimeException;
 
 final class ImportacaoProdutosService
 {
@@ -137,7 +139,7 @@ final class ImportacaoProdutosService
     }
 
     /** Confirma importação: upsert produtos, movimenta estoque e salva arquivo */
-    public function confirmar(NotaDTO $nota, Collection $itens, int $depositoId, string $xmlString, string $dataEntrada): void
+    public function confirmar(NotaDTO $nota, Collection $itens, int $depositoId, string $xmlString, ?string $dataEntrada): void
     {
         DB::transaction(function () use ($nota, $itens, $depositoId, $xmlString, $dataEntrada) {
             $path = 'importacoes/xml/' . now()->format('Ymd-His') . "-NF{$nota->numero}.xml";
@@ -145,6 +147,8 @@ final class ImportacaoProdutosService
 
             foreach ($itens as $dto) {
                 /** @var ProdutoImportadoDTO $dto */
+                $this->validarItem($dto);
+                $atributos = $this->normalizarAtributos($dto->atributos);
                 $variacaoId = $dto->variacaoIdEncontrada ?: $dto->variacaoIdManual;
 
                 if (!$variacaoId) {
@@ -168,11 +172,11 @@ final class ImportacaoProdutosService
                         'codigo_barras'=> null,
                     ]);
 
-                    foreach ($dto->atributos as $attr) {
+                    foreach ($atributos as $attr) {
                         ProdutoVariacaoAtributo::create([
                             'id_variacao' => $variacao->id,
-                            'atributo'    => self::normalizarAtributo(is_array($attr) ? $attr['atributo'] : $attr->atributo),
-                            'valor'       => self::normalizarValor(is_array($attr) ? $attr['valor'] : $attr->valor),
+                            'atributo'    => $attr['atributo'],
+                            'valor'       => $attr['valor'],
                         ]);
                     }
 
@@ -201,13 +205,13 @@ final class ImportacaoProdutosService
                     $variacao->save();
                     $this->registrarCodigoHistoricoXml($variacao, $dto->referencia);
 
-                    if (!empty($dto->atributos)) {
+                    if (!empty($atributos)) {
                         $variacao->atributos()->delete();
-                        foreach ($dto->atributos as $attr) {
+                        foreach ($atributos as $attr) {
                             ProdutoVariacaoAtributo::create([
                                 'id_variacao' => $variacao->id,
-                                'atributo'    => self::normalizarAtributo(is_array($attr) ? $attr['atributo'] : $attr->atributo),
-                                'valor'       => self::normalizarValor(is_array($attr) ? $attr['valor'] : $attr->valor),
+                                'atributo'    => $attr['atributo'],
+                                'valor'       => $attr['valor'],
                             ]);
                         }
                     }
@@ -254,7 +258,75 @@ final class ImportacaoProdutosService
         );
     }
 
-    /** Faz o parsing da descrição (nome + atributos) */
+    /** Valida invariantes que tambem protegem entradas vindas de outros pontos. */
+    private function validarItem(ProdutoImportadoDTO $dto): void
+    {
+        $variacaoId = $dto->variacaoIdEncontrada ?: $dto->variacaoIdManual;
+        $produtoLabel = $dto->descricaoXml ?: 'produto sem descricao';
+
+        if ($dto->quantidade < 1 || floor($dto->quantidade) !== $dto->quantidade) {
+            throw new InvalidArgumentException("Quantidade deve ser um numero inteiro maior que zero para o produto: {$produtoLabel}");
+        }
+
+        if (!$variacaoId) {
+            if (!$dto->idCategoria) {
+                throw new RuntimeException("Categoria nao informada para o produto: {$produtoLabel}");
+            }
+
+            if (blank($dto->referencia)) {
+                throw new RuntimeException("Referencia nao informada para o produto: {$produtoLabel}");
+            }
+
+            if (blank($dto->descricaoFinal)) {
+                throw new RuntimeException("Descricao final nao informada para o produto: {$produtoLabel}");
+            }
+        }
+
+        if ($dto->referencia !== null && mb_strlen($dto->referencia) > 100) {
+            throw new InvalidArgumentException("Referencia maior que 100 caracteres para o produto: {$produtoLabel}");
+        }
+
+        if ($dto->descricaoFinal !== null && mb_strlen($dto->descricaoFinal) > 255) {
+            throw new InvalidArgumentException("Descricao final maior que 255 caracteres para o produto: {$produtoLabel}");
+        }
+    }
+
+    /**
+     * @param array<int, array{atributo?: string, valor?: string}|AtributoDTO> $atributos
+     * @return array<int, array{atributo: string, valor: string}>
+     */
+    private function normalizarAtributos(array $atributos): array
+    {
+        $normalizados = [];
+        $vistos = [];
+
+        foreach ($atributos as $attr) {
+            $atributo = self::normalizarAtributo((string) (is_array($attr) ? ($attr['atributo'] ?? '') : ($attr->atributo ?? '')));
+            $valor = self::normalizarValor((string) (is_array($attr) ? ($attr['valor'] ?? '') : ($attr->valor ?? '')));
+
+            if ($atributo === '' || $valor === '') {
+                continue;
+            }
+
+            if (mb_strlen($atributo) > 100 || mb_strlen($valor) > 100) {
+                throw new InvalidArgumentException('Atributo do produto maior que o permitido. Revise os atributos antes de salvar.');
+            }
+
+            if (isset($vistos[$atributo])) {
+                continue;
+            }
+
+            $vistos[$atributo] = true;
+            $normalizados[] = [
+                'atributo' => $atributo,
+                'valor' => $valor,
+            ];
+        }
+
+        return $normalizados;
+    }
+
+    /** Faz o parsing da descricao (nome + atributos). */
     public static function parseDescricao(string $descricao): array
     {
         // Mantém lógica atual de parsing

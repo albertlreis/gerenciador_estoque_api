@@ -14,7 +14,9 @@ use App\Integrations\ContaAzul\Import\ProdutoContaAzulImportAdapter;
 use App\Integrations\ContaAzul\Import\TituloContaAzulImportAdapter;
 use App\Integrations\ContaAzul\Import\VendaContaAzulImportAdapter;
 use App\Integrations\ContaAzul\Mappers\ContaAzulBaixaMapper;
+use App\Integrations\ContaAzul\Mappers\ContaAzulBaixaContaPagarMapper;
 use App\Integrations\ContaAzul\Mappers\ContaAzulCobrancaMapper;
+use App\Integrations\ContaAzul\Mappers\ContaAzulContaPagarMapper;
 use App\Integrations\ContaAzul\Mappers\ContaAzulPedidoMapper;
 use App\Integrations\ContaAzul\Mappers\ContaAzulPessoaMapper;
 use App\Integrations\ContaAzul\Mappers\ContaAzulProdutoMapper;
@@ -79,6 +81,8 @@ class AppServiceProvider extends ServiceProvider
         $this->app->singleton(ContaAzulPedidoMapper::class, fn () => new ContaAzulPedidoMapper());
         $this->app->singleton(ContaAzulTituloMapper::class, fn () => new ContaAzulTituloMapper());
         $this->app->singleton(ContaAzulBaixaMapper::class, fn () => new ContaAzulBaixaMapper());
+        $this->app->singleton(ContaAzulContaPagarMapper::class, fn () => new ContaAzulContaPagarMapper());
+        $this->app->singleton(ContaAzulBaixaContaPagarMapper::class, fn () => new ContaAzulBaixaContaPagarMapper());
         $this->app->singleton(ContaAzulCobrancaMapper::class, fn () => new ContaAzulCobrancaMapper());
         $this->app->singleton(PessoaContaAzulImportAdapter::class, fn () => new PessoaContaAzulImportAdapter());
         $this->app->singleton(ProdutoContaAzulImportAdapter::class, fn () => new ProdutoContaAzulImportAdapter());
@@ -130,7 +134,9 @@ class AppServiceProvider extends ServiceProvider
                 $app->make(ContaAzulProdutoMapper::class),
                 $app->make(ContaAzulPedidoMapper::class),
                 $app->make(ContaAzulTituloMapper::class),
-                $app->make(ContaAzulBaixaMapper::class)
+                $app->make(ContaAzulBaixaMapper::class),
+                $app->make(ContaAzulContaPagarMapper::class),
+                $app->make(ContaAzulBaixaContaPagarMapper::class)
             );
         });
 

@@ -101,12 +101,25 @@ class ExportacaoContaAzulService
     {
         $conta->loadMissing(['fornecedor', 'categoria', 'centroCusto']);
         $path = (string) ($this->config['paths']['contas_pagar_create'] ?? '/v1/financeiro/eventos-financeiros/contas-a-pagar');
+        try {
+            $payload = $this->contaPagarMapper->fromLocal($conta, $lojaId);
+        } catch (ContaAzulException $e) {
+            $this->registrarFalhaPreExport(
+                ContaAzulEntityType::CONTA_PAGAR,
+                (int) $conta->id,
+                $lojaId,
+                $e
+            );
+
+            throw $e;
+        }
+
         $this->exportJsonEntity(
             $conexao,
             $path,
             ContaAzulEntityType::CONTA_PAGAR,
             (int) $conta->id,
-            $this->contaPagarMapper->fromLocal($conta, $lojaId),
+            $payload,
             $lojaId,
             true
         );
@@ -257,6 +270,40 @@ class ExportacaoContaAzulService
                 ]
             );
         }
+    }
+
+    private function registrarFalhaPreExport(
+        string $tipoEntidade,
+        int $idLocal,
+        ?int $lojaId,
+        ContaAzulException $e
+    ): void {
+        app(AuditoriaLogService::class)->registrar([
+            'occurred_at' => now(),
+            'tipo' => 'integracao',
+            'categoria' => 'integracao',
+            'nivel' => 'error',
+            'modulo' => 'conta_azul',
+            'acao' => 'export',
+            'status' => 'falha',
+            'label' => 'Falha ao preparar exportacao Conta Azul',
+            'message' => $e->getMessage(),
+            'entity_type' => $tipoEntidade,
+            'entity_id' => $idLocal,
+            'context_json' => [
+                'loja_id' => $lojaId,
+                'tipo_entidade' => $tipoEntidade,
+                'id_local' => $idLocal,
+                'direcao' => 'export',
+                'tentativa' => 1,
+                'erro_codigo' => $e->reason,
+                'erro_mensagem' => $e->getMessage(),
+                'erro_contexto' => $e->context,
+            ],
+            'source_system' => 'estoque',
+            'source_kind' => 'sync',
+            'retention_days' => 365,
+        ]);
     }
 
     private function resolveParcelaContaPagarId(ContaAzulConexao $conexao, int $contaPagarId, ?int $lojaId): ?string

@@ -166,4 +166,42 @@ class LocalizacoesDepositoFluxoTest extends TestCase
             'id' => $livre->id,
         ]);
     }
+
+    public function test_lista_filtra_por_ocupacao(): void
+    {
+        $this->autenticar();
+        $deposito = Deposito::create(['nome' => 'Deposito Filtro Ocupacao']);
+        $estoque = $this->criarEstoque($deposito);
+
+        $ocupada = LocalizacaoEstoque::create([
+            'deposito_id' => $deposito->id,
+            'area' => 'A',
+            'corredor' => '1',
+            'setor' => 'S',
+            'coluna' => '1',
+            'codigo_composto' => 'A-1-S-1',
+            'ativo' => true,
+        ]);
+        $vazia = LocalizacaoEstoque::create([
+            'deposito_id' => $deposito->id,
+            'area' => 'A',
+            'corredor' => '1',
+            'setor' => 'S',
+            'coluna' => '2',
+            'codigo_composto' => 'A-1-S-2',
+            'ativo' => true,
+        ]);
+        $estoque->update(['localizacao_id' => $ocupada->id]);
+
+        $ocupadas = $this->getJson("/api/v1/depositos/{$deposito->id}/localizacoes?ocupacao=ocupadas")
+            ->assertOk()
+            ->json('data');
+
+        $vazias = $this->getJson("/api/v1/depositos/{$deposito->id}/localizacoes?ocupacao=vazias")
+            ->assertOk()
+            ->json('data');
+
+        $this->assertSame([$ocupada->id], collect($ocupadas)->pluck('id')->all());
+        $this->assertSame([$vazia->id], collect($vazias)->pluck('id')->all());
+    }
 }

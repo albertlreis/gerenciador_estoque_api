@@ -126,7 +126,8 @@ jobs:
         run: |
           compose_fix_cmd="if [ -f docker-compose.yml ]; then cp docker-compose.yml docker-compose.yml.bak-version-obsolete && sed -i '/^version:/d' docker-compose.yml; fi"
           repo_sync_cmd="repo_git_dir=\$(find . -maxdepth 3 -type d -name .git -print -quit) && repo_dir=\${repo_git_dir%/.git} && if [ -n \"\${repo_dir}\" ]; then git -C \"\${repo_dir}\" fetch origin hml && git -C \"\${repo_dir}\" reset --hard origin/hml && git -C \"\${repo_dir}\" clean -fd; fi"
-          remote_command="cd /home/docker/acadsoft/sierra-estoque-hml && ${repo_sync_cmd} && ${compose_fix_cmd} && ./deploy.sh --no-git"
+          deploy_cmd="APP_DIR=/home/docker/acadsoft/sierra-estoque-hml HTML_DIR=/home/docker/acadsoft/sierra-estoque-hml/html COMPOSE_FILE=/home/docker/acadsoft/sierra-estoque-hml/docker-compose.yml bash ./html/scripts/deploy.sh --no-git"
+          remote_command="cd /home/docker/acadsoft/sierra-estoque-hml && ${repo_sync_cmd} && ${compose_fix_cmd} && ${deploy_cmd}"
 
           if [ "${RUN_MIGRATIONS}" = "true" ]; then
             remote_command="${remote_command} --migrate"

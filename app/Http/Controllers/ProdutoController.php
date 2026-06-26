@@ -20,6 +20,8 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use InvalidArgumentException;
+use RuntimeException;
 use Throwable;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Http\JsonResponse;
@@ -487,11 +489,12 @@ class ProdutoController extends Controller
             return $resposta;
         }
 
-        $notaArr    = $request->input('nota');
-        $depositoId = (int)$request->input('deposito_id');
-        $produtos   = collect($request->input('produtos'));
-        $tokenXml   = $request->input('token_xml');
-        $dataEntrada = $request->input('data_entrada');
+        $dados = $request->validated();
+        $notaArr    = $dados['nota'];
+        $depositoId = (int)$dados['deposito_id'];
+        $produtos   = collect($dados['produtos']);
+        $tokenXml   = $dados['token_xml'];
+        $dataEntrada = $dados['data_entrada'] ?? null;
 
         if (!$tokenXml) {
             return response()->json([
@@ -538,7 +541,17 @@ class ProdutoController extends Controller
             );
         });
 
-        $this->service->confirmar($notaDto, $itens, $depositoId, $xmlString, $dataEntrada);
+        try {
+            $this->service->confirmar($notaDto, $itens, $depositoId, $xmlString, $dataEntrada);
+        } catch (InvalidArgumentException|RuntimeException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage(),
+                'errors' => [
+                    'produtos' => [$e->getMessage()],
+                ],
+            ], 422);
+        }
 
         // Remove arquivo temporário após uso
         Storage::disk('local')->delete($path);

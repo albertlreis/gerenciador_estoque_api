@@ -10,6 +10,7 @@ use App\Http\Resources\ContaPagarResource;
 use App\Models\ContaPagar;
 use App\Services\ContaPagarCommandService;
 use App\Services\ContaPagarQueryService;
+use App\Support\FinanceiroTituloSearch;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -246,13 +247,7 @@ class ContaPagarController extends Controller
 
         $query = ContaPagar::query()->with('pagamentos');
 
-        if ($f->busca) {
-            $busca = "%{$f->busca}%";
-            $query->where(fn($w) => $w
-                ->where('descricao','like',$busca)
-                ->orWhere('numero_documento','like',$busca)
-            );
-        }
+        FinanceiroTituloSearch::applyContaPagar($query, $f->busca);
 
         if ($f->fornecedor_id) $query->where('fornecedor_id', $f->fornecedor_id);
         if ($f->status)        $query->where('status', $f->status);

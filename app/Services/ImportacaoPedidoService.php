@@ -98,7 +98,7 @@ class ImportacaoPedidoService
             'itens.*.valor'        => 'required|numeric|min:0|max:99999999.99',
             'itens.*.preco_unitario' => 'nullable|numeric|min:0|max:99999999.99',
             'itens.*.custo_unitario' => 'nullable|numeric|min:0|max:99999999.99',
-            'itens.*.id_categoria' => 'required|integer',
+            'itens.*.id_categoria' => 'required|integer|exists:categorias,id',
             'itens.*.id_deposito'  => 'nullable|integer|exists:depositos,id',
             'itens.*.movimentacao_estoque_tipo' => 'nullable|in:entrada,saida',
             'itens.*.atributos'    => 'nullable|array',
@@ -165,6 +165,18 @@ class ImportacaoPedidoService
                     ->flip();
 
             foreach ($itens as $index => $item) {
+                $label = 'Produto ' . ($index + 1);
+                $forcarProdutoNovo = $this->itemDeveForcarProdutoNovo($request, $item);
+                $semReferencia = !$this->hasValue($item['ref'] ?? null);
+                $semVinculoDireto = empty($item['id_variacao']) && empty($item['codigo_barras']);
+
+                if ($semReferencia && ($forcarProdutoNovo || $semVinculoDireto)) {
+                    $validator->errors()->add(
+                        "itens.$index.ref",
+                        "$label: informe a referencia para cadastrar um produto novo."
+                    );
+                }
+
                 $categoriaId = $item['id_categoria'] ?? null;
                 if (is_numeric($categoriaId) && $categoriasProibidas->has((int) $categoriaId)) {
                     $validator->errors()->add("itens.$index.id_categoria", self::MENSAGEM_CATEGORIA_IMPORTACAO_INVALIDA);
@@ -183,7 +195,6 @@ class ImportacaoPedidoService
                 $normalizados = [];
                 foreach ($atributos as $atributo => $valor) {
                     $nome = trim((string) $atributo);
-                    $label = 'Produto ' . ($index + 1);
 
                     if ($nome === '') {
                         $validator->errors()->add(
@@ -301,8 +312,18 @@ class ImportacaoPedidoService
                 $clienteId = $cliente->id;
             }
 
-            $valorTotal = $dadosPedido['total']
-                ?? collect($itens)->sum(fn($i) => (float) ($i['quantidade'] ?? 0) * (float) ($i['valor'] ?? 0));
+            $totalItens = collect($itens)->sum(
+                fn($i) => $this->toDecimal($i['quantidade'] ?? 0)
+                    * $this->toDecimal($i['valor'] ?? ($i['preco_unitario'] ?? 0))
+            );
+            $fluxoManualSemStaging = empty($importacaoId) && !$this->hasValue($request->input('tipo_importacao'));
+            $valorTotal = $this->hasValue($dadosPedido['total'] ?? null)
+                ? $this->toDecimal($dadosPedido['total'])
+                : $totalItens;
+
+            if ($fluxoManualSemStaging && $valorTotal <= 0 && $totalItens > 0) {
+                $valorTotal = $totalItens;
+            }
 
             $numeroExterno = isset($dadosPedido['numero_externo'])
                 ? trim((string) $dadosPedido['numero_externo'])
@@ -542,6 +563,14 @@ class ImportacaoPedidoService
                 }
 
                 if (!$variacao) {
+                    if (!$this->hasValue($item['ref'] ?? null)) {
+                        throw ValidationException::withMessages([
+                            "itens.$index.ref" => [
+                                'Produto ' . ($index + 1) . ': informe a referencia para cadastrar um produto novo.',
+                            ],
+                        ]);
+                    }
+
                     $produto = Produto::firstOrCreate([
                         'nome'         => $item['nome'],
                         'id_categoria' => $item['id_categoria'],

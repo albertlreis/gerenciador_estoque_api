@@ -3,6 +3,7 @@
 namespace App\Exports;
 
 use App\Models\ContaReceber;
+use App\Support\FinanceiroTituloSearch;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
@@ -39,13 +40,7 @@ class ContasReceberExport implements FromCollection, ShouldAutoSize, WithColumnF
         $q = ContaReceber::query()
             ->with(['cliente', 'pedido.cliente', 'categoria', 'centroCusto', 'pagamentos']);
 
-        if (!empty($params['busca'])) {
-            $busca = '%' . trim((string) $params['busca']) . '%';
-            $q->where(fn ($w) => $w
-                ->where('descricao', 'like', $busca)
-                ->orWhere('numero_documento', 'like', $busca)
-            );
-        }
+        FinanceiroTituloSearch::applyContaReceber($q, $params['busca'] ?? null);
 
         if (!empty($params['status'])) {
             $q->where('status', (string) $params['status']);

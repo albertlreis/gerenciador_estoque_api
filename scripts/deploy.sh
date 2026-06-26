@@ -120,6 +120,14 @@ PHP
 
 log "Projeto: $APP_DIR | Serviço: $SERVICE"
 
+assert_not_in_maintenance() {
+  log "Validando que a aplicacao nao esta em maintenance mode..."
+  if ! compose exec -T "$SERVICE" bash -lc 'cd /var/www/html && test ! -f storage/framework/down'; then
+    log "ERRO: Laravel ainda esta em maintenance mode (storage/framework/down). Rode php artisan up antes de finalizar."
+    return 1
+  fi
+}
+
 DID_SET_MAINTENANCE=false
 cleanup() {
   if $DO_MAINTENANCE && $DID_SET_MAINTENANCE; then
@@ -211,6 +219,8 @@ if $DO_MAINTENANCE && $DID_SET_MAINTENANCE; then
 fi
 
 log "Últimas 150 linhas dos logs…"
+assert_not_in_maintenance
+
 CONTAINER_ID="$(compose ps -q "$SERVICE")"
 docker logs --tail=150 "$CONTAINER_ID" || true
 

@@ -18,6 +18,8 @@ final class ContaAzulEntityType
 
     public const BAIXA = 'baixa';
 
+    public const BAIXA_CONTA_PAGAR = 'baixa_conta_pagar';
+
     public const COBRANCA = 'cobranca';
 
     public const PARCELA = 'parcela';

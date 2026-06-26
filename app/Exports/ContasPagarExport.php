@@ -4,6 +4,7 @@ namespace App\Exports;
 
 use App\DTOs\FiltroContaPagarDTO;
 use App\Models\ContaPagar;
+use App\Support\FinanceiroTituloSearch;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use Maatwebsite\Excel\Concerns\FromCollection;
@@ -52,13 +53,8 @@ class ContasPagarExport implements FromCollection, ShouldAutoSize, WithColumnFor
 
         $q = ContaPagar::query()->with(['fornecedor', 'categoria', 'centroCusto', 'pagamentos']);
 
-        if ($f->busca) {
-            $busca = "%{$f->busca}%";
-            $q->where(fn ($w) => $w
-                ->where('descricao', 'like', $busca)
-                ->orWhere('numero_documento', 'like', $busca)
-            );
-        }
+        FinanceiroTituloSearch::applyContaPagar($q, $f->busca);
+
         if ($f->fornecedor_id) $q->where('fornecedor_id', $f->fornecedor_id);
         if ($f->status) $q->where('status', $f->status);
         if ($f->forma_pagamento) $q->where('forma_pagamento', $f->forma_pagamento);

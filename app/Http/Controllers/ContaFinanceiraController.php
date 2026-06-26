@@ -2,13 +2,17 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\LancamentoStatus;
+use App\Enums\LancamentoTipo;
 use App\Http\Requests\Financeiro\ContaFinanceiraIndexRequest;
 use App\Http\Requests\Financeiro\ContaFinanceiraUpsertRequest;
 use App\Http\Resources\ContaFinanceiraOptionResource;
 use App\Http\Resources\ContaFinanceiraResource;
 use App\Models\ContaFinanceira;
+use App\Models\LancamentoFinanceiro;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -20,7 +24,7 @@ class ContaFinanceiraController extends Controller
         $f = $request->validated();
 
         $items = ContaFinanceira::query()
-            ->select(['id','nome','slug','tipo','ativo','padrao','moeda','data_saldo_inicial','saldo_atual','saldo_atual_em'])
+            ->select(['id','nome','slug','tipo','ativo','padrao','moeda','saldo_inicial','data_saldo_inicial','saldo_atual','saldo_atual_em'])
             ->when(!empty($f['tipo']), fn($q) => $q->where('tipo', $f['tipo']))
             ->when(array_key_exists('ativo', $f) && $f['ativo'] !== null, fn($q) => $q->where('ativo', (bool)$f['ativo']))
             ->when(!empty($f['q']), function ($q) use ($f) {
@@ -29,7 +33,8 @@ class ContaFinanceiraController extends Controller
             })
             ->orderByDesc('padrao')
             ->orderBy('nome')
-            ->get();
+            ->get()
+            ->map(fn (ContaFinanceira $conta) => $this->withSaldoListagem($conta));
 
         return response()->json([
             'data' => ContaFinanceiraOptionResource::collection($items),
@@ -88,10 +93,20 @@ class ContaFinanceiraController extends Controller
                 ignoreId: (int)$contaFinanceira->id
             );
 
+            $shouldResetImportedSaldo = $this->shouldResetImportedSaldo($contaFinanceira, $data);
+
             $contaFinanceira->fill([
                 ...$data,
                 'slug' => $slug,
             ]);
+
+            if ($shouldResetImportedSaldo) {
+                $contaFinanceira->forceFill([
+                    'saldo_atual' => null,
+                    'saldo_atual_em' => null,
+                    'meta_json' => $this->withoutImportedSaldoMeta($contaFinanceira->meta_json),
+                ]);
+            }
 
             $contaFinanceira->save();
 
@@ -109,6 +124,93 @@ class ContaFinanceiraController extends Controller
                 'data' => new ContaFinanceiraResource($contaFinanceira),
             ]);
         });
+    }
+
+    private function withSaldoListagem(ContaFinanceira $conta): ContaFinanceira
+    {
+        if ($conta->saldo_atual !== null) {
+            $conta->setAttribute('saldo_base_origem', 'saldo_atual');
+            return $conta;
+        }
+
+        $conta->setAttribute('saldo_atual', $this->saldoLivro($conta));
+        $conta->setAttribute('saldo_base_origem', 'saldo_livro');
+
+        return $conta;
+    }
+
+    private function saldoLivro(ContaFinanceira $conta): float
+    {
+        $inicio = $conta->data_saldo_inicial
+            ? Carbon::parse($conta->data_saldo_inicial)->startOfDay()
+            : Carbon::parse('1900-01-01')->startOfDay();
+
+        $movimentos = LancamentoFinanceiro::query()
+            ->where('conta_id', $conta->id)
+            ->where('status', LancamentoStatus::CONFIRMADO->value)
+            ->where('data_movimento', '>=', $inicio)
+            ->get()
+            ->sum(fn (LancamentoFinanceiro $l) => $this->signedValue($l));
+
+        return round((float) $conta->saldo_inicial + (float) $movimentos, 2);
+    }
+
+    private function signedValue(LancamentoFinanceiro $l): float
+    {
+        $tipo = $l->tipo?->value ?? (string) $l->tipo;
+        $valor = (float) $l->valor;
+
+        if ($tipo === LancamentoTipo::DESPESA->value) {
+            return -$valor;
+        }
+
+        if ($tipo === LancamentoTipo::TRANSFERENCIA->value) {
+            return str_contains(strtolower((string) $l->descricao), 'recebida') ? $valor : -$valor;
+        }
+
+        return $valor;
+    }
+
+    private function shouldResetImportedSaldo(ContaFinanceira $conta, array $data): bool
+    {
+        return $this->manualAnchorChanged($conta, $data)
+            || $this->importedSaldoBeforeManualAnchor($conta, $data);
+    }
+
+    private function manualAnchorChanged(ContaFinanceira $conta, array $data): bool
+    {
+        $saldoChanged = array_key_exists('saldo_inicial', $data)
+            && round((float) $conta->saldo_inicial, 2) !== round((float) $data['saldo_inicial'], 2);
+
+        $dateChanged = array_key_exists('data_saldo_inicial', $data)
+            && $conta->data_saldo_inicial?->format('Y-m-d') !== Carbon::parse($data['data_saldo_inicial'])->format('Y-m-d');
+
+        return $saldoChanged || $dateChanged;
+    }
+
+    private function importedSaldoBeforeManualAnchor(ContaFinanceira $conta, array $data): bool
+    {
+        if ($conta->saldo_atual === null || $conta->saldo_atual_em === null || empty($data['data_saldo_inicial'])) {
+            return false;
+        }
+
+        return Carbon::parse($conta->saldo_atual_em)->startOfDay()
+            ->lt(Carbon::parse($data['data_saldo_inicial'])->startOfDay());
+    }
+
+    private function withoutImportedSaldoMeta(mixed $meta): ?array
+    {
+        if (!is_array($meta)) {
+            return null;
+        }
+
+        unset(
+            $meta['conta_azul_saldo'],
+            $meta['saldo_conta_financeira'],
+            $meta['saldos_contas_financeiras']
+        );
+
+        return $meta ?: null;
     }
 
     public function destroy(ContaFinanceira $contaFinanceira): JsonResponse

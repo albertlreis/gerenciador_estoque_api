@@ -194,6 +194,268 @@ class FinanceiroExportsTest extends TestCase
             ->assertJsonPath('data.0.fornecedor_nome', 'Fornecedor Historico');
     }
 
+    public function test_contas_pagar_busca_campos_relacionados_acentos_e_caracteres_especiais(): void
+    {
+        $fornecedor = Fornecedor::create([
+            'nome' => 'Sierra Móveis & Cia',
+            'cnpj' => '12345678000188',
+            'status' => 1,
+        ]);
+        $categoria = \App\Models\CategoriaFinanceira::create(['nome' => 'Água e Luz', 'slug' => 'agua-e-luz-busca', 'tipo' => 'despesa', 'ativo' => true]);
+        $centro = \App\Models\CentroCusto::create(['nome' => 'Administração', 'slug' => 'administracao-busca', 'ativo' => true]);
+        $conta = ContaFinanceira::create([
+            'nome' => 'Conta Especial',
+            'tipo' => 'banco',
+            'moeda' => 'BRL',
+            'ativo' => true,
+            'padrao' => false,
+            'saldo_inicial' => 0,
+        ]);
+
+        $alvo = ContaPagar::create([
+            'fornecedor_id' => $fornecedor->id,
+            'categoria_id' => $categoria->id,
+            'centro_custo_id' => $centro->id,
+            'descricao' => 'Aluguel 100% _teste\\barra - NF.01',
+            'numero_documento' => 'PG-ESPECIAL-001',
+            'observacoes' => 'Competencia junho',
+            'data_vencimento' => '2026-06-10',
+            'valor_bruto' => 100,
+            'desconto' => 0,
+            'juros' => 0,
+            'multa' => 0,
+            'status' => 'PAGA',
+            'forma_pagamento' => 'PIX',
+        ]);
+
+        ContaPagarPagamento::create([
+            'conta_pagar_id' => $alvo->id,
+            'data_pagamento' => '2026-06-11',
+            'valor' => 100,
+            'forma_pagamento' => 'PIX',
+            'usuario_id' => $this->usuario->id,
+            'conta_financeira_id' => $conta->id,
+        ]);
+
+        ContaPagar::create([
+            'descricao' => 'Despesa fora da busca',
+            'data_vencimento' => '2026-06-10',
+            'valor_bruto' => 200,
+            'desconto' => 0,
+            'juros' => 0,
+            'multa' => 0,
+            'status' => 'ABERTA',
+            'forma_pagamento' => 'BOLETO',
+        ]);
+
+        foreach (['moveis', 'agua', 'administracao', 'conta especial', '100% _teste\\barra - NF.01'] as $termo) {
+            $this->getJson('/api/v1/financeiro/contas-pagar?' . http_build_query(['busca' => $termo]))
+                ->assertOk()
+                ->assertJsonCount(1, 'data')
+                ->assertJsonPath('data.0.id', $alvo->id);
+
+            $this->assertSame([$alvo->id], (new ContasPagarExport(['busca' => $termo]))->collection()->pluck('id')->all());
+        }
+
+        $this->getJson('/api/v1/financeiro/contas-pagar/kpis?' . http_build_query(['busca' => 'moveis']))
+            ->assertOk()
+            ->assertJsonPath('total_periodo', 100)
+            ->assertJsonPath('qtd_pagas', 1);
+    }
+
+    public function test_contas_receber_busca_cliente_pedido_e_mantem_lista_kpi_export_consistentes(): void
+    {
+        $cliente = Cliente::create([
+            'nome' => 'Cliente São José',
+            'nome_fantasia' => 'Loja Ñandú',
+            'documento' => '12345678901',
+            'tipo' => 'pf',
+        ]);
+
+        $pedido = Pedido::create([
+            'id_cliente' => $cliente->id,
+            'id_usuario' => $this->usuario->id,
+            'numero_externo' => 'PED-SJ-001',
+        ]);
+
+        $alvo = ContaReceber::create([
+            'pedido_id' => $pedido->id,
+            'descricao' => 'Receber cliente especial',
+            'numero_documento' => 'REC-SJ-001',
+            'observacoes' => 'Contrato com acento',
+            'data_vencimento' => '2026-06-15',
+            'valor_bruto' => 300,
+            'desconto' => 0,
+            'juros' => 0,
+            'multa' => 0,
+            'valor_liquido' => 300,
+            'valor_recebido' => 0,
+            'saldo_aberto' => 300,
+            'status' => 'ABERTA',
+            'forma_recebimento' => 'BOLETO',
+        ]);
+
+        ContaReceber::create([
+            'descricao' => 'Receber fora',
+            'data_vencimento' => '2026-06-15',
+            'valor_bruto' => 400,
+            'valor_liquido' => 400,
+            'valor_recebido' => 0,
+            'saldo_aberto' => 400,
+            'status' => 'ABERTA',
+            'forma_recebimento' => 'PIX',
+        ]);
+
+        foreach (['sao jose', 'nandu', '12345678901', 'PED-SJ-001'] as $termo) {
+            $this->getJson('/api/v1/financeiro/contas-receber?' . http_build_query(['busca' => $termo]))
+                ->assertOk()
+                ->assertJsonCount(1, 'data')
+                ->assertJsonPath('data.0.id', $alvo->id);
+
+            $this->assertSame([$alvo->id], ContasReceberExport::query(['busca' => $termo])->pluck('id')->all());
+        }
+
+        $this->getJson('/api/v1/financeiro/contas-receber/kpis?' . http_build_query(['busca' => 'sao jose']))
+            ->assertOk()
+            ->assertJsonPath('total_periodo', 300)
+            ->assertJsonPath('qtd_abertas', 1);
+    }
+
+    public function test_contas_pagar_busca_por_total_e_saldo_com_valor_parcial(): void
+    {
+        $contaFinanceira = ContaFinanceira::create([
+            'nome' => 'Conta Busca Valor Pagar',
+            'tipo' => 'banco',
+            'moeda' => 'BRL',
+            'ativo' => true,
+            'padrao' => false,
+            'saldo_inicial' => 0,
+        ]);
+
+        $totalCem = ContaPagar::create([
+            'descricao' => 'Despesa monetaria alfa',
+            'data_vencimento' => '2026-06-10',
+            'valor_bruto' => 100,
+            'desconto' => 0,
+            'juros' => 0,
+            'multa' => 0,
+            'status' => 'ABERTA',
+            'forma_pagamento' => 'PIX',
+        ]);
+
+        $totalMilCem = ContaPagar::create([
+            'descricao' => 'Despesa monetaria beta',
+            'data_vencimento' => '2026-06-11',
+            'valor_bruto' => 1100,
+            'desconto' => 0,
+            'juros' => 0,
+            'multa' => 0,
+            'status' => 'ABERTA',
+            'forma_pagamento' => 'PIX',
+        ]);
+
+        $saldoCem = ContaPagar::create([
+            'descricao' => 'Despesa monetaria saldo',
+            'data_vencimento' => '2026-06-12',
+            'valor_bruto' => 500,
+            'desconto' => 0,
+            'juros' => 0,
+            'multa' => 0,
+            'status' => 'PARCIAL',
+            'forma_pagamento' => 'PIX',
+        ]);
+
+        ContaPagarPagamento::create([
+            'conta_pagar_id' => $saldoCem->id,
+            'data_pagamento' => '2026-06-13',
+            'valor' => 400,
+            'forma_pagamento' => 'PIX',
+            'usuario_id' => $this->usuario->id,
+            'conta_financeira_id' => $contaFinanceira->id,
+        ]);
+
+        $this->getJson('/api/v1/financeiro/contas-pagar?' . http_build_query(['busca' => '100']))
+            ->assertOk()
+            ->assertJsonFragment(['id' => $totalCem->id])
+            ->assertJsonFragment(['id' => $totalMilCem->id])
+            ->assertJsonFragment(['id' => $saldoCem->id]);
+
+        $this->getJson('/api/v1/financeiro/contas-pagar?' . http_build_query(['busca' => 'R$ 100,00']))
+            ->assertOk()
+            ->assertJsonFragment(['id' => $totalCem->id]);
+
+        $this->assertSame(
+            [$totalCem->id, $totalMilCem->id, $saldoCem->id],
+            (new ContasPagarExport(['busca' => '100']))->collection()->pluck('id')->sort()->values()->all()
+        );
+
+        $this->getJson('/api/v1/financeiro/contas-pagar/kpis?' . http_build_query(['busca' => '100']))
+            ->assertOk()
+            ->assertJsonPath('total_periodo', 1700)
+            ->assertJsonPath('qtd_abertas', 3);
+    }
+
+    public function test_contas_receber_busca_por_total_e_saldo_com_valor_monetario(): void
+    {
+        $contaFinanceira = ContaFinanceira::create([
+            'nome' => 'Conta Busca Valor Receber',
+            'tipo' => 'banco',
+            'moeda' => 'BRL',
+            'ativo' => true,
+            'padrao' => false,
+            'saldo_inicial' => 0,
+        ]);
+
+        $conta = ContaReceber::create([
+            'descricao' => 'Receita monetaria alfa',
+            'data_vencimento' => '2026-06-15',
+            'valor_bruto' => 300,
+            'desconto' => 0,
+            'juros' => 0,
+            'multa' => 0,
+            'valor_liquido' => 300,
+            'valor_recebido' => 0,
+            'saldo_aberto' => 300,
+            'status' => 'PARCIAL',
+            'forma_recebimento' => 'BOLETO',
+        ]);
+
+        ContaReceberPagamento::create([
+            'conta_receber_id' => $conta->id,
+            'data_pagamento' => '2026-06-16',
+            'valor' => 120,
+            'forma_pagamento' => 'BOLETO',
+            'usuario_id' => $this->usuario->id,
+            'conta_financeira_id' => $contaFinanceira->id,
+        ]);
+
+        ContaReceber::create([
+            'descricao' => 'Receita monetaria fora',
+            'data_vencimento' => '2026-06-15',
+            'valor_bruto' => 450,
+            'valor_liquido' => 450,
+            'valor_recebido' => 0,
+            'saldo_aberto' => 450,
+            'status' => 'ABERTA',
+            'forma_recebimento' => 'PIX',
+        ]);
+
+        foreach (['300,00', '180'] as $termo) {
+            $this->getJson('/api/v1/financeiro/contas-receber?' . http_build_query(['busca' => $termo]))
+                ->assertOk()
+                ->assertJsonCount(1, 'data')
+                ->assertJsonPath('data.0.id', $conta->id);
+
+            $this->assertSame([$conta->id], ContasReceberExport::query(['busca' => $termo])->pluck('id')->all());
+        }
+
+        $this->getJson('/api/v1/financeiro/contas-receber/kpis?' . http_build_query(['busca' => '180']))
+            ->assertOk()
+            ->assertJsonPath('total_periodo', 300)
+            ->assertJsonPath('total_aberto', 180)
+            ->assertJsonPath('total_recebido', 120);
+    }
+
     public function test_titulos_exports_respeitam_conta_financeira_id(): void
     {
         $contaAlvo = ContaFinanceira::create([
@@ -518,6 +780,13 @@ class FinanceiroExportsTest extends TestCase
             ->assertJsonCount(1, 'data.linhas')
             ->assertJsonPath('data.linhas.0.descricao', 'Receita apos data base')
             ->assertJsonPath('data.linhas.0.saldo', 125);
+
+        $this->getJson('/api/v1/financeiro/extrato/resumo?' . http_build_query($params))
+            ->assertOk()
+            ->assertJsonPath('data.0.saldo_inicial', 100)
+            ->assertJsonPath('data.0.total_periodo', 25)
+            ->assertJsonPath('data.0.saldo_final', 125)
+            ->assertJsonPath('data.0.saldo_base_origem', 'saldo_livro');
     }
 
     public function test_extrato_resumo_projeta_saldos_do_periodo_a_partir_do_saldo_atual_para_data_anterior(): void
@@ -700,3 +969,4 @@ class FinanceiroExportsTest extends TestCase
             ->assertHeader('content-disposition');
     }
 }
+

@@ -150,6 +150,9 @@ class TransferenciaEntreDepositosTest extends TestCase
     {
         [$usuario, $variacao, $depOrigem, $depDestino] = $this->criarCenarioTransferencia();
         $this->actingAsComPermissoes($usuario, ['estoque.transferir']);
+        $movimentacoesManuaisAntes = EstoqueMovimentacao::query()
+            ->whereIn('tipo', ['entrada', 'saida'])
+            ->count();
 
         $entrada = $this->postJson('/api/v1/estoque/movimentacoes/lote', [
             'tipo' => 'entrada',
@@ -169,7 +172,10 @@ class TransferenciaEntreDepositosTest extends TestCase
         ]);
         $saida->assertStatus(403);
 
-        $this->assertSame(0, EstoqueMovimentacao::query()->whereIn('tipo', ['entrada', 'saida'])->count());
+        $this->assertSame(
+            $movimentacoesManuaisAntes,
+            EstoqueMovimentacao::query()->whereIn('tipo', ['entrada', 'saida'])->count()
+        );
     }
 
     public function test_permissao_movimentar_autoriza_entrada_manual(): void

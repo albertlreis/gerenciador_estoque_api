@@ -108,8 +108,8 @@ class ContaAzulContaPagarMapper
 
     private function formaPagamento(mixed $formaPagamento): string
     {
-        $code = Str::ascii(trim((string) $formaPagamento));
-        $code = strtoupper((string) preg_replace('/[^A-Z0-9]+/', '_', $code));
+        $code = strtoupper(Str::ascii(trim((string) $formaPagamento)));
+        $code = (string) preg_replace('/[^A-Z0-9]+/', '_', $code);
         $code = trim($code, '_');
 
         return match ($code) {

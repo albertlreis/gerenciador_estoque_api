@@ -43,6 +43,18 @@ class FiltroEstoqueDTO
     /** Texto de busca da localizacao fisica/area do estoque */
     public ?string $localizacao = null;
 
+    /** Area fisica exata do estoque */
+    public ?string $area = null;
+
+    /** ID da localizacao fisica do estoque */
+    public ?int $localizacaoId = null;
+
+    /** Filtra itens reservados para pedidos/clientes */
+    public bool $estoqueCliente = false;
+
+    /** @var array<int, string> Colunas selecionadas para exportacao */
+    public array $colunas = [];
+
     /** Se deve exibir apenas produtos com estoque zerado */
     public bool $zerados = false;
 
@@ -68,6 +80,7 @@ class FiltroEstoqueDTO
         $this->deposito = $this->toNullablePositiveInt($data['deposito'] ?? null);
         $this->categoria = $this->toNullablePositiveInt($data['categoria'] ?? null);
         $this->fornecedor = $this->toNullablePositiveInt($data['fornecedor'] ?? null);
+        $this->localizacaoId = $this->toNullablePositiveInt($data['localizacao_id'] ?? null);
         $this->tipo = isset($data['tipo']) ? trim((string) $data['tipo']) : null;
         if ($this->tipo === '') {
             $this->tipo = null;
@@ -110,6 +123,22 @@ class FiltroEstoqueDTO
 
         $localizacao = isset($data['localizacao']) ? trim((string) $data['localizacao']) : '';
         $this->localizacao = $localizacao !== '' ? $localizacao : null;
+
+        $area = isset($data['area']) ? trim((string) $data['area']) : '';
+        $this->area = $area !== '' ? $area : null;
+
+        $this->estoqueCliente = filter_var(
+            $data['estoque_cliente'] ?? false,
+            FILTER_VALIDATE_BOOLEAN
+        );
+
+        $colunas = $data['colunas'] ?? [];
+        if (is_string($colunas)) {
+            $colunas = array_filter(array_map('trim', explode(',', $colunas)));
+        }
+        $this->colunas = is_array($colunas)
+            ? array_values(array_filter(array_map(static fn ($coluna) => trim((string) $coluna), $colunas)))
+            : [];
 
         // sort
         $this->sortField = isset($data['sort_field']) ? trim((string) $data['sort_field']) : null;

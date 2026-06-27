@@ -106,9 +106,8 @@ class EstoqueMovimentacaoService
             $query->whereHas('variacao.produto', fn (Builder $sub) => $sub->where('id_fornecedor', $fornecedorId));
         }
 
-        if (!empty($filtros->localizacao)) {
-            $localizacaoLike = '%' . $this->escapeLike($filtros->localizacao) . '%';
-            $query->whereExists(function ($sub) use ($localizacaoLike) {
+        if (!empty($filtros->localizacaoId) || !empty($filtros->area) || !empty($filtros->localizacao)) {
+            $query->whereExists(function ($sub) use ($filtros) {
                 $sub->selectRaw('1')
                     ->from('estoque as e')
                     ->join('localizacoes_estoque as le', 'le.id', '=', 'e.localizacao_id')
@@ -118,14 +117,37 @@ class EstoqueMovimentacaoService
                             ->whereColumn('e.id_deposito', 'estoque_movimentacoes.id_deposito_origem')
                             ->orWhereColumn('e.id_deposito', 'estoque_movimentacoes.id_deposito_destino');
                     })
-                    ->where(function ($localizacaoQuery) use ($localizacaoLike) {
-                        $localizacaoQuery
-                            ->whereRaw("le.codigo_composto LIKE ? ESCAPE '\\\\'", [$localizacaoLike])
-                            ->orWhereRaw("le.area LIKE ? ESCAPE '\\\\'", [$localizacaoLike])
-                            ->orWhereRaw("le.corredor LIKE ? ESCAPE '\\\\'", [$localizacaoLike])
-                            ->orWhereRaw("le.setor LIKE ? ESCAPE '\\\\'", [$localizacaoLike])
-                            ->orWhereRaw("le.coluna LIKE ? ESCAPE '\\\\'", [$localizacaoLike])
-                            ->orWhereRaw("le.observacoes LIKE ? ESCAPE '\\\\'", [$localizacaoLike]);
+                    ->when(!empty($filtros->localizacaoId), fn ($localizacaoQuery) =>
+                        $localizacaoQuery->where('le.id', $filtros->localizacaoId)
+                    )
+                    ->when(!empty($filtros->area), fn ($localizacaoQuery) =>
+                        $localizacaoQuery->where('le.area', $filtros->area)
+                    )
+                    ->when(!empty($filtros->localizacao), function ($localizacaoQuery) use ($filtros) {
+                        $valor = $filtros->localizacao;
+                        $localizacaoQuery->where(function ($q) use ($valor) {
+                            $q->where('le.codigo_composto', $valor)
+                                ->orWhere('le.area', $valor)
+                                ->orWhere('le.corredor', $valor)
+                                ->orWhere('le.setor', $valor)
+                                ->orWhere('le.coluna', $valor)
+                                ->orWhere('le.nivel', $valor);
+                        });
+                    });
+            });
+        }
+
+        if (!empty($filtros->estoqueCliente)) {
+            $query->whereExists(function ($sub) {
+                $sub->selectRaw('1')
+                    ->from('estoque_reservas as er')
+                    ->whereColumn('er.id_variacao', 'estoque_movimentacoes.id_variacao')
+                    ->whereNotNull('er.pedido_id')
+                    ->where('er.status', 'ativa')
+                    ->whereRaw('(er.quantidade - er.quantidade_consumida) > 0')
+                    ->where(function ($expiraQuery) {
+                        $expiraQuery->whereNull('er.data_expira')
+                            ->orWhere('er.data_expira', '>', now());
                     });
             });
         }
@@ -734,7 +756,7 @@ class EstoqueMovimentacaoService
                         'quantidade' => (int) $qtd,
                         'corredor' => $row?->localizacao?->corredor,
                         'prateleira' => null,
-                        'nivel' => null,
+                        'nivel' => $row?->localizacao?->nivel,
                     ]);
                 }
             }

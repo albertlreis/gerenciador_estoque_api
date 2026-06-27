@@ -16,6 +16,7 @@ class FiltroMovimentacaoEstoqueDTOTest extends TestCase
             'deposito' => '4',
             'categoria' => '7',
             'fornecedor' => '8',
+            'localizacao_id' => '15',
             'localizacao' => ' A-01 ',
             'periodo' => ['2026-01-01', '2026-01-31'],
             'sort_field' => 'tipo',
@@ -29,6 +30,7 @@ class FiltroMovimentacaoEstoqueDTOTest extends TestCase
         $this->assertSame(4, $dto->deposito);
         $this->assertSame(7, $dto->categoria);
         $this->assertSame(8, $dto->fornecedor);
+        $this->assertSame(15, $dto->localizacaoId);
         $this->assertSame('A-01', $dto->localizacao);
         $this->assertSame(['2026-01-01', '2026-01-31'], $dto->periodo);
         $this->assertSame('tipo', $dto->sortField);
@@ -45,6 +47,7 @@ class FiltroMovimentacaoEstoqueDTOTest extends TestCase
             'deposito' => '0',
             'categoria' => '',
             'fornecedor' => '-1',
+            'localizacao_id' => '0',
             'localizacao' => '   ',
         ]);
 
@@ -54,6 +57,7 @@ class FiltroMovimentacaoEstoqueDTOTest extends TestCase
         $this->assertNull($dto->deposito);
         $this->assertNull($dto->categoria);
         $this->assertNull($dto->fornecedor);
+        $this->assertNull($dto->localizacaoId);
         $this->assertNull($dto->localizacao);
         $this->assertSame('desc', $dto->sortOrder);
         $this->assertSame(10, $dto->perPage);

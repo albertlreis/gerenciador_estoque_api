@@ -64,10 +64,16 @@ class ProdutoEstoqueResource extends JsonResource
                 'corredor' => $localizacao->corredor,
                 'setor' => $localizacao->setor,
                 'coluna' => $localizacao->coluna,
+                'nivel' => $localizacao->nivel,
                 'codigo_composto' => $localizacao->codigo_composto,
                 'observacoes' => $localizacao->observacoes,
                 'ativo' => (bool) $localizacao->ativo,
             ] : null,
+            'quantidade_reservada_cliente' => (int) (
+                $estoque?->quantidade_reservada_cliente
+                ?? $this->quantidade_reservada_cliente
+                ?? 0
+            ),
         ];
     }
 }

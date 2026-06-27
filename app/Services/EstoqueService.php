@@ -3,12 +3,15 @@
 namespace App\Services;
 
 use App\DTOs\FiltroEstoqueDTO;
+use App\Exports\EstoqueAtualConferenciaExport;
 use App\Models\Produto;
 use App\Repositories\EstoqueRepository;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Response;
+use Maatwebsite\Excel\Facades\Excel;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 /**
  * Serviço de orquestração do módulo de estoque:
@@ -78,9 +81,27 @@ class EstoqueService
         return Pdf::loadView('pdf.estoque-atual', [
             'estoque' => $estoque,
             'filtros' => $filtros,
+            'colunas' => EstoqueAtualConferenciaExport::definicoes($filtros->colunas),
+            'linhas' => EstoqueAtualConferenciaExport::linhas($estoque, $filtros),
         ])
             ->setPaper('a4', 'landscape')
             ->download('estoque-atual.pdf');
+    }
+
+    public function exportarExcel(FiltroEstoqueDTO $filtros): BinaryFileResponse
+    {
+        $query = $this->estoqueRepository
+            ->aplicarRelacoesDeEstoque(
+                $this->estoqueRepository->queryBase($filtros),
+                $filtros
+            );
+
+        $this->aplicarOrdenacao($query, $filtros);
+
+        return Excel::download(
+            new EstoqueAtualConferenciaExport($query->get(), $filtros),
+            'estoque-atual.xlsx'
+        );
     }
 
     /**

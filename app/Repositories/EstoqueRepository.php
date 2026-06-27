@@ -49,6 +49,10 @@ class EstoqueRepository
             $subqueryDiasSemVenda->where('e.quantidade', '>', 0);
         }
 
+        $this->aplicarFiltroLocalizacaoDbQuery($subqueryDataEntrada, $filtros);
+        $this->aplicarFiltroLocalizacaoDbQuery($subqueryUltimaVenda, $filtros);
+        $this->aplicarFiltroLocalizacaoDbQuery($subqueryDiasSemVenda, $filtros);
+
         $subqueryDataEntrada
             ->orderByDesc('e.quantidade')
             ->orderBy('e.id_deposito')
@@ -68,6 +72,7 @@ class EstoqueRepository
             ->selectSub($subqueryDataEntrada, 'data_entrada_estoque_atual')
             ->selectSub($subqueryUltimaVenda, 'ultima_venda_em')
             ->selectSub($subqueryDiasSemVenda, 'dias_sem_venda')
+            ->selectSub($this->reservasClientePorVariacaoSubquery($filtros), 'quantidade_reservada_cliente')
             ->whereHas('produto', fn ($q) => $q->where('ativo', 1))
             ->with(['produto.categoria', 'produto.fornecedor', 'atributos'])
             ->withSum(
@@ -75,6 +80,7 @@ class EstoqueRepository
                     if ($filtros->deposito) {
                         $q->where('id_deposito', $filtros->deposito);
                     }
+                    $this->aplicarFiltroLocalizacaoRelation($q, $filtros);
                 }],
                 'quantidade'
             )
@@ -89,22 +95,32 @@ class EstoqueRepository
             $query->whereHas('produto', fn ($q) => $q->where('id_fornecedor', $filtros->fornecedor));
         }
 
-        if ($filtros->localizacao) {
-            $localizacaoLike = '%' . $this->escapeLike($filtros->localizacao) . '%';
-            $query->whereHas('estoques', function (Builder $estoqueQuery) use ($filtros, $localizacaoLike) {
+        if ($filtros->localizacaoId || $filtros->area || $filtros->localizacao) {
+            $query->whereHas('estoques', function (Builder $estoqueQuery) use ($filtros) {
                 if ($filtros->deposito) {
                     $estoqueQuery->where('id_deposito', $filtros->deposito);
                 }
 
-                $estoqueQuery->whereHas('localizacao', function (Builder $localizacaoQuery) use ($localizacaoLike) {
-                    $localizacaoQuery
-                        ->whereRaw("codigo_composto LIKE ? ESCAPE '\\\\'", [$localizacaoLike])
-                        ->orWhereRaw("area LIKE ? ESCAPE '\\\\'", [$localizacaoLike])
-                        ->orWhereRaw("corredor LIKE ? ESCAPE '\\\\'", [$localizacaoLike])
-                        ->orWhereRaw("setor LIKE ? ESCAPE '\\\\'", [$localizacaoLike])
-                        ->orWhereRaw("coluna LIKE ? ESCAPE '\\\\'", [$localizacaoLike])
-                        ->orWhereRaw("observacoes LIKE ? ESCAPE '\\\\'", [$localizacaoLike]);
-                });
+                $this->aplicarFiltroLocalizacaoRelation($estoqueQuery, $filtros);
+            });
+        }
+
+        if ($filtros->estoqueCliente) {
+            $query->whereExists(function ($sub) use ($filtros) {
+                $sub->selectRaw('1')
+                    ->from('estoque_reservas as er')
+                    ->whereColumn('er.id_variacao', 'produto_variacoes.id')
+                    ->whereNotNull('er.pedido_id')
+                    ->where('er.status', 'ativa')
+                    ->whereRaw('(er.quantidade - er.quantidade_consumida) > 0')
+                    ->where(function ($expiraQuery) {
+                        $expiraQuery->whereNull('er.data_expira')
+                            ->orWhere('er.data_expira', '>', now());
+                    });
+
+                if ($filtros->deposito) {
+                    $sub->where('er.id_deposito', $filtros->deposito);
+                }
             });
         }
 
@@ -258,6 +274,89 @@ class EstoqueRepository
         return (bool) preg_match('/\d|[-\/_]/', $t);
     }
 
+    private function reservasClientePorVariacaoSubquery(FiltroEstoqueDTO $filtros)
+    {
+        $query = DB::table('estoque_reservas as er')
+            ->selectRaw('COALESCE(SUM(CASE WHEN er.quantidade > er.quantidade_consumida THEN er.quantidade - er.quantidade_consumida ELSE 0 END), 0)')
+            ->whereColumn('er.id_variacao', 'produto_variacoes.id')
+            ->whereNotNull('er.pedido_id')
+            ->where('er.status', 'ativa')
+            ->where(function ($expiraQuery) {
+                $expiraQuery->whereNull('er.data_expira')
+                    ->orWhere('er.data_expira', '>', now());
+            });
+
+        if ($filtros->deposito) {
+            $query->where('er.id_deposito', $filtros->deposito);
+        }
+
+        return $query;
+    }
+
+    private function reservasClientePorEstoqueSubquery()
+    {
+        return DB::table('estoque_reservas as er')
+            ->selectRaw('COALESCE(SUM(CASE WHEN er.quantidade > er.quantidade_consumida THEN er.quantidade - er.quantidade_consumida ELSE 0 END), 0)')
+            ->whereColumn('er.id_variacao', 'estoque.id_variacao')
+            ->whereColumn('er.id_deposito', 'estoque.id_deposito')
+            ->whereNotNull('er.pedido_id')
+            ->where('er.status', 'ativa')
+            ->where(function ($expiraQuery) {
+                $expiraQuery->whereNull('er.data_expira')
+                    ->orWhere('er.data_expira', '>', now());
+            });
+    }
+
+    private function aplicarFiltroLocalizacaoDbQuery($query, FiltroEstoqueDTO $filtros): void
+    {
+        if (!$filtros->localizacaoId && !$filtros->area && !$filtros->localizacao) {
+            return;
+        }
+
+        $query->whereExists(function ($sub) use ($filtros) {
+            $sub->selectRaw('1')
+                ->from('localizacoes_estoque as le')
+                ->whereColumn('le.id', 'e.localizacao_id');
+
+            $this->aplicarFiltroLocalizacaoCampos($sub, $filtros, 'le.');
+        });
+    }
+
+    private function aplicarFiltroLocalizacaoRelation($estoqueQuery, FiltroEstoqueDTO $filtros): void
+    {
+        if (!$filtros->localizacaoId && !$filtros->area && !$filtros->localizacao) {
+            return;
+        }
+
+        $estoqueQuery->whereHas('localizacao', function (Builder $localizacaoQuery) use ($filtros) {
+            $this->aplicarFiltroLocalizacaoCampos($localizacaoQuery, $filtros);
+        });
+    }
+
+    private function aplicarFiltroLocalizacaoCampos($query, FiltroEstoqueDTO $filtros, string $prefix = ''): void
+    {
+        if ($filtros->localizacaoId) {
+            $query->where($prefix . 'id', $filtros->localizacaoId);
+        }
+
+        if ($filtros->area) {
+            $query->where($prefix . 'area', $filtros->area);
+        }
+
+        if ($filtros->localizacao) {
+            $valor = $filtros->localizacao;
+
+            $query->where(function ($q) use ($prefix, $valor) {
+                $q->where($prefix . 'codigo_composto', $valor)
+                    ->orWhere($prefix . 'area', $valor)
+                    ->orWhere($prefix . 'corredor', $valor)
+                    ->orWhere($prefix . 'setor', $valor)
+                    ->orWhere($prefix . 'coluna', $valor)
+                    ->orWhere($prefix . 'nivel', $valor);
+            });
+        }
+    }
+
     private function escapeLike(string $value): string
     {
         return str_replace(['\\', '%', '_'], ['\\\\', '\%', '\_'], $value);
@@ -281,6 +380,9 @@ class EstoqueRepository
 
         return $query->with([
             'estoquesComLocalizacao' => function ($q) use ($filtros) {
+                $q->select('estoque.*')
+                    ->selectSub($this->reservasClientePorEstoqueSubquery(), 'quantidade_reservada_cliente');
+
                 // Se o filtro for por depósito, alinhe a "linha" ao mesmo depósito do withSum
                 if ($filtros->deposito) {
                     $q->where('id_deposito', $filtros->deposito);
@@ -291,6 +393,8 @@ class EstoqueRepository
                 }
 
                 // Deixa determinístico qual vem primeiro (o Resource pega o first())
+                $this->aplicarFiltroLocalizacaoRelation($q, $filtros);
+
                 $q->orderByDesc('quantidade')
                     ->orderBy('id_deposito');
 

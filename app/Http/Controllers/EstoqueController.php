@@ -16,6 +16,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\Response;
 
 class EstoqueController extends Controller
@@ -27,9 +28,9 @@ class EstoqueController extends Controller
      *
      * @param \App\Http\Requests\FiltroEstoqueRequest $request Instância da requisição HTTP com os parâmetros de filtro
      * @param EstoqueService $service Serviço responsável pela lógica de estoque
-     * @return \Illuminate\Http\JsonResponse|\Symfony\Component\HttpFoundation\Response
+     * @return \Illuminate\Http\JsonResponse|\Symfony\Component\HttpFoundation\Response|\Symfony\Component\HttpFoundation\BinaryFileResponse
      */
-    public function listarEstoqueAtual(FiltroEstoqueRequest $request, EstoqueService $service): JsonResponse|Response
+    public function listarEstoqueAtual(FiltroEstoqueRequest $request, EstoqueService $service): JsonResponse|Response|BinaryFileResponse
     {
         ini_set('memory_limit', '512M');
         set_time_limit(300);
@@ -38,6 +39,10 @@ class EstoqueController extends Controller
 
         if ($request->get('export') === 'pdf') {
             return $service->exportarPdf($dto);
+        }
+
+        if ($request->get('export') === 'excel') {
+            return $service->exportarExcel($dto);
         }
 
         $result = $service->listar($dto);

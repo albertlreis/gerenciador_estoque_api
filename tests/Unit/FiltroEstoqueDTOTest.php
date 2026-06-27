@@ -14,6 +14,7 @@ class FiltroEstoqueDTOTest extends TestCase
             'deposito' => '5',
             'categoria' => '2',
             'fornecedor' => '9',
+            'localizacao_id' => '12',
             'tipo' => ' entrada ',
             'periodo' => ['2026-01-01', '2026-01-31'],
             'per_page' => 500,
@@ -27,6 +28,7 @@ class FiltroEstoqueDTOTest extends TestCase
         $this->assertSame(5, $dto->deposito);
         $this->assertSame(2, $dto->categoria);
         $this->assertSame(9, $dto->fornecedor);
+        $this->assertSame(12, $dto->localizacaoId);
         $this->assertSame('entrada', $dto->tipo);
         $this->assertSame(['2026-01-01', '2026-01-31'], $dto->periodo);
         $this->assertSame(200, $dto->perPage);
@@ -44,6 +46,7 @@ class FiltroEstoqueDTOTest extends TestCase
             'deposito' => '0',
             'categoria' => '',
             'fornecedor' => null,
+            'localizacao_id' => '0',
             'tipo' => '   ',
             'periodo' => ['2026-01-01', ''],
             'per_page' => 0,
@@ -56,6 +59,7 @@ class FiltroEstoqueDTOTest extends TestCase
         $this->assertNull($dto->deposito);
         $this->assertNull($dto->categoria);
         $this->assertNull($dto->fornecedor);
+        $this->assertNull($dto->localizacaoId);
         $this->assertNull($dto->tipo);
         $this->assertNull($dto->periodo);
         $this->assertSame(1, $dto->perPage);

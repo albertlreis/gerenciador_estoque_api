@@ -27,6 +27,12 @@ class FiltroMovimentacaoEstoqueDTO
 
     public ?string $localizacao;
 
+    public ?string $area;
+
+    public ?int $localizacaoId;
+
+    public bool $estoqueCliente;
+
     /** @var array<int, string>|null Período da movimentação (inicial, final) */
     public ?array $periodo;
 
@@ -58,10 +64,19 @@ class FiltroMovimentacaoEstoqueDTO
         $this->deposito = $this->toNullablePositiveInt($data['deposito'] ?? null);
         $this->categoria = $this->toNullablePositiveInt($data['categoria'] ?? null);
         $this->fornecedor = $this->toNullablePositiveInt($data['fornecedor'] ?? null);
+        $this->localizacaoId = $this->toNullablePositiveInt($data['localizacao_id'] ?? null);
         $this->localizacao = isset($data['localizacao']) ? trim((string) $data['localizacao']) : null;
         if ($this->localizacao === '') {
             $this->localizacao = null;
         }
+        $this->area = isset($data['area']) ? trim((string) $data['area']) : null;
+        if ($this->area === '') {
+            $this->area = null;
+        }
+        $this->estoqueCliente = filter_var(
+            $data['estoque_cliente'] ?? false,
+            FILTER_VALIDATE_BOOLEAN
+        );
         $this->periodo = $data['periodo'] ?? null;
         $this->sortField = $data['sort_field'] ?? null;
         $this->sortOrder = $data['sort_order'] ?? 'desc';

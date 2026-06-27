@@ -260,5 +260,12 @@ class EstoqueMovimentacaoIndicadoresTest extends TestCase
         $referencias = collect($response->json('data'))->pluck('produto_referencia')->all();
         $this->assertContains('LOC-ALVO', $referencias);
         $this->assertNotContains('LOC-OUTRA', $referencias);
+
+        $responsePorId = $this->getJson('/api/v1/estoque/movimentacoes?localizacao_id=' . $localizacaoAlvo->id);
+        $responsePorId->assertOk();
+
+        $referenciasPorId = collect($responsePorId->json('data'))->pluck('produto_referencia')->all();
+        $this->assertContains('LOC-ALVO', $referenciasPorId);
+        $this->assertNotContains('LOC-OUTRA', $referenciasPorId);
     }
 }

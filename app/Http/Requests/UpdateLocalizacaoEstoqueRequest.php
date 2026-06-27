@@ -19,6 +19,7 @@ class UpdateLocalizacaoEstoqueRequest extends FormRequest
             'corredor' => ['nullable', 'string', 'max:80'],
             'setor' => ['nullable', 'string', 'max:80'],
             'coluna' => ['nullable', 'string', 'max:80'],
+            'nivel' => ['nullable', 'string', 'max:80'],
             'observacoes' => ['nullable', 'string'],
             'ativo' => ['nullable', 'boolean'],
         ];

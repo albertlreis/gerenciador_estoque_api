@@ -19,6 +19,7 @@ class LocalizacaoEstoqueResource extends JsonResource
             'corredor' => $this->corredor,
             'setor' => $this->setor,
             'coluna' => $this->coluna,
+            'nivel' => $this->nivel,
             'codigo_composto' => $this->codigo_composto,
             'observacoes' => $this->observacoes,
             'ativo' => (bool) $this->ativo,

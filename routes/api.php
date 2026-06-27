@@ -224,6 +224,9 @@ Route::middleware(['auth:sanctum', 'senha.nao_obrigatoria'])
             Route::post('movimentacoes/lote', [EstoqueMovimentacaoController::class, 'lote']);
 
             // Vinculo do estoque com uma posicao do mapa do deposito.
+            Route::get('localizacoes/pendencias', [LocalizacaoEstoqueController::class, 'pendencias']);
+            Route::patch('localizacoes/vinculos-em-massa', [LocalizacaoEstoqueController::class, 'atribuirEstoquesEmMassa']);
+
             Route::patch('{estoque}/localizacao', [LocalizacaoEstoqueController::class, 'atribuirEstoque'])
                 ->whereNumber('estoque');
 

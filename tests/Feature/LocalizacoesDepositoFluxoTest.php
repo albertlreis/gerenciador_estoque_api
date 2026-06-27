@@ -10,6 +10,7 @@ use App\Models\Produto;
 use App\Models\ProdutoVariacao;
 use App\Models\Usuario;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
@@ -67,19 +68,48 @@ class LocalizacoesDepositoFluxoTest extends TestCase
             'corredor' => '1',
             'setor' => 'B',
             'coluna' => '2',
+            'nivel' => 'N1',
         ]);
 
         $response->assertCreated()
-            ->assertJsonPath('data.codigo_composto', 'A-1-B-2');
+            ->assertJsonPath('data.codigo_composto', 'A-1-B-2-N1')
+            ->assertJsonPath('data.nivel', 'N1');
+
+        $this->postJson("/api/v1/depositos/{$deposito->id}/localizacoes", [
+            'setor' => '8',
+            'coluna' => 'D',
+        ])->assertCreated()
+            ->assertJsonPath('data.codigo_composto', '8-D');
+
+        $this->postJson("/api/v1/depositos/{$deposito->id}/localizacoes", [
+            'area' => 'Base',
+        ])->assertCreated()
+            ->assertJsonPath('data.codigo_composto', 'Base');
+
+        $this->postJson("/api/v1/depositos/{$deposito->id}/localizacoes", [
+            'nivel' => 'N1',
+        ])->assertCreated()
+            ->assertJsonPath('data.codigo_composto', 'N1')
+            ->assertJsonPath('data.nivel', 'N1');
 
         $this->postJson("/api/v1/depositos/{$deposito->id}/localizacoes", [])
             ->assertStatus(422);
+
+        $this->postJson("/api/v1/depositos/{$deposito->id}/localizacoes", [
+            'setor' => '-',
+        ])->assertStatus(422);
 
         $this->postJson("/api/v1/depositos/{$deposito->id}/localizacoes", [
             'area' => 'A',
             'corredor' => '1',
             'setor' => 'B',
             'coluna' => '2',
+            'nivel' => 'N1',
+        ])->assertStatus(422);
+
+        $this->postJson("/api/v1/depositos/{$deposito->id}/localizacoes", [
+            'setor' => '8',
+            'coluna' => 'D',
         ])->assertStatus(422);
     }
 
@@ -203,5 +233,120 @@ class LocalizacoesDepositoFluxoTest extends TestCase
 
         $this->assertSame([$ocupada->id], collect($ocupadas)->pluck('id')->all());
         $this->assertSame([$vazia->id], collect($vazias)->pluck('id')->all());
+    }
+
+    public function test_migration_limpa_codigo_mescla_duplicadas_e_redireciona_estoque(): void
+    {
+        $deposito = Deposito::create(['nome' => 'Deposito Merge']);
+        $estoqueLegado = $this->criarEstoque($deposito);
+        $estoqueDuplicado = $this->criarEstoque($deposito);
+
+        $legada = LocalizacaoEstoque::create([
+            'deposito_id' => $deposito->id,
+            'area' => null,
+            'corredor' => null,
+            'setor' => '8',
+            'coluna' => 'D',
+            'codigo_composto' => '----8-D',
+            'observacoes' => 'Observacao canonica',
+            'ativo' => true,
+        ]);
+        $duplicada = LocalizacaoEstoque::create([
+            'deposito_id' => $deposito->id,
+            'area' => null,
+            'corredor' => null,
+            'setor' => '8',
+            'coluna' => 'D',
+            'codigo_composto' => '8-D',
+            'observacoes' => 'Observacao duplicada',
+            'ativo' => false,
+        ]);
+
+        $estoqueLegado->update(['localizacao_id' => $legada->id]);
+        $estoqueDuplicado->update(['localizacao_id' => $duplicada->id]);
+
+        $migration = require database_path('migrations/2026_06_26_090000_limpar_codigos_localizacoes_estoque.php');
+        $migration->up();
+
+        $this->assertDatabaseHas('localizacoes_estoque', [
+            'id' => $legada->id,
+            'codigo_composto' => '8-D',
+            'ativo' => true,
+        ]);
+        $this->assertDatabaseMissing('localizacoes_estoque', [
+            'id' => $duplicada->id,
+        ]);
+        $this->assertDatabaseHas('estoque', [
+            'id' => $estoqueLegado->id,
+            'localizacao_id' => $legada->id,
+        ]);
+        $this->assertDatabaseHas('estoque', [
+            'id' => $estoqueDuplicado->id,
+            'localizacao_id' => $legada->id,
+        ]);
+
+        $canonical = DB::table('localizacoes_estoque')->where('id', $legada->id)->first();
+        $this->assertStringContainsString('Observacao canonica', $canonical->observacoes);
+        $this->assertStringContainsString('Observacao duplicada', $canonical->observacoes);
+        $this->assertStringContainsString('#' . $duplicada->id, $canonical->observacoes);
+    }
+
+    public function test_migration_reintroduz_nivel_recupera_observacao_e_mescla_duplicadas(): void
+    {
+        $deposito = Deposito::create(['nome' => 'Deposito Nivel']);
+        $estoqueLegado = $this->criarEstoque($deposito);
+        $estoqueDuplicado = $this->criarEstoque($deposito);
+
+        $legada = LocalizacaoEstoque::create([
+            'deposito_id' => $deposito->id,
+            'area' => null,
+            'corredor' => null,
+            'setor' => '8',
+            'coluna' => 'D',
+            'nivel' => null,
+            'codigo_composto' => '8-D',
+            'observacoes' => "Observacao canonica\nNivel legado: N1",
+            'ativo' => true,
+        ]);
+        $duplicada = LocalizacaoEstoque::create([
+            'deposito_id' => $deposito->id,
+            'area' => null,
+            'corredor' => null,
+            'setor' => '8',
+            'coluna' => 'D',
+            'nivel' => 'N1',
+            'codigo_composto' => '8-D-N1',
+            'observacoes' => 'Observacao duplicada',
+            'ativo' => false,
+        ]);
+
+        $estoqueLegado->update(['localizacao_id' => $legada->id]);
+        $estoqueDuplicado->update(['localizacao_id' => $duplicada->id]);
+
+        $migration = require database_path('migrations/2026_06_26_150000_reintroduzir_nivel_localizacoes_estoque.php');
+        $migration->up();
+
+        $this->assertDatabaseHas('localizacoes_estoque', [
+            'id' => $legada->id,
+            'nivel' => 'N1',
+            'codigo_composto' => '8-D-N1',
+            'ativo' => true,
+        ]);
+        $this->assertDatabaseMissing('localizacoes_estoque', [
+            'id' => $duplicada->id,
+        ]);
+        $this->assertDatabaseHas('estoque', [
+            'id' => $estoqueLegado->id,
+            'localizacao_id' => $legada->id,
+        ]);
+        $this->assertDatabaseHas('estoque', [
+            'id' => $estoqueDuplicado->id,
+            'localizacao_id' => $legada->id,
+        ]);
+
+        $canonical = DB::table('localizacoes_estoque')->where('id', $legada->id)->first();
+        $this->assertStringContainsString('Nivel legado: N1', $canonical->observacoes);
+        $this->assertStringContainsString('Observacao duplicada', $canonical->observacoes);
+        $this->assertStringContainsString('#' . $duplicada->id, $canonical->observacoes);
     }
 }

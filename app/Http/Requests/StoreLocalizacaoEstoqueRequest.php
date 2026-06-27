@@ -19,6 +19,7 @@ class StoreLocalizacaoEstoqueRequest extends FormRequest
             'corredor' => ['nullable', 'string', 'max:80'],
             'setor' => ['nullable', 'string', 'max:80'],
             'coluna' => ['nullable', 'string', 'max:80'],
+            'nivel' => ['nullable', 'string', 'max:80'],
             'observacoes' => ['nullable', 'string'],
             'ativo' => ['nullable', 'boolean'],
         ];
@@ -27,11 +28,15 @@ class StoreLocalizacaoEstoqueRequest extends FormRequest
     public function withValidator($validator): void
     {
         $validator->after(function ($v) {
-            $temLocalizacao = collect(['area', 'corredor', 'setor', 'coluna'])
-                ->contains(fn ($field) => trim((string) ($this->input($field) ?? '')) !== '');
+            $temLocalizacao = collect(['area', 'corredor', 'setor', 'coluna', 'nivel'])
+                ->contains(function ($field) {
+                    $valor = trim((string) ($this->input($field) ?? ''));
+
+                    return $valor !== '' && !preg_match('/^-+$/', $valor);
+                });
 
             if (!$temLocalizacao) {
-                $v->errors()->add('localizacao', 'Informe area, corredor, setor ou coluna.');
+                $v->errors()->add('localizacao', 'Informe area, corredor, setor, coluna ou nivel.');
             }
         });
     }

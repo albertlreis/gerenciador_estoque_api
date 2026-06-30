@@ -33,8 +33,10 @@ class ProdutoVariacaoController extends Controller
                 'atributos',
                 'codigosHistoricos',
                 'imagem',
+                'imagens',
                 'produto',
                 'estoques',
+                'outlets.imagemSelecionada',
                 'outlets.motivo',
                 'outlets.formasPagamento.formaPagamento',
             ])
@@ -129,7 +131,7 @@ class ProdutoVariacaoController extends Controller
     public function buscar(Request $request): JsonResponse
     {
         $query = ProdutoVariacao::query()
-            ->with(['produto', 'atributos', 'codigosHistoricos', 'imagem'])
+            ->with(['produto', 'atributos', 'codigosHistoricos', 'imagem', 'imagens'])
             ->orderBy('id', 'desc');
 
         if ($request->filled('search')) {
@@ -181,7 +183,7 @@ class ProdutoVariacaoController extends Controller
 
         $perPage = min(max((int) $request->input('per_page', 20), 1), 100);
         $query = ProdutoVariacao::query()
-            ->with(['produto.categoria', 'produto.fornecedor', 'produto.imagemPrincipal', 'atributos', 'imagem'])
+            ->with(['produto.categoria', 'produto.fornecedor', 'produto.imagemPrincipal', 'atributos', 'imagem', 'imagens'])
             ->withSum('estoques as quantidade_estoque', 'quantidade')
             ->orderByDesc('id');
 

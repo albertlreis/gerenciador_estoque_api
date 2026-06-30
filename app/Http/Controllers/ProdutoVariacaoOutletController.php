@@ -8,6 +8,7 @@ use App\Http\Resources\ProdutoVariacaoOutletResource;
 use App\Models\OutletFormaPagamento;
 use App\Models\OutletMotivo;
 use App\Models\ProdutoVariacao;
+use App\Models\ProdutoVariacaoImagem;
 use App\Models\ProdutoVariacaoOutlet;
 use App\Services\ProdutoVariacaoService;
 use Illuminate\Http\JsonResponse;
@@ -41,6 +42,7 @@ class ProdutoVariacaoOutletController extends Controller
         $variacao = ProdutoVariacao::with([
             'produto',
             'outlets.usuario',
+            'outlets.imagemSelecionada',
             'outlets.motivo',
             'outlets.formasPagamento.formaPagamento',
         ])->findOrFail($id);
@@ -56,6 +58,9 @@ class ProdutoVariacaoOutletController extends Controller
     {
         $variacao = ProdutoVariacao::with(['estoques', 'outlets'])->findOrFail($id);
         if ($erro = $this->validarFormasPagamentoUnicas($request->input('formas_pagamento', []))) {
+            return $erro;
+        }
+        if ($erro = $this->validarImagemSelecionada($request->input('produto_variacao_imagem_id'), $variacao)) {
             return $erro;
         }
 
@@ -92,6 +97,7 @@ class ProdutoVariacaoOutletController extends Controller
                 'quantidade' => $quantidadeNova,
                 'quantidade_restante' => $quantidadeNova,
                 'usuario_id' => Auth::id(),
+                'produto_variacao_imagem_id' => $request->input('produto_variacao_imagem_id') ?: null,
             ]);
 
             $variacao->outlets()->save($outlet);
@@ -112,7 +118,8 @@ class ProdutoVariacaoOutletController extends Controller
             return $outlet;
         });
 
-        $outlet->load(['usuario','motivo','formasPagamento.formaPagamento']);
+        $outlet->setRelation('variacao', $variacao->loadMissing('imagem', 'produto.imagemPrincipal'));
+        $outlet->load(['usuario','imagemSelecionada','motivo','formasPagamento.formaPagamento']);
 
         return (new ProdutoVariacaoOutletResource($outlet))
             ->response()
@@ -140,6 +147,7 @@ class ProdutoVariacaoOutletController extends Controller
         $data = $request->validate([
             'quantidade' => 'required|integer|min:1',
             'motivo_id'  => 'required|exists:outlet_motivos,id',
+            'produto_variacao_imagem_id' => 'nullable|integer|exists:produto_variacao_imagens,id',
             'preco_original' => 'sometimes|numeric|min:0',
             'custo_original' => 'sometimes|numeric|min:0',
             'formas_pagamento' => 'sometimes|array|min:1',
@@ -153,15 +161,26 @@ class ProdutoVariacaoOutletController extends Controller
                 return $erro;
             }
         }
+        if ($request->has('produto_variacao_imagem_id')) {
+            if ($erro = $this->validarImagemSelecionada($data['produto_variacao_imagem_id'] ?? null, $variacao)) {
+                return $erro;
+            }
+        }
 
         DB::transaction(function () use ($request, $variacao, $outlet, $data): void {
             $variacao = $this->sincronizarPrecoOriginalSeNecessario($variacao, $request);
             $this->sincronizarCustoOriginalSeNecessario($variacao, $request);
 
-            $outlet->update([
+            $updates = [
                 'quantidade' => $data['quantidade'],
                 'motivo_id'  => (int)$data['motivo_id'],
-            ]);
+            ];
+
+            if (array_key_exists('produto_variacao_imagem_id', $data)) {
+                $updates['produto_variacao_imagem_id'] = $data['produto_variacao_imagem_id'] ?: null;
+            }
+
+            $outlet->update($updates);
 
             if ($request->has('formas_pagamento')) {
                 $outlet->formasPagamento()->delete();
@@ -175,7 +194,8 @@ class ProdutoVariacaoOutletController extends Controller
             }
         });
 
-        $outlet->load(['usuario','motivo','formasPagamento.formaPagamento']);
+        $outlet->setRelation('variacao', $variacao->loadMissing('imagem', 'produto.imagemPrincipal'));
+        $outlet->load(['usuario','imagemSelecionada','motivo','formasPagamento.formaPagamento']);
         return new ProdutoVariacaoOutletResource($outlet);
     }
 
@@ -237,6 +257,29 @@ class ProdutoVariacaoOutletController extends Controller
         }
 
         return null;
+    }
+
+    private function validarImagemSelecionada(mixed $imagemId, ProdutoVariacao $variacao): ?JsonResponse
+    {
+        if ($imagemId === null || $imagemId === '') {
+            return null;
+        }
+
+        $pertence = ProdutoVariacaoImagem::query()
+            ->where('id', (int) $imagemId)
+            ->where('id_variacao', $variacao->id)
+            ->exists();
+
+        if ($pertence) {
+            return null;
+        }
+
+        return response()->json([
+            'message' => 'A imagem selecionada nao pertence a esta variacao.',
+            'errors' => [
+                'produto_variacao_imagem_id' => ['A imagem selecionada nao pertence a esta variacao.'],
+            ],
+        ], 422);
     }
 
     private function sincronizarPrecoOriginalSeNecessario(ProdutoVariacao $variacao, Request $request): ProdutoVariacao

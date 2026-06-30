@@ -60,7 +60,18 @@ class ProdutoVariacao extends Model
 
     public function imagem(): HasOne
     {
-        return $this->hasOne(ProdutoVariacaoImagem::class, 'id_variacao');
+        return $this->hasOne(ProdutoVariacaoImagem::class, 'id_variacao')
+            ->orderByDesc('principal')
+            ->orderBy('ordem')
+            ->orderBy('id');
+    }
+
+    public function imagens(): HasMany
+    {
+        return $this->hasMany(ProdutoVariacaoImagem::class, 'id_variacao')
+            ->orderByDesc('principal')
+            ->orderBy('ordem')
+            ->orderBy('id');
     }
 
     /**

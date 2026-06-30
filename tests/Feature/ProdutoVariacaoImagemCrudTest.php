@@ -166,6 +166,72 @@ class ProdutoVariacaoImagemCrudTest extends TestCase
         $this->assertSame(1, $count);
     }
 
+    public function test_endpoints_pluralizados_permitem_galeria_com_principal_ordem_e_promocao(): void
+    {
+        Storage::fake('public');
+        $this->autenticarUsuario();
+        $variacaoId = $this->criarVariacao();
+
+        $primeira = $this->post("/api/v1/variacoes/{$variacaoId}/imagens", [
+            'imagem' => $this->fakeImagemPng('galeria-1.png'),
+            'principal' => true,
+            'ordem' => 5,
+        ]);
+
+        $primeira->assertCreated()
+            ->assertJsonPath('id_variacao', $variacaoId)
+            ->assertJsonPath('principal', true)
+            ->assertJsonPath('ordem', 5);
+
+        $segunda = $this->post("/api/v1/variacoes/{$variacaoId}/imagens", [
+            'imagem' => $this->fakeImagemPng('galeria-2.png'),
+            'ordem' => 1,
+        ]);
+
+        $segunda->assertCreated()
+            ->assertJsonPath('id_variacao', $variacaoId)
+            ->assertJsonPath('principal', false)
+            ->assertJsonPath('ordem', 1);
+
+        $primeiraId = (int) $primeira->json('id');
+        $segundaId = (int) $segunda->json('id');
+
+        $this->getJson("/api/v1/variacoes/{$variacaoId}/imagens")
+            ->assertOk()
+            ->assertJsonCount(2)
+            ->assertJsonPath('0.id', $primeiraId)
+            ->assertJsonPath('1.id', $segundaId);
+
+        $this->patchJson("/api/v1/variacoes/{$variacaoId}/imagens/{$segundaId}", [
+            'ordem' => 0,
+        ])->assertOk()
+            ->assertJsonPath('ordem', 0);
+
+        $this->postJson("/api/v1/variacoes/{$variacaoId}/imagens/{$segundaId}/definir-principal")
+            ->assertOk()
+            ->assertJsonPath('principal', true);
+
+        $this->assertDatabaseHas('produto_variacao_imagens', [
+            'id' => $primeiraId,
+            'principal' => false,
+        ]);
+        $this->assertDatabaseHas('produto_variacao_imagens', [
+            'id' => $segundaId,
+            'principal' => true,
+        ]);
+
+        $this->deleteJson("/api/v1/variacoes/{$variacaoId}/imagens/{$segundaId}")
+            ->assertNoContent();
+
+        $this->assertDatabaseMissing('produto_variacao_imagens', [
+            'id' => $segundaId,
+        ]);
+        $this->assertDatabaseHas('produto_variacao_imagens', [
+            'id' => $primeiraId,
+            'principal' => true,
+        ]);
+    }
+
     public function test_put_funciona_como_upsert(): void
     {
         Storage::fake('public');

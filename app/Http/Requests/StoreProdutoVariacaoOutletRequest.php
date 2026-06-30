@@ -16,6 +16,7 @@ class StoreProdutoVariacaoOutletRequest extends FormRequest
         return [
             'motivo_id' => 'nullable|exists:outlet_motivos,id',
             'quantidade' => 'required|integer|min:1',
+            'produto_variacao_imagem_id' => 'nullable|integer|exists:produto_variacao_imagens,id',
             'preco_original' => 'sometimes|numeric|min:0',
             'custo_original' => 'sometimes|numeric|min:0',
             'formas_pagamento' => 'required|array|min:1',

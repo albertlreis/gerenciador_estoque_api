@@ -138,9 +138,20 @@ Route::middleware(['auth:sanctum', 'senha.nao_obrigatoria'])
 
         Route::prefix('variacoes/{variacao}')->whereNumber('variacao')->group(function () {
             Route::get('imagem', [ProdutoVariacaoImagemController::class, 'show']);
-            Route::post('imagem', [ProdutoVariacaoImagemController::class, 'store']);
+            Route::post('imagem', [ProdutoVariacaoImagemController::class, 'legacyStore']);
             Route::put('imagem', [ProdutoVariacaoImagemController::class, 'update']);
             Route::delete('imagem', [ProdutoVariacaoImagemController::class, 'destroy']);
+
+            Route::get('imagens', [ProdutoVariacaoImagemController::class, 'index']);
+            Route::post('imagens', [ProdutoVariacaoImagemController::class, 'store']);
+            Route::put('imagens/{imagem}', [ProdutoVariacaoImagemController::class, 'updateImagem'])
+                ->whereNumber('imagem');
+            Route::patch('imagens/{imagem}', [ProdutoVariacaoImagemController::class, 'updateImagem'])
+                ->whereNumber('imagem');
+            Route::post('imagens/{imagem}/definir-principal', [ProdutoVariacaoImagemController::class, 'definirPrincipal'])
+                ->whereNumber('imagem');
+            Route::delete('imagens/{imagem}', [ProdutoVariacaoImagemController::class, 'destroyImagem'])
+                ->whereNumber('imagem');
         });
 
         // Catálogo Outlet

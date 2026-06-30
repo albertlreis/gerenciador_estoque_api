@@ -52,9 +52,11 @@ class ProdutoVariacaoService
             'atributos',
             'codigosHistoricos',
             'imagem',
+            'imagens',
             'estoque',
             'estoques',
             'outlets',
+            'outlets.imagemSelecionada',
             'outlets.motivo',
             'outlets.formasPagamento.formaPagamento',
         ])->findOrFail($variacaoId);
@@ -83,7 +85,7 @@ class ProdutoVariacaoService
             array_key_exists('codigos_historicos', $data)
         );
 
-        $variacao = $variacao->refresh()->load('atributos', 'codigosHistoricos', 'imagem');
+        $variacao = $variacao->refresh()->load('atributos', 'codigosHistoricos', 'imagem', 'imagens');
         $this->registrarCriacao($variacao);
         $this->contaAzulExports->produto((int) $produto->id, (int) $variacao->id, null, ['evento' => 'variacao_criada']);
 
@@ -186,7 +188,7 @@ class ProdutoVariacaoService
             );
         }
 
-        $variacao = $variacao->refresh()->load('atributos', 'codigosHistoricos', 'imagem');
+        $variacao = $variacao->refresh()->load('atributos', 'codigosHistoricos', 'imagem', 'imagens');
         $this->contaAzulExports->produto((int) $variacao->produto_id, (int) $variacao->id, null, ['evento' => 'variacao_atualizada']);
 
         return $variacao;

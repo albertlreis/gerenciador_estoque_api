@@ -91,6 +91,30 @@ class PdfImageServiceTest extends TestCase
         );
     }
 
+    public function test_resolve_imagem_do_produto_da_variacao_para_pdfs_operacionais(): void
+    {
+        Storage::fake('public');
+        Storage::disk('public')->put('produtos/produto-pdf.png', base64_decode(self::PNG_PRODUTO));
+        Storage::disk('public')->put('produtos/variacoes/variacao-pdf.png', base64_decode(self::PNG_VARIACAO));
+
+        $produto = $this->createProduto('Produto PDF');
+        $variacao = $this->createVariacao($produto, 'REF-PDF-PRODUTO');
+        ProdutoImagem::create(['id_produto' => $produto->id, 'url' => 'produto-pdf.png', 'principal' => true]);
+        ProdutoVariacaoImagem::create([
+            'id_variacao' => $variacao->id,
+            'url' => '/storage/produtos/variacoes/variacao-pdf.png',
+            'principal' => true,
+            'ordem' => 0,
+        ]);
+
+        $service = app(PdfImageService::class);
+
+        $this->assertSame(
+            $this->pngDataUri(self::PNG_PRODUTO),
+            $service->fromProdutoDaVariacao($variacao->fresh()->load('imagem', 'produto.imagemPrincipal'))
+        );
+    }
+
     public function test_resolve_imagem_do_produto_quando_variacao_nao_tem_imagem(): void
     {
         Storage::fake('public');

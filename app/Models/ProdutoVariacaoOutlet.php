@@ -16,11 +16,13 @@ class ProdutoVariacaoOutlet extends Model
         'quantidade',
         'quantidade_restante',
         'usuario_id',
+        'produto_variacao_imagem_id',
     ];
 
     protected $casts = [
         'quantidade' => 'integer',
         'quantidade_restante' => 'integer',
+        'produto_variacao_imagem_id' => 'integer',
     ];
 
     public const MOTIVOS = [
@@ -43,6 +45,11 @@ class ProdutoVariacaoOutlet extends Model
     public function variacao(): BelongsTo
     {
         return $this->belongsTo(ProdutoVariacao::class, 'produto_variacao_id');
+    }
+
+    public function imagemSelecionada(): BelongsTo
+    {
+        return $this->belongsTo(ProdutoVariacaoImagem::class, 'produto_variacao_imagem_id');
     }
 
     /**

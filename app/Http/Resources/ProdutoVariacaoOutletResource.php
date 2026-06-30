@@ -2,14 +2,25 @@
 
 namespace App\Http\Resources;
 
+use App\Models\ProdutoImagem;
 use Illuminate\Http\Resources\Json\JsonResource;
 
 class ProdutoVariacaoOutletResource extends JsonResource
 {
     public function toArray($request): array
     {
+        $imagemSelecionada = $this->relationLoaded('imagemSelecionada') ? $this->imagemSelecionada : null;
+        $variacao = $this->relationLoaded('variacao') ? $this->variacao : null;
+        $imagemUrl = ProdutoImagem::normalizarUrlPublica(
+            $imagemSelecionada?->url
+            ?? $variacao?->imagem?->url
+            ?? $variacao?->produto?->imagemPrincipal?->url
+        );
+
         return [
             'id' => $this->id,
+            'produto_variacao_imagem_id' => $this->produto_variacao_imagem_id,
+            'imagem_url' => $imagemUrl,
             'motivo'   => $this->whenLoaded('motivo', fn() => [
                 'id'   => $this->motivo->id,
                 'slug' => $this->motivo->slug,

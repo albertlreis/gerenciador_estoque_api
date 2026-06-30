@@ -9,6 +9,7 @@ use App\Models\OutletFormaPagamento;
 use App\Models\OutletMotivo;
 use App\Models\Produto;
 use App\Models\ProdutoVariacao;
+use App\Models\ProdutoVariacaoImagem;
 use App\Models\ProdutoVariacaoOutletPagamento;
 use App\Models\Usuario;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -102,6 +103,71 @@ class OutletCrudTest extends TestCase
             'quantidade_restante' => 2,
             'motivo_id' => $motivo->id,
         ]);
+    }
+
+    public function test_cadastra_outlet_com_imagem_da_mesma_variacao(): void
+    {
+        [$variacao, $motivo, $formaPagamento] = $this->seedBase();
+        $imagem = ProdutoVariacaoImagem::create([
+            'id_variacao' => $variacao->id,
+            'url' => '/storage/produtos/variacoes/outlet-selecionada.png',
+            'principal' => true,
+            'ordem' => 0,
+        ]);
+
+        $response = $this->postJson("/api/v1/variacoes/{$variacao->id}/outlets", [
+            'motivo_id' => $motivo->id,
+            'quantidade' => 2,
+            'produto_variacao_imagem_id' => $imagem->id,
+            'formas_pagamento' => [
+                [
+                    'forma_pagamento_id' => $formaPagamento->id,
+                    'percentual_desconto' => 10,
+                    'max_parcelas' => null,
+                ],
+            ],
+        ]);
+
+        $response->assertStatus(201)
+            ->assertJsonPath('data.produto_variacao_imagem_id', $imagem->id)
+            ->assertJsonPath('data.imagem_url', config('app.url') . '/storage/produtos/variacoes/outlet-selecionada.png');
+
+        $this->assertDatabaseHas('produto_variacao_outlets', [
+            'produto_variacao_id' => $variacao->id,
+            'produto_variacao_imagem_id' => $imagem->id,
+        ]);
+    }
+
+    public function test_rejeita_imagem_de_outra_variacao_ao_cadastrar_outlet(): void
+    {
+        [$variacao, $motivo, $formaPagamento] = $this->seedBase();
+        $outraVariacao = ProdutoVariacao::create([
+            'produto_id' => $variacao->produto_id,
+            'referencia' => 'REF-OUTLET-OUTRA-' . uniqid(),
+            'nome' => 'Outra variante',
+            'preco' => 100,
+            'custo' => 50,
+        ]);
+        $imagemOutra = ProdutoVariacaoImagem::create([
+            'id_variacao' => $outraVariacao->id,
+            'url' => '/storage/produtos/variacoes/outra.png',
+            'principal' => true,
+            'ordem' => 0,
+        ]);
+
+        $this->postJson("/api/v1/variacoes/{$variacao->id}/outlets", [
+            'motivo_id' => $motivo->id,
+            'quantidade' => 2,
+            'produto_variacao_imagem_id' => $imagemOutra->id,
+            'formas_pagamento' => [
+                [
+                    'forma_pagamento_id' => $formaPagamento->id,
+                    'percentual_desconto' => 10,
+                    'max_parcelas' => null,
+                ],
+            ],
+        ])->assertStatus(422)
+            ->assertJsonValidationErrors('produto_variacao_imagem_id');
     }
 
     public function test_cadastra_outlet_atualizando_preco_original_com_auditoria(): void

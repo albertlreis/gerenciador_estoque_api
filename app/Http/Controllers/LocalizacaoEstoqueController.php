@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Http\Requests\StoreLocalizacaoEstoqueRequest;
 use App\Http\Requests\UpdateLocalizacaoEstoqueRequest;
+use App\Http\Resources\EstoqueLocalizacaoPendenteResource;
 use App\Http\Resources\LocalizacaoEstoqueResource;
 use App\Http\Resources\ProdutoEstoqueResource;
 use App\Models\Deposito;
@@ -29,6 +30,48 @@ class LocalizacaoEstoqueController extends Controller
                 'last_page' => $localizacoes->lastPage(),
             ],
         ])->response();
+    }
+
+    public function pendencias(Request $request): JsonResponse
+    {
+        $dados = $request->validate([
+            'deposito' => ['nullable', 'integer', 'min:1'],
+            'produto' => ['nullable', 'string', 'max:255'],
+            'per_page' => ['nullable', 'integer', 'min:1', 'max:200'],
+            'page' => ['nullable', 'integer', 'min:1'],
+        ]);
+
+        $pendencias = $this->service->listarPendencias($dados);
+
+        return EstoqueLocalizacaoPendenteResource::collection($pendencias)->additional([
+            'meta' => [
+                'current_page' => $pendencias->currentPage(),
+                'per_page' => $pendencias->perPage(),
+                'total' => $pendencias->total(),
+                'last_page' => $pendencias->lastPage(),
+            ],
+        ])->response();
+    }
+
+    public function atribuirEstoquesEmMassa(Request $request): JsonResponse
+    {
+        $dados = $request->validate([
+            'estoque_ids' => ['required', 'array', 'min:1'],
+            'estoque_ids.*' => ['integer', 'distinct', 'exists:estoque,id'],
+            'localizacao_id' => ['required', 'integer', 'exists:localizacoes_estoque,id'],
+        ]);
+
+        $resultado = $this->service->atribuirEstoquesEmMassa(
+            $dados['estoque_ids'],
+            (int) $dados['localizacao_id']
+        );
+
+        return response()->json([
+            'data' => [
+                'atualizados' => $resultado['atualizados'],
+                'localizacao' => (new LocalizacaoEstoqueResource($resultado['localizacao']))->resolve($request),
+            ],
+        ]);
     }
 
     public function store(StoreLocalizacaoEstoqueRequest $request, Deposito $deposito): JsonResponse

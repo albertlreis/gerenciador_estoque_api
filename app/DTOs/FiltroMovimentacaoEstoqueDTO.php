@@ -7,6 +7,13 @@ namespace App\DTOs;
  */
 class FiltroMovimentacaoEstoqueDTO
 {
+    public const ESTOQUE_CLIENTE_STATUSES = [
+        'todos_pendentes',
+        'aguardando_estoque',
+        'reservado',
+        'pendente_entrega',
+    ];
+
     /** @var int|null ID da variação do produto */
     public ?int $variacao;
 
@@ -26,6 +33,14 @@ class FiltroMovimentacaoEstoqueDTO
     public ?int $fornecedor;
 
     public ?string $localizacao;
+
+    public ?string $area;
+
+    public ?int $localizacaoId;
+
+    public bool $estoqueCliente;
+
+    public ?string $estoqueClienteStatus;
 
     /** @var array<int, string>|null Período da movimentação (inicial, final) */
     public ?array $periodo;
@@ -58,10 +73,26 @@ class FiltroMovimentacaoEstoqueDTO
         $this->deposito = $this->toNullablePositiveInt($data['deposito'] ?? null);
         $this->categoria = $this->toNullablePositiveInt($data['categoria'] ?? null);
         $this->fornecedor = $this->toNullablePositiveInt($data['fornecedor'] ?? null);
+        $this->localizacaoId = $this->toNullablePositiveInt($data['localizacao_id'] ?? null);
         $this->localizacao = isset($data['localizacao']) ? trim((string) $data['localizacao']) : null;
         if ($this->localizacao === '') {
             $this->localizacao = null;
         }
+        $this->area = isset($data['area']) ? trim((string) $data['area']) : null;
+        if ($this->area === '') {
+            $this->area = null;
+        }
+        $estoqueClienteLegado = filter_var(
+            $data['estoque_cliente'] ?? false,
+            FILTER_VALIDATE_BOOLEAN
+        );
+        $estoqueClienteStatus = isset($data['estoque_cliente_status'])
+            ? strtolower(trim((string) $data['estoque_cliente_status']))
+            : null;
+        $this->estoqueClienteStatus = in_array($estoqueClienteStatus, self::ESTOQUE_CLIENTE_STATUSES, true)
+            ? $estoqueClienteStatus
+            : ($estoqueClienteLegado ? 'todos_pendentes' : null);
+        $this->estoqueCliente = $this->estoqueClienteStatus !== null;
         $this->periodo = $data['periodo'] ?? null;
         $this->sortField = $data['sort_field'] ?? null;
         $this->sortOrder = $data['sort_order'] ?? 'desc';

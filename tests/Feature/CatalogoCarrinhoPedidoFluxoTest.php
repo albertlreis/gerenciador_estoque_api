@@ -376,6 +376,103 @@ class CatalogoCarrinhoPedidoFluxoTest extends TestCase
         $this->assertDatabaseMissing('carrinho_itens', ['id' => $item->id]);
     }
 
+    public function test_atualiza_depositos_de_itens_do_carrinho_em_lote(): void
+    {
+        $usuario = $this->autenticar(['carrinhos.finalizar'], ['Vendedor']);
+        $cliente = $this->criarCliente();
+        $depositoA = Deposito::create(['nome' => 'Deposito Lote A']);
+        $depositoB = Deposito::create(['nome' => 'Deposito Lote B']);
+        ['variacao' => $variacaoA] = $this->criarProdutoComVariacao([], ['preco' => 100], $depositoA, 5);
+        ['variacao' => $variacaoB] = $this->criarProdutoComVariacao([], ['preco' => 80], $depositoB, 7);
+        ['carrinho' => $carrinho, 'item' => $itemA] = $this->criarCarrinhoComItem($usuario, $cliente, $variacaoA, 1);
+
+        $itemB = CarrinhoItem::create([
+            'id_carrinho' => $carrinho->id,
+            'id_variacao' => $variacaoB->id,
+            'quantidade' => 2,
+            'preco_unitario' => $variacaoB->preco,
+            'subtotal' => $variacaoB->preco * 2,
+        ]);
+
+        $response = $this->patchJson("/api/v1/carrinhos/{$carrinho->id}/itens/depositos", [
+            'itens' => [
+                [
+                    'id_carrinho_item' => $itemA->id,
+                    'id_deposito' => $depositoA->id,
+                ],
+                [
+                    'id_carrinho_item' => $itemB->id,
+                    'id_deposito' => $depositoB->id,
+                ],
+            ],
+        ]);
+
+        $response->assertOk()
+            ->assertJsonPath('success', true)
+            ->assertJsonPath('updated', 2);
+
+        $this->assertDatabaseHas('carrinho_itens', [
+            'id' => $itemA->id,
+            'id_carrinho' => $carrinho->id,
+            'id_deposito' => $depositoA->id,
+        ]);
+        $this->assertDatabaseHas('carrinho_itens', [
+            'id' => $itemB->id,
+            'id_carrinho' => $carrinho->id,
+            'id_deposito' => $depositoB->id,
+        ]);
+    }
+
+    public function test_rejeita_atualizacao_de_deposito_de_item_de_outro_carrinho(): void
+    {
+        $usuario = $this->autenticar(['carrinhos.finalizar'], ['Vendedor']);
+        $cliente = $this->criarCliente();
+        $deposito = Deposito::create(['nome' => 'Deposito Item Outro Carrinho']);
+        ['variacao' => $variacao] = $this->criarProdutoComVariacao([], ['preco' => 110], $deposito, 4);
+        ['carrinho' => $carrinho] = $this->criarCarrinhoComItem($usuario, $cliente, $variacao, 1);
+        ['item' => $itemOutroCarrinho] = $this->criarCarrinhoComItem($usuario, $cliente, $variacao, 1);
+
+        $response = $this->patchJson("/api/v1/carrinhos/{$carrinho->id}/itens/depositos", [
+            'itens' => [
+                [
+                    'id_carrinho_item' => $itemOutroCarrinho->id,
+                    'id_deposito' => $deposito->id,
+                ],
+            ],
+        ]);
+
+        $response->assertStatus(422)
+            ->assertJsonValidationErrors(['itens.0.id_carrinho_item']);
+
+        $this->assertDatabaseHas('carrinho_itens', [
+            'id' => $itemOutroCarrinho->id,
+            'id_deposito' => null,
+        ]);
+    }
+
+    public function test_endpoint_antigo_atualiza_deposito_do_item_do_carrinho(): void
+    {
+        $usuario = $this->autenticar(['carrinhos.finalizar'], ['Vendedor']);
+        $cliente = $this->criarCliente();
+        $deposito = Deposito::create(['nome' => 'Deposito Endpoint Antigo']);
+        ['variacao' => $variacao] = $this->criarProdutoComVariacao([], ['preco' => 90], $deposito, 3);
+        ['carrinho' => $carrinho, 'item' => $item] = $this->criarCarrinhoComItem($usuario, $cliente, $variacao, 1);
+
+        $response = $this->patchJson("/api/v1/carrinhos/{$carrinho->id}/itens/atualizar-deposito", [
+            'id_carrinho_item' => $item->id,
+            'id_deposito' => $deposito->id,
+        ]);
+
+        $response->assertOk()
+            ->assertJsonPath('success', true);
+
+        $this->assertDatabaseHas('carrinho_itens', [
+            'id' => $item->id,
+            'id_carrinho' => $carrinho->id,
+            'id_deposito' => $deposito->id,
+        ]);
+    }
+
     public function test_finaliza_carrinho_como_venda_criando_demanda_e_reserva(): void
     {
         $usuario = $this->autenticar(['carrinhos.finalizar'], ['Vendedor']);

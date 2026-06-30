@@ -13,6 +13,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property string|null $corredor
  * @property string|null $setor
  * @property string|null $coluna
+ * @property string|null $nivel
  * @property string $codigo_composto
  * @property string|null $observacoes
  * @property bool $ativo
@@ -27,6 +28,7 @@ class LocalizacaoEstoque extends Model
         'corredor',
         'setor',
         'coluna',
+        'nivel',
         'codigo_composto',
         'observacoes',
         'ativo',

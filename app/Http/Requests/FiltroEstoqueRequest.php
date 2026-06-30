@@ -27,9 +27,13 @@ class FiltroEstoqueRequest extends FormRequest
             'deposito' => ['nullable', 'integer', 'min:1'],
             'categoria' => ['nullable', 'integer', 'min:1'],
             'fornecedor' => ['nullable', 'integer', 'min:1'],
+            'localizacao_id' => ['nullable', 'integer', 'min:1'],
 
             'produto' => ['nullable', 'string', 'max:255'],
             'localizacao' => ['nullable', 'string', 'max:255'],
+            'area' => ['nullable', 'string', 'max:80'],
+            'estoque_cliente' => ['nullable', 'boolean'],
+            'estoque_cliente_status' => ['nullable', 'string', 'in:todos_pendentes,aguardando_estoque,reservado,pendente_entrega'],
 
             'periodo' => ['nullable', 'array', 'size:2'],
             'periodo.0' => ['nullable', 'date_format:Y-m-d'],
@@ -45,7 +49,9 @@ class FiltroEstoqueRequest extends FormRequest
             'sort_field' => ['nullable', 'string', 'max:64'],
             'sort_order' => ['nullable', 'string', 'in:asc,desc'],
 
-            'export' => ['nullable', 'string', 'in:pdf'],
+            'export' => ['nullable', 'string', 'in:pdf,excel'],
+            'colunas' => ['nullable'],
+            'colunas.*' => ['nullable', 'string', 'max:64'],
         ];
     }
 
@@ -58,7 +64,7 @@ class FiltroEstoqueRequest extends FormRequest
     {
         $input = $this->all();
 
-        foreach (['produto', 'localizacao', 'tipo', 'sort_field', 'sort_order', 'export'] as $k) {
+        foreach (['produto', 'localizacao', 'area', 'tipo', 'sort_field', 'sort_order', 'export', 'estoque_cliente_status'] as $k) {
             if (array_key_exists($k, $input) && is_string($input[$k])) {
                 $input[$k] = trim($input[$k]);
                 if ($input[$k] === '') $input[$k] = null;
@@ -72,10 +78,30 @@ class FiltroEstoqueRequest extends FormRequest
             }
         }
 
-        foreach (['deposito', 'categoria', 'fornecedor', 'per_page', 'page', 'dias_sem_venda_min'] as $k) {
+        foreach (['deposito', 'categoria', 'fornecedor', 'localizacao_id', 'per_page', 'page', 'dias_sem_venda_min'] as $k) {
             if (array_key_exists($k, $input) && $input[$k] === '') {
                 $input[$k] = null;
             }
+        }
+
+        foreach (['estoque_cliente', 'zerados'] as $k) {
+            if (!array_key_exists($k, $input)) {
+                continue;
+            }
+
+            if ($input[$k] === '') {
+                $input[$k] = null;
+                continue;
+            }
+
+            $boolean = filter_var($input[$k], FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+            if ($boolean !== null) {
+                $input[$k] = $boolean;
+            }
+        }
+
+        if (isset($input['colunas']) && is_string($input['colunas'])) {
+            $input['colunas'] = array_filter(array_map('trim', explode(',', $input['colunas'])));
         }
 
         // Caso venha "periodo=2025-01-01,2025-01-31" por algum client, tenta normalizar

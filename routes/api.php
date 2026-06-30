@@ -224,6 +224,9 @@ Route::middleware(['auth:sanctum', 'senha.nao_obrigatoria'])
             Route::post('movimentacoes/lote', [EstoqueMovimentacaoController::class, 'lote']);
 
             // Vinculo do estoque com uma posicao do mapa do deposito.
+            Route::get('localizacoes/pendencias', [LocalizacaoEstoqueController::class, 'pendencias']);
+            Route::patch('localizacoes/vinculos-em-massa', [LocalizacaoEstoqueController::class, 'atribuirEstoquesEmMassa']);
+
             Route::patch('{estoque}/localizacao', [LocalizacaoEstoqueController::class, 'atribuirEstoque'])
                 ->whereNumber('estoque');
 
@@ -340,7 +343,7 @@ Route::middleware(['auth:sanctum', 'senha.nao_obrigatoria'])
             Route::get('stats', [PedidoController::class, 'estatisticas']);
 
             Route::post('import', [PedidoController::class, 'importar']);
-            Route::post('import/pdf/confirm', [PedidoController::class, 'confirmarImportacaoPDF']);
+            Route::post('import/xml/confirm', [PedidoController::class, 'confirmarImportacaoXml']);
         });
 
         Route::prefix('pedidos/{pedido}')->whereNumber('pedido')->group(function () {
@@ -401,6 +404,7 @@ Route::middleware(['auth:sanctum', 'senha.nao_obrigatoria'])
             Route::post('/', [CarrinhoItemController::class, 'store']);
             Route::delete('{item}', [CarrinhoItemController::class, 'destroy'])->whereNumber('item');
             Route::delete('/', [CarrinhoItemController::class, 'clear']);
+            Route::patch('depositos', [CarrinhoItemController::class, 'atualizarDepositos']);
             Route::patch('atualizar-deposito', [CarrinhoItemController::class, 'atualizarDeposito']);
         });
 

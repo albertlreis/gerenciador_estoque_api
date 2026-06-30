@@ -9,7 +9,6 @@ use App\Models\ContaPagar;
 use DateTimeInterface;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Str;
 
 class ContaAzulContaPagarMapper
 {
@@ -19,22 +18,21 @@ class ContaAzulContaPagarMapper
     public function fromLocal(ContaPagar $conta, ?int $lojaId = null): array
     {
         if ($conta->exists || $conta->fornecedor_id || $conta->relationLoaded('fornecedor')) {
-            $conta->loadMissing(['fornecedor', 'categoria', 'centroCusto']);
+            $conta->loadMissing(['fornecedor', 'categoria', 'centroCusto', 'pagamentos.contaFinanceira']);
         }
 
         $valor = (float) $conta->valor_liquido;
         $dataCompetencia = $this->date($conta->data_emissao) ?: $this->date($conta->data_vencimento);
         $dataVencimento = $this->date($conta->data_vencimento) ?: $dataCompetencia;
-        $formaPagamento = $this->formaPagamento($conta->forma_pagamento);
+        $descricao = $this->descricao($conta);
+        $descricaoParcela = $this->descricaoParcela($conta, $descricao);
 
-        $idFornecedorExt = null;
-        if ($conta->fornecedor_id) {
-            $idFornecedorExt = ContaAzulMapeamento::idExternoPorLocal(
-                ContaAzulEntityType::FORNECEDOR,
-                (int) $conta->fornecedor_id,
-                $lojaId
-            );
-        }
+        $idFornecedorExt = $this->idExternoComFallbackMeta(
+            ContaAzulEntityType::FORNECEDOR,
+            $conta->fornecedor_id ? (int) $conta->fornecedor_id : null,
+            $conta->relationLoaded('fornecedor') ? $conta->getRelation('fornecedor') : null,
+            $lojaId
+        );
 
         $idCategoriaExt = $this->idExternoComFallbackMeta(
             ContaAzulEntityType::CATEGORIA_FINANCEIRA,
@@ -50,6 +48,30 @@ class ContaAzulContaPagarMapper
                 [
                     'conta_pagar_id' => $conta->id,
                     'categoria_id' => $conta->categoria_id,
+                    'loja_id' => $lojaId,
+                ]
+            );
+        }
+
+        if ($idFornecedorExt === null || $idFornecedorExt === '') {
+            throw new ContaAzulException(
+                'Exportacao de conta a pagar bloqueada: fornecedor local sem mapeamento externo na Conta Azul.',
+                'conta_azul_fornecedor_sem_mapeamento',
+                [
+                    'conta_pagar_id' => $conta->id,
+                    'fornecedor_id' => $conta->fornecedor_id,
+                    'loja_id' => $lojaId,
+                ]
+            );
+        }
+
+        $idContaFinanceiraExt = $this->idContaFinanceiraExterna($conta, $lojaId);
+        if ($idContaFinanceiraExt === null || $idContaFinanceiraExt === '') {
+            throw new ContaAzulException(
+                'Exportacao de conta a pagar bloqueada: conta financeira local sem mapeamento externo na Conta Azul.',
+                'conta_azul_conta_financeira_sem_mapeamento',
+                [
+                    'conta_pagar_id' => $conta->id,
                     'loja_id' => $lojaId,
                 ]
             );
@@ -74,21 +96,100 @@ class ContaAzulContaPagarMapper
         }
 
         return array_filter([
-            'descricao' => $conta->descricao,
-            'numero_documento' => $conta->numero_documento,
+            'data_competencia' => $dataCompetencia,
             'valor' => $valor,
-            'competenceDate' => $dataCompetencia,
-            'idFornecedor' => $idFornecedorExt,
+            'observacao' => $this->observacao($conta, $descricaoParcela),
+            'descricao' => $descricao,
+            'contato' => $idFornecedorExt,
+            'conta_financeira' => $idContaFinanceiraExt,
             'rateio' => [$rateio],
             'condicao_pagamento' => [
-                'tipo_pagamento' => $formaPagamento,
                 'parcelas' => [[
+                    'descricao' => $descricaoParcela,
                     'data_vencimento' => $dataVencimento,
-                    'valor' => $valor,
-                    'metodo_pagamento' => $formaPagamento,
+                    'nota' => $this->notaParcela($conta),
+                    'conta_financeira' => $idContaFinanceiraExt,
+                    'detalhe_valor' => [
+                        'multa' => (float) $conta->multa,
+                        'juros' => (float) $conta->juros,
+                        'valor_bruto' => (float) $conta->valor_bruto,
+                        'valor_liquido' => $valor,
+                        'desconto' => (float) $conta->desconto,
+                        'taxa' => 0.0,
+                    ],
                 ]],
             ],
         ], fn ($value) => $value !== null && $value !== '');
+    }
+
+    private function idContaFinanceiraExterna(ContaPagar $conta, ?int $lojaId): ?string
+    {
+        $pagamentos = $conta->relationLoaded('pagamentos')
+            ? $conta->getRelation('pagamentos')
+            : ($conta->exists
+                ? $conta->pagamentos()->with('contaFinanceira')->orderBy('data_pagamento')->orderBy('id')->get()
+                : collect());
+
+        foreach ($pagamentos as $pagamento) {
+            $contaFinanceiraId = $pagamento->conta_financeira_id ? (int) $pagamento->conta_financeira_id : null;
+            if (!$contaFinanceiraId) {
+                continue;
+            }
+
+            $contaFinanceira = $pagamento->relationLoaded('contaFinanceira')
+                ? $pagamento->getRelation('contaFinanceira')
+                : null;
+
+            $idExterno = $this->idExternoComFallbackMeta(
+                ContaAzulEntityType::CONTA_FINANCEIRA,
+                $contaFinanceiraId,
+                $contaFinanceira,
+                $lojaId
+            );
+            if ($idExterno !== null && $idExterno !== '') {
+                return $idExterno;
+            }
+        }
+
+        return null;
+    }
+
+    private function descricao(ContaPagar $conta): string
+    {
+        $descricao = trim((string) $conta->descricao);
+
+        return $descricao !== '' ? $descricao : $this->fallbackDescricao($conta);
+    }
+
+    private function descricaoParcela(ContaPagar $conta, string $descricao): string
+    {
+        $documento = trim((string) $conta->numero_documento);
+        if ($documento !== '' && $descricao !== '') {
+            return $documento . ' - ' . $descricao;
+        }
+
+        return $documento !== '' ? $documento : ($descricao !== '' ? $descricao : $this->fallbackDescricao($conta));
+    }
+
+    private function observacao(ContaPagar $conta, string $descricaoParcela): string
+    {
+        $observacoes = trim((string) $conta->observacoes);
+
+        return $observacoes !== '' ? $observacoes : $descricaoParcela;
+    }
+
+    private function notaParcela(ContaPagar $conta): string
+    {
+        $formaPagamento = trim((string) $conta->forma_pagamento);
+
+        return $formaPagamento !== '' ? 'Pagamento via ' . $formaPagamento : 'Pagamento de conta a pagar';
+    }
+
+    private function fallbackDescricao(ContaPagar $conta): string
+    {
+        $id = $conta->id ? ' #' . $conta->id : '';
+
+        return 'Conta a pagar' . $id;
     }
 
     private function idExternoComFallbackMeta(string $tipoEntidade, ?int $idLocal, ?Model $model, ?int $lojaId): ?string
@@ -104,19 +205,6 @@ class ContaAzulContaPagarMapper
 
         return $this->stringOrNull(data_get($meta, 'conta_azul.id'))
             ?: $this->stringOrNull(data_get($meta, 'conta_azul_id'));
-    }
-
-    private function formaPagamento(mixed $formaPagamento): string
-    {
-        $code = strtoupper(Str::ascii(trim((string) $formaPagamento)));
-        $code = (string) preg_replace('/[^A-Z0-9]+/', '_', $code);
-        $code = trim($code, '_');
-
-        return match ($code) {
-            '', 'OUTROS' => 'OUTRO',
-            'PIX', 'PAGAMENTO_INSTANTANEO' => 'PIX_PAGAMENTO_INSTANTANEO',
-            default => $code,
-        };
     }
 
     private function date(mixed $value): ?string

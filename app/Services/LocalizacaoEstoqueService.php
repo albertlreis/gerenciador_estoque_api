@@ -7,6 +7,7 @@ use App\Models\Estoque;
 use App\Models\LocalizacaoEstoque;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -39,6 +40,7 @@ class LocalizacaoEstoqueService
                     ->orWhereRaw("corredor LIKE ? ESCAPE '\\\\'", [$like])
                     ->orWhereRaw("setor LIKE ? ESCAPE '\\\\'", [$like])
                     ->orWhereRaw("coluna LIKE ? ESCAPE '\\\\'", [$like])
+                    ->orWhereRaw("nivel LIKE ? ESCAPE '\\\\'", [$like])
                     ->orWhereRaw("observacoes LIKE ? ESCAPE '\\\\'", [$like]);
             });
         }
@@ -50,7 +52,54 @@ class LocalizacaoEstoqueService
             ->orderBy('corredor')
             ->orderBy('setor')
             ->orderBy('coluna')
+            ->orderBy('nivel')
             ->orderBy('codigo_composto')
+            ->paginate($perPage);
+    }
+
+    public function listarPendencias(array $filtros = []): LengthAwarePaginator
+    {
+        $query = Estoque::query()
+            ->select('estoque.*')
+            ->selectSub($this->reservasClientePorEstoqueSubquery(), 'quantidade_reservada_cliente')
+            ->whereNull('localizacao_id')
+            ->where(function (Builder $q) {
+                $q->where('quantidade', '>', 0)
+                    ->orWhereExists(function ($sub) {
+                        $this->aplicarReservaClienteAberta($sub);
+                    });
+            })
+            ->with(['deposito', 'variacao.produto', 'variacao.atributos']);
+
+        $depositoId = $this->toNullablePositiveInt($filtros['deposito'] ?? null);
+        if ($depositoId !== null) {
+            $query->where('id_deposito', $depositoId);
+        }
+
+        $produto = trim((string) ($filtros['produto'] ?? ''));
+        if ($produto !== '') {
+            $like = '%' . $this->escapeLike($produto) . '%';
+            $query->whereHas('variacao', function (Builder $variacaoQuery) use ($like) {
+                $variacaoQuery
+                    ->whereRaw("referencia LIKE ? ESCAPE '\\\\'", [$like])
+                    ->orWhereRaw("sku_interno LIKE ? ESCAPE '\\\\'", [$like])
+                    ->orWhereRaw("chave_variacao LIKE ? ESCAPE '\\\\'", [$like])
+                    ->orWhereRaw("codigo_barras LIKE ? ESCAPE '\\\\'", [$like])
+                    ->orWhereRaw("nome LIKE ? ESCAPE '\\\\'", [$like])
+                    ->orWhereHas('produto', function (Builder $produtoQuery) use ($like) {
+                        $produtoQuery
+                            ->whereRaw("nome LIKE ? ESCAPE '\\\\'", [$like])
+                            ->orWhereRaw("codigo_produto LIKE ? ESCAPE '\\\\'", [$like]);
+                    });
+            });
+        }
+
+        $perPage = max(1, min(200, (int) ($filtros['per_page'] ?? 20)));
+
+        return $query
+            ->orderBy('id_deposito')
+            ->orderByDesc('quantidade')
+            ->orderBy('id')
             ->paginate($perPage);
     }
 
@@ -116,20 +165,89 @@ class LocalizacaoEstoqueService
         });
     }
 
-    public static function montarCodigo(?string $area, ?string $corredor, ?string $setor, ?string $coluna): ?string
+    /**
+     * @param array<int, mixed> $estoqueIds
+     * @return array{atualizados:int,localizacao:LocalizacaoEstoque}
+     */
+    public function atribuirEstoquesEmMassa(array $estoqueIds, int $localizacaoId): array
+    {
+        $ids = collect($estoqueIds)
+            ->map(fn ($id) => (int) $id)
+            ->filter(fn ($id) => $id > 0)
+            ->unique()
+            ->values();
+
+        if ($ids->isEmpty()) {
+            throw ValidationException::withMessages([
+                'estoque_ids' => ['Selecione ao menos um item de estoque.'],
+            ]);
+        }
+
+        return DB::transaction(function () use ($ids, $localizacaoId) {
+            $localizacao = LocalizacaoEstoque::query()->lockForUpdate()->findOrFail($localizacaoId);
+
+            if (!$localizacao->ativo) {
+                throw ValidationException::withMessages([
+                    'localizacao_id' => ['A localizacao selecionada esta inativa.'],
+                ]);
+            }
+
+            /** @var Collection<int, Estoque> $estoques */
+            $estoques = Estoque::query()
+                ->whereIn('id', $ids->all())
+                ->lockForUpdate()
+                ->get();
+
+            if ($estoques->count() !== $ids->count()) {
+                throw ValidationException::withMessages([
+                    'estoque_ids' => ['Um ou mais itens de estoque nao foram encontrados.'],
+                ]);
+            }
+
+            $depositos = $estoques->pluck('id_deposito')->unique()->values();
+            if ($depositos->count() !== 1 || (int) $depositos->first() !== (int) $localizacao->deposito_id) {
+                throw ValidationException::withMessages([
+                    'localizacao_id' => ['Todos os itens devem pertencer ao mesmo deposito da localizacao.'],
+                ]);
+            }
+
+            Estoque::query()
+                ->whereIn('id', $ids->all())
+                ->update([
+                    'localizacao_id' => $localizacao->id,
+                    'updated_at' => now(),
+                ]);
+
+            return [
+                'atualizados' => $ids->count(),
+                'localizacao' => $localizacao->refresh(),
+            ];
+        });
+    }
+
+    public static function montarCodigo(
+        ?string $area,
+        ?string $corredor,
+        ?string $setor,
+        ?string $coluna,
+        ?string $nivel = null
+    ): ?string
     {
         $parts = [
             self::trimStatic($area),
             self::trimStatic($corredor),
             self::trimStatic($setor),
             self::trimStatic($coluna),
+            self::trimStatic($nivel),
         ];
 
-        if (count(array_filter($parts, fn ($part) => $part !== null)) === 0) {
+        $parts = array_values(array_filter($parts, fn ($part) => $part !== null));
+
+        if (count($parts) === 0) {
             return null;
         }
 
-        return implode('-', array_map(fn ($part) => $part ?? '-', $parts));
+        return implode('-', $parts);
     }
 
     private function payload(Deposito $deposito, array $dados, ?LocalizacaoEstoque $localizacao = null): array
@@ -138,11 +256,12 @@ class LocalizacaoEstoqueService
         $corredor = $this->trimOrNull($dados['corredor'] ?? $localizacao?->corredor);
         $setor = $this->trimOrNull($dados['setor'] ?? $localizacao?->setor);
         $coluna = $this->trimOrNull($dados['coluna'] ?? $localizacao?->coluna);
-        $codigo = self::montarCodigo($area, $corredor, $setor, $coluna);
+        $nivel = $this->trimOrNull($dados['nivel'] ?? $localizacao?->nivel);
+        $codigo = self::montarCodigo($area, $corredor, $setor, $coluna, $nivel);
 
         if ($codigo === null) {
             throw ValidationException::withMessages([
-                'localizacao' => ['Informe area, corredor, setor ou coluna.'],
+                'localizacao' => ['Informe area, corredor, setor, coluna ou nivel.'],
             ]);
         }
 
@@ -152,6 +271,7 @@ class LocalizacaoEstoqueService
             'corredor' => $corredor,
             'setor' => $setor,
             'coluna' => $coluna,
+            'nivel' => $nivel,
             'codigo_composto' => $codigo,
             'observacoes' => array_key_exists('observacoes', $dados)
                 ? $this->trimOrNull($dados['observacoes'])
@@ -164,11 +284,22 @@ class LocalizacaoEstoqueService
 
     private function validarCodigoUnico(Deposito $deposito, string $codigo, ?int $ignorarId = null): void
     {
-        $existe = LocalizacaoEstoque::query()
+        $localizacoes = LocalizacaoEstoque::query()
             ->where('deposito_id', $deposito->id)
-            ->where('codigo_composto', $codigo)
             ->when($ignorarId, fn (Builder $q) => $q->whereKeyNot($ignorarId))
-            ->exists();
+            ->get(['id', 'area', 'corredor', 'setor', 'coluna', 'nivel', 'codigo_composto']);
+
+        $existe = $localizacoes->contains(function (LocalizacaoEstoque $localizacao) use ($codigo) {
+            $codigoExistente = self::montarCodigo(
+                $localizacao->area,
+                $localizacao->corredor,
+                $localizacao->setor,
+                $localizacao->coluna,
+                $localizacao->nivel
+            ) ?? self::limparCodigoExistente($localizacao->codigo_composto);
+
+            return $codigoExistente === $codigo;
+        });
 
         if ($existe) {
             throw ValidationException::withMessages([
@@ -197,11 +328,72 @@ class LocalizacaoEstoqueService
 
         $trimmed = trim((string) $value);
 
-        return $trimmed === '' ? null : $trimmed;
+        return $trimmed === '' || preg_match('/^-+$/', $trimmed) ? null : $trimmed;
+    }
+
+    private static function limparCodigoExistente(mixed $codigo): ?string
+    {
+        $codigo = self::trimStatic($codigo);
+        if ($codigo === null) {
+            return null;
+        }
+
+        $parts = array_values(array_filter(
+            array_map(fn ($part) => self::trimStatic($part), explode('-', $codigo)),
+            fn ($part) => $part !== null
+        ));
+
+        return empty($parts) ? null : implode('-', $parts);
     }
 
     private function escapeLike(string $value): string
     {
         return str_replace(['\\', '%', '_'], ['\\\\', '\%', '\_'], $value);
+    }
+
+    private function reservasClientePorEstoqueSubquery()
+    {
+        return DB::table('estoque_reservas as er')
+            ->selectRaw('COALESCE(SUM(CASE WHEN er.quantidade > er.quantidade_consumida THEN er.quantidade - er.quantidade_consumida ELSE 0 END), 0)')
+            ->whereColumn('er.id_variacao', 'estoque.id_variacao')
+            ->whereColumn('er.id_deposito', 'estoque.id_deposito')
+            ->whereNotNull('er.pedido_id')
+            ->where('er.status', 'ativa')
+            ->whereRaw('(er.quantidade - er.quantidade_consumida) > 0')
+            ->where(function ($expiraQuery) {
+                $expiraQuery->whereNull('er.data_expira')
+                    ->orWhere('er.data_expira', '>', now());
+            });
+    }
+
+    private function aplicarReservaClienteAberta($query): void
+    {
+        $query->selectRaw('1')
+            ->from('estoque_reservas as er')
+            ->whereColumn('er.id_variacao', 'estoque.id_variacao')
+            ->whereColumn('er.id_deposito', 'estoque.id_deposito')
+            ->whereNotNull('er.pedido_id')
+            ->where('er.status', 'ativa')
+            ->whereRaw('(er.quantidade - er.quantidade_consumida) > 0')
+            ->where(function ($expiraQuery) {
+                $expiraQuery->whereNull('er.data_expira')
+                    ->orWhere('er.data_expira', '>', now());
+            });
+    }
+
+    private function toNullablePositiveInt(mixed $value): ?int
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        $value = trim((string) $value);
+        if ($value === '' || $value === '0') {
+            return null;
+        }
+
+        $int = (int) $value;
+
+        return $int > 0 ? $int : null;
     }
 }

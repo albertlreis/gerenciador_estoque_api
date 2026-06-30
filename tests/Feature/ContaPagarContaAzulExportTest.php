@@ -249,9 +249,20 @@ class ContaPagarContaAzulExportTest extends TestCase
         $conexao = $this->criarConexaoContaAzul();
         $categoria = $this->criarCategoriaFinanceira('Combustiveis Payload Conta Azul');
         $fornecedor = $this->criarFornecedor('Fornecedor Payload Conta Azul');
+        $contaFinanceira = $this->criarContaFinanceira('Conta Financeira Payload Conta Azul');
         $conta = $this->criarContaPagarComCategoriaFornecedor($categoria, $fornecedor);
+        $pagamento = ContaPagarPagamento::create([
+            'conta_pagar_id' => $conta->id,
+            'data_pagamento' => '2026-06-25',
+            'valor' => '50.00',
+            'forma_pagamento' => 'PIX',
+            'conta_financeira_id' => $contaFinanceira->id,
+        ]);
+        $this->pagamentoIds[] = (int) $pagamento->id;
+
         $this->mapearEntidade(ContaAzulEntityType::CATEGORIA_FINANCEIRA, (int) $categoria->id, 'categoria-ext-1');
         $this->mapearEntidade(ContaAzulEntityType::FORNECEDOR, (int) $fornecedor->id, 'fornecedor-ext-1');
+        $this->mapearEntidade(ContaAzulEntityType::CONTA_FINANCEIRA, (int) $contaFinanceira->id, 'conta-financeira-ext-1');
 
         $client = Mockery::mock(ContaAzulClient::class);
         $client->shouldReceive('post')
@@ -261,14 +272,26 @@ class ContaPagarContaAzulExportTest extends TestCase
                 'token-valido',
                 Mockery::on(function (array $payload): bool {
                     $this->assertSame('Conta Pagar Payload Conta Azul', $payload['descricao']);
-                    $this->assertSame('2026-06-25', $payload['competenceDate']);
-                    $this->assertSame('fornecedor-ext-1', $payload['idFornecedor']);
+                    $this->assertSame('2026-06-25', $payload['data_competencia']);
+                    $this->assertSame('Conta Pagar Payload Conta Azul', $payload['observacao']);
+                    $this->assertSame('fornecedor-ext-1', $payload['contato']);
+                    $this->assertSame('conta-financeira-ext-1', $payload['conta_financeira']);
                     $this->assertSame('categoria-ext-1', $payload['rateio'][0]['id_categoria']);
                     $this->assertEqualsWithDelta(50.0, $payload['rateio'][0]['valor'], 0.001);
-                    $this->assertSame('OUTRO', $payload['condicao_pagamento']['tipo_pagamento']);
-                    $this->assertSame('2026-06-25', $payload['condicao_pagamento']['parcelas'][0]['data_vencimento']);
-                    $this->assertEqualsWithDelta(50.0, $payload['condicao_pagamento']['parcelas'][0]['valor'], 0.001);
-                    $this->assertSame('OUTRO', $payload['condicao_pagamento']['parcelas'][0]['metodo_pagamento']);
+                    $this->assertArrayNotHasKey('competenceDate', $payload);
+                    $this->assertArrayNotHasKey('idFornecedor', $payload);
+
+                    $parcela = $payload['condicao_pagamento']['parcelas'][0];
+                    $this->assertSame('Conta Pagar Payload Conta Azul', $parcela['descricao']);
+                    $this->assertSame('2026-06-25', $parcela['data_vencimento']);
+                    $this->assertSame('Pagamento de conta a pagar', $parcela['nota']);
+                    $this->assertSame('conta-financeira-ext-1', $parcela['conta_financeira']);
+                    $this->assertEqualsWithDelta(50.0, $parcela['detalhe_valor']['valor_bruto'], 0.001);
+                    $this->assertEqualsWithDelta(50.0, $parcela['detalhe_valor']['valor_liquido'], 0.001);
+                    $this->assertEqualsWithDelta(0.0, $parcela['detalhe_valor']['desconto'], 0.001);
+                    $this->assertEqualsWithDelta(0.0, $parcela['detalhe_valor']['juros'], 0.001);
+                    $this->assertEqualsWithDelta(0.0, $parcela['detalhe_valor']['multa'], 0.001);
+                    $this->assertEqualsWithDelta(0.0, $parcela['detalhe_valor']['taxa'], 0.001);
 
                     return true;
                 })

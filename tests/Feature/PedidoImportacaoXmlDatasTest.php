@@ -17,7 +17,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
-class PedidoImportacaoPdfDatasTest extends TestCase
+class PedidoImportacaoXmlDatasTest extends TestCase
 {
     use RefreshDatabase;
 
@@ -61,7 +61,7 @@ class PedidoImportacaoPdfDatasTest extends TestCase
         ];
 
         $response = $this->actingAs($usuario, 'sanctum')
-            ->postJson('/api/v1/pedidos/import/pdf/confirm', $payload);
+            ->postJson('/api/v1/pedidos/import/xml/confirm', $payload);
 
         $response->assertStatus(200);
 
@@ -110,7 +110,7 @@ class PedidoImportacaoPdfDatasTest extends TestCase
         ];
 
         $response = $this->actingAs($usuario, 'sanctum')
-            ->postJson('/api/v1/pedidos/import/pdf/confirm', $payload);
+            ->postJson('/api/v1/pedidos/import/xml/confirm', $payload);
 
         $response->assertStatus(200);
 
@@ -158,7 +158,7 @@ class PedidoImportacaoPdfDatasTest extends TestCase
         ];
 
         $response = $this->actingAs($usuario, 'sanctum')
-            ->postJson('/api/v1/pedidos/import/pdf/confirm', $payload);
+            ->postJson('/api/v1/pedidos/import/xml/confirm', $payload);
 
         $response->assertStatus(200);
 
@@ -228,7 +228,7 @@ class PedidoImportacaoPdfDatasTest extends TestCase
         ];
 
         $response = $this->actingAs($usuario, 'sanctum')
-            ->postJson('/api/v1/pedidos/import/pdf/confirm', $payload);
+            ->postJson('/api/v1/pedidos/import/xml/confirm', $payload);
 
         $response->assertStatus(200);
 

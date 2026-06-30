@@ -76,7 +76,7 @@ class ImportacaoPedidoMovimentacaoEstoqueTest extends TestCase
         unset($payload['movimentar_estoque']);
 
         $response = $this->actingAs($usuario, 'sanctum')
-            ->postJson('/api/v1/pedidos/import/pdf/confirm', $payload);
+            ->postJson('/api/v1/pedidos/import/xml/confirm', $payload);
 
         $response->assertOk();
 
@@ -115,7 +115,7 @@ class ImportacaoPedidoMovimentacaoEstoqueTest extends TestCase
         );
 
         $response = $this->actingAs($usuario, 'sanctum')
-            ->postJson('/api/v1/pedidos/import/pdf/confirm', $payload);
+            ->postJson('/api/v1/pedidos/import/xml/confirm', $payload);
 
         $response->assertOk();
 
@@ -143,7 +143,7 @@ class ImportacaoPedidoMovimentacaoEstoqueTest extends TestCase
         );
 
         $response = $this->actingAs($usuario, 'sanctum')
-            ->postJson('/api/v1/pedidos/import/pdf/confirm', $this->payloadImportacao(
+            ->postJson('/api/v1/pedidos/import/xml/confirm', $this->payloadImportacao(
                 tipo: 'venda',
                 clienteId: $cliente->id,
                 categoriaId: $categoria->id,
@@ -187,7 +187,7 @@ class ImportacaoPedidoMovimentacaoEstoqueTest extends TestCase
         $payload['itens'][0]['ref'] = 'E66008';
 
         $response = $this->actingAs($usuario, 'sanctum')
-            ->postJson('/api/v1/pedidos/import/pdf/confirm', $payload);
+            ->postJson('/api/v1/pedidos/import/xml/confirm', $payload);
 
         $response
             ->assertStatus(422)
@@ -227,7 +227,7 @@ class ImportacaoPedidoMovimentacaoEstoqueTest extends TestCase
         );
 
         $response = $this->actingAs($usuario, 'sanctum')
-            ->postJson('/api/v1/pedidos/import/pdf/confirm', $payload);
+            ->postJson('/api/v1/pedidos/import/xml/confirm', $payload);
 
         $response
             ->assertStatus(422)
@@ -253,7 +253,7 @@ class ImportacaoPedidoMovimentacaoEstoqueTest extends TestCase
         );
 
         $response = $this->actingAs($usuario, 'sanctum')
-            ->postJson('/api/v1/pedidos/import/pdf/confirm', $this->payloadImportacao(
+            ->postJson('/api/v1/pedidos/import/xml/confirm', $this->payloadImportacao(
                 tipo: 'venda',
                 clienteId: $cliente->id,
                 categoriaId: $categoria->id,
@@ -311,11 +311,11 @@ class ImportacaoPedidoMovimentacaoEstoqueTest extends TestCase
         $payloadB['pedido']['numero_externo'] = $numeroExterno;
 
         $this->actingAs($usuario, 'sanctum')
-            ->postJson('/api/v1/pedidos/import/pdf/confirm', $payloadA)
+            ->postJson('/api/v1/pedidos/import/xml/confirm', $payloadA)
             ->assertOk();
 
         $this->actingAs($usuario, 'sanctum')
-            ->postJson('/api/v1/pedidos/import/pdf/confirm', $payloadB)
+            ->postJson('/api/v1/pedidos/import/xml/confirm', $payloadB)
             ->assertOk();
 
         $this->assertSame(2, \App\Models\Pedido::query()->where('numero_externo', $numeroExterno)->count());
@@ -326,7 +326,7 @@ class ImportacaoPedidoMovimentacaoEstoqueTest extends TestCase
         [$usuario, , $categoria, $variacao, $deposito] = $this->criarContexto();
 
         $response = $this->actingAs($usuario, 'sanctum')
-            ->postJson('/api/v1/pedidos/import/pdf/confirm', $this->payloadImportacao(
+            ->postJson('/api/v1/pedidos/import/xml/confirm', $this->payloadImportacao(
                 tipo: 'reposicao',
                 clienteId: null,
                 categoriaId: $categoria->id,
@@ -360,7 +360,7 @@ class ImportacaoPedidoMovimentacaoEstoqueTest extends TestCase
         [$usuario, , $categoria, $variacao, $deposito] = $this->criarContexto();
 
         $response = $this->actingAs($usuario, 'sanctum')
-            ->postJson('/api/v1/pedidos/import/pdf/confirm', $this->payloadImportacao(
+            ->postJson('/api/v1/pedidos/import/xml/confirm', $this->payloadImportacao(
                 tipo: 'reposicao',
                 clienteId: null,
                 categoriaId: $categoria->id,
@@ -389,7 +389,7 @@ class ImportacaoPedidoMovimentacaoEstoqueTest extends TestCase
         [$usuario, , $categoria, $variacao, $deposito] = $this->criarContexto();
 
         $response = $this->actingAs($usuario, 'sanctum')
-            ->postJson('/api/v1/pedidos/import/pdf/confirm', $this->payloadImportacao(
+            ->postJson('/api/v1/pedidos/import/xml/confirm', $this->payloadImportacao(
                 tipo: 'reposicao',
                 clienteId: null,
                 categoriaId: $categoria->id,
@@ -435,7 +435,7 @@ class ImportacaoPedidoMovimentacaoEstoqueTest extends TestCase
         [$usuario, , $categoria, $variacao] = $this->criarContexto();
 
         $response = $this->actingAs($usuario, 'sanctum')
-            ->postJson('/api/v1/pedidos/import/pdf/confirm', $this->payloadImportacao(
+            ->postJson('/api/v1/pedidos/import/xml/confirm', $this->payloadImportacao(
                 tipo: 'reposicao',
                 clienteId: null,
                 categoriaId: $categoria->id,
@@ -456,7 +456,7 @@ class ImportacaoPedidoMovimentacaoEstoqueTest extends TestCase
         [$usuario, $cliente, $categoria, $variacao] = $this->criarContexto();
 
         $response = $this->actingAs($usuario, 'sanctum')
-            ->postJson('/api/v1/pedidos/import/pdf/confirm', $this->payloadImportacao(
+            ->postJson('/api/v1/pedidos/import/xml/confirm', $this->payloadImportacao(
                 tipo: 'venda',
                 clienteId: $cliente->id,
                 categoriaId: $categoria->id,
@@ -516,7 +516,7 @@ class ImportacaoPedidoMovimentacaoEstoqueTest extends TestCase
         unset($payload['itens'][0]['id_variacao']);
 
         $response = $this->actingAs($usuario, 'sanctum')
-            ->postJson('/api/v1/pedidos/import/pdf/confirm', $payload);
+            ->postJson('/api/v1/pedidos/import/xml/confirm', $payload);
 
         $response
             ->assertStatus(422)

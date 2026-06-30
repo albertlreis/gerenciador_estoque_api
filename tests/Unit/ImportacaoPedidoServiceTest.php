@@ -217,7 +217,7 @@ class ImportacaoPedidoServiceTest extends TestCase
         $this->assertCount(2, $itens[0]['variacoes_encontradas']);
     }
 
-    public function test_mescla_sku_interno_repetido_vincula_variacao_mais_recente(): void
+    public function test_mescla_sku_interno_repetido_retorna_pendencia_de_variacao(): void
     {
         $categoria = Categoria::create(['nome' => 'Categoria SKU Duplicado']);
 
@@ -226,7 +226,7 @@ class ImportacaoPedidoServiceTest extends TestCase
             'id_categoria' => $categoria->id,
             'ativo' => true,
         ]);
-        ProdutoVariacao::create([
+        $variacaoAntiga = ProdutoVariacao::create([
             'produto_id' => $produtoAntigo->id,
             'referencia' => 'REF-SKU-PEDIDO-OLD',
             'sku_interno' => 'SKU-PEDIDO-DUP',
@@ -259,7 +259,12 @@ class ImportacaoPedidoServiceTest extends TestCase
             'preco_unitario' => '99',
         ]]);
 
-        $this->assertSame($variacaoRecente->id, $itens[0]['id_variacao']);
-        $this->assertSame($produtoRecente->id, $itens[0]['produto_id']);
+        $this->assertNull($itens[0]['id_variacao']);
+        $this->assertNull($itens[0]['produto_id']);
+        $this->assertCount(2, $itens[0]['variacoes_encontradas']);
+        $this->assertEqualsCanonicalizing(
+            [$variacaoAntiga->id, $variacaoRecente->id],
+            array_column($itens[0]['variacoes_encontradas'], 'id_variacao')
+        );
     }
 }

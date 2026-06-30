@@ -27,6 +27,21 @@ class ProdutoEstoqueResource extends JsonResource
         $diasSemVenda = $this->dias_sem_venda ?? null;
         $estoqueOutletTotal = (int) ($this->quantidade_outlet ?? $this->estoque_outlet_total ?? 0);
         $outletRestanteTotal = (int) ($this->quantidade_outlet_restante ?? $this->outlet_restante_total ?? 0);
+        $quantidadeClienteAguardando = (int) (
+            $estoque?->quantidade_cliente_aguardando_estoque
+            ?? $this->quantidade_cliente_aguardando_estoque
+            ?? 0
+        );
+        $quantidadeReservadaCliente = (int) (
+            $estoque?->quantidade_reservada_cliente
+            ?? $this->quantidade_reservada_cliente
+            ?? 0
+        );
+        $quantidadeClientePendenteEntrega = (int) (
+            $estoque?->quantidade_cliente_pendente_entrega
+            ?? $this->quantidade_cliente_pendente_entrega
+            ?? 0
+        );
 
         if ($diasSemVenda === null && ($ultimaVendaEm || $dataEntradaAtual)) {
             $timezone = config('app.timezone', 'America/Belem');
@@ -64,10 +79,17 @@ class ProdutoEstoqueResource extends JsonResource
                 'corredor' => $localizacao->corredor,
                 'setor' => $localizacao->setor,
                 'coluna' => $localizacao->coluna,
+                'nivel' => $localizacao->nivel,
                 'codigo_composto' => $localizacao->codigo_composto,
                 'observacoes' => $localizacao->observacoes,
                 'ativo' => (bool) $localizacao->ativo,
             ] : null,
+            'quantidade_estoque_cliente_total' => $quantidadeClienteAguardando
+                + $quantidadeReservadaCliente
+                + $quantidadeClientePendenteEntrega,
+            'quantidade_cliente_aguardando_estoque' => $quantidadeClienteAguardando,
+            'quantidade_reservada_cliente' => $quantidadeReservadaCliente,
+            'quantidade_cliente_pendente_entrega' => $quantidadeClientePendenteEntrega,
         ];
     }
 }

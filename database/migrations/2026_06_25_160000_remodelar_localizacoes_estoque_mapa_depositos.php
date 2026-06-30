@@ -23,6 +23,7 @@ return new class extends Migration
             $table->string('corredor', 80)->nullable();
             $table->string('setor', 80)->nullable();
             $table->string('coluna', 80)->nullable();
+            $table->string('nivel', 80)->nullable();
             $table->string('codigo_composto', 255);
             $table->text('observacoes')->nullable();
             $table->boolean('ativo')->default(true)->index();
@@ -173,9 +174,10 @@ return new class extends Migration
                 $corredor = $this->trimOrNull($row->corredor ?? null) ?? $this->dimensionValue($values, ['corredor']);
                 $setor = $this->trimOrNull($row->setor ?? null);
                 $coluna = $this->trimOrNull($row->coluna ?? null);
+                $nivel = $this->trimOrNull($row->nivel ?? null) ?? $this->dimensionValue($values, ['nivel', 'nível']);
                 $observacoes = $this->buildObservacoes(
                     $row->observacoes ?? null,
-                    $row->nivel ?? null,
+                    null,
                     $row->prateleira ?? null,
                     $row->estoque_nivel ?? null,
                     $values
@@ -188,7 +190,8 @@ return new class extends Migration
                     'corredor' => $corredor,
                     'setor' => $setor,
                     'coluna' => $coluna,
-                    'codigo_composto' => $this->codigoComposto($area, $corredor, $setor, $coluna),
+                    'nivel' => $nivel,
+                    'codigo_composto' => $this->codigoComposto($area, $corredor, $setor, $coluna, $nivel),
                     'observacoes' => $observacoes,
                 ];
             })
@@ -237,6 +240,7 @@ return new class extends Migration
                 $corredor = $this->trimOrNull($row->corredor ?? null);
                 $setor = null;
                 $coluna = null;
+                $nivel = $this->trimOrNull($row->estoque_nivel ?? null);
 
                 return [
                     'estoque_id' => (int) $row->estoque_id,
@@ -245,12 +249,13 @@ return new class extends Migration
                     'corredor' => $corredor,
                     'setor' => $setor,
                     'coluna' => $coluna,
-                    'codigo_composto' => $this->codigoComposto($area, $corredor, $setor, $coluna),
+                    'nivel' => $nivel,
+                    'codigo_composto' => $this->codigoComposto($area, $corredor, $setor, $coluna, $nivel),
                     'observacoes' => $this->buildObservacoes(
                         null,
                         null,
                         $row->prateleira ?? null,
-                        $row->estoque_nivel ?? null,
+                        null,
                         []
                     ),
                 ];
@@ -300,6 +305,7 @@ return new class extends Migration
                     'corredor' => $row['corredor'],
                     'setor' => $row['setor'],
                     'coluna' => $row['coluna'],
+                    'nivel' => $row['nivel'],
                     'codigo_composto' => $row['codigo_composto'],
                     'observacoes' => $row['observacoes'],
                     'ativo' => true,
@@ -374,20 +380,29 @@ return new class extends Migration
         return trim(($base ? $base . "\n" : '') . implode("\n", $extras));
     }
 
-    private function codigoComposto(?string $area, ?string $corredor, ?string $setor, ?string $coluna): ?string
+    private function codigoComposto(
+        ?string $area,
+        ?string $corredor,
+        ?string $setor,
+        ?string $coluna,
+        ?string $nivel
+    ): ?string
     {
         $parts = [
             $this->trimOrNull($area),
             $this->trimOrNull($corredor),
             $this->trimOrNull($setor),
             $this->trimOrNull($coluna),
+            $this->trimOrNull($nivel),
         ];
 
-        if (count(array_filter($parts, fn ($part) => $part !== null)) === 0) {
+        $parts = array_values(array_filter($parts, fn ($part) => $part !== null));
+
+        if (count($parts) === 0) {
             return null;
         }
 
-        return implode('-', array_map(fn ($part) => $part ?? '-', $parts));
+        return implode('-', $parts);
     }
 
     private function trimOrNull(mixed $value): ?string
@@ -398,7 +413,7 @@ return new class extends Migration
 
         $trimmed = trim((string) $value);
 
-        return $trimmed === '' ? null : $trimmed;
+        return $trimmed === '' || preg_match('/^-+$/', $trimmed) ? null : $trimmed;
     }
 
     private function normalizeName(string $value): string

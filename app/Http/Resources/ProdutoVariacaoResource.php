@@ -52,6 +52,14 @@ class ProdutoVariacaoResource extends JsonResource
         }
         $estoqueDisponivelTotal = max(0, $estoqueFisicoTotal - $estoqueReservadoTotal);
 
+        $outletResource = function ($outlet) {
+            if ($outlet && !$outlet->relationLoaded('variacao')) {
+                $outlet->setRelation('variacao', $this->resource);
+            }
+
+            return $outlet ? new ProdutoVariacaoOutletResource($outlet) : null;
+        };
+
         // Outlet agregados
         $estoqueOutletTotal = $this->whenLoaded('outlets', fn () => (int) $this->outlets->sum('quantidade'));
         $outletRestanteTotal = $this->whenLoaded('outlets', fn () => (int) $this->outlets->sum('quantidade_restante'));
@@ -66,6 +74,16 @@ class ProdutoVariacaoResource extends JsonResource
             'chave_variacao' => $this->chave_variacao,
             'codigo_barras' => $this->codigo_barras,
             'imagem_url' => ProdutoImagem::normalizarUrlPublica($this->imagem?->url ?? $this->imagem_url),
+            'imagens' => $this->whenLoaded('imagens', function () {
+                return $this->imagens->map(fn ($imagem) => [
+                    'id' => $imagem->id,
+                    'id_variacao' => $imagem->id_variacao,
+                    'url' => $imagem->url,
+                    'url_completa' => ProdutoImagem::normalizarUrlPublica($imagem->url ?? $imagem->url_completa),
+                    'principal' => (bool) $imagem->principal,
+                    'ordem' => (int) ($imagem->ordem ?? 0),
+                ])->values();
+            }),
             'altura' => $this->dimensao_3,
             'largura' => $this->dimensao_1,
             'profundidade' => $this->dimensao_2,
@@ -94,8 +112,10 @@ class ProdutoVariacaoResource extends JsonResource
             // ✅ outlets
             'estoque_outlet_total' => $estoqueOutletTotal,
             'outlet_restante_total' => $outletRestanteTotal,
-            'outlet' => new ProdutoVariacaoOutletResource($this->whenLoaded('outlet')),
-            'outlets' => ProdutoVariacaoOutletResource::collection($this->whenLoaded('outlets')),
+            'outlet' => $this->whenLoaded('outlet', fn () => $outletResource($this->outlet)),
+            'outlets' => $this->whenLoaded('outlets', fn () => $this->outlets
+                ->map(fn ($outlet) => $outletResource($outlet))
+                ->values()),
 
             // ✅ atributos (ordenados se carregados)
             'atributos' => ProdutoVariacaoAtributoResource::collection(

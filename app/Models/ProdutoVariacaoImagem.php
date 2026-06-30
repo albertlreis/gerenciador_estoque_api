@@ -12,6 +12,13 @@ class ProdutoVariacaoImagem extends Model
     protected $fillable = [
         'id_variacao',
         'url',
+        'principal',
+        'ordem',
+    ];
+
+    protected $casts = [
+        'principal' => 'boolean',
+        'ordem' => 'integer',
     ];
 
     protected $appends = [

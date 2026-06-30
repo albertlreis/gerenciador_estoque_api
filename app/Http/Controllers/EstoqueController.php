@@ -14,6 +14,7 @@ use App\Services\EstoqueMovimentacaoService;
 use App\Services\EstoqueService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
@@ -100,7 +101,9 @@ class EstoqueController extends Controller
         }
 
         $dados = $request->validate([
-            'estoque_id' => ['required', 'integer', 'exists:estoque,id'],
+            'estoque_id' => ['nullable', 'integer', 'exists:estoque,id', 'required_without_all:variacao_id,deposito_id'],
+            'variacao_id' => ['nullable', 'integer', 'exists:produto_variacoes,id', 'required_without:estoque_id'],
+            'deposito_id' => ['nullable', 'integer', 'exists:depositos,id', 'required_without:estoque_id'],
             'quantidade_final' => ['required', 'integer', 'min:0'],
             'observacao' => ['nullable', 'string', 'max:1000'],
         ]);
@@ -108,10 +111,7 @@ class EstoqueController extends Controller
         try {
             $movimentacao = DB::transaction(function () use ($dados, $movimentacaoService) {
                 /** @var Estoque $estoque */
-                $estoque = Estoque::query()
-                    ->whereKey((int) $dados['estoque_id'])
-                    ->lockForUpdate()
-                    ->firstOrFail();
+                $estoque = $this->resolverEstoqueAjusteManual($dados);
 
                 $quantidadeAtual = (int) $estoque->quantidade;
                 $quantidadeFinal = (int) $dados['quantidade_final'];
@@ -158,5 +158,49 @@ class EstoqueController extends Controller
         } catch (\InvalidArgumentException $e) {
             return response()->json(['error' => $e->getMessage()], 422);
         }
+    }
+
+    /**
+     * @param array<string, mixed> $dados
+     */
+    private function resolverEstoqueAjusteManual(array $dados): Estoque
+    {
+        if (!empty($dados['estoque_id'])) {
+            return Estoque::query()
+                ->whereKey((int) $dados['estoque_id'])
+                ->lockForUpdate()
+                ->firstOrFail();
+        }
+
+        $variacaoId = (int) $dados['variacao_id'];
+        $depositoId = (int) $dados['deposito_id'];
+
+        $estoque = Estoque::query()
+            ->where('id_variacao', $variacaoId)
+            ->where('id_deposito', $depositoId)
+            ->lockForUpdate()
+            ->first();
+
+        if ($estoque) {
+            return $estoque;
+        }
+
+        try {
+            return Estoque::query()->create([
+                'id_variacao' => $variacaoId,
+                'id_deposito' => $depositoId,
+                'quantidade' => 0,
+            ]);
+        } catch (QueryException $e) {
+            if (($e->errorInfo[0] ?? null) !== '23000') {
+                throw $e;
+            }
+        }
+
+        return Estoque::query()
+            ->where('id_variacao', $variacaoId)
+            ->where('id_deposito', $depositoId)
+            ->lockForUpdate()
+            ->firstOrFail();
     }
 }

@@ -243,13 +243,17 @@ class ProdutoService
 
         $with = [
             'categoria',
+            'imagemPrincipal',
+            'imagens',
             'variacoes' => function ($q) use ($depositoId, $incluirEstoque) {
                 // ✅ evita N+1 e mantém coerência do catálogo
                 $q->with([
                     'atributos',
                     'codigosHistoricos',
                     'imagem',
+                    'imagens',
                     'outlets', // se você precisa do outlet no catálogo
+                    'outlets.imagemSelecionada',
                     'outlets.motivo',
                     'outlets.formasPagamento.formaPagamento',
                 ]);
@@ -407,7 +411,9 @@ class ProdutoService
                     'atributos',
                     'codigosHistoricos',
                     'imagem',
+                    'imagens',
                     'outlets',
+                    'outlets.imagemSelecionada',
                     'outlets.motivo',
                     'outlets.formasPagamento.formaPagamento',
                     'estoques' => function ($e) use ($depositoId) {

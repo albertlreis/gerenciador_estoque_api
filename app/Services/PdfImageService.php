@@ -112,6 +112,16 @@ class PdfImageService
         return $this->fromProdutoVariacao($variacao) ?? $this->placeholderDataUri();
     }
 
+    public function fromProdutoDaVariacao(?ProdutoVariacao $variacao): ?string
+    {
+        return $this->fromProduto($variacao?->produto);
+    }
+
+    public function fromProdutoDaVariacaoOrPlaceholder(?ProdutoVariacao $variacao): string
+    {
+        return $this->fromProdutoDaVariacao($variacao) ?? $this->placeholderDataUri();
+    }
+
     public function fromProduto(?Produto $produto): ?string
     {
         if ($produto === null) {

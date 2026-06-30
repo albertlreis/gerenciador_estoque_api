@@ -108,6 +108,57 @@ class AjusteManualEstoqueTest extends TestCase
         ]);
     }
 
+    public function test_desenvolvedor_cria_saldo_zerado_por_variacao_e_deposito(): void
+    {
+        $usuario = Usuario::create([
+            'nome' => 'Usuario Ajuste Zerado',
+            'email' => 'ajuste.zerado.' . uniqid() . '@example.test',
+            'senha' => 'senha',
+            'ativo' => true,
+        ]);
+        $categoria = Categoria::create(['nome' => 'Categoria Ajuste Zerado']);
+        $produto = Produto::create([
+            'nome' => 'Produto Ajuste Zerado',
+            'descricao' => 'Teste',
+            'id_categoria' => $categoria->id,
+            'ativo' => true,
+        ]);
+        $variacao = ProdutoVariacao::create([
+            'produto_id' => $produto->id,
+            'referencia' => 'AJ-Z',
+            'nome' => 'Variacao Ajuste Zerado',
+            'preco' => 100,
+            'custo' => 50,
+        ]);
+        $deposito = Deposito::create(['nome' => 'Deposito Ajuste Zerado']);
+        $this->actingAsComPerfis($usuario, ['Desenvolvedor']);
+
+        $response = $this->postJson('/api/v1/estoque/ajustes-manuais', [
+            'variacao_id' => $variacao->id,
+            'deposito_id' => $deposito->id,
+            'quantidade_final' => 4,
+            'observacao' => 'Contagem inicial',
+        ]);
+
+        $response->assertCreated();
+
+        $estoque = Estoque::query()
+            ->where('id_variacao', $variacao->id)
+            ->where('id_deposito', $deposito->id)
+            ->first();
+
+        $this->assertNotNull($estoque);
+        $this->assertSame(4, (int) $estoque->quantidade);
+        $this->assertDatabaseHas('estoque_movimentacoes', [
+            'id_variacao' => $variacao->id,
+            'id_deposito_destino' => $deposito->id,
+            'tipo' => 'entrada',
+            'quantidade' => 4,
+            'ref_type' => 'ajuste_manual',
+            'ref_id' => $estoque->id,
+        ]);
+    }
+
     public function test_desenvolvedor_reduz_saldo_registrando_saida(): void
     {
         [$usuario, $variacao, $deposito, $estoque] = $this->criarCenario(5);

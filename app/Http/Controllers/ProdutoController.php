@@ -95,6 +95,8 @@ class ProdutoController extends Controller
                 'imagemPrincipal',
                 'variacoes.atributos',
                 'variacoes.imagem',
+                'variacoes.imagens',
+                'variacoes.outlets.imagemSelecionada',
                 'variacoes.outlets.formasPagamento.formaPagamento',
             ]);
 

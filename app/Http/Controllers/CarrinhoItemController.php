@@ -8,6 +8,7 @@ use App\Models\CarrinhoItem;
 use App\Models\ProdutoVariacaoOutlet;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Auth;
 use App\Helpers\AuthHelper;
 use Illuminate\Validation\ValidationException;
@@ -130,24 +131,85 @@ class CarrinhoItemController extends Controller
      * @param Request $request
      * @return JsonResponse
      */
-    public function atualizarDeposito(Request $request): JsonResponse
+    public function atualizarDeposito(Request $request, int $carrinho): JsonResponse
     {
-        $request->validate([
-            'id_carrinho_item' => 'required|exists:carrinho_itens,id',
-            'id_deposito'      => 'nullable|exists:depositos,id',
+        $validated = $request->validate([
+            'id_carrinho_item' => 'required|integer|exists:carrinho_itens,id',
+            'id_deposito'      => 'nullable|integer|exists:depositos,id',
         ]);
 
-        $item = CarrinhoItem::where('id', $request->id_carrinho_item)
-            ->whereHas('carrinho', function ($q) {
-                if (!AuthHelper::podeVisualizarCarrinhosDeTodos()) {
-                    $q->where('id_usuario', Auth::id());
-                }
-            })
-            ->firstOrFail();
-
-        $item->id_deposito = $request->id_deposito;
-        $item->save();
+        $this->atualizarDepositosDoCarrinho($carrinho, [[
+            'id_carrinho_item' => (int) $validated['id_carrinho_item'],
+            'id_deposito' => $validated['id_deposito'] ?? null,
+        ]]);
 
         return response()->json(['success' => true]);
+    }
+
+    /**
+     * Atualiza o deposito vinculado a varios itens do carrinho.
+     *
+     * @param Request $request
+     * @param int $carrinho
+     * @return JsonResponse
+     */
+    public function atualizarDepositos(Request $request, int $carrinho): JsonResponse
+    {
+        $validated = $request->validate([
+            'itens' => ['required', 'array', 'min:1'],
+            'itens.*.id_carrinho_item' => ['required', 'integer', 'distinct', 'exists:carrinho_itens,id'],
+            'itens.*.id_deposito' => ['nullable', 'integer', 'exists:depositos,id'],
+        ]);
+
+        $updated = $this->atualizarDepositosDoCarrinho($carrinho, $validated['itens']);
+
+        return response()->json(['success' => true, 'updated' => $updated]);
+    }
+
+    private function carrinhoAutorizado(int $carrinho): Carrinho
+    {
+        $query = Carrinho::where('id', $carrinho);
+
+        if (!AuthHelper::podeVisualizarCarrinhosDeTodos()) {
+            $query->where('id_usuario', Auth::id());
+        }
+
+        return $query->firstOrFail();
+    }
+
+    /**
+     * @param array<int,array{id_carrinho_item:int,id_deposito?:int|null}> $itensPayload
+     */
+    private function atualizarDepositosDoCarrinho(int $carrinhoId, array $itensPayload): int
+    {
+        $carrinho = $this->carrinhoAutorizado($carrinhoId);
+        $ids = collect($itensPayload)
+            ->pluck('id_carrinho_item')
+            ->map(fn ($id) => (int) $id)
+            ->values();
+
+        $itens = $carrinho->itens()
+            ->whereIn('id', $ids)
+            ->get()
+            ->keyBy('id');
+
+        foreach ($itensPayload as $index => $payload) {
+            if (!$itens->has((int) $payload['id_carrinho_item'])) {
+                throw ValidationException::withMessages([
+                    "itens.$index.id_carrinho_item" => ['Item nao pertence a este carrinho.'],
+                ]);
+            }
+        }
+
+        DB::transaction(function () use ($itensPayload, $itens) {
+            foreach ($itensPayload as $payload) {
+                /** @var CarrinhoItem $item */
+                $item = $itens->get((int) $payload['id_carrinho_item']);
+                $item->id_deposito = $payload['id_deposito'] ?? null;
+                $item->save();
+            }
+        });
+
+        return count($itensPayload);
     }
 }

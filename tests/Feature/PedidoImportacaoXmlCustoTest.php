@@ -10,7 +10,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
-class PedidoImportacaoPdfCustoTest extends TestCase
+class PedidoImportacaoXmlCustoTest extends TestCase
 {
     use RefreshDatabase;
 
@@ -55,7 +55,7 @@ class PedidoImportacaoPdfCustoTest extends TestCase
         ];
 
         $response = $this->actingAs($usuario, 'sanctum')
-            ->postJson('/api/v1/pedidos/import/pdf/confirm', $payload);
+            ->postJson('/api/v1/pedidos/import/xml/confirm', $payload);
 
         $response->assertStatus(200);
 
@@ -105,7 +105,7 @@ class PedidoImportacaoPdfCustoTest extends TestCase
         ];
 
         $response = $this->actingAs($usuario, 'sanctum')
-            ->postJson('/api/v1/pedidos/import/pdf/confirm', $payload);
+            ->postJson('/api/v1/pedidos/import/xml/confirm', $payload);
 
         $response->assertStatus(422);
         $response->assertJsonValidationErrors(['itens.0.preco_unitario']);

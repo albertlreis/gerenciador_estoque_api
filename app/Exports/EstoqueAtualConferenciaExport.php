@@ -19,6 +19,9 @@ class EstoqueAtualConferenciaExport implements FromArray, ShouldAutoSize, WithHe
         'deposito' => 'Deposito',
         'quantidade' => 'Quantidade',
         'estoque_cliente' => 'Estoque cliente',
+        'estoque_cliente_aguardando' => 'Aguardando estoque',
+        'estoque_cliente_reservado' => 'Reservado cliente',
+        'estoque_cliente_pendente_entrega' => 'Pendente entrega',
         'localizacao' => 'Localizacao',
         'area' => 'Area',
         'corredor' => 'Corredor',
@@ -110,13 +113,36 @@ class EstoqueAtualConferenciaExport implements FromArray, ShouldAutoSize, WithHe
     private static function montarLinha($item, $estoqueItem): array
     {
         $localizacao = $estoqueItem?->localizacao;
+        $estoqueClienteAguardando = (int) (
+            $estoqueItem?->quantidade_cliente_aguardando_estoque
+            ?? $item->quantidade_cliente_aguardando_estoque
+            ?? 0
+        );
+        $estoqueClienteReservado = (int) (
+            $estoqueItem?->quantidade_reservada_cliente
+            ?? $item->quantidade_reservada_cliente
+            ?? 0
+        );
+        $estoqueClientePendenteEntrega = (int) (
+            $estoqueItem?->quantidade_cliente_pendente_entrega
+            ?? $item->quantidade_cliente_pendente_entrega
+            ?? 0
+        );
+        $estoqueClienteTotal = (int) (
+            $estoqueItem?->quantidade_estoque_cliente_total
+            ?? $item->quantidade_estoque_cliente_total
+            ?? ($estoqueClienteAguardando + $estoqueClienteReservado + $estoqueClientePendenteEntrega)
+        );
 
         return [
             'produto' => $item->nome_completo,
             'referencia' => $item->sku_interno ?: ($item->referencia ?: $item->chave_variacao),
             'deposito' => $estoqueItem?->deposito?->nome ?? '-',
             'quantidade' => (int) ($estoqueItem?->quantidade ?? $item->quantidade_estoque ?? 0),
-            'estoque_cliente' => (int) ($estoqueItem?->quantidade_reservada_cliente ?? $item->quantidade_reservada_cliente ?? 0),
+            'estoque_cliente' => $estoqueClienteTotal,
+            'estoque_cliente_aguardando' => $estoqueClienteAguardando,
+            'estoque_cliente_reservado' => $estoqueClienteReservado,
+            'estoque_cliente_pendente_entrega' => $estoqueClientePendenteEntrega,
             'localizacao' => self::formatarLocalizacao($localizacao),
             'area' => $localizacao?->area,
             'corredor' => $localizacao?->corredor,

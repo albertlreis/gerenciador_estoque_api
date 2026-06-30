@@ -71,7 +71,7 @@ class ImportacaoPedidoEstrategiaVinculoTest extends TestCase
         ];
 
         $response = $this->actingAs($usuario, 'sanctum')
-            ->postJson('/api/v1/pedidos/import/pdf/confirm', $payload);
+            ->postJson('/api/v1/pedidos/import/xml/confirm', $payload);
 
         $response->assertStatus(200);
 
@@ -137,7 +137,7 @@ class ImportacaoPedidoEstrategiaVinculoTest extends TestCase
         ];
 
         $response = $this->actingAs($usuario, 'sanctum')
-            ->postJson('/api/v1/pedidos/import/pdf/confirm', $payload);
+            ->postJson('/api/v1/pedidos/import/xml/confirm', $payload);
 
         $response->assertStatus(200);
 
@@ -190,7 +190,7 @@ class ImportacaoPedidoEstrategiaVinculoTest extends TestCase
         ];
 
         $response = $this->actingAs($usuario, 'sanctum')
-            ->postJson('/api/v1/pedidos/import/pdf/confirm', $payload);
+            ->postJson('/api/v1/pedidos/import/xml/confirm', $payload);
 
         $response->assertStatus(422);
 
@@ -240,7 +240,7 @@ class ImportacaoPedidoEstrategiaVinculoTest extends TestCase
         ];
 
         $response = $this->actingAs($usuario, 'sanctum')
-            ->postJson('/api/v1/pedidos/import/pdf/confirm', $payload);
+            ->postJson('/api/v1/pedidos/import/xml/confirm', $payload);
 
         $response->assertStatus(422);
         $response->assertJsonValidationErrors('itens.0.ref');
@@ -290,7 +290,7 @@ class ImportacaoPedidoEstrategiaVinculoTest extends TestCase
         ];
 
         $response = $this->actingAs($usuario, 'sanctum')
-            ->postJson('/api/v1/pedidos/import/pdf/confirm', $payload);
+            ->postJson('/api/v1/pedidos/import/xml/confirm', $payload);
 
         $response->assertStatus(422);
         $response->assertJsonValidationErrors('itens.0.ref');
@@ -354,7 +354,7 @@ class ImportacaoPedidoEstrategiaVinculoTest extends TestCase
         ];
 
         $response = $this->actingAs($usuario, 'sanctum')
-            ->postJson('/api/v1/pedidos/import/pdf/confirm', $payload);
+            ->postJson('/api/v1/pedidos/import/xml/confirm', $payload);
 
         $response->assertStatus(200);
 

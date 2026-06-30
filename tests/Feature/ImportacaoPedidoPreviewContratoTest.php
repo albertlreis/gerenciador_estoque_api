@@ -343,7 +343,7 @@ XML
         ]);
 
         $response = $this->actingAs($usuario, 'sanctum')
-            ->postJson('/api/v1/pedidos/import/pdf/confirm', [
+            ->postJson('/api/v1/pedidos/import/xml/confirm', [
                 'importacao_id' => $importacao->id,
                 'pedido' => ['tipo' => 'reposicao', 'numero_externo' => '999', 'total' => 100, 'id_fornecedor' => $fornecedor->id],
                 'cliente' => [],
@@ -365,7 +365,7 @@ XML
         $fornecedor = $this->criarFornecedor();
 
         $response = $this->actingAs($usuario, 'sanctum')
-            ->postJson('/api/v1/pedidos/import/pdf/confirm', [
+            ->postJson('/api/v1/pedidos/import/xml/confirm', [
                 'pedido' => ['tipo' => 'reposicao', 'numero_externo' => '', 'total' => 100, 'id_fornecedor' => $fornecedor->id],
                 'cliente' => [],
                 'itens' => [
@@ -389,7 +389,7 @@ XML
         $categoria = $this->criarCategoria(['nome' => 'Importacao XML - Sem categoria']);
 
         $response = $this->actingAs($usuario, 'sanctum')
-            ->postJson('/api/v1/pedidos/import/pdf/confirm', [
+            ->postJson('/api/v1/pedidos/import/xml/confirm', [
                 'pedido' => [
                     'tipo' => 'reposicao',
                     'numero_externo' => 'CAT-PROIBIDA',
@@ -419,7 +419,7 @@ XML
         $fornecedor = $this->criarFornecedor();
 
         $response = $this->actingAs($usuario, 'sanctum')
-            ->postJson('/api/v1/pedidos/import/pdf/confirm', [
+            ->postJson('/api/v1/pedidos/import/xml/confirm', [
                 'pedido' => [
                     'tipo' => 'reposicao',
                     'numero_externo' => 'SEM-CATEGORIA',
@@ -463,7 +463,7 @@ XML
         ]);
 
         $response = $this->actingAs($usuario, 'sanctum')
-            ->postJson('/api/v1/pedidos/import/pdf/confirm', [
+            ->postJson('/api/v1/pedidos/import/xml/confirm', [
                 'pedido' => [
                     'tipo' => 'reposicao',
                     'numero_externo' => 'VAR-CAT-PROIBIDA',
@@ -495,7 +495,7 @@ XML
         $categoria = $this->criarCategoria();
 
         $response = $this->actingAs($usuario, 'sanctum')
-            ->postJson('/api/v1/pedidos/import/pdf/confirm', [
+            ->postJson('/api/v1/pedidos/import/xml/confirm', [
                 'pedido' => [
                     'tipo' => 'reposicao',
                     'numero_externo' => 'MAN-SEM-FORN',
@@ -540,7 +540,7 @@ XML
         $categoria = $this->criarCategoria();
 
         $response = $this->actingAs($usuario, 'sanctum')
-            ->postJson('/api/v1/pedidos/import/pdf/confirm', [
+            ->postJson('/api/v1/pedidos/import/xml/confirm', [
                 'importacao_id' => null,
                 'tipo_importacao' => null,
                 'movimentar_estoque' => false,

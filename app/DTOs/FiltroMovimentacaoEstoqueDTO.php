@@ -7,6 +7,13 @@ namespace App\DTOs;
  */
 class FiltroMovimentacaoEstoqueDTO
 {
+    public const ESTOQUE_CLIENTE_STATUSES = [
+        'todos_pendentes',
+        'aguardando_estoque',
+        'reservado',
+        'pendente_entrega',
+    ];
+
     /** @var int|null ID da variação do produto */
     public ?int $variacao;
 
@@ -32,6 +39,8 @@ class FiltroMovimentacaoEstoqueDTO
     public ?int $localizacaoId;
 
     public bool $estoqueCliente;
+
+    public ?string $estoqueClienteStatus;
 
     /** @var array<int, string>|null Período da movimentação (inicial, final) */
     public ?array $periodo;
@@ -73,10 +82,17 @@ class FiltroMovimentacaoEstoqueDTO
         if ($this->area === '') {
             $this->area = null;
         }
-        $this->estoqueCliente = filter_var(
+        $estoqueClienteLegado = filter_var(
             $data['estoque_cliente'] ?? false,
             FILTER_VALIDATE_BOOLEAN
         );
+        $estoqueClienteStatus = isset($data['estoque_cliente_status'])
+            ? strtolower(trim((string) $data['estoque_cliente_status']))
+            : null;
+        $this->estoqueClienteStatus = in_array($estoqueClienteStatus, self::ESTOQUE_CLIENTE_STATUSES, true)
+            ? $estoqueClienteStatus
+            : ($estoqueClienteLegado ? 'todos_pendentes' : null);
+        $this->estoqueCliente = $this->estoqueClienteStatus !== null;
         $this->periodo = $data['periodo'] ?? null;
         $this->sortField = $data['sort_field'] ?? null;
         $this->sortOrder = $data['sort_order'] ?? 'desc';

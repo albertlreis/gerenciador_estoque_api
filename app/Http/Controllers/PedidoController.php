@@ -197,9 +197,9 @@ class PedidoController extends Controller
      * @return JsonResponse
      * @throws \Illuminate\Validation\ValidationException
      */
-    public function confirmarImportacaoPDF(Request $request): JsonResponse
+    public function confirmarImportacaoXml(Request $request): JsonResponse
     {
-        return $this->importacaoService->confirmarImportacaoPDF($request);
+        return $this->importacaoService->confirmarImportacaoXml($request);
     }
 
     /**

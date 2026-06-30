@@ -7,7 +7,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Tests\TestCase;
 
-class ImportacaoPedidoPdfExamplesTest extends TestCase
+class ImportacaoPedidoFornecedorXmlExamplesTest extends TestCase
 {
     use RefreshDatabase;
 
@@ -66,7 +66,7 @@ class ImportacaoPedidoPdfExamplesTest extends TestCase
         }
     }
 
-    public function test_rejeita_tipo_antigo_de_importacao_pdf(): void
+    public function test_rejeita_tipo_de_importacao_nao_suportado(): void
     {
         $usuario = Usuario::create([
             'nome' => 'Usuario Tipo Antigo',
@@ -80,7 +80,7 @@ class ImportacaoPedidoPdfExamplesTest extends TestCase
 
         $response = $this->actingAs($usuario, 'sanctum')
             ->post('/api/v1/pedidos/import', [
-                'tipo_importacao' => 'PRODUTOS_PDF_SIERRA',
+                'tipo_importacao' => 'PRODUTOS_IMPORTACAO_DESCONHECIDA',
                 'arquivo' => $file,
             ]);
 

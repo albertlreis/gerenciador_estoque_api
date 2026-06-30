@@ -19,6 +19,7 @@ class FiltroEstoqueDTOTest extends TestCase
             'periodo' => ['2026-01-01', '2026-01-31'],
             'per_page' => 500,
             'estoque_status' => 'sem_estoque',
+            'estoque_cliente_status' => 'reservado',
             'zerados' => '1',
             'sort_field' => 'referencia',
             'sort_order' => 'DESC',
@@ -33,6 +34,8 @@ class FiltroEstoqueDTOTest extends TestCase
         $this->assertSame(['2026-01-01', '2026-01-31'], $dto->periodo);
         $this->assertSame(200, $dto->perPage);
         $this->assertSame('sem_estoque', $dto->estoqueStatus);
+        $this->assertSame('reservado', $dto->estoqueClienteStatus);
+        $this->assertTrue($dto->estoqueCliente);
         $this->assertTrue($dto->zerados);
         $this->assertFalse($dto->comEstoque);
         $this->assertSame('referencia', $dto->sortField);
@@ -51,6 +54,7 @@ class FiltroEstoqueDTOTest extends TestCase
             'periodo' => ['2026-01-01', ''],
             'per_page' => 0,
             'estoque_status' => 'com_estoque',
+            'estoque_cliente_status' => 'invalido',
             'zerados' => 'false',
             'sort_order' => 'invalido',
         ]);
@@ -64,8 +68,20 @@ class FiltroEstoqueDTOTest extends TestCase
         $this->assertNull($dto->periodo);
         $this->assertSame(1, $dto->perPage);
         $this->assertSame('com_estoque', $dto->estoqueStatus);
+        $this->assertNull($dto->estoqueClienteStatus);
+        $this->assertFalse($dto->estoqueCliente);
         $this->assertFalse($dto->zerados);
         $this->assertTrue($dto->comEstoque);
         $this->assertNull($dto->sortOrder);
+    }
+
+    public function test_estoque_cliente_legado_vira_todos_pendentes(): void
+    {
+        $dto = new FiltroEstoqueDTO([
+            'estoque_cliente' => '1',
+        ]);
+
+        $this->assertSame('todos_pendentes', $dto->estoqueClienteStatus);
+        $this->assertTrue($dto->estoqueCliente);
     }
 }

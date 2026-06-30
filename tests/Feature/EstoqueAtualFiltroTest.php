@@ -11,7 +11,9 @@ use App\Models\LocalizacaoEstoque;
 use App\Models\OutletFormaPagamento;
 use App\Models\OutletMotivo;
 use App\Models\Pedido;
+use App\Models\PedidoItem;
 use App\Models\Produto;
+use App\Models\ProdutoEntregaItem;
 use App\Models\ProdutoVariacao;
 use App\Models\ProdutoVariacaoOutlet;
 use App\Models\ProdutoVariacaoOutletPagamento;
@@ -77,6 +79,64 @@ class EstoqueAtualFiltroTest extends TestCase
         );
 
         return [$variacaoCom, $variacaoSem, $deposito, $usuario];
+    }
+
+    private function criarVariacao(Produto $produto, string $referencia): ProdutoVariacao
+    {
+        return ProdutoVariacao::create([
+            'produto_id' => $produto->id,
+            'referencia' => $referencia,
+            'sku_interno' => $referencia,
+            'nome' => $referencia,
+            'preco' => 100,
+            'custo' => 50,
+        ]);
+    }
+
+    private function criarPedido(Usuario $usuario, string $tipo = Pedido::TIPO_VENDA): Pedido
+    {
+        $cliente = Cliente::create(['nome' => 'Cliente ' . uniqid()]);
+
+        return Pedido::create([
+            'tipo' => $tipo,
+            'id_cliente' => $cliente->id,
+            'id_usuario' => $usuario->id,
+            'data_pedido' => now(),
+            'valor_total' => 100,
+        ]);
+    }
+
+    private function criarEntregaPedido(
+        Pedido $pedido,
+        ProdutoVariacao $variacao,
+        Deposito $deposito,
+        array $overrides = []
+    ): ProdutoEntregaItem {
+        $quantidade = (int) ($overrides['quantidade_total'] ?? 1);
+        $pedidoItem = PedidoItem::create([
+            'id_pedido' => $pedido->id,
+            'id_variacao' => $variacao->id,
+            'id_deposito' => $deposito->id,
+            'quantidade' => $quantidade,
+            'preco_unitario' => 100,
+            'custo_unitario' => 50,
+            'subtotal' => 100 * $quantidade,
+        ]);
+
+        return ProdutoEntregaItem::create(array_merge([
+            'tipo_origem' => ProdutoEntregaItem::ORIGEM_PEDIDO,
+            'origem_id' => $pedido->id,
+            'pedido_id' => $pedido->id,
+            'pedido_item_id' => $pedidoItem->id,
+            'id_variacao' => $variacao->id,
+            'quantidade_total' => $quantidade,
+            'quantidade_reservada' => 0,
+            'quantidade_recebida' => 0,
+            'quantidade_expedida' => 0,
+            'quantidade_entregue' => 0,
+            'id_deposito_origem' => $deposito->id,
+            'status' => ProdutoEntregaItem::STATUS_AGUARDANDO_ESTOQUE,
+        ], $overrides));
     }
 
     public function test_filtra_apenas_com_estoque(): void
@@ -336,6 +396,114 @@ class EstoqueAtualFiltroTest extends TestCase
 
         $linha = $linhas->firstWhere('variacao_id', $variacaoCom->id);
         $this->assertSame(2, (int) ($linha['quantidade_reservada_cliente'] ?? 0));
+        $this->assertSame(2, (int) ($linha['quantidade_estoque_cliente_total'] ?? 0));
+        $this->assertSame(0, (int) ($linha['quantidade_cliente_aguardando_estoque'] ?? 0));
+        $this->assertSame(0, (int) ($linha['quantidade_cliente_pendente_entrega'] ?? 0));
+    }
+
+    public function test_filtro_estoque_cliente_status_segmenta_estados_e_exclui_entregues_cancelados_e_reposicao(): void
+    {
+        [$variacaoReservada, $variacaoAguardando, $deposito, $usuario] = $this->seedBase();
+        $produto = $variacaoReservada->produto;
+
+        $variacaoPendenteEntrega = $this->criarVariacao($produto, 'CLIENTE-PENDENTE-' . uniqid());
+        $variacaoEntregue = $this->criarVariacao($produto, 'CLIENTE-ENTREGUE-' . uniqid());
+        $variacaoCancelada = $this->criarVariacao($produto, 'CLIENTE-CANCELADA-' . uniqid());
+        $variacaoReposicao = $this->criarVariacao($produto, 'CLIENTE-REPOSICAO-' . uniqid());
+
+        foreach ([$variacaoPendenteEntrega, $variacaoEntregue, $variacaoCancelada, $variacaoReposicao] as $variacao) {
+            Estoque::updateOrCreate(
+                ['id_variacao' => $variacao->id, 'id_deposito' => $deposito->id],
+                ['quantidade' => 0]
+            );
+        }
+
+        $pedidoVenda = $this->criarPedido($usuario);
+        $pedidoReposicao = $this->criarPedido($usuario, Pedido::TIPO_REPOSICAO);
+
+        $this->criarEntregaPedido($pedidoVenda, $variacaoAguardando, $deposito, [
+            'quantidade_total' => 3,
+            'status' => ProdutoEntregaItem::STATUS_AGUARDANDO_ESTOQUE,
+        ]);
+
+        $entregaReservada = $this->criarEntregaPedido($pedidoVenda, $variacaoReservada, $deposito, [
+            'quantidade_total' => 2,
+            'quantidade_reservada' => 2,
+            'status' => ProdutoEntregaItem::STATUS_RESERVADO,
+        ]);
+        EstoqueReserva::create([
+            'id_variacao' => $variacaoReservada->id,
+            'id_deposito' => $deposito->id,
+            'pedido_id' => $pedidoVenda->id,
+            'pedido_item_id' => $entregaReservada->pedido_item_id,
+            'quantidade' => 2,
+            'quantidade_consumida' => 0,
+            'status' => 'ativa',
+        ]);
+
+        $this->criarEntregaPedido($pedidoVenda, $variacaoPendenteEntrega, $deposito, [
+            'quantidade_total' => 2,
+            'quantidade_expedida' => 2,
+            'quantidade_entregue' => 1,
+            'status' => ProdutoEntregaItem::STATUS_RESERVADO,
+        ]);
+        $this->criarEntregaPedido($pedidoVenda, $variacaoEntregue, $deposito, [
+            'quantidade_total' => 2,
+            'quantidade_expedida' => 2,
+            'quantidade_entregue' => 2,
+            'status' => ProdutoEntregaItem::STATUS_ENTREGUE,
+        ]);
+        $this->criarEntregaPedido($pedidoVenda, $variacaoCancelada, $deposito, [
+            'quantidade_total' => 2,
+            'status' => ProdutoEntregaItem::STATUS_CANCELADO,
+        ]);
+        $this->criarEntregaPedido($pedidoReposicao, $variacaoReposicao, $deposito, [
+            'quantidade_total' => 2,
+            'status' => ProdutoEntregaItem::STATUS_AGUARDANDO_ESTOQUE,
+        ]);
+
+        $aguardando = $this->getJson('/api/v1/estoque/atual?estoque_cliente_status=aguardando_estoque');
+        $aguardando->assertOk();
+        $idsAguardando = collect($aguardando->json('data'))->pluck('variacao_id')->all();
+        $this->assertContains($variacaoAguardando->id, $idsAguardando);
+        $this->assertNotContains($variacaoReservada->id, $idsAguardando);
+        $this->assertNotContains($variacaoPendenteEntrega->id, $idsAguardando);
+
+        $reservado = $this->getJson('/api/v1/estoque/atual?estoque_cliente_status=reservado');
+        $reservado->assertOk();
+        $idsReservado = collect($reservado->json('data'))->pluck('variacao_id')->all();
+        $this->assertContains($variacaoReservada->id, $idsReservado);
+        $this->assertNotContains($variacaoAguardando->id, $idsReservado);
+        $this->assertNotContains($variacaoPendenteEntrega->id, $idsReservado);
+
+        $pendenteEntrega = $this->getJson('/api/v1/estoque/atual?estoque_cliente_status=pendente_entrega');
+        $pendenteEntrega->assertOk();
+        $idsPendenteEntrega = collect($pendenteEntrega->json('data'))->pluck('variacao_id')->all();
+        $this->assertContains($variacaoPendenteEntrega->id, $idsPendenteEntrega);
+        $this->assertNotContains($variacaoAguardando->id, $idsPendenteEntrega);
+        $this->assertNotContains($variacaoReservada->id, $idsPendenteEntrega);
+
+        $todos = $this->getJson('/api/v1/estoque/atual?estoque_cliente_status=todos_pendentes');
+        $todos->assertOk();
+        $linhas = collect($todos->json('data'));
+        $idsTodos = $linhas->pluck('variacao_id')->all();
+        $this->assertContains($variacaoAguardando->id, $idsTodos);
+        $this->assertContains($variacaoReservada->id, $idsTodos);
+        $this->assertContains($variacaoPendenteEntrega->id, $idsTodos);
+        $this->assertNotContains($variacaoEntregue->id, $idsTodos);
+        $this->assertNotContains($variacaoCancelada->id, $idsTodos);
+        $this->assertNotContains($variacaoReposicao->id, $idsTodos);
+
+        $linhaAguardando = $linhas->firstWhere('variacao_id', $variacaoAguardando->id);
+        $linhaReservada = $linhas->firstWhere('variacao_id', $variacaoReservada->id);
+        $linhaPendenteEntrega = $linhas->firstWhere('variacao_id', $variacaoPendenteEntrega->id);
+
+        $this->assertSame(3, (int) ($linhaAguardando['quantidade_estoque_cliente_total'] ?? 0));
+        $this->assertSame(3, (int) ($linhaAguardando['quantidade_cliente_aguardando_estoque'] ?? 0));
+        $this->assertSame(2, (int) ($linhaReservada['quantidade_estoque_cliente_total'] ?? 0));
+        $this->assertSame(2, (int) ($linhaReservada['quantidade_reservada_cliente'] ?? 0));
+        $this->assertSame(1, (int) ($linhaPendenteEntrega['quantidade_estoque_cliente_total'] ?? 0));
+        $this->assertSame(1, (int) ($linhaPendenteEntrega['quantidade_cliente_pendente_entrega'] ?? 0));
     }
 
     public function test_estoque_atual_retorna_campos_de_outlet(): void

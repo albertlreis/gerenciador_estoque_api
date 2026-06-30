@@ -9,6 +9,13 @@ namespace App\DTOs;
  */
 class FiltroEstoqueDTO
 {
+    public const ESTOQUE_CLIENTE_STATUSES = [
+        'todos_pendentes',
+        'aguardando_estoque',
+        'reservado',
+        'pendente_entrega',
+    ];
+
     /** Texto de busca (produto pai, SKU interno, códigos históricos ou referência legada) */
     public ?string $produto = null;
 
@@ -51,6 +58,9 @@ class FiltroEstoqueDTO
 
     /** Filtra itens reservados para pedidos/clientes */
     public bool $estoqueCliente = false;
+
+    /** Situacao de produtos vendidos e ainda nao entregues */
+    public ?string $estoqueClienteStatus = null;
 
     /** @var array<int, string> Colunas selecionadas para exportacao */
     public array $colunas = [];
@@ -127,10 +137,17 @@ class FiltroEstoqueDTO
         $area = isset($data['area']) ? trim((string) $data['area']) : '';
         $this->area = $area !== '' ? $area : null;
 
-        $this->estoqueCliente = filter_var(
+        $estoqueClienteLegado = filter_var(
             $data['estoque_cliente'] ?? false,
             FILTER_VALIDATE_BOOLEAN
         );
+        $estoqueClienteStatus = isset($data['estoque_cliente_status'])
+            ? strtolower(trim((string) $data['estoque_cliente_status']))
+            : null;
+        $this->estoqueClienteStatus = in_array($estoqueClienteStatus, self::ESTOQUE_CLIENTE_STATUSES, true)
+            ? $estoqueClienteStatus
+            : ($estoqueClienteLegado ? 'todos_pendentes' : null);
+        $this->estoqueCliente = $this->estoqueClienteStatus !== null;
 
         $colunas = $data['colunas'] ?? [];
         if (is_string($colunas)) {

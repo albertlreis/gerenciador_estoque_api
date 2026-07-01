@@ -15,9 +15,9 @@ use App\Services\OutletCatalogoPricingService;
 use App\Services\OutletCatalogoPdfService;
 use App\Services\PdfImageService;
 use App\Services\ProdutoSugestoesOutletService;
+use App\Support\Logging\SierraLog;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
@@ -141,11 +141,12 @@ class ProdutoController extends Controller
                 ->values();
 
             if (app()->environment('local')) {
-                Log::info('Exportacao de catalogo outlet iniciada', [
+                SierraLog::inventory('inventory.outlet_catalog.export_started', [
                     'total_cards' => $cards->count(),
                     'total_conjuntos' => count($catalogoPdf['conjuntos']),
                     'total_avulsos' => count($catalogoPdf['itens_avulsos']),
                     'ids' => array_values($ids),
+                    'format' => 'pdf',
                 ]);
             }
 
@@ -167,9 +168,10 @@ class ProdutoController extends Controller
 
             $dateRef = now('America/Belem')->format('Y-m-d');
             if (app()->environment('local')) {
-                Log::info('Exportacao de catalogo outlet em PDF finalizada', [
+                SierraLog::inventory('inventory.outlet_catalog.export_finished', [
                     'total_cards' => $cards->count(),
-                    'tempo_ms' => (int) ((microtime(true) - $start) * 1000),
+                    'duration_ms' => (int) ((microtime(true) - $start) * 1000),
+                    'format' => 'pdf',
                 ]);
             }
             return $pdf->download("catalogo_outlet_{$dateRef}.pdf");
@@ -182,9 +184,10 @@ class ProdutoController extends Controller
             ->values();
 
         if (app()->environment('local')) {
-            Log::info('Exportacao de catalogo outlet iniciada', [
+            SierraLog::inventory('inventory.outlet_catalog.export_started', [
                 'total_produtos' => $itensExportacao->count(),
                 'ids' => array_values($ids),
+                'format' => 'csv',
                 'amostra' => $itensExportacao->take(3)->map(fn ($item) => [
                     'id' => $item['id'],
                     'referencias' => $item['referencias'],

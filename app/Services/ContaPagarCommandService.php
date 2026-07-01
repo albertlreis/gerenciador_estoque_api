@@ -12,11 +12,11 @@ use App\Models\ContaPagar;
 use App\Models\ContaPagarPagamento;
 use App\Models\FinanceiroParcelamento;
 use App\Repositories\Contracts\ContaPagarRepository;
+use App\Support\Logging\SierraLog;
 use BackedEnum;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 use Throwable;
@@ -374,10 +374,10 @@ class ContaPagarCommandService
      */
     private function logFalhaExportacaoContaAzul(string $tipo, array $contexto, Throwable $e): void
     {
-        Log::warning("Falha ao disparar exportacao Conta Azul para {$tipo}.", $contexto + [
-            'exception' => $e::class,
-            'erro' => $e->getMessage(),
-        ]);
+        SierraLog::finance('finance.conta_azul.export_dispatch_failed', $contexto + [
+            'operation' => $tipo,
+            'exception' => $e,
+        ], 'warning');
     }
 
     private function criarParcelado(array $dados): ContaPagarResource

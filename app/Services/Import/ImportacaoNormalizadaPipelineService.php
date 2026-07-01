@@ -20,11 +20,11 @@ use App\Models\Produto;
 use App\Models\ProdutoVariacao;
 use App\Services\EstoqueMovimentacaoService;
 use App\Services\LocalizacaoEstoqueService;
+use App\Support\Logging\SierraLog;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use RuntimeException;
 use Throwable;
@@ -85,8 +85,9 @@ final class ImportacaoNormalizadaPipelineService
             ])->save();
         }
 
-        Log::info('Importação normalizada: preview gerado.', [
-            'importacao_id' => $importacao->id,
+        SierraLog::inventory('inventory.normalized_import.preview_generated', [
+            'entity_type' => 'importacao_normalizada',
+            'entity_id' => $importacao->id,
             'persistido' => $persist,
             'status' => $importacao->fresh()?->status?->value ?? $importacao->fresh()?->status,
             'totais' => $preview['totais'] ?? [],
@@ -162,10 +163,11 @@ final class ImportacaoNormalizadaPipelineService
             $validacao = $this->validarParaConfirmacao($locked, $preview);
 
             if (!$validacao['apta']) {
-                Log::warning('Importação normalizada: confirmação bloqueada.', [
-                    'importacao_id' => $locked->id,
+                SierraLog::inventory('inventory.normalized_import.confirmation_blocked', [
+                    'entity_type' => 'importacao_normalizada',
+                    'entity_id' => $locked->id,
                     'motivos' => $validacao['motivos'],
-                ]);
+                ], 'warning');
 
                 return [
                     'sucesso' => false,
@@ -183,8 +185,9 @@ final class ImportacaoNormalizadaPipelineService
                 'preview_resumo' => $preview,
             ])->save();
 
-            Log::info('Importação normalizada: confirmada.', [
-                'importacao_id' => $locked->id,
+            SierraLog::inventory('inventory.normalized_import.confirmed', [
+                'entity_type' => 'importacao_normalizada',
+                'entity_id' => $locked->id,
                 'usuario_id' => $usuarioId,
                 'totais' => $preview['totais'] ?? [],
             ]);
@@ -227,10 +230,11 @@ final class ImportacaoNormalizadaPipelineService
                 $validacao = $this->validarParaConfirmacao($locked, $preview);
 
                 if (!$validacao['apta']) {
-                    Log::warning('Importação normalizada: efetivação bloqueada.', [
-                        'importacao_id' => $locked->id,
+                    SierraLog::inventory('inventory.normalized_import.application_blocked', [
+                        'entity_type' => 'importacao_normalizada',
+                        'entity_id' => $locked->id,
                         'motivos' => $validacao['motivos'],
-                    ]);
+                    ], 'warning');
 
                     return [
                         'sucesso' => false,
@@ -260,10 +264,11 @@ final class ImportacaoNormalizadaPipelineService
                     'observacoes' => null,
                 ])->save();
 
-                Log::info('Importação normalizada: efetivação iniciada.', [
-                    'importacao_id' => $locked->id,
+                SierraLog::inventory('inventory.normalized_import.application_started', [
+                    'entity_type' => 'importacao_normalizada',
+                    'entity_id' => $locked->id,
                     'usuario_id' => $usuarioId,
-                    'chave_execucao' => $executionKey,
+                    'batch_id' => $executionKey,
                 ]);
 
                 /** @var EloquentCollection<int, ImportacaoNormalizadaLinha> $linhas */
@@ -283,10 +288,11 @@ final class ImportacaoNormalizadaPipelineService
                     'observacoes' => null,
                 ])->save();
 
-                Log::info('Importação normalizada: efetivação concluída.', [
-                    'importacao_id' => $locked->id,
+                SierraLog::inventory('inventory.normalized_import.application_finished', [
+                    'entity_type' => 'importacao_normalizada',
+                    'entity_id' => $locked->id,
                     'usuario_id' => $usuarioId,
-                    'chave_execucao' => $executionKey,
+                    'batch_id' => $executionKey,
                     'relatorio' => $relatorio,
                 ]);
 
@@ -304,11 +310,12 @@ final class ImportacaoNormalizadaPipelineService
                 'observacoes' => $e->getMessage(),
             ])->save();
 
-            Log::error('Importação normalizada: falha na efetivação.', [
-                'importacao_id' => $importacao->id,
+            SierraLog::inventory('inventory.normalized_import.application_failed', [
+                'entity_type' => 'importacao_normalizada',
+                'entity_id' => $importacao->id,
                 'usuario_id' => $usuarioId,
-                'erro' => $e->getMessage(),
-            ]);
+                'exception' => $e,
+            ], 'error');
 
             throw $e;
         }

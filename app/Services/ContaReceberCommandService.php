@@ -9,11 +9,11 @@ use App\Integrations\ContaAzul\Services\ContaAzulExportDispatchService;
 use App\Models\ContaReceber;
 use App\Models\ContaReceberPagamento;
 use App\Models\FinanceiroParcelamento;
+use App\Support\Logging\SierraLog;
 use BackedEnum;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use App\Services\Comunicacao\ComunicacaoApiClient;
 use Illuminate\Validation\ValidationException;
@@ -68,9 +68,11 @@ class ContaReceberCommandService
             try {
                 $this->comms->enviarCobranca($fresh);
             } catch (\Throwable $e) {
-                logger()->warning('[Comunicacao] Falha ao enfileirar cobrança', [
-                    'conta_id' => $fresh->id,
-                    'error' => $e->getMessage(),
+                SierraLog::warning('communication.billing.enqueue_failed', [
+                    'entity_type' => 'conta_receber',
+                    'entity_id' => $fresh->id,
+                    'operation' => 'enviar_cobranca',
+                    'exception' => $e,
                 ]);
             }
 
@@ -384,10 +386,10 @@ class ContaReceberCommandService
      */
     private function logFalhaExportacaoContaAzul(string $tipo, array $contexto, Throwable $e): void
     {
-        Log::warning("Falha ao disparar exportacao Conta Azul para {$tipo}.", $contexto + [
-            'exception' => $e::class,
-            'erro' => $e->getMessage(),
-        ]);
+        SierraLog::finance('finance.conta_azul.export_dispatch_failed', $contexto + [
+            'operation' => $tipo,
+            'exception' => $e,
+        ], 'warning');
     }
 
     private function syncValores(ContaReceber $conta): void
@@ -512,9 +514,11 @@ class ContaReceberCommandService
             try {
                 $this->comms->enviarCobranca($fresh);
             } catch (\Throwable $e) {
-                logger()->warning('[Comunicacao] Falha ao enfileirar cobranÃ§a recorrente', [
-                    'conta_id' => $fresh->id,
-                    'error' => $e->getMessage(),
+                SierraLog::warning('communication.billing.recurring_enqueue_failed', [
+                    'entity_type' => 'conta_receber',
+                    'entity_id' => $fresh->id,
+                    'operation' => 'enviar_cobranca_recorrente',
+                    'exception' => $e,
                 ]);
             }
 

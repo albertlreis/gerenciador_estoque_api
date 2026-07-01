@@ -2,9 +2,9 @@
 
 namespace App\Http\Middleware;
 
+use App\Support\Logging\SierraLog;
 use Closure;
 use Illuminate\Http\UploadedFile;
-use Illuminate\Support\Facades\Log;
 
 class LogRequests
 {
@@ -25,7 +25,7 @@ class LogRequests
                 }
             }
 
-            Log::channel('estoque')->info('Requisicao API', [
+            SierraLog::http('http.write_request_payload', [
                 'user' => auth()->user()?->email,
                 'method' => $request->method(),
                 'uri' => $request->getRequestUri(),

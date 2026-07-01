@@ -4,8 +4,8 @@ namespace App\Services\Comunicacao;
 
 use App\Models\ContaReceber;
 use App\Models\Pedido;
+use App\Support\Logging\SierraLog;
 use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use RuntimeException;
 
@@ -86,7 +86,7 @@ class ComunicacaoApiClient
             ->post($url, $body);
 
         if (!$resp->successful()) {
-            Log::warning('[ComunicacaoApiClient] Falha ao criar request', [
+            SierraLog::warning('communication.request.create_failed', [
                 'status' => $resp->status(),
                 'url' => $url,
                 'channel' => $channel,
@@ -190,4 +190,3 @@ class ComunicacaoApiClient
         return $base . '/api/requests';
     }
 }
-

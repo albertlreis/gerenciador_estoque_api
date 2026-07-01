@@ -8,10 +8,10 @@ use App\Services\Dashboard\Queries\EstoqueDashboardQuery;
 use App\Services\Dashboard\Queries\FinanceiroDashboardQuery;
 use App\Services\Dashboard\Queries\SeriesComercialDashboardQuery;
 use App\Services\Dashboard\Queries\VendedorDashboardQuery;
+use App\Support\Logging\SierraLog;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 use Symfony\Component\HttpKernel\Exception\HttpException;
 
@@ -335,9 +335,10 @@ class DashboardService
         try {
             return Schema::hasTable('usuario_preferencias');
         } catch (\Throwable $exception) {
-            Log::warning('Não foi possível verificar a tabela de preferências do dashboard.', [
-                'message' => $exception->getMessage(),
-            ]);
+            SierraLog::system('dashboard.preferences.table_check_failed', [
+                'operation' => 'schema_check',
+                'exception' => $exception,
+            ], 'warning');
 
             return false;
         }
@@ -405,7 +406,7 @@ class DashboardService
             $elapsedMs = (int) round((microtime(true) - $start) * 1000);
 
             if ($debug) {
-                Log::debug('dashboard.query_timing', [
+                SierraLog::debug('dashboard.query_timing', [
                     'cache_key' => $cacheKey,
                     'elapsed_ms' => $elapsedMs,
                 ]);

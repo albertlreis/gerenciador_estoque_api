@@ -10,11 +10,11 @@ use App\Models\ImportacaoNormalizada;
 use App\Models\ImportacaoNormalizadaConflito;
 use App\Models\ImportacaoNormalizadaLinha;
 use App\Models\ImportacaoNormalizadaRevisao;
+use App\Support\Logging\SierraLog;
 use Carbon\Carbon;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use PhpOffice\PhpSpreadsheet\Shared\Date as SpreadsheetDate;
 
@@ -147,8 +147,9 @@ final class ImportacaoNormalizadaSierraService
             'status' => ImportacaoNormalizadaStatus::RECEBIDA,
         ]);
 
-        Log::info('Importação normalizada: início do staging.', [
-            'importacao_id' => $importacao->id,
+        SierraLog::inventory('inventory.normalized_import.staging_started', [
+            'entity_type' => 'importacao_normalizada',
+            'entity_id' => $importacao->id,
             'arquivo_nome' => $importacao->arquivo_nome,
             'arquivo_hash' => $importacao->arquivo_hash,
             'usuario_id' => $usuarioId,
@@ -237,17 +238,19 @@ final class ImportacaoNormalizadaSierraService
                 'observacoes' => $e->getMessage(),
             ])->save();
 
-            Log::error('Importação normalizada: falha no staging.', [
-                'importacao_id' => $importacao->id,
+            SierraLog::inventory('inventory.normalized_import.staging_failed', [
+                'entity_type' => 'importacao_normalizada',
+                'entity_id' => $importacao->id,
                 'arquivo_nome' => $importacao->arquivo_nome,
-                'erro' => $e->getMessage(),
-            ]);
+                'exception' => $e,
+            ], 'error');
 
             throw $e;
         }
 
-        Log::info('Importação normalizada: staging concluído.', [
-            'importacao_id' => $importacao->id,
+        SierraLog::inventory('inventory.normalized_import.staging_finished', [
+            'entity_type' => 'importacao_normalizada',
+            'entity_id' => $importacao->id,
             'status' => $importacao->fresh()?->status?->value ?? $importacao->fresh()?->status,
             'linhas_total' => $importacao->fresh()?->linhas_total,
             'linhas_com_conflito' => $importacao->fresh()?->linhas_com_conflito,

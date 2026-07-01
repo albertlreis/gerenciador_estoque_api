@@ -1,5 +1,6 @@
 <?php
 
+use App\Logging\JsonLogFormatter;
 use Monolog\Handler\NullHandler;
 use Monolog\Handler\StreamHandler;
 use Monolog\Handler\SyslogUdpHandler;
@@ -67,7 +68,7 @@ return [
         'daily' => [
             'driver' => 'daily',
             'path' => storage_path('logs/laravel.log'),
-            'level' => 'debug',
+            'level' => env('LOG_LEVEL', 'debug'),
             'days' => 14,
             'tap' => [App\Logging\AuditoriaLogTap::class],
         ],
@@ -111,7 +112,7 @@ return [
             'driver' => 'monolog',
             'level' => env('LOG_LEVEL', 'debug'),
             'handler' => StreamHandler::class,
-            'formatter' => env('LOG_STDERR_FORMATTER'),
+            'formatter' => env('LOG_STDERR_FORMATTER', JsonLogFormatter::class),
             'with' => [
                 'stream' => 'php://stderr',
             ],

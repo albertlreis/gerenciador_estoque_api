@@ -11,6 +11,8 @@ final class StructuredLog
      */
     public static function integration(string $message, array $context = [], string $level = 'info'): void
     {
-        SierraLog::integration($message, array_merge(['channel' => 'conta_azul'], $context), $level);
+        $context = array_merge(['channel' => 'conta_azul'], $context);
+
+        SierraLog::integration($message, $context, $level);
     }
 }

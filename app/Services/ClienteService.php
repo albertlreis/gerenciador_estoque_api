@@ -12,6 +12,7 @@ use App\Repositories\ClienteRepository;
 use App\Repositories\ClienteEnderecoRepository;
 use App\Validators\DocumentoValidator;
 use Throwable;
+use Illuminate\Support\Facades\Log;
 
 class ClienteService
 {
@@ -258,6 +259,12 @@ class ClienteService
         try {
             $this->contaAzulExports->cliente((int) $cliente->id, null, ['evento' => $evento]);
         } catch (Throwable $e) {
+            Log::warning('Falha ao disparar exportacao Conta Azul para cliente.', [
+                'cliente_id' => $cliente->id,
+                'evento' => $evento,
+                'erro' => $e->getMessage(),
+            ]);
+
             SierraLog::finance('finance.conta_azul.customer_export_dispatch_failed', [
                 'entity_type' => 'cliente',
                 'entity_id' => $cliente->id,

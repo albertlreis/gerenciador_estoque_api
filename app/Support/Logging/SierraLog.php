@@ -136,6 +136,7 @@ final class SierraLog
         } catch (Throwable) {
             // Observability must never break the business flow.
         }
+
     }
 
     public static function normalizeEventName(string $eventName): string
@@ -165,12 +166,14 @@ final class SierraLog
         $context = self::withExceptionFields($context);
         $context = self::withRequestContext($context);
         $domain = (string) ($context['event_domain'] ?? Str::before($eventName, '.'));
+        $app = Facade::getFacadeApplication();
+        $hasConfig = $app !== null && $app->bound('config');
 
         $base = [
             'event_name' => $eventName,
             'event_domain' => self::normalizeToken($domain, 'system'),
-            'app' => config('app.name'),
-            'env' => config('app.env'),
+            'app' => $hasConfig ? config('app.name') : 'Laravel',
+            'env' => $hasConfig ? config('app.env') : (env('APP_ENV') ?: 'production'),
             'service' => env('APP_SERVICE', 'gerenciador-estoque-api'),
         ];
 

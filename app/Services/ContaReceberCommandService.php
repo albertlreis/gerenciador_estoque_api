@@ -14,6 +14,7 @@ use BackedEnum;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use App\Services\Comunicacao\ComunicacaoApiClient;
 use Illuminate\Validation\ValidationException;
@@ -386,6 +387,10 @@ class ContaReceberCommandService
      */
     private function logFalhaExportacaoContaAzul(string $tipo, array $contexto, Throwable $e): void
     {
+        Log::warning("Falha ao disparar exportacao Conta Azul para {$tipo}.", $contexto + [
+            'erro' => $e->getMessage(),
+        ]);
+
         SierraLog::finance('finance.conta_azul.export_dispatch_failed', $contexto + [
             'operation' => $tipo,
             'exception' => $e,

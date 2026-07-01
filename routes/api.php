@@ -2,6 +2,7 @@
 
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\V1\DashboardController as DashboardV1Controller;
+use App\Http\Controllers\Api\V1\UsuarioPreferenciaController;
 
 use App\Http\Controllers\{
     AniversarioController,
@@ -97,6 +98,11 @@ Route::middleware(['auth:sanctum', 'senha.nao_obrigatoria'])
          * ============================================================ */
         Route::get('configuracoes', [ConfiguracaoController::class, 'listar']);
         Route::put('configuracoes/{chave}', [ConfiguracaoController::class, 'atualizar']);
+        Route::prefix('preferencias/telas')->group(function () {
+            Route::get('{screenKey}', [UsuarioPreferenciaController::class, 'show']);
+            Route::patch('{screenKey}', [UsuarioPreferenciaController::class, 'update']);
+            Route::delete('{screenKey}', [UsuarioPreferenciaController::class, 'destroy']);
+        });
         Route::prefix('configuracoes/pedidos')->group(function () {
             Route::get('statuses', [PedidoStatusConfiguracaoController::class, 'index']);
             Route::post('statuses', [PedidoStatusConfiguracaoController::class, 'store']);

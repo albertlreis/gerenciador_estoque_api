@@ -23,6 +23,7 @@ class ProdutoVariacao extends Model
         'dimensao_1', 'dimensao_2', 'dimensao_3',
         'cor', 'lado', 'material_oficial', 'acabamento_oficial',
         'conflito_codigo', 'status_revisao',
+        'ativo', 'motivo_desativacao',
     ];
 
     protected $appends = [
@@ -40,6 +41,7 @@ class ProdutoVariacao extends Model
         'dimensao_2' => 'float',
         'dimensao_3' => 'float',
         'conflito_codigo' => 'boolean',
+        'ativo' => 'boolean',
         'status_revisao' => StatusRevisaoCadastro::class,
     ];
 

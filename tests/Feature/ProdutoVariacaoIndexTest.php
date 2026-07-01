@@ -80,6 +80,8 @@ class ProdutoVariacaoIndexTest extends TestCase
             'preco' => 100,
             'custo' => 40,
             'codigo_barras' => null,
+            'ativo' => false,
+            'motivo_desativacao' => 'Fora de linha no fornecedor',
             'created_at' => $now,
             'updated_at' => $now,
         ]);
@@ -160,6 +162,10 @@ class ProdutoVariacaoIndexTest extends TestCase
             ])
             ->assertJsonFragment([
                 'sku_interno' => 'SKU-INDEX-001',
+            ])
+            ->assertJsonFragment([
+                'ativo' => false,
+                'motivo_desativacao' => 'Fora de linha no fornecedor',
             ])
             ->assertJsonFragment([
                 'nome' => 'Defeito',

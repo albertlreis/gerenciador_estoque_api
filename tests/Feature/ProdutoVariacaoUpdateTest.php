@@ -103,6 +103,8 @@ class ProdutoVariacaoUpdateTest extends TestCase
                 'custo' => 60,
                 'referencia' => 'REF-NEW-1',
                 'codigo_barras' => '123',
+                'ativo' => 0,
+                'motivo_desativacao' => 'Fora de linha',
                 'audit' => [
                     'motivo' => 'Ajuste de tabela',
                     'origin' => 'cadastro',
@@ -132,6 +134,19 @@ class ProdutoVariacaoUpdateTest extends TestCase
             'referencia' => 'REF-NEW-1',
             'preco' => 150,
             'custo' => 60,
+            'ativo' => 0,
+            'motivo_desativacao' => 'Fora de linha',
+        ]);
+
+        $eventoId = DB::table('auditoria_logs')
+            ->where('modulo', 'produto_variacoes')
+            ->where('entity_id', (string) $variacaoId1)
+            ->latest('id')
+            ->value('id');
+
+        $this->assertDatabaseHas('auditoria_log_mudancas', [
+            'auditoria_log_id' => $eventoId,
+            'campo' => 'ativo',
         ]);
 
         $this->assertDatabaseHas('produto_variacoes', [

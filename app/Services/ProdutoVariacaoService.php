@@ -37,6 +37,8 @@ class ProdutoVariacaoService
         'acabamento_oficial',
         'conflito_codigo',
         'status_revisao',
+        'ativo',
+        'motivo_desativacao',
     ];
 
     public function __construct(
@@ -361,6 +363,8 @@ class ProdutoVariacaoService
             'acabamento_oficial' => 'nullable|string|max:180',
             'conflito_codigo' => 'nullable|boolean',
             'status_revisao' => 'nullable|string|in:nao_revisado,pendente_revisao,aprovado,rejeitado',
+            'ativo' => 'nullable|boolean',
+            'motivo_desativacao' => 'nullable|string|max:1000',
             'atributos' => 'nullable|array',
             'atributos.*.atributo' => 'required_with:atributos.*.valor|string|max:255',
             'atributos.*.valor' => 'required_with:atributos.*.atributo|string|max:255',
@@ -391,6 +395,7 @@ class ProdutoVariacaoService
             'chave_variacao.max' => 'A chave da variação pode ter no máximo 255 caracteres.',
             'chave_variacao.unique' => 'Esta chave de variação já está em uso.',
             'codigo_barras.max' => 'O código de barras pode ter no máximo 255 caracteres.',
+            'motivo_desativacao.max' => 'O motivo da desativação pode ter no máximo 1000 caracteres.',
             'audit.motivo.max' => 'O motivo pode ter no máximo 500 caracteres.',
             'audit.origin.in' => 'A origem da alteração de preço é inválida.',
         ]);
@@ -420,6 +425,8 @@ class ProdutoVariacaoService
             'acabamento_oficial',
             'conflito_codigo',
             'status_revisao',
+            'ativo',
+            'motivo_desativacao',
         ];
 
         foreach ($campos as $campo) {
@@ -436,6 +443,10 @@ class ProdutoVariacaoService
 
         if ((!$parcial || array_key_exists('status_revisao', $data)) && ($payload['status_revisao'] ?? null) === null) {
             $payload['status_revisao'] = $variacao?->status_revisao?->value ?? StatusRevisaoCadastro::NAO_REVISADO->value;
+        }
+
+        if ((!$parcial || array_key_exists('ativo', $data)) && ($payload['ativo'] ?? null) === null) {
+            $payload['ativo'] = $variacao?->ativo ?? true;
         }
 
         if (!$parcial || array_key_exists('referencia', $data)) {

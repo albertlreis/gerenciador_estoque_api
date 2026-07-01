@@ -37,6 +37,7 @@ class UsuarioPreferenciaController extends Controller
             'tables.*' => ['array'],
             'tables.*.hidden_columns' => ['sometimes', 'array', 'max:120'],
             'tables.*.hidden_columns.*' => ['string', 'max:120', 'regex:/\A[A-Za-z0-9_.:-]+\z/'],
+            'tables.*.first' => ['nullable', 'integer', 'min:0'],
             'tables.*.rows' => ['nullable', 'integer', 'min:1', 'max:500'],
             'tables.*.sort' => ['nullable', 'array'],
             'tables.*.sort.field' => ['nullable', 'string', 'max:120', 'regex:/\A[A-Za-z0-9_.:-]+\z/'],

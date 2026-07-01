@@ -119,6 +119,13 @@ class UsuarioPreferenciaService
                 'hidden_columns' => $hiddenColumns,
             ];
 
+            if (isset($config['first']) && is_numeric($config['first'])) {
+                $first = (int) $config['first'];
+                if ($first >= 0) {
+                    $table['first'] = $first;
+                }
+            }
+
             if (isset($config['rows']) && is_numeric($config['rows'])) {
                 $rows = (int) $config['rows'];
                 if ($rows > 0 && $rows <= 500) {

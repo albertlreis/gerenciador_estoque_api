@@ -12,6 +12,7 @@ use App\Http\Controllers\{
     CategoriaController,
     CategoriaFinanceiraController,
     CentroCustoController,
+    ClientLogController,
     ClienteController,
     ConciliacaoBancariaController,
     ConfiguracaoController,
@@ -80,6 +81,9 @@ Route::get('v1/health', fn () => response()->json([
     'status' => 'ok',
     'service' => 'gerenciador-estoque-api',
 ]));
+
+Route::post('v1/client-logs', [ClientLogController::class, 'store'])
+    ->middleware('throttle:client-logs');
 
 Route::get('v1/integrations/conta-azul/callback', [ContaAzulOAuthController::class, 'callback']);
 Route::get('v1/integrations/google-calendar/callback', [GoogleCalendarOAuthController::class, 'callback']);

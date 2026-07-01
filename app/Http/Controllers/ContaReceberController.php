@@ -189,9 +189,9 @@ class ContaReceberController extends Controller
     /**
      * Exclui (soft delete) uma conta a receber.
      */
-    public function destroy(ContaReceber $conta): JsonResponse
+    public function destroy(Request $request, ContaReceber $conta): JsonResponse
     {
-        $this->cmd->deletar($conta);
+        $this->cmd->deletar($conta, $request->boolean('confirmar_estornos'));
 
         return response()->json([
             'message' => 'Excluída com sucesso',

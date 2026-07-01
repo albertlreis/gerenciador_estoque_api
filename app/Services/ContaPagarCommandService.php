@@ -6,12 +6,14 @@ use App\Enums\ContaStatus;
 use App\Enums\LancamentoTipo;
 use App\Http\Resources\ContaPagarResource;
 use App\Http\Resources\ContaPagarPagamentoResource;
+use App\Integrations\ContaAzul\ContaAzulEntityType;
 use App\Integrations\ContaAzul\Services\ContaAzulExportDispatchService;
 use App\Models\ContaPagar;
 use App\Models\ContaPagarPagamento;
 use App\Models\FinanceiroParcelamento;
 use App\Repositories\Contracts\ContaPagarRepository;
 use BackedEnum;
+use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -85,17 +87,53 @@ class ContaPagarCommandService
         return new ContaPagarResource($fresh);
     }
 
-    public function deletar(ContaPagar $conta): void
+    public function deletar(ContaPagar $conta, bool $confirmarEstornos = false): void
     {
-        abort_if($conta->pagamentos()->exists(), 422, 'Estorne os pagamentos antes de excluir esta conta.');
+        $conta->loadMissing(['pagamentos.usuario', 'pagamentos.contaFinanceira']);
 
-        abort_if($this->statusValue($conta) === ContaStatus::PAGA->value, 422, 'Não é possível excluir uma conta já paga.');
+        if ($conta->pagamentos->isNotEmpty() && !$confirmarEstornos) {
+            $this->exigirConfirmacaoEstornos($conta->pagamentos);
+        }
 
-        $antes = $conta->fresh(['fornecedor', 'pagamentos.usuario'])->toArray();
+        abort_if(
+            $conta->pagamentos->isEmpty() && $this->statusValue($conta) === ContaStatus::PAGA->value,
+            422,
+            'Nao e possivel excluir uma conta paga sem pagamentos vinculados para estorno.'
+        );
 
-        $this->repo->deletar($conta);
+        DB::transaction(function () use ($conta, $confirmarEstornos): void {
+            $conta = ContaPagar::query()
+                ->with(['fornecedor', 'recorrencia', 'pagamentos.usuario', 'pagamentos.contaFinanceira'])
+                ->lockForUpdate()
+                ->findOrFail($conta->id);
 
-        $this->audit->log('deleted', $conta, $antes, null);
+            if ($conta->pagamentos->isNotEmpty() && !$confirmarEstornos) {
+                $this->exigirConfirmacaoEstornos($conta->pagamentos);
+            }
+
+            abort_if(
+                $conta->pagamentos->isEmpty() && $this->statusValue($conta) === ContaStatus::PAGA->value,
+                422,
+                'Nao e possivel excluir uma conta paga sem pagamentos vinculados para estorno.'
+            );
+
+            $antes = $conta->fresh(['fornecedor', 'recorrencia', 'pagamentos.usuario', 'pagamentos.contaFinanceira'])->toArray();
+
+            foreach ($conta->pagamentos as $pagamento) {
+                $this->estornarPagamentoParaExclusao($conta, $pagamento);
+                $this->estornarBaixaContaAzulBestEffort((int) $pagamento->id, 'exclusao_conta_pagar');
+            }
+
+            if ($conta->pagamentos->isNotEmpty()) {
+                $this->statusSvc->syncPagar($conta->fresh());
+            }
+
+            $this->excluirContaPagarContaAzulBestEffort((int) $conta->id, 'exclusao_conta_pagar');
+
+            $this->repo->deletar($conta);
+
+            $this->audit->log('deleted', $conta, $antes, null);
+        });
     }
 
     public function registrarPagamento(ContaPagar $conta, array $dados): ContaPagarPagamentoResource
@@ -195,6 +233,54 @@ class ContaPagarCommandService
         return (string) $st;
     }
 
+    private function estornarPagamentoParaExclusao(ContaPagar $conta, ContaPagarPagamento $pagamento): void
+    {
+        $antesPagamento = $pagamento->fresh(['usuario', 'contaFinanceira'])->toArray();
+
+        $this->ledger->cancelarLancamentoPorPagamento($pagamento);
+
+        if ($pagamento->comprovante_path) {
+            Storage::disk('public')->delete($pagamento->comprovante_path);
+        }
+
+        $pagamento->delete();
+
+        $this->audit->log('reversed_by_delete', $pagamento, $antesPagamento, null);
+        $this->audit->log('ledger_canceled', $pagamento, null, [
+            'pagamento_id' => (int) $pagamento->id,
+            'pagamento_type' => get_class($pagamento),
+            'motivo' => 'delete_conta_pagar',
+            'conta_pagar_id' => (int) $conta->id,
+        ]);
+    }
+
+    private function exigirConfirmacaoEstornos($pagamentos): void
+    {
+        throw new HttpResponseException(response()->json([
+            'message' => 'Confirme a exclusao e os estornos dos pagamentos vinculados.',
+            'reason' => 'confirmacao_estornos_obrigatoria',
+            'pagamentos' => $this->pagamentosResumo($pagamentos),
+        ], 422));
+    }
+
+    private function pagamentosResumo($pagamentos): array
+    {
+        return collect($pagamentos)->map(fn (ContaPagarPagamento $pagamento) => [
+            'id' => (int) $pagamento->id,
+            'data_pagamento' => optional($pagamento->data_pagamento)->format('Y-m-d'),
+            'valor' => (float) $pagamento->valor,
+            'forma_pagamento' => $pagamento->forma_pagamento,
+            'conta_financeira' => $pagamento->relationLoaded('contaFinanceira') ? [
+                'id' => $pagamento->contaFinanceira?->id,
+                'nome' => $pagamento->contaFinanceira?->nome,
+            ] : null,
+            'usuario' => $pagamento->relationLoaded('usuario') ? [
+                'id' => $pagamento->usuario?->id,
+                'nome' => $pagamento->usuario?->nome ?? $pagamento->usuario?->name,
+            ] : null,
+        ])->values()->all();
+    }
+
     private function exportarContaPagarContaAzulBestEffort(int $contaPagarId, string $evento): void
     {
         try {
@@ -232,6 +318,52 @@ class ContaPagarCommandService
         } catch (Throwable $e) {
             $this->logFalhaExportacaoContaAzul('baixa_conta_pagar', [
                 'pagamento_id' => $pagamentoId,
+                'evento' => $evento,
+            ], $e);
+        }
+    }
+
+    private function estornarBaixaContaAzulBestEffort(int $pagamentoId, string $evento): void
+    {
+        try {
+            DB::afterCommit(function () use ($pagamentoId, $evento): void {
+                try {
+                    $this->contaAzulExports->estornarBaixa(ContaAzulEntityType::BAIXA_CONTA_PAGAR, $pagamentoId, null, [
+                        'evento' => $evento,
+                    ]);
+                } catch (Throwable $e) {
+                    $this->logFalhaExportacaoContaAzul('estorno_baixa_conta_pagar', [
+                        'pagamento_id' => $pagamentoId,
+                        'evento' => $evento,
+                    ], $e);
+                }
+            });
+        } catch (Throwable $e) {
+            $this->logFalhaExportacaoContaAzul('estorno_baixa_conta_pagar', [
+                'pagamento_id' => $pagamentoId,
+                'evento' => $evento,
+            ], $e);
+        }
+    }
+
+    private function excluirContaPagarContaAzulBestEffort(int $contaPagarId, string $evento): void
+    {
+        try {
+            DB::afterCommit(function () use ($contaPagarId, $evento): void {
+                try {
+                    $this->contaAzulExports->excluirTituloFinanceiro(ContaAzulEntityType::CONTA_PAGAR, $contaPagarId, null, [
+                        'evento' => $evento,
+                    ]);
+                } catch (Throwable $e) {
+                    $this->logFalhaExportacaoContaAzul('delete_conta_pagar', [
+                        'conta_pagar_id' => $contaPagarId,
+                        'evento' => $evento,
+                    ], $e);
+                }
+            });
+        } catch (Throwable $e) {
+            $this->logFalhaExportacaoContaAzul('delete_conta_pagar', [
+                'conta_pagar_id' => $contaPagarId,
                 'evento' => $evento,
             ], $e);
         }

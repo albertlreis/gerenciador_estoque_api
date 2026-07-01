@@ -19,6 +19,11 @@ class ContaPagarPagamentoResource extends JsonResource
             'usuario' => $this->whenLoaded('usuario', fn() => [
                 'id' => $this->usuario?->id,
                 'name' => $this->usuario?->name,
+                'nome' => $this->usuario?->nome ?? $this->usuario?->name,
+            ]),
+            'conta_financeira' => $this->whenLoaded('contaFinanceira', fn() => [
+                'id' => $this->contaFinanceira?->id,
+                'nome' => $this->contaFinanceira?->nome,
             ]),
         ];
     }

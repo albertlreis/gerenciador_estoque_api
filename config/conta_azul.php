@@ -139,6 +139,9 @@ return [
         'titulos_create' => env('CONTA_AZUL_PATH_TITULOS_CREATE', env('CONTA_AZUL_PATH_FIN_CREATE', '/v1/financeiro/eventos-financeiros/contas-a-receber')),
         'contas_pagar_create' => env('CONTA_AZUL_PATH_CONTAS_PAGAR_CREATE', '/v1/financeiro/eventos-financeiros/contas-a-pagar'),
         'baixa_create' => env('CONTA_AZUL_PATH_BAIXA_CREATE', '/v1/financeiro/eventos-financeiros/parcelas/{parcela_id}/baixa'),
+        'baixa_delete' => env('CONTA_AZUL_PATH_BAIXA_DELETE', '/v1/financeiro/eventos-financeiros/parcelas/baixa/{baixa_id}'),
+        'titulos_delete' => env('CONTA_AZUL_PATH_TITULOS_DELETE'),
+        'contas_pagar_delete' => env('CONTA_AZUL_PATH_CONTAS_PAGAR_DELETE'),
         'cobranca_create' => env('CONTA_AZUL_PATH_COBRANCA_CREATE', '/v1/financeiro/eventos-financeiros/contas-a-receber/gerar-cobranca'),
     ],
 

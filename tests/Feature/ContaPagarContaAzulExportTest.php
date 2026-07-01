@@ -22,6 +22,7 @@ use App\Models\ContaPagarPagamento;
 use App\Models\Fornecedor;
 use App\Models\LancamentoFinanceiro;
 use App\Services\ContaPagarCommandService;
+use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -206,6 +207,50 @@ class ContaPagarContaAzulExportTest extends TestCase
         Queue::assertNotPushed(ExportBaixaContaPagarContaAzulJob::class);
     }
 
+    public function test_criar_conta_pagar_com_pagamento_inicial_enfileira_conta_encadeada_com_baixa(): void
+    {
+        Queue::fake();
+        $this->criarConexaoContaAzul();
+
+        $contaFinanceira = $this->criarContaFinanceira('Banco Pagar Inicial Encadeada');
+
+        $resource = app(ContaPagarCommandService::class)->criar([
+            'descricao' => 'Conta Pagar Inicial Encadeada',
+            'data_emissao' => '2026-06-20',
+            'data_vencimento' => '2026-06-30',
+            'valor_bruto' => '180.00',
+            'pagamento_inicial' => [
+                'data_pagamento' => '2026-06-20',
+                'valor' => '180.00',
+                'forma_pagamento' => 'PIX',
+                'conta_financeira_id' => $contaFinanceira->id,
+            ],
+        ]);
+
+        $contaId = (int) $resource->resource->id;
+        $this->contaPagarIds[] = $contaId;
+        $pagamentoId = (int) ContaPagarPagamento::query()
+            ->where('conta_pagar_id', $contaId)
+            ->value('id');
+        $this->pagamentoIds[] = $pagamentoId;
+
+        Queue::assertPushedWithChain(
+            ExportContaPagarContaAzulJob::class,
+            [ExportBaixaContaPagarContaAzulJob::class],
+            fn (ExportContaPagarContaAzulJob $job) => $job->contaPagarId === $contaId
+        );
+        Queue::assertPushed(ExportContaPagarContaAzulJob::class, function (ExportContaPagarContaAzulJob $job) use ($pagamentoId) {
+            $chain = collect($job->chained)
+                ->map(fn (string $serialized) => unserialize($serialized))
+                ->values();
+
+            return $chain->count() === 1
+                && $chain[0] instanceof ExportBaixaContaPagarContaAzulJob
+                && $chain[0]->pagamentoId === $pagamentoId;
+        });
+        Queue::assertNotPushed(ExportBaixaContaPagarContaAzulJob::class);
+    }
+
     public function test_pagamento_persiste_quando_disparo_baixa_conta_azul_falha(): void
     {
         Log::spy();
@@ -242,6 +287,84 @@ class ContaPagarContaAzulExportTest extends TestCase
         ]);
 
         Log::shouldHaveReceived('warning')->once();
+    }
+
+    public function test_excluir_conta_pagar_com_pagamento_sem_confirmacao_retorna_422(): void
+    {
+        $conta = $this->criarContaPagar('Conta Pagar Exclusao Sem Confirmacao', '100.00');
+        $contaFinanceira = $this->criarContaFinanceira('Banco Pagar Exclusao Sem Confirmacao');
+
+        $pagamento = app(ContaPagarCommandService::class)->registrarPagamento($conta, [
+            'data_pagamento' => '2026-06-20',
+            'valor' => '100.00',
+            'forma_pagamento' => 'PIX',
+            'conta_financeira_id' => $contaFinanceira->id,
+        ]);
+        $pagamentoId = (int) $pagamento->resource->id;
+        $this->pagamentoIds[] = $pagamentoId;
+
+        try {
+            app(ContaPagarCommandService::class)->deletar($conta);
+            $this->fail('A exclusao deveria exigir confirmacao dos estornos.');
+        } catch (HttpResponseException $e) {
+            $this->assertSame(422, $e->getResponse()->getStatusCode());
+            $payload = json_decode($e->getResponse()->getContent(), true);
+            $this->assertSame('confirmacao_estornos_obrigatoria', $payload['reason']);
+            $this->assertSame($pagamentoId, $payload['pagamentos'][0]['id']);
+        }
+
+        $this->assertDatabaseHas('contas_pagar', ['id' => $conta->id, 'deleted_at' => null]);
+        $this->assertDatabaseHas('contas_pagar_pagamentos', ['id' => $pagamentoId]);
+    }
+
+    public function test_excluir_conta_pagar_com_confirmacao_estorna_pagamentos_cancela_ledger_e_audita(): void
+    {
+        $conta = $this->criarContaPagar('Conta Pagar Exclusao Confirmada', '100.00');
+        $contaFinanceira = $this->criarContaFinanceira('Banco Pagar Exclusao Confirmada');
+
+        $pagamento = app(ContaPagarCommandService::class)->registrarPagamento($conta, [
+            'data_pagamento' => '2026-06-20',
+            'valor' => '100.00',
+            'forma_pagamento' => 'PIX',
+            'conta_financeira_id' => $contaFinanceira->id,
+        ]);
+        $pagamentoId = (int) $pagamento->resource->id;
+        $this->pagamentoIds[] = $pagamentoId;
+
+        $exports = Mockery::mock(ContaAzulExportDispatchService::class);
+        $exports->shouldReceive('estornarBaixa')
+            ->once()
+            ->with(ContaAzulEntityType::BAIXA_CONTA_PAGAR, $pagamentoId, null, Mockery::on(
+                fn (array $contexto) => ($contexto['evento'] ?? null) === 'exclusao_conta_pagar'
+            ));
+        $exports->shouldReceive('excluirTituloFinanceiro')
+            ->once()
+            ->with(ContaAzulEntityType::CONTA_PAGAR, (int) $conta->id, null, Mockery::on(
+                fn (array $contexto) => ($contexto['evento'] ?? null) === 'exclusao_conta_pagar'
+            ));
+        $this->app->instance(ContaAzulExportDispatchService::class, $exports);
+
+        app(ContaPagarCommandService::class)->deletar($conta, true);
+
+        $this->assertSoftDeleted('contas_pagar', ['id' => $conta->id]);
+        $this->assertDatabaseMissing('contas_pagar_pagamentos', ['id' => $pagamentoId]);
+        $this->assertDatabaseHas('lancamentos_financeiros', [
+            'pagamento_type' => ContaPagarPagamento::class,
+            'pagamento_id' => $pagamentoId,
+            'status' => LancamentoStatus::CANCELADO->value,
+        ]);
+        $this->assertDatabaseHas('auditoria_logs', [
+            'modulo' => 'financeiro',
+            'acao' => 'reversed_by_delete',
+            'entity_type' => ContaPagarPagamento::class,
+            'entity_id' => (string) $pagamentoId,
+        ]);
+        $this->assertDatabaseHas('auditoria_logs', [
+            'modulo' => 'financeiro',
+            'acao' => 'deleted',
+            'entity_type' => ContaPagar::class,
+            'entity_id' => (string) $conta->id,
+        ]);
     }
 
     public function test_exportar_conta_pagar_envia_payload_exigido_pela_conta_azul(): void

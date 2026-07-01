@@ -129,9 +129,9 @@ class ContaPagarController extends Controller
     /**
      * Exclui uma conta a pagar
      */
-    public function destroy(ContaPagar $conta_pagar): JsonResponse
+    public function destroy(Request $request, ContaPagar $conta_pagar): JsonResponse
     {
-        $this->cmd->deletar($conta_pagar);
+        $this->cmd->deletar($conta_pagar, $request->boolean('confirmar_estornos'));
         return response()->json(['message' => 'Excluída com sucesso'], 200);
     }
 

@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Enums\ContaStatus;
 use App\Enums\LancamentoStatus;
 use App\Enums\LancamentoTipo;
+use App\Integrations\ContaAzul\Clients\ContaAzulClient;
 use App\Integrations\ContaAzul\ContaAzulEntityType;
 use App\Integrations\ContaAzul\Exceptions\ContaAzulException;
 use App\Integrations\ContaAzul\Models\ContaAzulConexao;
@@ -13,6 +14,7 @@ use App\Integrations\ContaAzul\Models\ContaAzulToken;
 use App\Integrations\ContaAzul\Services\ContaAzulConnectionService;
 use App\Integrations\ContaAzul\Services\ContaAzulExportDispatchService;
 use App\Integrations\ContaAzul\Services\ExportacaoContaAzulService;
+use App\Jobs\ContaAzul\EstornarBaixaContaAzulJob;
 use App\Jobs\ContaAzul\ExportBaixaContaAzulJob;
 use App\Jobs\ContaAzul\ExportTituloContaAzulJob;
 use App\Models\ContaFinanceira;
@@ -21,6 +23,7 @@ use App\Models\ContaReceberPagamento;
 use App\Models\LancamentoFinanceiro;
 use App\Services\AuditoriaLogService;
 use App\Services\ContaReceberCommandService;
+use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
@@ -310,6 +313,196 @@ class ContaReceberContaAzulExportTest extends TestCase
             fn (ExportTituloContaAzulJob $job) => $job->contaReceberId === (int) $conta->id
         );
         Queue::assertNotPushed(ExportBaixaContaAzulJob::class);
+    }
+
+    public function test_exportar_baixa_receber_resolve_parcela_do_titulo_antes_de_baixar(): void
+    {
+        $conexao = $this->criarConexaoContaAzul();
+        $conta = $this->criarContaReceber('Baixa Receber Resolve Parcela', '100.00');
+        $contaFinanceira = $this->criarContaFinanceira('Banco Baixa Receber Resolve Parcela');
+        $this->mapearTitulo($conta, 'evento-receber-ext-1');
+
+        $pagamento = ContaReceberPagamento::create([
+            'conta_receber_id' => $conta->id,
+            'data_pagamento' => '2026-06-20',
+            'valor' => '100.00',
+            'forma_pagamento' => 'PIX',
+            'conta_financeira_id' => $contaFinanceira->id,
+        ]);
+        $this->pagamentoIds[] = (int) $pagamento->id;
+
+        $client = Mockery::mock(ContaAzulClient::class);
+        $client->shouldReceive('get')
+            ->once()
+            ->with('v1/financeiro/eventos-financeiros/evento-receber-ext-1/parcelas', 'token-valido')
+            ->andReturn([
+                'status' => 200,
+                'body' => '[{"id":"parcela-receber-ext-1"}]',
+                'json' => [['id' => 'parcela-receber-ext-1']],
+                'headers' => [],
+            ]);
+        $client->shouldReceive('post')
+            ->once()
+            ->with(
+                'v1/financeiro/eventos-financeiros/parcelas/parcela-receber-ext-1/baixa',
+                'token-valido',
+                Mockery::on(function (array $payload): bool {
+                    $this->assertEqualsWithDelta(100.0, $payload['valor'], 0.001);
+                    $this->assertSame('2026-06-20', $payload['data_pagamento']);
+                    $this->assertSame('PIX', $payload['forma_pagamento']);
+
+                    return true;
+                })
+            )
+            ->andReturn([
+                'status' => 201,
+                'body' => '{"id":"baixa-receber-ext-1"}',
+                'json' => ['id' => 'baixa-receber-ext-1'],
+                'headers' => [],
+            ]);
+        $this->app->instance(ContaAzulClient::class, $client);
+
+        app(ExportacaoContaAzulService::class)->exportarBaixa($conexao, $pagamento);
+
+        $this->mapeamentoIds[] = (int) ContaAzulMapeamento::query()
+            ->where('tipo_entidade', ContaAzulEntityType::BAIXA)
+            ->where('id_local', $pagamento->id)
+            ->value('id');
+
+        $this->assertDatabaseHas('conta_azul_mapeamentos', [
+            'tipo_entidade' => ContaAzulEntityType::BAIXA,
+            'id_local' => $pagamento->id,
+            'id_externo' => 'baixa-receber-ext-1',
+        ]);
+    }
+
+    public function test_excluir_conta_receber_com_pagamento_sem_confirmacao_retorna_422(): void
+    {
+        $conta = $this->criarContaReceber('Receber Exclusao Sem Confirmacao', '100.00');
+        $contaFinanceira = $this->criarContaFinanceira('Banco Receber Exclusao Sem Confirmacao');
+
+        $pagamento = app(ContaReceberCommandService::class)->registrarPagamento($conta, [
+            'data_pagamento' => '2026-06-20',
+            'valor' => '100.00',
+            'forma_pagamento' => 'PIX',
+            'conta_financeira_id' => $contaFinanceira->id,
+        ]);
+        $this->pagamentoIds[] = (int) $pagamento->id;
+
+        try {
+            app(ContaReceberCommandService::class)->deletar($conta);
+            $this->fail('A exclusao deveria exigir confirmacao dos estornos.');
+        } catch (HttpResponseException $e) {
+            $this->assertSame(422, $e->getResponse()->getStatusCode());
+            $payload = json_decode($e->getResponse()->getContent(), true);
+            $this->assertSame('confirmacao_estornos_obrigatoria', $payload['reason']);
+            $this->assertSame($pagamento->id, $payload['pagamentos'][0]['id']);
+        }
+
+        $this->assertDatabaseHas('contas_receber', ['id' => $conta->id, 'deleted_at' => null]);
+        $this->assertDatabaseHas('contas_receber_pagamentos', ['id' => $pagamento->id]);
+    }
+
+    public function test_excluir_conta_receber_com_confirmacao_estorna_pagamentos_cancela_ledger_e_audita(): void
+    {
+        $conta = $this->criarContaReceber('Receber Exclusao Confirmada', '100.00');
+        $contaFinanceira = $this->criarContaFinanceira('Banco Receber Exclusao Confirmada');
+
+        $pagamento = app(ContaReceberCommandService::class)->registrarPagamento($conta, [
+            'data_pagamento' => '2026-06-20',
+            'valor' => '100.00',
+            'forma_pagamento' => 'PIX',
+            'conta_financeira_id' => $contaFinanceira->id,
+        ]);
+        $pagamentoId = (int) $pagamento->id;
+        $this->pagamentoIds[] = $pagamentoId;
+
+        $exports = Mockery::mock(ContaAzulExportDispatchService::class);
+        $exports->shouldReceive('estornarBaixa')
+            ->once()
+            ->with(ContaAzulEntityType::BAIXA, $pagamentoId, null, Mockery::on(
+                fn (array $contexto) => ($contexto['evento'] ?? null) === 'exclusao_conta_receber'
+            ));
+        $exports->shouldReceive('excluirTituloFinanceiro')
+            ->once()
+            ->with(ContaAzulEntityType::TITULO, (int) $conta->id, null, Mockery::on(
+                fn (array $contexto) => ($contexto['evento'] ?? null) === 'exclusao_conta_receber'
+            ));
+        $this->app->instance(ContaAzulExportDispatchService::class, $exports);
+
+        app(ContaReceberCommandService::class)->deletar($conta, true);
+
+        $this->assertSoftDeleted('contas_receber', ['id' => $conta->id]);
+        $this->assertDatabaseMissing('contas_receber_pagamentos', ['id' => $pagamentoId]);
+        $this->assertDatabaseHas('lancamentos_financeiros', [
+            'pagamento_type' => ContaReceberPagamento::class,
+            'pagamento_id' => $pagamentoId,
+            'status' => LancamentoStatus::CANCELADO->value,
+        ]);
+        $this->assertDatabaseHas('auditoria_logs', [
+            'modulo' => 'financeiro',
+            'acao' => 'reversed_by_delete',
+            'entity_type' => ContaReceberPagamento::class,
+            'entity_id' => (string) $pagamentoId,
+        ]);
+        $this->assertDatabaseHas('auditoria_logs', [
+            'modulo' => 'financeiro',
+            'acao' => 'deleted',
+            'entity_type' => ContaReceber::class,
+            'entity_id' => (string) $conta->id,
+        ]);
+    }
+
+    public function test_job_estorna_baixa_receber_mapeada_e_trata_404_como_idempotente(): void
+    {
+        $this->criarConexaoContaAzul();
+        $conta = $this->criarContaReceber('Receber Estorno Baixa Externa', '100.00');
+        $contaFinanceira = $this->criarContaFinanceira('Banco Receber Estorno Baixa Externa');
+
+        $pagamento = ContaReceberPagamento::create([
+            'conta_receber_id' => $conta->id,
+            'data_pagamento' => '2026-06-20',
+            'valor' => '100.00',
+            'forma_pagamento' => 'PIX',
+            'conta_financeira_id' => $contaFinanceira->id,
+        ]);
+        $this->pagamentoIds[] = (int) $pagamento->id;
+
+        $mapeamento = ContaAzulMapeamento::create([
+            'tipo_entidade' => ContaAzulEntityType::BAIXA,
+            'id_local' => $pagamento->id,
+            'id_externo' => 'baixa-receber-ext-404',
+            'origem_inicial' => 'test',
+            'sincronizado_em' => now(),
+        ]);
+        $this->mapeamentoIds[] = (int) $mapeamento->id;
+
+        $client = Mockery::mock(ContaAzulClient::class);
+        $client->shouldReceive('delete')
+            ->once()
+            ->with('v1/financeiro/eventos-financeiros/parcelas/baixa/baixa-receber-ext-404', 'token-valido')
+            ->andReturn([
+                'status' => 404,
+                'body' => '{"message":"not found"}',
+                'json' => ['message' => 'not found'],
+                'headers' => [],
+            ]);
+        $this->app->instance(ContaAzulClient::class, $client);
+
+        (new EstornarBaixaContaAzulJob(ContaAzulEntityType::BAIXA, (int) $pagamento->id))->handle(
+            app(ExportacaoContaAzulService::class),
+            app(ContaAzulConnectionService::class),
+            app(AuditoriaLogService::class)
+        );
+
+        $this->assertDatabaseMissing('conta_azul_mapeamentos', ['id' => $mapeamento->id]);
+        $this->assertDatabaseHas('auditoria_logs', [
+            'modulo' => 'conta_azul',
+            'acao' => 'estorno_baixa',
+            'status' => 'sucesso',
+            'entity_type' => ContaAzulEntityType::BAIXA,
+            'entity_id' => (string) $pagamento->id,
+        ]);
     }
 
     public function test_job_de_baixa_registra_auditoria_quando_exportacao_falha(): void

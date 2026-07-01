@@ -3,6 +3,7 @@
 namespace App\Http;
 
 use App\Http\Middleware\Authenticate;
+use App\Http\Middleware\AddRequestContext;
 use App\Http\Middleware\EncryptCookies;
 use App\Http\Middleware\EnsureSenhaNaoObrigatoria;
 use App\Http\Middleware\LogRequests;
@@ -45,6 +46,7 @@ class Kernel extends HttpKernel
         ValidatePostSize::class,
         TrimStrings::class,
         ConvertEmptyStringsToNull::class,
+        AddRequestContext::class,
     ];
 
     /**

@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Integrations\ContaAzul\Services\ContaAzulExportDispatchService;
 use App\Models\Produto;
 use App\Support\Auditoria\AuditoriaDiff;
+use App\Support\Logging\SierraLog;
 use Exception;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
@@ -12,7 +13,6 @@ use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Throwable;
@@ -128,12 +128,14 @@ class ProdutoService
 
             return $path;
         } catch (Throwable $e) {
-            Log::error('Erro ao salvar manual de conserva????o', [
-                'produto_id' => $produto->id,
+            SierraLog::inventory('inventory.product_manual.save_failed', [
+                'entity_type' => 'produto',
+                'entity_id' => $produto->id,
                 'file' => $file?->getClientOriginalName(),
                 'size' => $file?->getSize(),
-                'erro' => $e->getMessage(),
-            ]);
+                'operation' => 'save_manual_conservacao',
+                'exception' => $e,
+            ], 'error');
 
             throw new Exception("Erro ao salvar o manual: " . $e->getMessage());
         }

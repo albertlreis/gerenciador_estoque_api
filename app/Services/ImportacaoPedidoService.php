@@ -20,12 +20,12 @@ use App\Enums\PedidoStatus;
 use App\Enums\TipoImportacao;
 use App\Helpers\StringHelper;
 use App\Support\Dates\DateNormalizer;
+use App\Support\Logging\SierraLog;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
@@ -56,9 +56,10 @@ class ImportacaoPedidoService
      */
     public function confirmarImportacaoXml(Request $request): JsonResponse
     {
-        Log::info('Importação XML - confirmação iniciada', [
+        SierraLog::inventory('inventory.order_xml_import.confirmation_started', [
             'usuario_id' => Auth::id(),
-            'importacao_id' => $request->input('importacao_id'),
+            'entity_type' => 'pedido_importacao',
+            'entity_id' => $request->input('importacao_id'),
             'itens_total' => is_array($request->input('itens')) ? count($request->input('itens')) : 0,
         ]);
 
@@ -249,10 +250,10 @@ class ImportacaoPedidoService
         });
 
         if ($validator->fails()) {
-            Log::warning('Importação XML - validação falhou', [
+            SierraLog::inventory('inventory.order_xml_import.validation_failed', [
                 'usuario_id' => Auth::id(),
                 'erros' => $validator->errors()->toArray(),
-            ]);
+            ], 'warning');
             throw new ValidationException($validator);
         }
 
@@ -512,7 +513,7 @@ class ImportacaoPedidoService
                 );
 
                 if ($index < 3) {
-                    Log::info('Importação XML - item normalizado para persistência', [
+                    SierraLog::inventory('inventory.order_xml_import.item_normalized', [
                         'index' => $index,
                         'referencia' => $item['ref'] ?? null,
                         'quantidade' => $quantidade,
@@ -652,10 +653,11 @@ class ImportacaoPedidoService
                 ]);
             }
 
-            Log::info('Importação XML - pedido confirmado', [
+            SierraLog::inventory('inventory.order_xml_import.order_confirmed', [
                 'usuario_id' => $usuario->id,
-                'pedido_id' => $pedido->id,
-                'importacao_id' => $importacaoId,
+                'entity_type' => 'pedido',
+                'entity_id' => $pedido->id,
+                'batch_id' => $importacaoId,
                 'itens_total' => count($itens),
             ]);
 
@@ -688,16 +690,19 @@ class ImportacaoPedidoService
             ]);
             });
         } catch (ValidationException $e) {
-            Log::warning('Importação XML - erro de normalização/validação', [
+            SierraLog::inventory('inventory.order_xml_import.normalization_failed', [
                 'usuario_id' => Auth::id(),
                 'erros' => $e->errors(),
-            ]);
+                'exception' => $e,
+            ], 'warning');
             throw $e;
         } catch (\Throwable $e) {
-            Log::error('Importação XML - erro ao confirmar', [
+            SierraLog::inventory('inventory.order_xml_import.confirmation_failed', [
                 'usuario_id' => Auth::id(),
-                'mensagem' => $e->getMessage(),
-            ]);
+                'entity_type' => 'pedido_importacao',
+                'entity_id' => $request->input('importacao_id'),
+                'exception' => $e,
+            ], 'error');
 
             if (
                 str_contains($e->getMessage(), 'SQLSTATE[22001]')
@@ -712,9 +717,10 @@ class ImportacaoPedidoService
 
             throw $e;
         } finally {
-            Log::info('Importação XML - confirmação finalizada', [
+            SierraLog::inventory('inventory.order_xml_import.confirmation_finished', [
                 'usuario_id' => Auth::id(),
-                'importacao_id' => $request->input('importacao_id'),
+                'entity_type' => 'pedido_importacao',
+                'entity_id' => $request->input('importacao_id'),
             ]);
         }
     }

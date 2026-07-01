@@ -5,13 +5,13 @@ namespace App\Console\Commands;
 use App\Http\Controllers\PedidoController;
 use App\Models\PedidoImportacao;
 use App\Models\Usuario;
+use App\Support\Logging\SierraLog;
 use Illuminate\Console\Command;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Symfony\Component\HttpFoundation\File\UploadedFile as SymfonyUploadedFile;
 use Throwable;
@@ -149,13 +149,13 @@ class TestImportPedidosXmlBatchCommand extends Command
                     'linha' => $e->getLine(),
                 ];
 
-                Log::error('batch_importacao_xml_falha', [
+                SierraLog::inventory('inventory.order_xml_import.batch_failed', [
                     'batch_id' => $requestBatchId,
                     'request_id' => $requestId,
                     'arquivo' => $arquivo,
                     'etapa' => 'batch',
-                    'erro' => $e->getMessage(),
-                ]);
+                    'exception' => $e,
+                ], 'error');
             } finally {
                 $resultado['tempo_ms'] = (int) ((microtime(true) - $inicioArquivo) * 1000);
 
@@ -251,4 +251,3 @@ class TestImportPedidosXmlBatchCommand extends Command
         return filter_var($value, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE) ?? $default;
     }
 }
-

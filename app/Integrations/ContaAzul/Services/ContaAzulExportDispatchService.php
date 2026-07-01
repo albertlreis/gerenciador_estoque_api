@@ -4,10 +4,12 @@ namespace App\Integrations\ContaAzul\Services;
 
 use App\Integrations\ContaAzul\ContaAzulEntityType;
 use App\Integrations\ContaAzul\Models\ContaAzulMapeamento;
+use App\Jobs\ContaAzul\EstornarBaixaContaAzulJob;
 use App\Jobs\ContaAzul\ExportBaixaContaPagarContaAzulJob;
 use App\Jobs\ContaAzul\ExportBaixaContaAzulJob;
 use App\Jobs\ContaAzul\ExportContaPagarContaAzulJob;
 use App\Jobs\ContaAzul\ExportClienteContaAzulJob;
+use App\Jobs\ContaAzul\ExcluirTituloFinanceiroContaAzulJob;
 use App\Jobs\ContaAzul\ExportPedidoContaAzulJob;
 use App\Jobs\ContaAzul\ExportProdutoContaAzulJob;
 use App\Jobs\ContaAzul\ExportTituloContaAzulJob;
@@ -172,6 +174,36 @@ class ContaAzulExportDispatchService
         );
     }
 
+    /**
+     * @param  array<string, mixed>  $contexto
+     */
+    public function estornarBaixa(string $tipoEntidade, int $pagamentoId, ?int $lojaId = null, array $contexto = []): void
+    {
+        $this->dispatchOperacao(
+            $tipoEntidade,
+            $pagamentoId,
+            $lojaId,
+            $contexto,
+            'estorno_baixa',
+            fn () => EstornarBaixaContaAzulJob::dispatch($tipoEntidade, $pagamentoId, $lojaId)
+        );
+    }
+
+    /**
+     * @param  array<string, mixed>  $contexto
+     */
+    public function excluirTituloFinanceiro(string $tipoEntidade, int $idLocal, ?int $lojaId = null, array $contexto = []): void
+    {
+        $this->dispatchOperacao(
+            $tipoEntidade,
+            $idLocal,
+            $lojaId,
+            $contexto,
+            'delete_titulo',
+            fn () => ExcluirTituloFinanceiroContaAzulJob::dispatch($tipoEntidade, $idLocal, $lojaId)
+        );
+    }
+
     private function dispatchBaixaDepoisDoTitulo(int $contaReceberId, int $pagamentoId, ?int $lojaId): void
     {
         Bus::chain([
@@ -193,19 +225,34 @@ class ContaAzulExportDispatchService
      */
     private function dispatch(string $tipoEntidade, int $idLocal, ?int $lojaId, array $contexto, callable $jobFactory): void
     {
+        $this->dispatchOperacao($tipoEntidade, $idLocal, $lojaId, $contexto, 'export', $jobFactory);
+    }
+
+    /**
+     * @param  array<string, mixed>  $contexto
+     */
+    private function dispatchOperacao(
+        string $tipoEntidade,
+        int $idLocal,
+        ?int $lojaId,
+        array $contexto,
+        string $acao,
+        callable $jobFactory
+    ): void
+    {
         if (!filter_var(config('conta_azul.flags.exportacao_ativa', true), FILTER_VALIDATE_BOOL)) {
-            $this->log($tipoEntidade, $idLocal, $lojaId, 'ignorado', 'Exportação automática desativada.', $contexto);
+            $this->log($tipoEntidade, $idLocal, $lojaId, $acao, 'ignorado', 'Sincronizacao automatica Conta Azul desativada.', $contexto);
             return;
         }
 
         $conexao = $this->connections->latestForLoja($lojaId);
         if (!$conexao) {
-            $this->log($tipoEntidade, $idLocal, $lojaId, 'ignorado', 'Nenhuma conexão Conta Azul encontrada.', $contexto);
+            $this->log($tipoEntidade, $idLocal, $lojaId, $acao, 'ignorado', 'Nenhuma conexao Conta Azul encontrada.', $contexto);
             return;
         }
 
         if ($conexao->status !== 'ativa') {
-            $this->log($tipoEntidade, $idLocal, $lojaId, 'ignorado', 'ConexÃ£o Conta Azul inativa ou em erro.', $contexto + [
+            $this->log($tipoEntidade, $idLocal, $lojaId, $acao, 'ignorado', 'Conexao Conta Azul inativa ou em erro.', $contexto + [
                 'conexao_id' => $conexao->id,
                 'status_conexao' => $conexao->status,
             ]);
@@ -214,18 +261,18 @@ class ContaAzulExportDispatchService
 
         $conexao->loadMissing('token');
         if ($conexao->token === null) {
-            $this->log($tipoEntidade, $idLocal, $lojaId, 'ignorado', 'Conexão Conta Azul sem tokens válidos.', $contexto);
+            $this->log($tipoEntidade, $idLocal, $lojaId, $acao, 'ignorado', 'Conexao Conta Azul sem tokens validos.', $contexto);
             return;
         }
 
         if ($conexao->token->isAccessTokenExpired() && !$conexao->token->refresh_token) {
-            $this->log($tipoEntidade, $idLocal, $lojaId, 'ignorado', 'Conexao Conta Azul com access token expirado e sem refresh token.', $contexto + [
+            $this->log($tipoEntidade, $idLocal, $lojaId, $acao, 'ignorado', 'Conexao Conta Azul com access token expirado e sem refresh token.', $contexto + [
                 'conexao_id' => $conexao->id,
             ]);
             return;
         }
 
-        $this->log($tipoEntidade, $idLocal, $lojaId, 'enfileirado', null, $contexto);
+        $this->log($tipoEntidade, $idLocal, $lojaId, $acao, 'enfileirado', null, $contexto);
         $pending = $jobFactory();
         if (is_object($pending) && method_exists($pending, 'afterCommit')) {
             $pending->afterCommit();
@@ -239,6 +286,7 @@ class ContaAzulExportDispatchService
         string $tipoEntidade,
         int $idLocal,
         ?int $lojaId,
+        string $acao,
         string $status,
         ?string $mensagem,
         array $contexto
@@ -251,7 +299,7 @@ class ContaAzulExportDispatchService
             'categoria' => 'integracao',
             'nivel' => $status === 'falha' ? 'error' : 'info',
             'modulo' => 'conta_azul',
-            'acao' => 'export',
+            'acao' => $acao,
             'status' => $status,
             'label' => 'Log de sincronizacao Conta Azul',
             'message' => $mensagem,

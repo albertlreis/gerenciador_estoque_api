@@ -51,5 +51,12 @@ class RouteServiceProvider extends ServiceProvider
 
             return Limit::perMinute(max(1, $perMinute))->by($request->user()?->id ?: $request->ip());
         });
+
+        RateLimiter::for('client-logs', function (Request $request) {
+            $defaultLimit = app()->environment('local') ? 120 : 30;
+            $perMinute = (int) env('CLIENT_LOG_RATE_LIMIT_PER_MINUTE', $defaultLimit);
+
+            return Limit::perMinute(max(1, $perMinute))->by($request->ip());
+        });
     }
 }

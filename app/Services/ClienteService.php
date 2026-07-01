@@ -5,13 +5,14 @@ namespace App\Services;
 use App\Integrations\ContaAzul\Services\ContaAzulExportDispatchService;
 use App\Models\Cliente;
 use App\Support\Auditoria\AuditoriaDiff;
+use App\Support\Logging\SierraLog;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Log;
 use App\Repositories\ClienteRepository;
 use App\Repositories\ClienteEnderecoRepository;
 use App\Validators\DocumentoValidator;
 use Throwable;
+use Illuminate\Support\Facades\Log;
 
 class ClienteService
 {
@@ -261,9 +262,16 @@ class ClienteService
             Log::warning('Falha ao disparar exportacao Conta Azul para cliente.', [
                 'cliente_id' => $cliente->id,
                 'evento' => $evento,
-                'exception' => $e::class,
                 'erro' => $e->getMessage(),
             ]);
+
+            SierraLog::finance('finance.conta_azul.customer_export_dispatch_failed', [
+                'entity_type' => 'cliente',
+                'entity_id' => $cliente->id,
+                'evento' => $evento,
+                'operation' => 'cliente_export',
+                'exception' => $e,
+            ], 'warning');
         }
     }
 }

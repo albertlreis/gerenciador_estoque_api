@@ -28,6 +28,7 @@ use App\Services\PedidoUpdateService;
 use App\Services\EstatisticaPedidoService;
 use App\Services\PedidoExportService;
 use App\Services\PdfImageService;
+use App\Support\Logging\SierraLog;
 use App\Support\Pdf\ClienteEnderecoPdf;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Exception;
@@ -36,7 +37,6 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
@@ -257,7 +257,7 @@ class PedidoController extends Controller
             $tipoDetectado = $this->detectarTipoImportacaoXml($arquivo->getRealPath());
 
             if ($tipoDetectado !== null && $tipoDetectado !== $tipoImportacao) {
-                Log::info('Importação de pedido - tipo ajustado por layout XML', [
+                SierraLog::inventory('inventory.order_import.type_adjusted', [
                     'request_id' => $requestId,
                     'usuario_id' => auth()->id(),
                     'tipo_importacao_solicitado' => $tipoImportacaoSolicitado,
@@ -275,7 +275,7 @@ class PedidoController extends Controller
             //   precisa ser único por tentativa (sem travas por hash/nome).
             $hash = hash('sha256', $hashArquivo . '|' . $tipoImportacao . '|' . Str::uuid());
 
-            Log::info('Importação de pedido - início', [
+            SierraLog::inventory('inventory.order_import.started', [
                 'request_id' => $requestId,
                 'etapa' => 'upload',
                 'usuario_id' => auth()->id(),
@@ -303,11 +303,11 @@ class PedidoController extends Controller
                 $temPedidoMinimo = $this->temPedidoMinimo($pedido, $totais);
                 if (!$temPedidoMinimo) {
                     $nomeArquivo = $arquivo->getClientOriginalName();
-                    Log::warning('Importação de pedido - sem dados mínimos do pedido', [
+                    SierraLog::inventory('inventory.order_import.minimum_data_missing', [
                         'request_id' => $requestId,
                         'tipo_importacao' => $tipoImportacao,
                         'arquivo_nome' => $nomeArquivo,
-                    ]);
+                    ], 'warning');
                     return response()->json([
                         'sucesso' => false,
                         'mensagem' => "Não foi possível extrair os dados mínimos do pedido (cabeçalho/totais). Arquivo: {$nomeArquivo}",
@@ -316,12 +316,12 @@ class PedidoController extends Controller
                 }
                 $nomeArquivo = $arquivo->getClientOriginalName();
                 $debugTexto = $dados['debug_texto_extraido'] ?? null;
-                Log::warning('Importação de pedido - XML sem itens identificados (preview ok, requer inserção manual)', [
+                SierraLog::inventory('inventory.order_import.items_missing', [
                     'request_id' => $requestId,
                     'tipo_importacao' => $tipoImportacao,
                     'arquivo_nome' => $nomeArquivo,
                     'debug_texto_preview' => $debugTexto ? mb_substr($debugTexto, 0, 2000) : null,
-                ]);
+                ], 'warning');
             }
 
             $estrategiaVinculo = EstrategiaVinculoImportacao::REF_SELECAO->value;
@@ -404,16 +404,17 @@ class PedidoController extends Controller
                 'erro' => null,
             ]);
 
-            Log::info('Importação de pedido - extração concluída', [
+            SierraLog::inventory('inventory.order_import.extraction_finished', [
                 'request_id' => $requestId,
                 'etapa' => 'staging',
                 'usuario_id' => auth()->id(),
-                'importacao_id' => $importacao->id,
+                'entity_type' => 'pedido_importacao',
+                'entity_id' => $importacao->id,
                 'tipo_importacao' => $tipoImportacao,
                 'estrategia_vinculo' => $estrategiaVinculo,
                 'itens_total' => count($itens),
                 'numero_extraido' => $numeroExtraido ?: null,
-                'tempo_ms' => (int) ((microtime(true) - $inicioImportacao) * 1000),
+                'duration_ms' => (int) ((microtime(true) - $inicioImportacao) * 1000),
             ]);
 
             return response()->json([
@@ -423,11 +424,11 @@ class PedidoController extends Controller
                 'dados' => $payload,
             ]);
         } catch (\InvalidArgumentException $e) {
-            Log::warning('Importação de pedido - validação/parse', [
+            SierraLog::inventory('inventory.order_import.parse_failed', [
                 'request_id' => $requestId,
                 'tipo_importacao' => $tipoImportacao,
-                'mensagem' => $e->getMessage(),
-            ]);
+                'exception' => $e,
+            ], 'warning');
             return response()->json([
                 'sucesso' => false,
                 'mensagem' => $e->getMessage(),
@@ -446,15 +447,15 @@ class PedidoController extends Controller
                 'erro' => $e->getMessage(),
             ]);
 
-            Log::error('Importação de pedido - erro ao processar', [
+            SierraLog::inventory('inventory.order_import.process_failed', [
                 'request_id' => $requestId,
                 'etapa' => 'importar',
                 'usuario_id' => auth()->id(),
                 'tipo_importacao' => $tipoImportacao,
                 'arquivo_hash' => $hashErro,
-                'mensagem' => $e->getMessage(),
-                'tempo_ms' => (int) ((microtime(true) - $inicioImportacao) * 1000),
-            ]);
+                'duration_ms' => (int) ((microtime(true) - $inicioImportacao) * 1000),
+                'exception' => $e,
+            ], 'error');
 
             return response()->json([
                 'sucesso' => false,
@@ -1461,7 +1462,7 @@ class PedidoController extends Controller
             ->first();
 
         if (!$categoria) {
-            Log::info('Importacao de pedido - categoria sugerida Avanti indisponivel', [
+            SierraLog::inventory('inventory.order_import.suggested_category_unavailable', [
                 'categoria_sugerida' => self::CATEGORIA_SUGERIDA_AVANTI,
                 'fornecedor_sugerido' => $fornecedorSugerido['nome'] ?? null,
                 'fornecedor_vinculado_id' => $fornecedorVinculado?->id,
@@ -1596,7 +1597,7 @@ class PedidoController extends Controller
         ?string $nomeArquivo,
         array $fornecedorIds
     ): void {
-        Log::info('Importacao de pedido - fornecedor Avanti nao selecionado automaticamente', [
+        SierraLog::inventory('inventory.order_import.avanti_supplier_not_selected', [
             'motivo' => $motivo,
             'fornecedor_sugerido' => $fornecedorSugerido['nome'] ?? null,
             'fornecedor_resolvido_xml_id' => $fornecedorResolvidoXml?->id,
@@ -1796,7 +1797,7 @@ class PedidoController extends Controller
         ?string $nomeArquivo,
         array $fornecedorIds
     ): void {
-        Log::info('Importacao de pedido - fornecedor nao selecionado automaticamente', [
+        SierraLog::inventory('inventory.order_import.supplier_not_selected', [
             'motivo' => $motivo,
             'fornecedor_sugerido' => $fornecedorSugerido['nome'] ?? null,
             'fornecedor_sugerido_cnpj' => $this->normalizarDocumentoFornecedor($fornecedorSugerido['cnpj'] ?? null),

@@ -2,9 +2,9 @@
 
 namespace App\Helpers;
 
+use App\Support\Logging\SierraLog;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 
@@ -155,10 +155,11 @@ class AuthHelper
                 return is_array($cached) ? $cached : [];
             }
         } catch (\Throwable $e) {
-            Log::warning('Falha ao ler cache de permissoes do usuario; usando banco.', [
-                'usuario_id' => $userId,
-                'message' => $e->getMessage(),
-            ]);
+            SierraLog::auth('auth.permissions.cache_read_failed', [
+                'user_id' => $userId,
+                'operation' => 'permissions_cache_read',
+                'exception' => $e,
+            ], 'warning');
         }
 
         if (!Schema::hasTable('acesso_usuario_perfil')
@@ -179,10 +180,11 @@ class AuthHelper
         try {
             Cache::put($cacheKey, $permissoes, now()->addHours(6));
         } catch (\Throwable $e) {
-            Log::warning('Falha ao gravar cache de permissoes do usuario; seguindo sem cache.', [
-                'usuario_id' => $userId,
-                'message' => $e->getMessage(),
-            ]);
+            SierraLog::auth('auth.permissions.cache_write_failed', [
+                'user_id' => $userId,
+                'operation' => 'permissions_cache_write',
+                'exception' => $e,
+            ], 'warning');
         }
 
         return $permissoes;
@@ -206,10 +208,11 @@ class AuthHelper
                 return is_array($cached) ? $cached : [];
             }
         } catch (\Throwable $e) {
-            Log::warning('Falha ao ler cache de perfis do usuario; usando banco.', [
-                'usuario_id' => $userId,
-                'message' => $e->getMessage(),
-            ]);
+            SierraLog::auth('auth.profiles.cache_read_failed', [
+                'user_id' => $userId,
+                'operation' => 'profiles_cache_read',
+                'exception' => $e,
+            ], 'warning');
         }
 
         if (!Schema::hasTable('acesso_usuario_perfil') || !Schema::hasTable('acesso_perfis')) {
@@ -227,10 +230,11 @@ class AuthHelper
         try {
             Cache::put($cacheKey, $perfis, now()->addHours(6));
         } catch (\Throwable $e) {
-            Log::warning('Falha ao gravar cache de perfis do usuario; seguindo sem cache.', [
-                'usuario_id' => $userId,
-                'message' => $e->getMessage(),
-            ]);
+            SierraLog::auth('auth.profiles.cache_write_failed', [
+                'user_id' => $userId,
+                'operation' => 'profiles_cache_write',
+                'exception' => $e,
+            ], 'warning');
         }
 
         return $perfis;

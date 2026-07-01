@@ -2,6 +2,7 @@
 
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\V1\DashboardController as DashboardV1Controller;
+use App\Http\Controllers\Api\V1\UsuarioPreferenciaController;
 
 use App\Http\Controllers\{
     AniversarioController,
@@ -12,6 +13,7 @@ use App\Http\Controllers\{
     CategoriaController,
     CategoriaFinanceiraController,
     CentroCustoController,
+    ClientLogController,
     ClienteController,
     ConciliacaoBancariaController,
     ConfiguracaoController,
@@ -81,6 +83,9 @@ Route::get('v1/health', fn () => response()->json([
     'service' => 'gerenciador-estoque-api',
 ]));
 
+Route::post('v1/client-logs', [ClientLogController::class, 'store'])
+    ->middleware('throttle:client-logs');
+
 Route::get('v1/integrations/conta-azul/callback', [ContaAzulOAuthController::class, 'callback']);
 Route::get('v1/integrations/google-calendar/callback', [GoogleCalendarOAuthController::class, 'callback']);
 
@@ -93,6 +98,11 @@ Route::middleware(['auth:sanctum', 'senha.nao_obrigatoria'])
          * ============================================================ */
         Route::get('configuracoes', [ConfiguracaoController::class, 'listar']);
         Route::put('configuracoes/{chave}', [ConfiguracaoController::class, 'atualizar']);
+        Route::prefix('preferencias/telas')->group(function () {
+            Route::get('{screenKey}', [UsuarioPreferenciaController::class, 'show']);
+            Route::patch('{screenKey}', [UsuarioPreferenciaController::class, 'update']);
+            Route::delete('{screenKey}', [UsuarioPreferenciaController::class, 'destroy']);
+        });
         Route::prefix('configuracoes/pedidos')->group(function () {
             Route::get('statuses', [PedidoStatusConfiguracaoController::class, 'index']);
             Route::post('statuses', [PedidoStatusConfiguracaoController::class, 'store']);

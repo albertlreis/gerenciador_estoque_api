@@ -1,0 +1,78 @@
+<?php
+
+namespace App\Jobs\ContaAzul;
+
+use App\Integrations\ContaAzul\Services\ContaAzulConnectionService;
+use App\Integrations\ContaAzul\Services\ExportacaoContaAzulService;
+use App\Services\AuditoriaLogService;
+use Illuminate\Bus\Queueable;
+use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Foundation\Bus\Dispatchable;
+use Illuminate\Queue\InteractsWithQueue;
+use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\Log;
+use Throwable;
+
+class ExcluirTituloFinanceiroContaAzulJob implements ShouldQueue
+{
+    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+
+    public function __construct(
+        public readonly string $tipoEntidade,
+        public readonly int $idLocal,
+        public readonly ?int $lojaId = null
+    ) {
+    }
+
+    public function handle(
+        ExportacaoContaAzulService $export,
+        ContaAzulConnectionService $connections,
+        AuditoriaLogService $auditoria
+    ): void {
+        try {
+            $conexao = $connections->latestForLoja($this->lojaId);
+            if (!$conexao) {
+                return;
+            }
+
+            $export->excluirTituloFinanceiroMapeado($conexao, $this->tipoEntidade, $this->idLocal, $this->lojaId);
+        } catch (Throwable $e) {
+            Log::warning('Falha ao remover titulo financeiro Conta Azul.', [
+                'tipo_entidade' => $this->tipoEntidade,
+                'id_local' => $this->idLocal,
+                'loja_id' => $this->lojaId,
+                'tentativa' => $this->attempts(),
+                'exception' => $e::class,
+                'erro' => $e->getMessage(),
+            ]);
+
+            $auditoria->registrar([
+                'occurred_at' => now(),
+                'tipo' => 'integracao',
+                'categoria' => 'integracao',
+                'nivel' => 'error',
+                'modulo' => 'conta_azul',
+                'acao' => 'delete_titulo',
+                'status' => 'falha',
+                'label' => 'Falha ao remover titulo financeiro Conta Azul',
+                'message' => $e->getMessage(),
+                'entity_type' => $this->tipoEntidade,
+                'entity_id' => $this->idLocal,
+                'context_json' => [
+                    'loja_id' => $this->lojaId,
+                    'tipo_entidade' => $this->tipoEntidade,
+                    'id_local' => $this->idLocal,
+                    'direcao' => 'export',
+                    'tentativa' => $this->attempts(),
+                    'erro_codigo' => $e::class,
+                    'erro_mensagem' => $e->getMessage(),
+                ],
+                'source_system' => 'estoque',
+                'source_kind' => 'sync',
+                'retention_days' => 365,
+            ]);
+
+            throw $e;
+        }
+    }
+}

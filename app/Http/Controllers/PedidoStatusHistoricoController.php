@@ -8,6 +8,7 @@ use App\Models\PedidoStatusHistorico;
 use App\Services\Comunicacao\ComunicacaoApiClient;
 use App\Services\EntregaProdutoService;
 use App\Services\PedidoStatusFluxoService;
+use App\Support\Logging\SierraLog;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -331,10 +332,12 @@ class PedidoStatusHistoricoController extends Controller
         try {
             $comms->enviarStatusPedido($pedido->fresh(['cliente']), $novoStatus);
         } catch (\Throwable $e) {
-            logger()->warning('[Comunicacao] Falha ao enviar status de pedido', [
-                'pedido_id' => $pedido->id,
+            SierraLog::warning('communication.order_status.send_failed', [
+                'entity_type' => 'pedido',
+                'entity_id' => $pedido->id,
                 'status' => $novoStatus,
-                'error' => $e->getMessage(),
+                'operation' => 'send_order_status',
+                'exception' => $e,
             ]);
         }
 

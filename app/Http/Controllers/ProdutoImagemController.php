@@ -5,10 +5,10 @@ namespace App\Http\Controllers;
 use App\Helpers\AuthHelper;
 use App\Models\Produto;
 use App\Models\ProdutoImagem;
+use App\Support\Logging\SierraLog;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Throwable;
 
@@ -70,12 +70,14 @@ class ProdutoImagemController extends Controller
             $fileName = $request->hasFile('image') ? $request->file('image')->getClientOriginalName() : 'Arquivo não enviado';
             $fileSize = $request->hasFile('image') ? (int) $request->file('image')->getSize() : 0;
 
-            Log::error('Erro ao enviar imagem', [
+            SierraLog::inventory('inventory.product_image.upload_failed', [
+                'entity_type' => 'produto',
+                'entity_id' => $produto->id,
                 'fileName' => $fileName,
                 'fileSize' => $fileSize,
-                'message'  => $e->getMessage(),
-                'trace'    => $e->getTraceAsString(),
-            ]);
+                'operation' => 'upload',
+                'exception' => $e,
+            ], 'error');
 
             return response()->json([
                 'error' => 'Erro interno ao salvar imagem.',
@@ -153,7 +155,13 @@ class ProdutoImagemController extends Controller
         try {
             Storage::disk(ProdutoImagem::DISK)->delete($path);
         } catch (Throwable $e) {
-            Log::error("Falha ao excluir o arquivo: {$path}", ['message' => $e->getMessage()]);
+            SierraLog::inventory('inventory.product_image.delete_file_failed', [
+                'entity_type' => 'produto_imagem',
+                'entity_id' => $imagemFound->getKey(),
+                'path' => $path,
+                'operation' => 'delete_file',
+                'exception' => $e,
+            ], 'error');
             return response()->json(['error' => 'Não foi possível remover o arquivo do diretório'], 500);
         }
 

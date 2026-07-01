@@ -128,19 +128,16 @@ class ExportacaoContaAzulService
     public function exportarBaixa(ContaAzulConexao $conexao, ContaReceberPagamento $pagamento, ?int $lojaId = null): void
     {
         $pagamento->loadMissing('conta');
-        $idTituloExt = ContaAzulMapeamento::idExternoPorLocal(
-            ContaAzulEntityType::TITULO,
-            (int) $pagamento->conta_receber_id,
-            $lojaId
-        );
-        if ($idTituloExt === null || $idTituloExt === '') {
+        $contaReceberId = (int) $pagamento->conta_receber_id;
+        $idParcelaExt = $this->resolveParcelaTituloId($conexao, $contaReceberId, $lojaId);
+        if ($idParcelaExt === null || $idParcelaExt === '') {
             throw new ContaAzulException(
-                'Exportação de baixa bloqueada: a conta a receber (título) local ainda não possui id externo na Conta Azul. Exporte o título antes.'
+                'Exportacao de baixa bloqueada: a conta a receber local ainda nao possui parcela externa na Conta Azul. Exporte o titulo antes.'
             );
         }
 
         $path = (string) ($this->config['paths']['baixa_create'] ?? '/v1/financeiro/eventos-financeiros/parcelas/{parcela_id}/baixa');
-        $path = str_replace('{parcela_id}', $idTituloExt, $path);
+        $path = str_replace('{parcela_id}', $idParcelaExt, $path);
         $this->exportJsonEntity(
             $conexao,
             $path,
@@ -174,6 +171,166 @@ class ExportacaoContaAzulService
             $lojaId,
             true
         );
+    }
+
+    public function estornarBaixaMapeada(ContaAzulConexao $conexao, string $tipoEntidade, int $idLocal, ?int $lojaId = null): void
+    {
+        if (!in_array($tipoEntidade, [ContaAzulEntityType::BAIXA, ContaAzulEntityType::BAIXA_CONTA_PAGAR], true)) {
+            throw new ContaAzulException('Tipo de baixa Conta Azul invalido para estorno.');
+        }
+
+        $mapping = $this->buscarMapeamento($tipoEntidade, $idLocal, $lojaId);
+        if (!$mapping?->id_externo) {
+            $this->registrarAuditoriaOperacao(
+                'estorno_baixa',
+                $tipoEntidade,
+                $idLocal,
+                $lojaId,
+                'ignorado',
+                'Mapeamento da baixa Conta Azul nao encontrado.',
+                ['motivo' => 'mapeamento_nao_encontrado']
+            );
+
+            return;
+        }
+
+        $path = (string) ($this->config['paths']['baixa_delete'] ?? '/v1/financeiro/eventos-financeiros/parcelas/baixa/{baixa_id}');
+        $path = $this->replacePathIds($path, (string) $mapping->id_externo);
+        $token = $this->connections->getValidAccessToken($conexao);
+        $res = $this->client->delete(ltrim($path, '/'), $token);
+        $ok = $res['status'] >= 200 && $res['status'] < 300;
+        $notFound = (int) $res['status'] === 404;
+        $respostaResumo = isset($res['body']) ? mb_substr((string) $res['body'], 0, 2000) : null;
+
+        if ($ok || $notFound) {
+            $mapping->delete();
+            $this->registrarAuditoriaOperacao(
+                'estorno_baixa',
+                $tipoEntidade,
+                $idLocal,
+                $lojaId,
+                'sucesso',
+                $notFound ? 'Baixa externa ja ausente na Conta Azul.' : 'Baixa externa estornada na Conta Azul.',
+                [
+                    'method' => 'DELETE',
+                    'path' => $path,
+                    'id_externo' => $mapping->id_externo,
+                    'http_status' => $res['status'],
+                    'resposta_resumo' => $respostaResumo,
+                    'resultado' => $notFound ? 'ja_ausente' : 'removida',
+                ]
+            );
+
+            return;
+        }
+
+        $this->registrarAuditoriaOperacao(
+            'estorno_baixa',
+            $tipoEntidade,
+            $idLocal,
+            $lojaId,
+            'falha',
+            'Falha ao estornar baixa externa na Conta Azul: HTTP ' . $res['status'],
+            [
+                'method' => 'DELETE',
+                'path' => $path,
+                'id_externo' => $mapping->id_externo,
+                'http_status' => $res['status'],
+                'resposta_resumo' => $respostaResumo,
+            ]
+        );
+
+        throw new ContaAzulException('Falha ao estornar baixa externa na Conta Azul: HTTP ' . $res['status']);
+    }
+
+    public function excluirTituloFinanceiroMapeado(ContaAzulConexao $conexao, string $tipoEntidade, int $idLocal, ?int $lojaId = null): void
+    {
+        $pathKey = match ($tipoEntidade) {
+            ContaAzulEntityType::TITULO => 'titulos_delete',
+            ContaAzulEntityType::CONTA_PAGAR => 'contas_pagar_delete',
+            default => null,
+        };
+
+        if ($pathKey === null) {
+            throw new ContaAzulException('Tipo de titulo financeiro Conta Azul invalido para exclusao.');
+        }
+
+        $pathConfig = $this->config['paths'][$pathKey] ?? null;
+        if (!is_string($pathConfig) || trim($pathConfig) === '') {
+            $this->registrarAuditoriaOperacao(
+                'delete_titulo',
+                $tipoEntidade,
+                $idLocal,
+                $lojaId,
+                'ignorado',
+                'Endpoint de exclusao de titulo Conta Azul nao configurado.',
+                ['motivo' => 'endpoint_nao_configurado', 'path_key' => $pathKey]
+            );
+
+            return;
+        }
+
+        $mapping = $this->buscarMapeamento($tipoEntidade, $idLocal, $lojaId);
+        if (!$mapping?->id_externo) {
+            $this->registrarAuditoriaOperacao(
+                'delete_titulo',
+                $tipoEntidade,
+                $idLocal,
+                $lojaId,
+                'ignorado',
+                'Mapeamento do titulo Conta Azul nao encontrado.',
+                ['motivo' => 'mapeamento_nao_encontrado', 'path_key' => $pathKey]
+            );
+
+            return;
+        }
+
+        $path = $this->replacePathIds($pathConfig, (string) $mapping->id_externo);
+        $token = $this->connections->getValidAccessToken($conexao);
+        $res = $this->client->delete(ltrim($path, '/'), $token);
+        $ok = $res['status'] >= 200 && $res['status'] < 300;
+        $notFound = (int) $res['status'] === 404;
+        $respostaResumo = isset($res['body']) ? mb_substr((string) $res['body'], 0, 2000) : null;
+
+        if ($ok || $notFound) {
+            $mapping->delete();
+            $this->registrarAuditoriaOperacao(
+                'delete_titulo',
+                $tipoEntidade,
+                $idLocal,
+                $lojaId,
+                'sucesso',
+                $notFound ? 'Titulo externo ja ausente na Conta Azul.' : 'Titulo externo removido na Conta Azul.',
+                [
+                    'method' => 'DELETE',
+                    'path' => $path,
+                    'id_externo' => $mapping->id_externo,
+                    'http_status' => $res['status'],
+                    'resposta_resumo' => $respostaResumo,
+                    'resultado' => $notFound ? 'ja_ausente' : 'removido',
+                ]
+            );
+
+            return;
+        }
+
+        $this->registrarAuditoriaOperacao(
+            'delete_titulo',
+            $tipoEntidade,
+            $idLocal,
+            $lojaId,
+            'falha',
+            'Falha ao remover titulo externo na Conta Azul: HTTP ' . $res['status'],
+            [
+                'method' => 'DELETE',
+                'path' => $path,
+                'id_externo' => $mapping->id_externo,
+                'http_status' => $res['status'],
+                'resposta_resumo' => $respostaResumo,
+            ]
+        );
+
+        throw new ContaAzulException('Falha ao remover titulo externo na Conta Azul: HTTP ' . $res['status']);
     }
 
     /**
@@ -306,13 +463,34 @@ class ExportacaoContaAzulService
         ]);
     }
 
+    private function resolveParcelaTituloId(ContaAzulConexao $conexao, int $contaReceberId, ?int $lojaId): ?string
+    {
+        $mapping = $this->buscarMapeamento(ContaAzulEntityType::TITULO, $contaReceberId, $lojaId);
+
+        if (!$mapping?->id_externo) {
+            return null;
+        }
+
+        $fromMetadata = $this->extractParcelaId($mapping->metadata_json['response'] ?? null);
+        if ($fromMetadata) {
+            return $fromMetadata;
+        }
+
+        $token = $this->connections->getValidAccessToken($conexao);
+        $path = (string) ($this->config['paths']['parcelas_by_evento'] ?? '/v1/financeiro/eventos-financeiros/{id_evento}/parcelas');
+        $path = str_replace('{id_evento}', (string) $mapping->id_externo, $path);
+        $res = $this->client->get(ltrim($path, '/'), $token);
+        $ok = $res['status'] >= 200 && $res['status'] < 300;
+        if (!$ok) {
+            throw new ContaAzulException('Falha ao consultar parcelas da conta a receber: HTTP ' . $res['status']);
+        }
+
+        return $this->extractParcelaId($res['json']);
+    }
+
     private function resolveParcelaContaPagarId(ContaAzulConexao $conexao, int $contaPagarId, ?int $lojaId): ?string
     {
-        $mapping = ContaAzulMapeamento::query()
-            ->where('tipo_entidade', ContaAzulEntityType::CONTA_PAGAR)
-            ->where('id_local', $contaPagarId)
-            ->when($lojaId !== null, fn ($q) => $q->where('loja_id', $lojaId))
-            ->first();
+        $mapping = $this->buscarMapeamento(ContaAzulEntityType::CONTA_PAGAR, $contaPagarId, $lojaId);
 
         if (!$mapping?->id_externo) {
             return null;
@@ -333,6 +511,70 @@ class ExportacaoContaAzulService
         }
 
         return $this->extractParcelaId($res['json']);
+    }
+
+    private function buscarMapeamento(string $tipoEntidade, int $idLocal, ?int $lojaId): ?ContaAzulMapeamento
+    {
+        return ContaAzulMapeamento::query()
+            ->where('tipo_entidade', $tipoEntidade)
+            ->where('id_local', $idLocal)
+            ->when($lojaId !== null, fn ($q) => $q->where('loja_id', $lojaId))
+            ->first();
+    }
+
+    /**
+     * @param array<string, mixed> $contexto
+     */
+    private function registrarAuditoriaOperacao(
+        string $acao,
+        string $tipoEntidade,
+        int $idLocal,
+        ?int $lojaId,
+        string $status,
+        ?string $mensagem,
+        array $contexto = []
+    ): void {
+        $payloadResumo = json_encode($contexto, JSON_UNESCAPED_UNICODE);
+
+        app(AuditoriaLogService::class)->registrar([
+            'occurred_at' => now(),
+            'tipo' => 'integracao',
+            'categoria' => 'integracao',
+            'nivel' => $status === 'falha' ? 'error' : 'info',
+            'modulo' => 'conta_azul',
+            'acao' => $acao,
+            'status' => $status,
+            'label' => 'Log de sincronizacao Conta Azul',
+            'message' => $mensagem,
+            'entity_type' => $tipoEntidade,
+            'entity_id' => $idLocal,
+            'context_json' => [
+                'loja_id' => $lojaId,
+                'tipo_entidade' => $tipoEntidade,
+                'id_local' => $idLocal,
+                'id_externo' => $contexto['id_externo'] ?? null,
+                'direcao' => 'export',
+                'tentativa' => 1,
+                'payload_resumo' => $payloadResumo,
+                'resposta_resumo' => $contexto['resposta_resumo'] ?? $mensagem,
+                'erro_codigo' => $status === 'falha' ? (string) ($contexto['http_status'] ?? '') : null,
+                'erro_mensagem' => $status === 'falha' ? $mensagem : null,
+                'motivo' => $contexto['motivo'] ?? null,
+                'resultado' => $contexto['resultado'] ?? null,
+            ],
+            'source_system' => 'estoque',
+            'source_kind' => 'sync',
+            'retention_days' => 365,
+        ]);
+    }
+
+    private function replacePathIds(string $path, string $idExterno): string
+    {
+        return str_replace(
+            ['{id}', '{uuid}', '{id_evento}', '{evento_id}', '{titulo_id}', '{conta_pagar_id}', '{baixa_id}'],
+            $idExterno,
+            $path
+        );
     }
 
     private function extractEventoFinanceiroId(mixed $payload): ?string

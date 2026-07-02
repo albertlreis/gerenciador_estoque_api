@@ -18,11 +18,13 @@ use App\Models\PedidoStatusHistorico;
 use App\Models\Produto;
 use App\Models\ProdutoEntregaEvento;
 use App\Models\ProdutoEntregaItem;
+use App\Models\ProdutoImagem;
 use App\Models\ProdutoVariacao;
 use App\Models\Usuario;
 use App\Services\EntregaProdutoService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Storage;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
@@ -535,6 +537,44 @@ class ProdutoEntregaCentralTest extends TestCase
                 'id' => $depositoExtra->id,
                 'quantidade_utilizavel' => 1,
             ]);
+    }
+
+    public function test_nota_entrega_itens_retorna_imagem_resolvida_por_referencia(): void
+    {
+        Storage::fake('public');
+        Storage::disk('public')->put('produtos/nota-referencia.png', base64_decode(
+            'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7+4fQAAAAASUVORK5CYII='
+        ));
+
+        [$usuario, $pedido, $variacao] = $this->criarPedidoComItem(1);
+        $variacao->update(['referencia' => 'REF-NOTA-IMG']);
+
+        $categoria = Categoria::firstOrCreate(['nome' => 'Categoria Entrega']);
+        $produtoComImagem = Produto::create([
+            'nome' => 'Produto Entrega com imagem',
+            'id_categoria' => $categoria->id,
+            'ativo' => true,
+        ]);
+        ProdutoVariacao::create([
+            'produto_id' => $produtoComImagem->id,
+            'referencia' => 'REF-NOTA-IMG',
+            'nome' => 'Variacao com imagem',
+            'preco' => 100,
+            'custo' => 50,
+        ]);
+        ProdutoImagem::create([
+            'id_produto' => $produtoComImagem->id,
+            'url' => 'nota-referencia.png',
+            'principal' => true,
+        ]);
+
+        Sanctum::actingAs($usuario);
+        app(EntregaProdutoService::class)->criarDemandaPedido($pedido->fresh('itens'), $usuario->id, false);
+
+        $response = $this->getJson("/api/v1/pedidos/{$pedido->id}/nota-entrega/itens")
+            ->assertOk();
+
+        $this->assertStringEndsWith('/storage/produtos/nota-referencia.png', (string) $response->json('data.0.imagem_url'));
     }
 
     public function test_nota_entrega_itens_cria_demanda_para_pedido_sem_fluxo_central(): void

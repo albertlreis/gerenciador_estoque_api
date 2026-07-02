@@ -115,6 +115,79 @@ class PdfImageServiceTest extends TestCase
         );
     }
 
+    public function test_resolve_imagem_da_nota_de_entrega_com_produto_antes_da_variacao(): void
+    {
+        Storage::fake('public');
+        Storage::disk('public')->put('produtos/produto-nota-entrega.png', base64_decode(self::PNG_PRODUTO));
+        Storage::disk('public')->put('produtos/variacoes/variacao-nota-entrega.png', base64_decode(self::PNG_VARIACAO));
+
+        $produto = $this->createProduto('Produto Nota Entrega');
+        $variacao = $this->createVariacao($produto, 'REF-NOTA-PRODUTO');
+        ProdutoImagem::create(['id_produto' => $produto->id, 'url' => 'produto-nota-entrega.png', 'principal' => true]);
+        ProdutoVariacaoImagem::create([
+            'id_variacao' => $variacao->id,
+            'url' => '/storage/produtos/variacoes/variacao-nota-entrega.png',
+            'principal' => true,
+            'ordem' => 0,
+        ]);
+
+        $service = app(PdfImageService::class);
+
+        $this->assertSame(
+            $this->pngDataUri(self::PNG_PRODUTO),
+            $service->fromProdutoVariacaoProdutoFirst($variacao->fresh()->load('imagem', 'produto.imagemPrincipal'))
+        );
+    }
+
+    public function test_resolve_imagem_da_nota_de_entrega_com_fallback_para_variacao(): void
+    {
+        Storage::fake('public');
+        Storage::disk('public')->put('produtos/variacoes/variacao-nota-fallback.png', base64_decode(self::PNG_VARIACAO));
+
+        $produto = $this->createProduto('Produto Nota sem imagem');
+        $variacao = $this->createVariacao($produto, 'REF-NOTA-VARIACAO');
+        ProdutoImagem::create(['id_produto' => $produto->id, 'url' => 'produto-inexistente.png', 'principal' => true]);
+        ProdutoVariacaoImagem::create([
+            'id_variacao' => $variacao->id,
+            'url' => '/storage/produtos/variacoes/variacao-nota-fallback.png',
+            'principal' => true,
+            'ordem' => 0,
+        ]);
+
+        $service = app(PdfImageService::class);
+
+        $this->assertSame(
+            $this->pngDataUri(self::PNG_VARIACAO),
+            $service->fromProdutoVariacaoProdutoFirst($variacao->fresh()->load('imagem', 'produto.imagemPrincipal'))
+        );
+    }
+
+    public function test_resolve_imagem_da_nota_de_entrega_com_fallback_por_referencia(): void
+    {
+        Storage::fake('public');
+        Storage::disk('public')->put('produtos/referencia-nota-entrega.png', base64_decode(self::PNG_REFERENCIA));
+
+        $produto = $this->createProduto('Produto Nota sem foto valida');
+        $variacao = $this->createVariacao($produto, 'REF-NOTA-DUPLICADA');
+        ProdutoImagem::create(['id_produto' => $produto->id, 'url' => 'inexistente.png', 'principal' => true]);
+
+        $produtoDuplicado = $this->createProduto('Produto Nota com foto');
+        $this->createVariacao($produtoDuplicado, 'REF-NOTA-DUPLICADA');
+        ProdutoImagem::create(['id_produto' => $produtoDuplicado->id, 'url' => 'referencia-nota-entrega.png', 'principal' => true]);
+
+        $service = app(PdfImageService::class);
+        $variacaoCarregada = $variacao->fresh()->load('imagem', 'produto.imagemPrincipal');
+
+        $this->assertSame(
+            $this->pngDataUri(self::PNG_REFERENCIA),
+            $service->fromProdutoVariacaoProdutoFirst($variacaoCarregada)
+        );
+        $this->assertStringEndsWith(
+            '/storage/produtos/referencia-nota-entrega.png',
+            $service->publicUrlFromProdutoVariacaoProdutoFirst($variacaoCarregada)
+        );
+    }
+
     public function test_resolve_imagem_do_produto_quando_variacao_nao_tem_imagem(): void
     {
         Storage::fake('public');

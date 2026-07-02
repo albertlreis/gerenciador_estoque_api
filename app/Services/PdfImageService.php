@@ -112,6 +112,61 @@ class PdfImageService
         return $this->fromProdutoVariacao($variacao) ?? $this->placeholderDataUri();
     }
 
+    public function fromProdutoVariacaoProdutoFirst(?ProdutoVariacao $variacao): ?string
+    {
+        if ($variacao === null) {
+            return null;
+        }
+
+        foreach ($this->produtoFirstImagePaths($variacao) as $path) {
+            $dataUri = $this->toDataUri($path);
+            if ($dataUri !== null) {
+                return $dataUri;
+            }
+        }
+
+        return null;
+    }
+
+    public function fromProdutoVariacaoProdutoFirstOrPlaceholder(?ProdutoVariacao $variacao): string
+    {
+        return $this->fromProdutoVariacaoProdutoFirst($variacao) ?? $this->placeholderDataUri();
+    }
+
+    public function publicUrlFromProdutoVariacaoProdutoFirst(?ProdutoVariacao $variacao): ?string
+    {
+        if ($variacao === null) {
+            return null;
+        }
+
+        foreach ($this->produtoFirstImagePaths($variacao) as $path) {
+            if ($this->toDataUri($path) !== null) {
+                return $this->toPublicUrl($path);
+            }
+        }
+
+        return null;
+    }
+
+    public function toPublicUrl(?string $path): ?string
+    {
+        if ($path === null) {
+            return null;
+        }
+
+        $normalized = trim($path);
+        if ($normalized === '') {
+            return null;
+        }
+
+        $relativePath = $this->normalizeToStorageRelativePath($normalized);
+        if ($relativePath === null) {
+            return null;
+        }
+
+        return ProdutoImagem::normalizarUrlPublica($relativePath);
+    }
+
     public function fromProdutoDaVariacao(?ProdutoVariacao $variacao): ?string
     {
         return $this->fromProduto($variacao?->produto);
@@ -163,6 +218,25 @@ class PdfImageService
         return collect($this->cachedProductImagesByReference($referencia))
             ->reject(fn (array $image): bool => $produtoId > 0 && $image['produto_id'] === $produtoId)
             ->pluck('url')
+            ->all();
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function produtoFirstImagePaths(ProdutoVariacao $variacao): array
+    {
+        return collect([
+            $variacao->produto?->imagemPrincipal?->url,
+            $variacao->produto?->imagemPrincipal?->url_completa,
+            $variacao->imagem?->url,
+            $variacao->imagem?->url_completa,
+        ])
+            ->merge($this->productImagePathsBySameReference($variacao))
+            ->map(fn ($path): string => trim((string) $path))
+            ->filter()
+            ->unique()
+            ->values()
             ->all();
     }
 

@@ -15,6 +15,7 @@ use App\Models\ProdutoEntregaEvento;
 use App\Models\ProdutoEntregaItem;
 use App\Models\ProdutoVariacao;
 use App\Models\Usuario;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Tests\TestCase;
@@ -91,6 +92,97 @@ class ImportacaoPedidoMovimentacaoEstoqueTest extends TestCase
         $this->assertSame(1, EstoqueReserva::query()->where('pedido_id', $pedidoId)->where('status', 'ativa')->count());
         $this->assertSame(1, EstoqueMovimentacao::query()->where('pedido_id', $pedidoId)->where('tipo', 'entrada_deposito')->count());
         $this->assertSame(0, EstoqueMovimentacao::query()->where('pedido_id', $pedidoId)->where('tipo', 'saida_entrega_cliente')->count());
+    }
+
+    public function test_importacao_salva_vendedor_selecionado_quando_usuario_tem_permissao(): void
+    {
+        [$usuario, $cliente, $categoria, $variacao, $deposito] = $this->criarContexto();
+        $vendedorSelecionado = Usuario::create([
+            'nome' => 'Vendedor Selecionado Importacao',
+            'email' => uniqid('vendedor-importacao-', false) . '@test.com',
+            'senha' => 'senha',
+            'ativo' => true,
+        ]);
+
+        Cache::put('permissoes_usuario_' . $usuario->id, ['pedidos.selecionar_vendedor'], now()->addHour());
+
+        $payload = $this->payloadImportacao(
+            tipo: 'venda',
+            clienteId: $cliente->id,
+            categoriaId: $categoria->id,
+            variacaoId: $variacao->id,
+            depositoId: $deposito->id,
+            quantidade: 1,
+            entregue: false,
+            movimentarEstoque: false,
+        );
+        $payload['pedido']['id_usuario'] = $vendedorSelecionado->id;
+
+        $response = $this->actingAs($usuario, 'sanctum')
+            ->postJson('/api/v1/pedidos/import/xml/confirm', $payload);
+
+        $response->assertOk();
+
+        $pedido = \App\Models\Pedido::findOrFail((int) $response->json('id'));
+        $this->assertSame((int) $vendedorSelecionado->id, (int) $pedido->id_usuario);
+        $this->assertDatabaseHas('pedido_status_historico', [
+            'pedido_id' => $pedido->id,
+            'usuario_id' => $usuario->id,
+        ]);
+    }
+
+    public function test_importacao_sem_vendedor_selecionado_salva_usuario_logado(): void
+    {
+        [$usuario, $cliente, $categoria, $variacao, $deposito] = $this->criarContexto();
+
+        $payload = $this->payloadImportacao(
+            tipo: 'venda',
+            clienteId: $cliente->id,
+            categoriaId: $categoria->id,
+            variacaoId: $variacao->id,
+            depositoId: $deposito->id,
+            quantidade: 1,
+            entregue: false,
+            movimentarEstoque: false,
+        );
+
+        $response = $this->actingAs($usuario, 'sanctum')
+            ->postJson('/api/v1/pedidos/import/xml/confirm', $payload);
+
+        $response->assertOk();
+
+        $pedido = \App\Models\Pedido::findOrFail((int) $response->json('id'));
+        $this->assertSame((int) $usuario->id, (int) $pedido->id_usuario);
+    }
+
+    public function test_importacao_bloqueia_vendedor_selecionado_sem_permissao(): void
+    {
+        [$usuario, $cliente, $categoria, $variacao, $deposito] = $this->criarContexto();
+        $vendedorSelecionado = Usuario::create([
+            'nome' => 'Vendedor Bloqueado Importacao',
+            'email' => uniqid('vendedor-bloqueado-', false) . '@test.com',
+            'senha' => 'senha',
+            'ativo' => true,
+        ]);
+
+        $payload = $this->payloadImportacao(
+            tipo: 'venda',
+            clienteId: $cliente->id,
+            categoriaId: $categoria->id,
+            variacaoId: $variacao->id,
+            depositoId: $deposito->id,
+            quantidade: 1,
+            entregue: false,
+            movimentarEstoque: false,
+        );
+        $payload['pedido']['id_vendedor'] = $vendedorSelecionado->id;
+
+        $response = $this->actingAs($usuario, 'sanctum')
+            ->postJson('/api/v1/pedidos/import/xml/confirm', $payload);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['pedido.id_usuario']);
+        $this->assertSame(0, \App\Models\Pedido::query()->count());
     }
 
     public function test_venda_com_saida_explicita_baixa_estoque_e_marca_expedida_sem_entregar(): void
@@ -538,6 +630,8 @@ class ImportacaoPedidoMovimentacaoEstoqueTest extends TestCase
             'senha' => 'senha',
             'ativo' => true,
         ]);
+        Cache::forget('permissoes_usuario_' . $usuario->id);
+        Cache::forget('perfis_usuario_' . $usuario->id);
 
         $cliente = Cliente::create([
             'nome' => 'Cliente Importacao',

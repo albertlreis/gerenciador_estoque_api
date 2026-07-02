@@ -2,8 +2,10 @@
 
 namespace Tests\Feature;
 
+use App\Jobs\ContaAzul\ExportProdutoContaAzulJob;
 use App\Services\Import\ProdutoUpsertService;
 use App\Models\Usuario;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
@@ -68,6 +70,8 @@ class ProdutoVariacaoUpdateTest extends TestCase
 
     public function test_patch_variacoes_bulk_atualiza_em_lote(): void
     {
+        Bus::fake();
+
         $usuario = $this->criarUsuario();
         Sanctum::actingAs($usuario);
         Cache::put('permissoes_usuario_' . $usuario->id, ['produto_variacoes.editar'], now()->addHour());
@@ -140,6 +144,8 @@ class ProdutoVariacaoUpdateTest extends TestCase
             'preco' => 250,
             'custo' => 90,
         ]);
+
+        Bus::assertNotDispatched(ExportProdutoContaAzulJob::class);
     }
 
     public function test_patch_variacoes_bulk_permite_referencia_repetida_em_outra_variacao(): void
@@ -246,6 +252,8 @@ class ProdutoVariacaoUpdateTest extends TestCase
 
     public function test_put_variacao_individual_atualiza_campos(): void
     {
+        Bus::fake();
+
         $usuario = $this->criarUsuario();
         Sanctum::actingAs($usuario);
         Cache::put('permissoes_usuario_' . $usuario->id, ['produto_variacoes.editar'], now()->addHour());
@@ -290,6 +298,8 @@ class ProdutoVariacaoUpdateTest extends TestCase
             'custo' => 55,
             'codigo_barras' => '789',
         ]);
+
+        Bus::assertNotDispatched(ExportProdutoContaAzulJob::class);
     }
 
     public function test_put_variacao_individual_permite_sku_interno_repetido(): void

@@ -4,7 +4,14 @@ namespace Tests\Unit\Integrations\ContaAzul;
 
 use App\Console\Commands\ContaAzul\ContaAzulImportAllCommand;
 use App\Console\Commands\ContaAzul\ContaAzulImportCommand;
+use App\Integrations\ContaAzul\ContaAzulEntityType;
+use App\Integrations\ContaAzul\Services\ContaAzulConnectionService;
+use App\Integrations\ContaAzul\Services\ContaAzulExportDispatchService;
 use App\Integrations\ContaAzul\Services\ImportacaoContaAzulService;
+use App\Jobs\ContaAzul\ExportProdutoContaAzulJob;
+use App\Services\AuditoriaLogService;
+use Illuminate\Support\Facades\Bus;
+use Mockery;
 use Tests\TestCase;
 
 class ContaAzulFinancialCommandCoverageTest extends TestCase
@@ -47,5 +54,29 @@ class ContaAzulFinancialCommandCoverageTest extends TestCase
                 'status' => 'EMITIDA',
             ])
         );
+    }
+
+    public function test_dispatch_produto_conta_azul_e_noop_por_regra_de_negocio(): void
+    {
+        Bus::fake();
+
+        $auditoria = Mockery::mock(AuditoriaLogService::class);
+        $auditoria->shouldReceive('registrar')
+            ->once()
+            ->with(Mockery::on(fn (array $payload) => $payload['entity_type'] === ContaAzulEntityType::PRODUTO
+                && $payload['entity_id'] === 123
+                && $payload['status'] === 'ignorado'
+                && $payload['message'] === 'Exportação de produtos para Conta Azul desativada por regra de negócio.'
+            ));
+
+        $this->app->instance(AuditoriaLogService::class, $auditoria);
+
+        $connections = Mockery::mock(ContaAzulConnectionService::class);
+        $connections->shouldNotReceive('latestForLoja');
+
+        $dispatch = new ContaAzulExportDispatchService($connections);
+        $dispatch->produto(123, 456, null, ['evento' => 'teste']);
+
+        Bus::assertNotDispatched(ExportProdutoContaAzulJob::class);
     }
 }

@@ -694,6 +694,8 @@ class PedidoController extends Controller
             $entregaService->criarDemandaPedido($pedido, $usuarioId ? (int) $usuarioId : null, false);
         }
 
+        $pdfImageService = app(PdfImageService::class);
+
         $queryBase = fn () => ProdutoEntregaItem::query()
             ->with([
                 'pedidoItem',
@@ -715,7 +717,7 @@ class PedidoController extends Controller
             ->whereColumn('quantidade_entregue', '<', 'quantidade_total')
             ->orderBy('id')
             ->get()
-            ->map(fn (ProdutoEntregaItem $item) => $this->formatarItemNotaEntrega($item, $disponibilidade))
+            ->map(fn (ProdutoEntregaItem $item) => $this->formatarItemNotaEntrega($item, $disponibilidade, 'pendente', $pdfImageService))
             ->values();
 
         if ($itens->isEmpty()) {
@@ -724,7 +726,7 @@ class PedidoController extends Controller
                 ->where('quantidade_entregue', '>', 0)
                 ->orderBy('id')
                 ->get()
-                ->map(fn (ProdutoEntregaItem $item) => $this->formatarItemNotaEntrega($item, $disponibilidade, 'reimpressao'))
+                ->map(fn (ProdutoEntregaItem $item) => $this->formatarItemNotaEntrega($item, $disponibilidade, 'reimpressao', $pdfImageService))
                 ->values();
         }
 
@@ -817,7 +819,7 @@ class PedidoController extends Controller
         $notaItens->each(function (ProdutoEntregaItem $item) use ($pdfImageService) {
             $item->setAttribute(
                 'pdf_imagem_data_uri',
-                $pdfImageService->fromProdutoDaVariacaoOrPlaceholder($item->variacao)
+                $pdfImageService->fromProdutoVariacaoProdutoFirstOrPlaceholder($item->variacao)
             );
         });
 
@@ -918,12 +920,14 @@ class PedidoController extends Controller
     private function formatarItemNotaEntrega(
         ProdutoEntregaItem $item,
         EstoqueDisponibilidadeService $disponibilidade,
-        string $modoNota = 'pendente'
+        string $modoNota = 'pendente',
+        ?PdfImageService $pdfImageService = null
     ): array {
         $pendenteTotal = max(0, (int) $item->quantidade_total - (int) $item->quantidade_entregue);
         $pendenteExpedido = max(0, (int) $item->quantidade_expedida - (int) $item->quantidade_entregue);
         $pendenteExpedicao = max(0, (int) $item->quantidade_total - (int) $item->quantidade_expedida);
         $reimpressao = $modoNota === 'reimpressao';
+        $pdfImageService ??= app(PdfImageService::class);
 
         return [
             'id' => $item->id,
@@ -947,6 +951,7 @@ class PedidoController extends Controller
             'status' => $item->status,
             'pedido_item' => $item->pedidoItem,
             'variacao' => $item->variacao,
+            'imagem_url' => $pdfImageService->publicUrlFromProdutoVariacaoProdutoFirst($item->variacao),
             'deposito_origem' => $item->depositoOrigem,
             'deposito_destino' => $item->depositoDestino,
             'depositos_disponiveis' => $this->depositosDisponiveisNotaEntrega(

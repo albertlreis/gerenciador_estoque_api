@@ -96,6 +96,8 @@ class ProdutoVariacaoResource extends JsonResource
             'acabamento_oficial' => $this->acabamento_oficial,
             'conflito_codigo' => (bool) $this->conflito_codigo,
             'status_revisao' => $this->status_revisao?->value ?? $this->status_revisao,
+            'ativo' => (bool) ($this->ativo ?? true),
+            'motivo_desativacao' => $this->motivo_desativacao,
 
             'preco' => $preco,
             'preco_promocional' => $temDesconto ? (float) $precoPromocional : null,

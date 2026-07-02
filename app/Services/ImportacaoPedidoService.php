@@ -18,6 +18,7 @@ use App\Enums\EstrategiaVinculoImportacao;
 use App\Enums\EstoqueMovimentacaoTipo;
 use App\Enums\PedidoStatus;
 use App\Enums\TipoImportacao;
+use App\Helpers\AuthHelper;
 use App\Helpers\StringHelper;
 use App\Support\Dates\DateNormalizer;
 use App\Support\Logging\SierraLog;
@@ -71,6 +72,8 @@ class ImportacaoPedidoService
             'cliente.id'           => 'nullable|numeric|min:1',
 
             'pedido.numero_externo'=> 'required|string|max:50',
+            'pedido.id_usuario'    => 'nullable|integer|exists:acesso_usuarios,id',
+            'pedido.id_vendedor'   => 'nullable|integer|exists:acesso_usuarios,id',
             'pedido.id_fornecedor'  => 'nullable|integer|exists:fornecedores,id',
             'pedido.total'         => 'nullable|numeric',
             'pedido.observacoes'   => 'nullable|string',
@@ -267,6 +270,18 @@ class ImportacaoPedidoService
 
             $tipo = $dadosPedido['tipo'] ?? Pedido::TIPO_VENDA;
             $fornecedorId = $this->toNullableInt($dadosPedido['id_fornecedor'] ?? null);
+            $vendedorSelecionadoId = $this->toNullableInt(
+                $dadosPedido['id_usuario'] ?? ($dadosPedido['id_vendedor'] ?? null)
+            );
+            $vendedorFinalId = $vendedorSelecionadoId ?? (int) $usuario->id;
+
+            if ($vendedorSelecionadoId !== null && $vendedorSelecionadoId !== (int) $usuario->id) {
+                if (!AuthHelper::podeSelecionarVendedorPedido()) {
+                    throw ValidationException::withMessages([
+                        'pedido.id_usuario' => ['Sem permissao para selecionar vendedor.'],
+                    ]);
+                }
+            }
 
             if ($importacaoId) {
                 /** @var PedidoImportacao $importacao */
@@ -449,7 +464,7 @@ class ImportacaoPedidoService
             $pedidoPayload = [
                 'tipo'          => $tipo,
                 'id_cliente'    => $clienteId,
-                'id_usuario'    => $usuario->id,
+                'id_usuario'    => $vendedorFinalId,
                 'id_parceiro'   => $dadosPedido['id_parceiro'] ?? null,
                 'id_fornecedor' => $fornecedorId,
                 'numero_externo'=> $numeroExterno ?: null,

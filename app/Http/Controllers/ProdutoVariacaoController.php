@@ -393,6 +393,8 @@ class ProdutoVariacaoController extends Controller
             'acabamento_oficial',
             'conflito_codigo',
             'status_revisao',
+            'ativo',
+            'motivo_desativacao',
         ];
         $camposRecebidos = array_keys(array_diff_key($payload, ['audit' => true]));
         $naoPermitidos = array_values(array_diff($camposRecebidos, $camposPermitidos));
@@ -420,6 +422,8 @@ class ProdutoVariacaoController extends Controller
             'acabamento_oficial' => 'sometimes|nullable|string|max:180',
             'conflito_codigo' => 'sometimes|boolean',
             'status_revisao' => 'sometimes|nullable|in:nao_revisado,pendente_revisao,aprovado,rejeitado',
+            'ativo' => 'sometimes|nullable|boolean',
+            'motivo_desativacao' => 'sometimes|nullable|string|max:1000',
             'audit' => 'sometimes|array',
             'audit.label' => 'sometimes|nullable|string|max:255',
             'audit.motivo' => 'sometimes|nullable|string|max:500',
@@ -432,6 +436,7 @@ class ProdutoVariacaoController extends Controller
             'custo.numeric' => 'Informe um custo válido para a variação.',
             'custo.min' => 'O custo da variação não pode ser negativo.',
             'chave_variacao.unique' => 'Esta chave de variação já está em uso.',
+            'motivo_desativacao.max' => 'O motivo da desativação pode ter no máximo 1000 caracteres.',
             'audit.motivo.max' => 'O motivo pode ter no máximo 500 caracteres.',
             'audit.origin.in' => 'A origem da alteração de preço é inválida.',
         ]);

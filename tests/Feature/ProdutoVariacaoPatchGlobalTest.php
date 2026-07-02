@@ -308,6 +308,27 @@ class ProdutoVariacaoPatchGlobalTest extends TestCase
         ]);
     }
 
+    public function test_patch_global_atualiza_status_da_variacao(): void
+    {
+        $this->autenticar(['produto_variacoes.editar']);
+        [$variacaoId] = $this->criarProdutoVariacaoComCarrinhos();
+
+        $response = $this->patchJson("/api/v1/produto-variacoes/{$variacaoId}", [
+            'ativo' => 0,
+            'motivo_desativacao' => 'Fora de linha no fornecedor',
+        ]);
+
+        $response->assertOk()
+            ->assertJsonPath('ativo', false)
+            ->assertJsonPath('motivo_desativacao', 'Fora de linha no fornecedor');
+
+        $this->assertDatabaseHas('produto_variacoes', [
+            'id' => $variacaoId,
+            'ativo' => 0,
+            'motivo_desativacao' => 'Fora de linha no fornecedor',
+        ]);
+    }
+
     public function test_patch_bloqueia_sem_permissao(): void
     {
         $this->autenticar([]);

@@ -24,10 +24,13 @@ use App\Models\ProdutoVariacaoImagem;
 use App\Models\Usuario;
 use App\Services\EntregaProdutoService;
 use App\Services\PdfImageService;
+use Barryvdh\DomPDF\Facade\Pdf;
+use Barryvdh\DomPDF\PDF as DomPdfWrapper;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Storage;
 use Laravel\Sanctum\Sanctum;
+use Mockery;
 use Tests\TestCase;
 
 class ConsignacaoRoteiroPdfTest extends TestCase
@@ -75,6 +78,18 @@ class ConsignacaoRoteiroPdfTest extends TestCase
         );
     }
 
+    public function test_endpoint_de_consignacao_usa_imagem_da_variacao_no_roteiro_de_devolucao(): void
+    {
+        [$pedidoId, $variacaoId] = $this->criarPedidoConsignado('devolvido', PedidoStatus::DEVOLUCAO_CONSIGNACAO);
+
+        $this->criarImagemDaVariacaoParaRoteiroDevolucao($variacaoId);
+        $this->esperarPdfDevolucaoComImagemDaVariacao($pedidoId);
+
+        $this->get("/api/v1/consignacoes/{$pedidoId}/pdf?tipo_roteiro=devolucao")
+            ->assertOk()
+            ->assertSee('pdf-ok');
+    }
+
     public function test_roteiro_do_pedido_permite_forcar_tipo_de_consignacao(): void
     {
         [$pedidoId] = $this->criarPedidoConsignado('devolvido', PedidoStatus::DEVOLUCAO_CONSIGNACAO);
@@ -86,6 +101,18 @@ class ConsignacaoRoteiroPdfTest extends TestCase
             "roteiro-de-consignacao-{$pedidoId}.pdf",
             (string) $response->headers->get('content-disposition')
         );
+    }
+
+    public function test_roteiro_do_pedido_usa_imagem_da_variacao_no_roteiro_de_devolucao(): void
+    {
+        [$pedidoId, $variacaoId] = $this->criarPedidoConsignado('devolvido', PedidoStatus::DEVOLUCAO_CONSIGNACAO);
+
+        $this->criarImagemDaVariacaoParaRoteiroDevolucao($variacaoId);
+        $this->esperarPdfDevolucaoComImagemDaVariacao($pedidoId);
+
+        $this->get("/api/v1/pedidos/{$pedidoId}/pdf/roteiro?tipo_roteiro=devolucao")
+            ->assertOk()
+            ->assertSee('pdf-ok');
     }
 
     public function test_roteiro_do_pedido_exige_escolha_quando_cliente_tem_multiplos_enderecos(): void
@@ -1060,6 +1087,47 @@ class ConsignacaoRoteiroPdfTest extends TestCase
             ->assertOk();
 
         $consignacao->refresh();
+    }
+
+    private function criarImagemDaVariacaoParaRoteiroDevolucao(int $variacaoId): void
+    {
+        Storage::fake('public');
+        Storage::disk('public')->put('produtos/variacoes/roteiro-devolucao.png', base64_decode(self::PNG_1X1));
+
+        ProdutoVariacaoImagem::create([
+            'id_variacao' => $variacaoId,
+            'url' => '/storage/produtos/variacoes/roteiro-devolucao.png',
+            'principal' => true,
+            'ordem' => 0,
+        ]);
+    }
+
+    private function esperarPdfDevolucaoComImagemDaVariacao(int $pedidoId): void
+    {
+        Pdf::shouldReceive('setOptions')
+            ->zeroOrMoreTimes()
+            ->with(['isRemoteEnabled' => true]);
+
+        $pdf = Mockery::mock(DomPdfWrapper::class);
+        $pdf->shouldReceive('setPaper')
+            ->once()
+            ->with('a4')
+            ->andReturnSelf();
+        $pdf->shouldReceive('download')
+            ->once()
+            ->with("roteiro-de-devolucao-{$pedidoId}.pdf")
+            ->andReturn(response('pdf-ok'));
+
+        Pdf::shouldReceive('loadView')
+            ->once()
+            ->with('exports.roteiro-consignacao', Mockery::on(function (array $data): bool {
+                $imagem = (string) $data['pedido']->consignacoes->first()?->pdf_imagem_data_uri;
+
+                return ($data['tituloRoteiro'] ?? null) === 'Roteiro de devolução'
+                    && str_starts_with($imagem, 'data:image/png;base64,')
+                    && !str_starts_with($imagem, 'data:image/svg+xml;base64,');
+            }))
+            ->andReturn($pdf);
     }
 
     private function criarVariacaoComEstoque(int $quantidade = 10): array

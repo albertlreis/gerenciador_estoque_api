@@ -573,7 +573,7 @@ class PedidoController extends Controller
             $pedido->consignacoes->each(function ($consignacao) use ($pdfImageService) {
                 $consignacao->setAttribute(
                     'pdf_imagem_data_uri',
-                    $pdfImageService->fromProdutoDaVariacaoOrPlaceholder($consignacao->produtoVariacao)
+                    $pdfImageService->fromProdutoVariacaoOrPlaceholder($consignacao->produtoVariacao)
                 );
             });
 

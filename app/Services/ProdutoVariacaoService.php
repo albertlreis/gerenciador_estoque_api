@@ -3,7 +3,6 @@
 namespace App\Services;
 
 use App\Enums\StatusRevisaoCadastro;
-use App\Integrations\ContaAzul\Services\ContaAzulExportDispatchService;
 use App\Models\Produto;
 use App\Models\ProdutoVariacao;
 use App\Models\ProdutoVariacaoCodigoHistorico;
@@ -42,7 +41,6 @@ class ProdutoVariacaoService
     ];
 
     public function __construct(
-        private readonly ContaAzulExportDispatchService $contaAzulExports,
         private readonly AuditoriaEventoService $auditoria,
     ) {
     }
@@ -89,7 +87,6 @@ class ProdutoVariacaoService
 
         $variacao = $variacao->refresh()->load('atributos', 'codigosHistoricos', 'imagem', 'imagens');
         $this->registrarCriacao($variacao);
-        $this->contaAzulExports->produto((int) $produto->id, (int) $variacao->id, null, ['evento' => 'variacao_criada']);
 
         return $variacao;
     }
@@ -147,7 +144,6 @@ class ProdutoVariacaoService
                 );
             }
 
-            $this->contaAzulExports->produto((int) $produto->id, (int) $variacao->id, null, ['evento' => 'variacao_atualizada_lote']);
         }
 
         $produto->variacoes()
@@ -191,7 +187,6 @@ class ProdutoVariacaoService
         }
 
         $variacao = $variacao->refresh()->load('atributos', 'codigosHistoricos', 'imagem', 'imagens');
-        $this->contaAzulExports->produto((int) $variacao->produto_id, (int) $variacao->id, null, ['evento' => 'variacao_atualizada']);
 
         return $variacao;
     }

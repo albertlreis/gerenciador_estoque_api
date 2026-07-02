@@ -11,7 +11,6 @@ use App\Jobs\ContaAzul\ExportContaPagarContaAzulJob;
 use App\Jobs\ContaAzul\ExportClienteContaAzulJob;
 use App\Jobs\ContaAzul\ExcluirTituloFinanceiroContaAzulJob;
 use App\Jobs\ContaAzul\ExportPedidoContaAzulJob;
-use App\Jobs\ContaAzul\ExportProdutoContaAzulJob;
 use App\Jobs\ContaAzul\ExportTituloContaAzulJob;
 use App\Models\ContaPagarPagamento;
 use App\Models\ContaReceberPagamento;
@@ -44,12 +43,14 @@ class ContaAzulExportDispatchService
      */
     public function produto(int $produtoId, ?int $variacaoId = null, ?int $lojaId = null, array $contexto = []): void
     {
-        $this->dispatch(
+        $this->log(
             ContaAzulEntityType::PRODUTO,
             $produtoId,
             $lojaId,
+            'export',
+            'ignorado',
+            'Exportação de produtos para Conta Azul desativada por regra de negócio.',
             array_filter($contexto + ['variacao_id' => $variacaoId], fn ($value) => $value !== null),
-            fn () => ExportProdutoContaAzulJob::dispatch($produtoId, $variacaoId, $lojaId)
         );
     }
 

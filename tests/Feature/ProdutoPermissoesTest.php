@@ -2,11 +2,13 @@
 
 namespace Tests\Feature;
 
+use App\Jobs\ContaAzul\ExportProdutoContaAzulJob;
 use App\Models\Usuario;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Storage;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
@@ -148,6 +150,8 @@ class ProdutoPermissoesTest extends TestCase
 
     public function test_admin_consegue_criar_produto_e_variacao(): void
     {
+        Bus::fake();
+
         $this->criarUsuario(['Administrador'], [
             'produtos.criar',
             'produtos.editar',
@@ -174,5 +178,7 @@ class ProdutoPermissoesTest extends TestCase
             'preco' => 100,
             'custo' => 50,
         ])->assertCreated();
+
+        Bus::assertNotDispatched(ExportProdutoContaAzulJob::class);
     }
 }

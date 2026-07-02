@@ -2,11 +2,13 @@
 
 namespace Tests\Feature;
 
+use App\Jobs\ContaAzul\ExportProdutoContaAzulJob;
 use App\Models\Categoria;
 use App\Models\Fornecedor;
 use App\Models\Produto;
 use App\Models\Usuario;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Laravel\Sanctum\Sanctum;
@@ -18,6 +20,8 @@ class ProdutoUpdateCatalogoTest extends TestCase
 
     public function test_update_produto_aceita_decimal_com_virgula_e_nulls(): void
     {
+        Bus::fake();
+
         $usuario = Usuario::create([
             'nome' => 'Usuario Teste',
             'email' => 'teste@example.com',
@@ -91,5 +95,7 @@ class ProdutoUpdateCatalogoTest extends TestCase
             'old_value' => 'Produto Original',
             'new_value' => 'Produto Atualizado',
         ]);
+
+        Bus::assertNotDispatched(ExportProdutoContaAzulJob::class);
     }
 }

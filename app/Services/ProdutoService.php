@@ -2,7 +2,6 @@
 
 namespace App\Services;
 
-use App\Integrations\ContaAzul\Services\ContaAzulExportDispatchService;
 use App\Models\Produto;
 use App\Support\Auditoria\AuditoriaDiff;
 use App\Support\Logging\SierraLog;
@@ -36,7 +35,6 @@ class ProdutoService
     ];
 
     public function __construct(
-        private readonly ContaAzulExportDispatchService $contaAzulExports,
         private readonly AuditoriaEventoService $auditoria,
     ) {
     }
@@ -73,8 +71,6 @@ class ProdutoService
             mudancas: AuditoriaDiff::modelChanges(null, $produto, self::PRODUTO_AUDIT_FIELDS)
         );
 
-        $this->contaAzulExports->produto((int) $produto->id, null, null, ['evento' => 'produto_criado']);
-
         return $produto;
     }
 
@@ -110,8 +106,6 @@ class ProdutoService
             auditable: $produto,
             mudancas: AuditoriaDiff::modelChanges($before, $produto, self::PRODUTO_AUDIT_FIELDS)
         );
-
-        $this->contaAzulExports->produto((int) $produto->id, null, null, ['evento' => 'produto_atualizado']);
 
         return $produto;
     }

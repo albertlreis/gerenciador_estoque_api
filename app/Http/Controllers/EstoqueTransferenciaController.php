@@ -57,7 +57,7 @@ class EstoqueTransferenciaController extends Controller
         $transferencia->itens->each(function ($item) use ($pdfImageService) {
             $item->setAttribute(
                 'pdf_imagem_data_uri',
-                $pdfImageService->fromProdutoDaVariacaoOrPlaceholder($item->variacao)
+                $pdfImageService->fromProdutoVariacaoOrPlaceholder($item->variacao)
             );
         });
 

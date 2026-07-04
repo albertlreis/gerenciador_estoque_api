@@ -620,6 +620,11 @@ class ImportacaoPedidoMovimentacaoEstoqueTest extends TestCase
         $this->assertStringContainsString("Produto 1: {$nomeProduto}", $mensagem);
         $this->assertStringContainsString("(Ref. {$referenciaAmbigua})", $mensagem);
         $this->assertStringContainsString('múltiplas variações', $mensagem);
+        $this->assertCount(2, $response->json('itens.0.variacoes_encontradas'));
+        $this->assertEqualsCanonicalizing(
+            ['Variacao A', 'Variacao B'],
+            collect($response->json('itens.0.variacoes_encontradas'))->pluck('variacao_nome')->all()
+        );
     }
 
     private function criarContexto(): array

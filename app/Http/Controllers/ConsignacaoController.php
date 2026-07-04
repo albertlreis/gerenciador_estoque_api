@@ -11,11 +11,13 @@ use App\Models\Cliente;
 use App\Models\Consignacao;
 use App\Models\ConsignacaoCompra;
 use App\Models\ConsignacaoDevolucao;
+use App\Models\EstoqueReserva;
 use App\Models\Parceiro;
 use App\Models\Pedido;
 use App\Models\PedidoItem;
 use App\Models\PedidoStatusHistorico;
 use App\Models\ProdutoEntregaEvento;
+use App\Models\ProdutoEntregaItem;
 use App\Models\ProdutoVariacao;
 use App\Services\EstoqueMovimentacaoService;
 use App\Services\EntregaProdutoService;
@@ -398,7 +400,7 @@ class ConsignacaoController extends Controller
 
         DB::transaction(function () use ($consignacao, $request) {
             if ($request->status === 'comprado') {
-                $restante = $consignacao->quantidadeDisponivelCliente();
+                $restante = $this->quantidadeAcionavelConsignacao($consignacao);
                 if ($restante <= 0) {
                     abort(422, 'Consignação sem quantidade disponível para venda.');
                 }
@@ -409,6 +411,7 @@ class ConsignacaoController extends Controller
                     'usuario_id' => AuthHelper::getUsuarioId(),
                 ]);
 
+                $this->garantirEnvioParaVendaConsignacao($consignacao, $restante, AuthHelper::getUsuarioId(), null);
                 $this->registrarVendaCentralConsignacao($consignacao, $restante, AuthHelper::getUsuarioId(), null, (int) $compra->id);
                 $this->recalcularStatusConsignacao($consignacao->fresh(['devolucoes', 'compras']));
                 $this->marcarPedidoConsignacaoComoVendido($consignacao->pedido);
@@ -615,10 +618,10 @@ class ConsignacaoController extends Controller
             return response()->json(['erro' => 'Não é possível registrar devolução para consignação finalizada.'], 422);
         }
 
-        $restante = $consignacao->quantidadeDisponivelCliente();
+        $restante = $this->quantidadeAcionavelConsignacao($consignacao);
 
         if ($request->quantidade > $restante) {
-            return response()->json(['erro' => "Quantidade devolvida excede o saldo enviado ao cliente ({$restante})."], 422);
+            return response()->json(['erro' => "Quantidade devolvida excede o saldo acionavel ({$restante})."], 422);
         }
 
         $usuarioId = AuthHelper::getUsuarioId();
@@ -632,21 +635,16 @@ class ConsignacaoController extends Controller
                 'deposito_id' => $request->deposito_id,
             ]);
 
-            $entregas = app(EntregaProdutoService::class);
-            $central = $entregas->criarDemandaConsignacao($consignacao, $usuarioId ? (int) $usuarioId : null);
-            $key = "consignacao-devolucao:{$devolucao->id}";
-            $entregas->receberItem(
-                $central,
-                (int) $request->deposito_id,
+            $movimentacaoId = $this->registrarDevolucaoCentralConsignacao(
+                $consignacao,
                 (int) $request->quantidade,
+                (int) $request->deposito_id,
                 $usuarioId ? (int) $usuarioId : null,
                 $request->observacoes,
-                $key,
-                ProdutoEntregaEvento::RETORNADO_CONSIGNACAO
+                (int) $devolucao->id
             );
 
-            $evento = ProdutoEntregaEvento::query()->where('idempotency_key', $key)->first();
-            $devolucao->update(['estoque_movimentacao_id' => $evento?->estoque_movimentacao_id]);
+            $devolucao->update(['estoque_movimentacao_id' => $movimentacaoId]);
 
             $this->recalcularStatusConsignacao($consignacao->fresh(['devolucoes', 'compras']));
         });
@@ -694,7 +692,7 @@ class ConsignacaoController extends Controller
                 }
 
                 $quantidade = (int) $itensPayload->get($consignacaoId);
-                $restante = $consignacao->quantidadeDisponivelCliente();
+                $restante = $this->quantidadeAcionavelConsignacao($consignacao);
 
                 if (!in_array($consignacao->status, ['pendente', 'parcial'], true)) {
                     $invalidos[] = [
@@ -709,7 +707,7 @@ class ConsignacaoController extends Controller
                     $invalidos[] = [
                         'id' => $consignacao->id,
                         'nome' => $this->nomeConsignacao($consignacao),
-                        'motivo' => 'Sem quantidade enviada ao cliente disponivel para devolucao.',
+                        'motivo' => 'Sem quantidade acionavel para devolucao.',
                     ];
                     continue;
                 }
@@ -718,7 +716,7 @@ class ConsignacaoController extends Controller
                     $invalidos[] = [
                         'id' => $consignacao->id,
                         'nome' => $this->nomeConsignacao($consignacao),
-                        'motivo' => "Quantidade maior que o disponivel ({$restante}).",
+                        'motivo' => "Quantidade maior que o saldo acionavel ({$restante}).",
                     ];
                 }
             }
@@ -744,21 +742,16 @@ class ConsignacaoController extends Controller
                     'deposito_id' => $depositoId,
                 ]);
 
-                $entregas = app(EntregaProdutoService::class);
-                $central = $entregas->criarDemandaConsignacao($consignacao, $usuarioId ? (int) $usuarioId : null);
-                $key = "consignacao-devolucao:{$devolucao->id}";
-                $entregas->receberItem(
-                    $central,
-                    $depositoId,
+                $movimentacaoId = $this->registrarDevolucaoCentralConsignacao(
+                    $consignacao,
                     $quantidade,
+                    $depositoId,
                     $usuarioId ? (int) $usuarioId : null,
                     $observacoes,
-                    $key,
-                    ProdutoEntregaEvento::RETORNADO_CONSIGNACAO
+                    (int) $devolucao->id
                 );
 
-                $evento = ProdutoEntregaEvento::query()->where('idempotency_key', $key)->first();
-                $devolucao->update(['estoque_movimentacao_id' => $evento?->estoque_movimentacao_id]);
+                $devolucao->update(['estoque_movimentacao_id' => $movimentacaoId]);
 
                 $this->recalcularStatusConsignacao($consignacao->fresh(['devolucoes', 'compras']));
             }
@@ -841,7 +834,7 @@ class ConsignacaoController extends Controller
                     continue;
                 }
 
-                $restante = $consignacao->quantidadeDisponivelCliente();
+                $restante = $this->quantidadeAcionavelConsignacao($consignacao);
                 $quantidade = $itensPayload->has($consignacaoId)
                     ? (int) $itensPayload->get($consignacaoId)
                     : $restante;
@@ -850,7 +843,7 @@ class ConsignacaoController extends Controller
                     $invalidos[] = [
                         'id' => $consignacao->id,
                         'nome' => $this->nomeConsignacao($consignacao),
-                        'motivo' => 'Sem quantidade enviada ao cliente disponivel para venda.',
+                        'motivo' => 'Sem quantidade acionavel para venda.',
                     ];
                     continue;
                 }
@@ -859,7 +852,7 @@ class ConsignacaoController extends Controller
                     $invalidos[] = [
                         'id' => $consignacao->id,
                         'nome' => $this->nomeConsignacao($consignacao),
-                        'motivo' => "Quantidade maior que o disponivel ({$restante}).",
+                        'motivo' => "Quantidade maior que o saldo acionavel ({$restante}).",
                     ];
                     continue;
                 }
@@ -879,6 +872,13 @@ class ConsignacaoController extends Controller
             foreach ($consignacaoIds as $consignacaoId) {
                 /** @var Consignacao $consignacao */
                 $consignacao = $consignacoes->get($consignacaoId);
+                $this->garantirEnvioParaVendaConsignacao(
+                    $consignacao,
+                    $quantidades[$consignacaoId],
+                    $usuarioId ? (int) $usuarioId : null,
+                    $observacoes
+                );
+
                 $compra = $consignacao->compras()->create([
                     'quantidade' => $quantidades[$consignacaoId],
                     'observacoes' => $observacoes,
@@ -1129,6 +1129,180 @@ class ConsignacaoController extends Controller
         ])
             ->where('pedido_id', $pedidoId)
             ->get();
+    }
+
+    private function quantidadeAcionavelConsignacao(Consignacao $consignacao): int
+    {
+        return max(
+            0,
+            $consignacao->quantidadeDisponivelCliente() + $consignacao->quantidadePendenteEnvio()
+        );
+    }
+
+    private function garantirEnvioParaVendaConsignacao(
+        Consignacao $consignacao,
+        int $quantidadeVenda,
+        ?int $usuarioId,
+        ?string $observacoes
+    ): void {
+        $disponivelCliente = $consignacao->quantidadeDisponivelCliente();
+        $quantidadeEnviar = max(0, $quantidadeVenda - $disponivelCliente);
+
+        if ($quantidadeEnviar <= 0) {
+            return;
+        }
+
+        $this->registrarEnvioCentralConsignacao(
+            $consignacao,
+            $quantidadeEnviar,
+            $usuarioId,
+            $observacoes ?: "Envio automatico para venda da consignacao #{$consignacao->id}"
+        );
+    }
+
+    private function registrarDevolucaoCentralConsignacao(
+        Consignacao $consignacao,
+        int $quantidade,
+        int $depositoId,
+        ?int $usuarioId,
+        ?string $observacoes,
+        int $devolucaoId
+    ): ?int {
+        $quantidadeRetornoFisico = min($quantidade, $consignacao->quantidadeDisponivelCliente());
+        $quantidadeReservada = max(0, $quantidade - $quantidadeRetornoFisico);
+        $movimentacaoId = null;
+
+        if ($quantidadeRetornoFisico > 0) {
+            $entregas = app(EntregaProdutoService::class);
+            $central = $entregas->criarDemandaConsignacao($consignacao, $usuarioId);
+            $key = "consignacao-devolucao:{$devolucaoId}";
+            $entregas->receberItem(
+                $central,
+                $depositoId,
+                $quantidadeRetornoFisico,
+                $usuarioId,
+                $observacoes,
+                $key,
+                ProdutoEntregaEvento::RETORNADO_CONSIGNACAO
+            );
+
+            $evento = ProdutoEntregaEvento::query()->where('idempotency_key', $key)->first();
+            $movimentacaoId = $evento?->estoque_movimentacao_id;
+        }
+
+        if ($quantidadeReservada > 0) {
+            $this->cancelarReservaPendenteConsignacao(
+                $consignacao,
+                $quantidadeReservada,
+                $usuarioId,
+                $observacoes ?: "Devolucao direta da consignacao #{$consignacao->id}",
+                $devolucaoId
+            );
+        }
+
+        return $movimentacaoId;
+    }
+
+    private function cancelarReservaPendenteConsignacao(
+        Consignacao $consignacao,
+        int $quantidade,
+        ?int $usuarioId,
+        string $observacao,
+        int $devolucaoId
+    ): void {
+        if ($quantidade <= 0) {
+            return;
+        }
+
+        $central = app(EntregaProdutoService::class)->criarDemandaConsignacao($consignacao, $usuarioId);
+        $entrega = ProdutoEntregaItem::query()->lockForUpdate()->findOrFail($central->id);
+        $restante = $quantidade;
+
+        $reservas = EstoqueReserva::query()
+            ->where('id_variacao', $consignacao->produto_variacao_id)
+            ->where('status', 'ativa')
+            ->where(function ($query) {
+                $query->whereNull('data_expira')
+                    ->orWhere('data_expira', '>', now());
+            })
+            ->whereRaw('quantidade > quantidade_consumida')
+            ->when($consignacao->pedido_item_id, fn ($query) => $query->where('pedido_item_id', $consignacao->pedido_item_id))
+            ->when(!$consignacao->pedido_item_id && $consignacao->pedido_id, fn ($query) => $query->where('pedido_id', $consignacao->pedido_id))
+            ->when($consignacao->deposito_id, fn ($query) => $query->where('id_deposito', $consignacao->deposito_id))
+            ->orderBy('id')
+            ->lockForUpdate()
+            ->get();
+
+        foreach ($reservas as $reserva) {
+            if ($restante <= 0) {
+                break;
+            }
+
+            $aberta = max(0, (int) $reserva->quantidade - (int) $reserva->quantidade_consumida);
+            $cancelar = min($aberta, $restante);
+
+            if ($cancelar <= 0) {
+                continue;
+            }
+
+            if ($cancelar >= $aberta) {
+                $reserva->status = 'cancelada';
+                $reserva->motivo = 'consignacao_devolvida_sem_envio';
+            } else {
+                $reserva->quantidade = max((int) $reserva->quantidade_consumida, (int) $reserva->quantidade - $cancelar);
+            }
+
+            $reserva->id_usuario = $usuarioId;
+            $reserva->save();
+            $restante -= $cancelar;
+        }
+
+        $reservaPendente = max(0, (int) $entrega->quantidade_reservada - (int) $entrega->quantidade_expedida);
+        $ajusteEntrega = min($quantidade, $reservaPendente);
+        if ($ajusteEntrega > 0) {
+            $entrega->quantidade_reservada = max(0, (int) $entrega->quantidade_reservada - $ajusteEntrega);
+            $entrega->status = $this->statusEntregaConsignacaoAposAjuste($entrega);
+            $entrega->save();
+        }
+
+        ProdutoEntregaEvento::query()->firstOrCreate(
+            ['idempotency_key' => "consignacao-devolucao:{$devolucaoId}:reserva-cancelada"],
+            [
+                'produto_entrega_item_id' => $entrega->id,
+                'tipo_evento' => ProdutoEntregaEvento::RESERVA_CANCELADA,
+                'quantidade' => $quantidade,
+                'id_deposito_origem' => $consignacao->deposito_id,
+                'id_deposito_destino' => null,
+                'estoque_reserva_id' => null,
+                'estoque_movimentacao_id' => null,
+                'usuario_id' => $usuarioId,
+                'observacao' => $observacao,
+                'metadata_json' => ['consignacao_id' => $consignacao->id, 'devolucao_id' => $devolucaoId],
+            ]
+        );
+    }
+
+    private function statusEntregaConsignacaoAposAjuste(ProdutoEntregaItem $entrega): string
+    {
+        $total = (int) $entrega->quantidade_total;
+
+        if ($entrega->status === ProdutoEntregaItem::STATUS_CANCELADO) {
+            return ProdutoEntregaItem::STATUS_CANCELADO;
+        }
+
+        if ($total > 0 && (int) $entrega->quantidade_entregue >= $total) {
+            return ProdutoEntregaItem::STATUS_ENTREGUE;
+        }
+
+        if ((int) $entrega->quantidade_entregue > 0 || (int) $entrega->quantidade_expedida > 0) {
+            return ProdutoEntregaItem::STATUS_RESERVADO;
+        }
+
+        if ((int) $entrega->quantidade_reservada > 0) {
+            return ProdutoEntregaItem::STATUS_RESERVADO;
+        }
+
+        return ProdutoEntregaItem::STATUS_AGUARDANDO_ESTOQUE;
     }
 
     private function registrarEnvioCentralConsignacao(Consignacao $consignacao, int $quantidade, ?int $usuarioId, ?string $observacoes): void

@@ -436,7 +436,7 @@ class ConsignacaoRoteiroPdfTest extends TestCase
         $this->assertSame('pendente', $consignacao->fresh()->status);
     }
 
-    public function test_compras_em_massa_bloqueia_venda_sem_envio(): void
+    public function test_compras_em_massa_envia_e_confirma_venda_sem_envio_previo(): void
     {
         [$pedidoId] = $this->criarPedidoConsignado('pendente', PedidoStatus::CONSIGNADO);
         $consignacao = Consignacao::where('pedido_id', $pedidoId)->firstOrFail();
@@ -446,11 +446,46 @@ class ConsignacaoRoteiroPdfTest extends TestCase
             'consignacao_ids' => [$consignacao->id],
         ]);
 
-        $response->assertStatus(422)
-            ->assertJsonStructure(['message', 'itens_invalidos']);
+        $response->assertOk();
 
-        $this->assertSame(0, ConsignacaoCompra::count());
+        $this->assertSame(1, ConsignacaoCompra::count());
+        $this->assertSame('comprado', $consignacao->fresh()->status);
+        $this->assertSame(0, (int) Estoque::where('id_variacao', $consignacao->produto_variacao_id)->where('id_deposito', $consignacao->deposito_id)->value('quantidade'));
+        $this->assertSame(1, EstoqueMovimentacao::where('tipo', 'consignacao_envio')
+            ->where('ref_type', 'consignacao')
+            ->where('ref_id', $consignacao->id)
+            ->count());
+    }
+
+    public function test_devolucao_de_item_pendente_cancela_reserva_sem_entrada_no_estoque(): void
+    {
+        [$pedidoId] = $this->criarPedidoConsignado('pendente', PedidoStatus::CONSIGNADO);
+        $consignacao = Consignacao::where('pedido_id', $pedidoId)->firstOrFail();
+        $this->garantirEstoqueConsignacao($consignacao, 1);
+
+        $entregas = app(EntregaProdutoService::class);
+        $central = $entregas->criarDemandaConsignacao($consignacao, auth()->id());
+        $entregas->reservarItem($central, $consignacao->deposito_id, null, auth()->id(), 'Reserva teste devolucao direta');
+
+        $this->assertSame(1, (int) EstoqueReserva::where('pedido_item_id', $consignacao->pedido_item_id)->where('status', 'ativa')->count());
+
+        $response = $this->postJson("/api/v1/consignacoes/{$consignacao->id}/devolucoes", [
+            'quantidade' => 1,
+            'deposito_id' => $consignacao->deposito_id,
+            'observacoes' => 'Cliente nao recebeu o produto.',
+        ]);
+
+        $response->assertOk();
+
+        $consignacao->refresh();
+        $this->assertSame('devolvido', $consignacao->status);
+        $this->assertSame(0, $consignacao->fresh(['devolucoes', 'compras'])->quantidadePendenteEnvio());
         $this->assertSame(1, (int) Estoque::where('id_variacao', $consignacao->produto_variacao_id)->where('id_deposito', $consignacao->deposito_id)->value('quantidade'));
+        $this->assertSame(0, EstoqueMovimentacao::where('tipo', 'consignacao_devolucao')
+            ->where('ref_type', 'consignacao')
+            ->where('ref_id', $consignacao->id)
+            ->count());
+        $this->assertSame(0, (int) EstoqueReserva::where('pedido_item_id', $consignacao->pedido_item_id)->where('status', 'ativa')->count());
     }
 
     public function test_registra_envio_posterior_baixa_estoque_uma_vez(): void

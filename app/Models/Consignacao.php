@@ -80,7 +80,13 @@ class Consignacao extends Model
 
     public function quantidadePendenteEnvio(): int
     {
-        return max(0, (int) $this->quantidade - $this->quantidadeEnviada());
+        return max(
+            0,
+            (int) $this->quantidade
+            - $this->quantidadeEnviada()
+            - $this->quantidadeDevolvida()
+            - $this->quantidadeComprada()
+        );
     }
 
     public function quantidadeDisponivelCliente(): int

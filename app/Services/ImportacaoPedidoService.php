@@ -561,7 +561,7 @@ class ImportacaoPedidoService
                     // A referência pode NÃO ser única por variação.
                     // Regra: se for ambígua e o front não enviou `id_variacao`,
                     // não devemos "chutar" uma variação automaticamente.
-                    $variacoesPorIdentificador = ProdutoVariacao::with('atributos')
+                    $variacoesPorIdentificador = ProdutoVariacao::with(['produto.categoria', 'atributos'])
                         ->where(function ($query) use ($item) {
                             $this->aplicarBuscaPorIdentificador($query, (string) ($item['ref'] ?? ''));
                         })
@@ -570,11 +570,7 @@ class ImportacaoPedidoService
                     if ($variacoesPorIdentificador->count() === 1) {
                         $variacao = $variacoesPorIdentificador->first();
                     } elseif ($variacoesPorIdentificador->count() > 1) {
-                        throw ValidationException::withMessages([
-                            "itens.{$index}.selecao_variacao" => [
-                                $this->mensagemReferenciaAmbiguaImportacao($item, $index),
-                            ],
-                        ]);
+                        throw $this->erroReferenciaAmbiguaImportacao($item, $index, $variacoesPorIdentificador);
                     }
                 }
 
@@ -1237,6 +1233,32 @@ class ImportacaoPedidoService
         }
 
         return "{$rotulo}: a referência corresponde a múltiplas variações. Selecione a variação correta na tela de importação.";
+    }
+
+    /**
+     * @param Collection<int, ProdutoVariacao> $variacoes
+     */
+    private function erroReferenciaAmbiguaImportacao(array $item, int $index, Collection $variacoes): ValidationException
+    {
+        $field = "itens.{$index}.selecao_variacao";
+        $message = $this->mensagemReferenciaAmbiguaImportacao($item, $index);
+        $exception = ValidationException::withMessages([
+            $field => [$message],
+        ]);
+
+        $exception->response = response()->json([
+            'message' => $message,
+            'errors' => [
+                $field => [$message],
+            ],
+            'itens' => [
+                $index => [
+                    'variacoes_encontradas' => $this->variacoesParaListaPreview($variacoes),
+                ],
+            ],
+        ], 422);
+
+        return $exception;
     }
 
     private function rotuloItemImportacao(array $item, int $index): string

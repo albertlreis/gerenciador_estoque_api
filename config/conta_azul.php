@@ -162,4 +162,13 @@ return [
         'oficializacao_producao_ativa' => filter_var(env('CONTA_AZUL_OFFICIALIZE_PRODUCTION_ENABLED', false), FILTER_VALIDATE_BOOL),
     ],
 
+    'auto_finance_import' => [
+        'enabled' => filter_var(env('CONTA_AZUL_AUTO_FINANCE_IMPORT_ENABLED', false), FILTER_VALIDATE_BOOL),
+        'officialize_enabled' => filter_var(env('CONTA_AZUL_AUTO_FINANCE_IMPORT_OFFICIALIZE_ENABLED', false), FILTER_VALIDATE_BOOL),
+        'time' => env('CONTA_AZUL_AUTO_FINANCE_IMPORT_TIME', '04:15'),
+        'pause_exports' => filter_var(env('CONTA_AZUL_EXPORT_PAUSE_DURING_IMPORT', true), FILTER_VALIDATE_BOOL),
+        'export_pause_ttl_minutes' => (int) env('CONTA_AZUL_EXPORT_PAUSE_TTL_MINUTES', 360),
+        'lock_minutes' => (int) env('CONTA_AZUL_AUTO_FINANCE_IMPORT_LOCK_MINUTES', 360),
+    ],
+
 ];

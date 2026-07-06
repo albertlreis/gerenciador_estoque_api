@@ -14,8 +14,10 @@ use App\Jobs\ContaAzul\ExportPedidoContaAzulJob;
 use App\Jobs\ContaAzul\ExportTituloContaAzulJob;
 use App\Models\ContaPagarPagamento;
 use App\Models\ContaReceberPagamento;
+use App\Integrations\ContaAzul\Support\ContaAzulRuntimeState;
 use App\Services\AuditoriaLogService;
 use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\Cache;
 
 class ContaAzulExportDispatchService
 {
@@ -241,6 +243,14 @@ class ContaAzulExportDispatchService
         callable $jobFactory
     ): void
     {
+        if (Cache::has(ContaAzulRuntimeState::EXPORTS_PAUSED_CACHE_KEY)) {
+            $pause = Cache::get(ContaAzulRuntimeState::EXPORTS_PAUSED_CACHE_KEY);
+            $this->log($tipoEntidade, $idLocal, $lojaId, $acao, 'ignorado', 'Sincronizacao automatica Conta Azul pausada durante importacao financeira.', $contexto + [
+                'pausa_conta_azul' => is_array($pause) ? $pause : true,
+            ]);
+            return;
+        }
+
         if (!filter_var(config('conta_azul.flags.exportacao_ativa', true), FILTER_VALIDATE_BOOL)) {
             $this->log($tipoEntidade, $idLocal, $lojaId, $acao, 'ignorado', 'Sincronizacao automatica Conta Azul desativada.', $contexto);
             return;

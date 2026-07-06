@@ -5,8 +5,10 @@ namespace Tests\Feature\Integrations;
 use App\Integrations\ContaAzul\Models\ContaAzulConexao;
 use App\Integrations\ContaAzul\Models\ContaAzulToken;
 use App\Integrations\ContaAzul\Services\ContaAzulExportDispatchService;
+use App\Integrations\ContaAzul\Support\ContaAzulRuntimeState;
 use App\Jobs\ContaAzul\ExportClienteContaAzulJob;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
@@ -93,6 +95,29 @@ class ContaAzulExportDispatchServiceTest extends TestCase
             'entity_type' => 'pessoa',
             'entity_id' => '22',
             'status' => 'enfileirado',
+            'source_kind' => 'sync',
+        ]);
+    }
+
+    public function test_nao_enfileira_job_enquanto_importacao_financeira_pausa_exportacoes(): void
+    {
+        Queue::fake();
+
+        Cache::put(ContaAzulRuntimeState::EXPORTS_PAUSED_CACHE_KEY, [
+            'motivo' => 'teste',
+        ], now()->addMinutes(5));
+
+        $service = app(ContaAzulExportDispatchService::class);
+        $service->cliente(33, null, ['evento' => 'cliente_criado']);
+
+        Queue::assertNothingPushed();
+        $this->assertDatabaseHas('auditoria_logs', [
+            'modulo' => 'conta_azul',
+            'acao' => 'export',
+            'entity_type' => 'pessoa',
+            'entity_id' => '33',
+            'status' => 'ignorado',
+            'message' => 'Sincronizacao automatica Conta Azul pausada durante importacao financeira.',
             'source_kind' => 'sync',
         ]);
     }

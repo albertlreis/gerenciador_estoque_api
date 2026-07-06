@@ -12,6 +12,7 @@ use App\Models\ContaPagarPagamento;
 use App\Models\ContaReceber;
 use App\Models\ContaReceberPagamento;
 use App\Models\Fornecedor;
+use App\Services\AuditoriaLogService;
 use App\Services\FinanceiroLedgerService;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -19,8 +20,10 @@ use Illuminate\Support\Str;
 
 class ContaAzulFinanceiroLocalOfficializationService
 {
-    public function __construct(private readonly FinanceiroLedgerService $ledger)
-    {
+    public function __construct(
+        private readonly FinanceiroLedgerService $ledger,
+        private readonly AuditoriaLogService $auditoria
+    ) {
     }
 
     /**
@@ -402,9 +405,17 @@ class ContaAzulFinanceiroLocalOfficializationService
             'conta_financeira_id' => $contaFinanceiraId,
         ];
 
+        $conta = ContaReceber::withTrashed()->find($contaId);
+        if (!$conta) {
+            return false;
+        }
+        if ($conta->trashed()) {
+            $conta->restore();
+            $this->logRestoredMappedFinancial('contas_receber', $contaId, ContaAzulEntityType::TITULO, $parcelaId, $lojaId);
+        }
+
         [$id, $created] = $this->upsertMappedPagamento($baixaId, $lojaId, 'contas_receber_pagamentos', $attrs);
         $pagamento = ContaReceberPagamento::query()->findOrFail($id);
-        $conta = ContaReceber::query()->findOrFail($contaId);
         $this->ledger->criarLancamentoPorPagamento(
             LancamentoTipo::RECEITA->value,
             $this->limit('Recebimento Conta Azul ' . ($conta->descricao ?: $parcelaId), 255),
@@ -438,9 +449,17 @@ class ContaAzulFinanceiroLocalOfficializationService
             'conta_financeira_id' => $contaFinanceiraId,
         ];
 
+        $conta = ContaPagar::withTrashed()->find($contaId);
+        if (!$conta) {
+            return false;
+        }
+        if ($conta->trashed()) {
+            $conta->restore();
+            $this->logRestoredMappedFinancial('contas_pagar', $contaId, ContaAzulEntityType::CONTA_PAGAR, $parcelaId, $lojaId);
+        }
+
         [$id, $created] = $this->upsertMappedPagamento($baixaId, $lojaId, 'contas_pagar_pagamentos', $attrs);
         $pagamento = ContaPagarPagamento::query()->findOrFail($id);
-        $conta = ContaPagar::query()->findOrFail($contaId);
         $this->ledger->criarLancamentoPorPagamento(
             LancamentoTipo::DESPESA->value,
             $this->limit('Pagamento Conta Azul ' . $conta->descricao, 255),
@@ -482,7 +501,15 @@ class ContaAzulFinanceiroLocalOfficializationService
         $mapping = $this->mapping($tipo, $idExterno, $lojaId);
         if ($mapping && $mapping->id_local && DB::table($table)->where('id', $mapping->id_local)->exists()) {
             $attrs = $this->preserveExistingPessoaVinculo($table, (int) $mapping->id_local, $attrs);
-            DB::table($table)->where('id', $mapping->id_local)->update($attrs + ['updated_at' => now()]);
+            $updateAttrs = $attrs + ['updated_at' => now()];
+            if ($this->shouldRestoreMappedTable($table)) {
+                $deletedAt = DB::table($table)->where('id', $mapping->id_local)->value('deleted_at');
+                if ($deletedAt !== null) {
+                    $updateAttrs['deleted_at'] = null;
+                    $this->logRestoredMappedFinancial($table, (int) $mapping->id_local, $tipo, $idExterno, $lojaId);
+                }
+            }
+            DB::table($table)->where('id', $mapping->id_local)->update($updateAttrs);
             return false;
         }
 
@@ -546,6 +573,38 @@ class ContaAzulFinanceiroLocalOfficializationService
     {
         $mapping = $this->mapping($tipo, $idExterno, $lojaId);
         return $mapping?->id_local ? (int) $mapping->id_local : null;
+    }
+
+    private function shouldRestoreMappedTable(string $table): bool
+    {
+        return in_array($table, ['contas_receber', 'contas_pagar'], true);
+    }
+
+    private function logRestoredMappedFinancial(string $table, int $idLocal, string $tipo, string $idExterno, ?int $lojaId): void
+    {
+        $this->auditoria->registrar([
+            'occurred_at' => now(),
+            'tipo' => 'integracao',
+            'categoria' => 'integracao',
+            'nivel' => 'warning',
+            'modulo' => 'conta_azul',
+            'acao' => 'restore_mapped_financial',
+            'status' => 'restaurado',
+            'label' => 'Registro financeiro mapeado Conta Azul restaurado',
+            'message' => 'Registro financeiro soft-deleted restaurado durante oficializacao Conta Azul.',
+            'entity_type' => $table,
+            'entity_id' => $idLocal,
+            'context_json' => [
+                'loja_id' => $lojaId,
+                'tabela' => $table,
+                'tipo_entidade' => $tipo,
+                'id_local' => $idLocal,
+                'id_externo' => $idExterno,
+            ],
+            'source_system' => 'estoque',
+            'source_kind' => 'sync',
+            'retention_days' => 365,
+        ]);
     }
 
     private function mapping(string $tipo, string $idExterno, ?int $lojaId): ?object

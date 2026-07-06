@@ -27,7 +27,11 @@ class Kernel extends ConsoleKernel
             ->timezone('America/Belem');
 
         $schedule->command('conta-azul:refresh-tokens')->hourly()->timezone('America/Belem');
-        $schedule->command('conta-azul:reconciliar --todos')->dailyAt('03:15')->timezone('America/Belem');
+        $schedule->command('conta-azul:financeiro-auto-import')
+            ->dailyAt((string) config('conta_azul.auto_finance_import.time', '04:15'))
+            ->timezone('America/Belem')
+            ->withoutOverlapping((int) config('conta_azul.auto_finance_import.lock_minutes', 360))
+            ->when(fn () => (bool) config('conta_azul.auto_finance_import.enabled', false));
         $schedule->command('financeiro:sync-bb-extratos --days=7')
             ->dailyAt('03:45')
             ->timezone('America/Belem')

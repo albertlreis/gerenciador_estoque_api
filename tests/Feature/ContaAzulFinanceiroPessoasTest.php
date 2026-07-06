@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Integrations\ContaAzul\ContaAzulEntityType;
 use App\Integrations\ContaAzul\Services\ContaAzulFinanceiroLocalOfficializationService;
 use App\Models\Cliente;
+use App\Models\ContaFinanceira;
 use App\Models\ContaPagar;
 use App\Models\ContaReceber;
 use App\Models\Fornecedor;
@@ -137,6 +138,70 @@ class ContaAzulFinanceiroPessoasTest extends TestCase
         $this->assertSame($fornecedorManual->id, $contaPagarManual->fresh()->fornecedor_id);
         $this->assertSame($clienteBackfill->id, $contaReceberSemCliente->fresh()->cliente_id);
         $this->assertSame(1, Cliente::query()->where('nome', 'Cliente Backfill')->count());
+    }
+
+    public function test_oficializacao_restaura_conta_pagar_mapeada_soft_deleted_e_cria_baixa(): void
+    {
+        $contaFinanceira = ContaFinanceira::create([
+            'nome' => 'Banco Conta Azul',
+            'slug' => 'banco-conta-azul-' . uniqid(),
+            'tipo' => 'banco',
+            'moeda' => 'BRL',
+            'ativo' => true,
+            'saldo_inicial' => 0,
+            'data_saldo_inicial' => '2026-07-01',
+        ]);
+        $contaPagar = ContaPagar::create([
+            'descricao' => 'Conta pagar mapeada',
+            'numero_documento' => 'pagar-soft',
+            'data_vencimento' => '2026-07-10',
+            'valor_bruto' => 100,
+            'status' => 'ABERTA',
+        ]);
+
+        $this->insertMapping(ContaAzulEntityType::CONTA_FINANCEIRA, 'conta-ca-1', $contaFinanceira->id);
+        $this->insertMapping(ContaAzulEntityType::CONTA_PAGAR, 'pagar-soft', $contaPagar->id);
+
+        $contaPagar->delete();
+
+        $this->insertStaging('stg_conta_azul_contas_pagar', 'pagar-soft', [
+            'id' => 'pagar-soft',
+            'descricao' => 'Conta pagar mapeada atualizada',
+            'data_vencimento' => '2026-07-10',
+            'total' => 100,
+            'status' => 'ACQUITTED',
+        ]);
+        $this->insertStaging('stg_conta_azul_baixas', 'baixa-soft', [
+            'id' => 'baixa-soft',
+            'idParcela' => 'pagar-soft',
+            'evento_tipo_sierra' => ContaAzulEntityType::CONTA_PAGAR,
+            'data_pagamento' => '2026-07-06',
+            'metodo_pagamento' => 'PIX',
+            'conta_financeira' => ['id' => 'conta-ca-1'],
+            'valor_composicao' => ['valor_liquido' => 100],
+        ]);
+
+        $resultado = app(ContaAzulFinanceiroLocalOfficializationService::class)->oficializar();
+
+        $this->assertSame(1, $resultado['baixas_pagamentos']['criados']);
+        $this->assertNull(ContaPagar::withTrashed()->findOrFail($contaPagar->id)->deleted_at);
+        $this->assertDatabaseHas('contas_pagar', [
+            'id' => $contaPagar->id,
+            'descricao' => 'Conta pagar mapeada atualizada',
+            'deleted_at' => null,
+        ]);
+        $this->assertDatabaseHas('contas_pagar_pagamentos', [
+            'conta_pagar_id' => $contaPagar->id,
+            'valor' => 100,
+            'conta_financeira_id' => $contaFinanceira->id,
+        ]);
+        $this->assertDatabaseHas('auditoria_logs', [
+            'modulo' => 'conta_azul',
+            'acao' => 'restore_mapped_financial',
+            'status' => 'restaurado',
+            'entity_type' => 'contas_pagar',
+            'entity_id' => (string) $contaPagar->id,
+        ]);
     }
 
     /**

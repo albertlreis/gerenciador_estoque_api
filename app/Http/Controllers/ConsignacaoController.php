@@ -11,6 +11,7 @@ use App\Models\Cliente;
 use App\Models\Consignacao;
 use App\Models\ConsignacaoCompra;
 use App\Models\ConsignacaoDevolucao;
+use App\Models\Deposito;
 use App\Models\EstoqueReserva;
 use App\Models\Parceiro;
 use App\Models\Pedido;
@@ -20,6 +21,7 @@ use App\Models\ProdutoEntregaEvento;
 use App\Models\ProdutoEntregaItem;
 use App\Models\ProdutoVariacao;
 use App\Services\EstoqueMovimentacaoService;
+use App\Services\EstoqueDisponibilidadeService;
 use App\Services\EntregaProdutoService;
 use App\Services\DesfazerConsignacaoService;
 use App\Services\PdfImageService;
@@ -31,6 +33,7 @@ use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Http\Response;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 class ConsignacaoController extends Controller
 {
@@ -172,6 +175,7 @@ class ConsignacaoController extends Controller
             'pedido.cliente.enderecos',
             'produtoVariacao.produto.imagemPrincipal',
             'produtoVariacao.atributos',
+            'deposito',
             'compras.usuario',
             'compras.canceladaPor',
             'devolucoes.usuario',
@@ -834,7 +838,7 @@ class ConsignacaoController extends Controller
                     continue;
                 }
 
-                $restante = $this->quantidadeAcionavelConsignacao($consignacao);
+                $restante = $this->quantidadeVendavelConsignacao($consignacao);
                 $quantidade = $itensPayload->has($consignacaoId)
                     ? (int) $itensPayload->get($consignacaoId)
                     : $restante;
@@ -843,7 +847,7 @@ class ConsignacaoController extends Controller
                     $invalidos[] = [
                         'id' => $consignacao->id,
                         'nome' => $this->nomeConsignacao($consignacao),
-                        'motivo' => 'Sem quantidade acionavel para venda.',
+                        'motivo' => 'Sem reserva ou saldo disponivel para venda.',
                     ];
                     continue;
                 }
@@ -852,7 +856,7 @@ class ConsignacaoController extends Controller
                     $invalidos[] = [
                         'id' => $consignacao->id,
                         'nome' => $this->nomeConsignacao($consignacao),
-                        'motivo' => "Quantidade maior que o saldo acionavel ({$restante}).",
+                        'motivo' => "Quantidade maior que o saldo com reserva ou estoque disponivel ({$restante}).",
                     ];
                     continue;
                 }
@@ -1066,11 +1070,11 @@ class ConsignacaoController extends Controller
             );
         });
 
-        $grupos = $pedido->consignacoes->groupBy(fn($item) => $item->deposito->nome ?? 'Sem depósito');
         $tipoRoteiro = $this->normalizarTipoRoteiro($request->query('tipo_roteiro'));
         $isDevolucao = $tipoRoteiro
             ? $tipoRoteiro === 'devolucao'
             : $this->isRoteiroDeDevolucao($pedido);
+        $grupos = $this->gruposRoteiroConsignacao($pedido, $isDevolucao, $request);
         $tituloRoteiro = $isDevolucao ? 'Roteiro de devolução' : 'Roteiro de consignação';
         $filename = $isDevolucao
             ? "roteiro-de-devolucao-{$id}.pdf"
@@ -1137,6 +1141,87 @@ class ConsignacaoController extends Controller
             0,
             $consignacao->quantidadeDisponivelCliente() + $consignacao->quantidadePendenteEnvio()
         );
+    }
+
+    private function quantidadeVendavelConsignacao(Consignacao $consignacao): int
+    {
+        $disponivelCliente = $consignacao->quantidadeDisponivelCliente();
+        $pendenteEnvio = $consignacao->quantidadePendenteEnvio();
+
+        if ($pendenteEnvio <= 0) {
+            return $disponivelCliente;
+        }
+
+        $reservaPropria = $this->quantidadeReservaAbertaConsignacao($consignacao);
+        $saldoNaoReservado = max(0, app(EstoqueDisponibilidadeService::class)->getDisponivel(
+            (int) $consignacao->produto_variacao_id,
+            (int) $consignacao->deposito_id
+        ));
+
+        return $disponivelCliente + min($pendenteEnvio, $reservaPropria + $saldoNaoReservado);
+    }
+
+    private function quantidadeReservaAbertaConsignacao(Consignacao $consignacao): int
+    {
+        return (int) EstoqueReserva::query()
+            ->where('id_variacao', $consignacao->produto_variacao_id)
+            ->where('id_deposito', $consignacao->deposito_id)
+            ->where('status', 'ativa')
+            ->where(function ($query) {
+                $query->whereNull('data_expira')
+                    ->orWhere('data_expira', '>', now());
+            })
+            ->whereRaw('quantidade > quantidade_consumida')
+            ->when($consignacao->pedido_item_id, fn ($query) => $query->where('pedido_item_id', $consignacao->pedido_item_id))
+            ->when(!$consignacao->pedido_item_id && $consignacao->pedido_id, fn ($query) => $query->where('pedido_id', $consignacao->pedido_id))
+            ->sum(DB::raw('GREATEST(0, quantidade - quantidade_consumida)'));
+    }
+
+    private function gruposRoteiroConsignacao(Pedido $pedido, bool $isDevolucao, Request $request)
+    {
+        if (!$isDevolucao) {
+            return $pedido->consignacoes->groupBy(fn ($item) => $item->deposito->nome ?? 'Sem depósito');
+        }
+
+        $destinos = collect((array) $request->query('destinos_devolucao', []))
+            ->mapWithKeys(fn ($depositoId, $consignacaoId) => [(int) $consignacaoId => (int) $depositoId])
+            ->filter(fn ($depositoId, $consignacaoId) => $consignacaoId > 0 && $depositoId > 0);
+
+        $consignacaoIds = $pedido->consignacoes
+            ->pluck('id')
+            ->map(fn ($id) => (int) $id)
+            ->values();
+
+        $faltando = $consignacaoIds
+            ->filter(fn ($consignacaoId) => !$destinos->has($consignacaoId))
+            ->values();
+
+        if ($faltando->isNotEmpty()) {
+            throw ValidationException::withMessages([
+                'destinos_devolucao' => ['Informe o depósito de destino para todos os produtos selecionados no roteiro de devolução.'],
+            ]);
+        }
+
+        $depositos = Deposito::query()
+            ->whereIn('id', $destinos->values()->unique()->all())
+            ->get()
+            ->keyBy('id');
+
+        $invalidos = $consignacaoIds
+            ->filter(fn ($consignacaoId) => !$depositos->has((int) $destinos->get($consignacaoId)))
+            ->values();
+
+        if ($invalidos->isNotEmpty()) {
+            throw ValidationException::withMessages([
+                'destinos_devolucao' => ['O depósito de destino informado para o roteiro de devolução é inválido.'],
+            ]);
+        }
+
+        return $pedido->consignacoes->groupBy(function ($item) use ($destinos, $depositos) {
+            $depositoId = (int) $destinos->get((int) $item->id);
+
+            return $depositos->get($depositoId)?->nome ?? 'Sem depósito';
+        });
     }
 
     private function garantirEnvioParaVendaConsignacao(

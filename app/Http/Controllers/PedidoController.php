@@ -577,10 +577,10 @@ class PedidoController extends Controller
                 );
             });
 
-            $grupos = $pedido->consignacoes->groupBy(fn($c) => $c->deposito->nome ?? 'Sem depósito');
             $isDevolucao = $tipoRoteiro
                 ? $tipoRoteiro === 'devolucao'
                 : $this->isRoteiroConsignacaoDevolucao($pedido);
+            $grupos = $this->gruposRoteiroConsignacao($pedido, $isDevolucao, $request);
             $tituloRoteiro = $isDevolucao ? 'Roteiro de devolução' : 'Roteiro de consignação';
             $filename = $isDevolucao
                 ? "roteiro-de-devolucao-{$pedidoId}.pdf"
@@ -1884,6 +1884,53 @@ class PedidoController extends Controller
         return $pedido->consignacoes->every(function ($item) {
             $status = strtolower((string) ($item->status ?? ''));
             return in_array($status, ['devolvido', 'comprado', 'finalizado'], true);
+        });
+    }
+
+    private function gruposRoteiroConsignacao(Pedido $pedido, bool $isDevolucao, Request $request)
+    {
+        if (!$isDevolucao) {
+            return $pedido->consignacoes->groupBy(fn ($item) => $item->deposito->nome ?? 'Sem depósito');
+        }
+
+        $destinos = collect((array) $request->query('destinos_devolucao', []))
+            ->mapWithKeys(fn ($depositoId, $consignacaoId) => [(int) $consignacaoId => (int) $depositoId])
+            ->filter(fn ($depositoId, $consignacaoId) => $consignacaoId > 0 && $depositoId > 0);
+
+        $consignacaoIds = $pedido->consignacoes
+            ->pluck('id')
+            ->map(fn ($id) => (int) $id)
+            ->values();
+
+        $faltando = $consignacaoIds
+            ->filter(fn ($consignacaoId) => !$destinos->has($consignacaoId))
+            ->values();
+
+        if ($faltando->isNotEmpty()) {
+            throw ValidationException::withMessages([
+                'destinos_devolucao' => ['Informe o depósito de destino para todos os produtos selecionados no roteiro de devolução.'],
+            ]);
+        }
+
+        $depositos = Deposito::query()
+            ->whereIn('id', $destinos->values()->unique()->all())
+            ->get()
+            ->keyBy('id');
+
+        $invalidos = $consignacaoIds
+            ->filter(fn ($consignacaoId) => !$depositos->has((int) $destinos->get($consignacaoId)))
+            ->values();
+
+        if ($invalidos->isNotEmpty()) {
+            throw ValidationException::withMessages([
+                'destinos_devolucao' => ['O depósito de destino informado para o roteiro de devolução é inválido.'],
+            ]);
+        }
+
+        return $pedido->consignacoes->groupBy(function ($item) use ($destinos, $depositos) {
+            $depositoId = (int) $destinos->get((int) $item->id);
+
+            return $depositos->get($depositoId)?->nome ?? 'Sem depósito';
         });
     }
 

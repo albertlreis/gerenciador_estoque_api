@@ -34,6 +34,8 @@ class ConsignacaoDetalhadaResource extends JsonResource
             'quantidade_pendente_envio' => $this->quantidadePendenteEnvio(),
             'quantidade_comprada' => $quantidadeComprada,
             'quantidade_devolvida' => $quantidadeDevolvida,
+            'deposito_id' => $this->deposito_id,
+            'deposito_nome' => $this->deposito?->nome,
 
             'data_envio' => optional($this->data_envio)->format('d/m/Y'),
             'prazo_resposta' => optional($this->prazo_resposta)->format('d/m/Y'),

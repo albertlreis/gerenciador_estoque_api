@@ -78,6 +78,66 @@ class ConsignacaoRoteiroPdfTest extends TestCase
         );
     }
 
+    public function test_roteiro_de_devolucao_agrupa_por_destino_informado(): void
+    {
+        [$pedidoId] = $this->criarPedidoConsignado('pendente', PedidoStatus::CONSIGNADO);
+        $consignacaoA = Consignacao::where('pedido_id', $pedidoId)->firstOrFail();
+        $consignacaoB = $this->criarConsignacaoParaPedido($pedidoId, $consignacaoA->deposito_id, 1);
+        $loja = Deposito::create(['nome' => 'LOJA']);
+        $depositoJb = Deposito::create(['nome' => 'DEPÓSITO JB']);
+
+        $this->esperarPdfConsignacaoComGrupos(
+            $pedidoId,
+            'Roteiro de devolução',
+            ['LOJA', 'DEPÓSITO JB'],
+            "roteiro-de-devolucao-{$pedidoId}.pdf"
+        );
+
+        $this->get(
+            "/api/v1/consignacoes/{$pedidoId}/pdf?tipo_roteiro=devolucao"
+            . "&consignacao_ids[]={$consignacaoA->id}"
+            . "&consignacao_ids[]={$consignacaoB->id}"
+            . "&destinos_devolucao[{$consignacaoA->id}]={$loja->id}"
+            . "&destinos_devolucao[{$consignacaoB->id}]={$depositoJb->id}"
+        )->assertOk()
+            ->assertSee('pdf-ok');
+    }
+
+    public function test_roteiro_de_devolucao_exige_destino_para_itens_selecionados(): void
+    {
+        [$pedidoId] = $this->criarPedidoConsignado('pendente', PedidoStatus::CONSIGNADO);
+        $consignacao = Consignacao::where('pedido_id', $pedidoId)->firstOrFail();
+
+        $this->getJson("/api/v1/consignacoes/{$pedidoId}/pdf?tipo_roteiro=devolucao&consignacao_ids[]={$consignacao->id}")
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('destinos_devolucao');
+    }
+
+    public function test_roteiro_de_consignacao_continua_agrupando_por_deposito_original(): void
+    {
+        [$pedidoId] = $this->criarPedidoConsignado('pendente', PedidoStatus::CONSIGNADO);
+        $consignacaoA = Consignacao::where('pedido_id', $pedidoId)->firstOrFail();
+        $depositoOrigemB = Deposito::create(['nome' => 'ORIGEM B']);
+        $consignacaoB = $this->criarConsignacaoParaPedido($pedidoId, $depositoOrigemB->id, 1);
+        $destinoIgnorado = Deposito::create(['nome' => 'DESTINO IGNORADO']);
+
+        $this->esperarPdfConsignacaoComGrupos(
+            $pedidoId,
+            'Roteiro de consignação',
+            ['Deposito PDF', 'ORIGEM B'],
+            "roteiro-de-consignacao-{$pedidoId}.pdf"
+        );
+
+        $this->get(
+            "/api/v1/consignacoes/{$pedidoId}/pdf?tipo_roteiro=consignacao"
+            . "&consignacao_ids[]={$consignacaoA->id}"
+            . "&consignacao_ids[]={$consignacaoB->id}"
+            . "&destinos_devolucao[{$consignacaoA->id}]={$destinoIgnorado->id}"
+            . "&destinos_devolucao[{$consignacaoB->id}]={$destinoIgnorado->id}"
+        )->assertOk()
+            ->assertSee('pdf-ok');
+    }
+
     public function test_endpoint_de_consignacao_usa_imagem_da_variacao_no_roteiro_de_devolucao(): void
     {
         [$pedidoId, $variacaoId] = $this->criarPedidoConsignado('devolvido', PedidoStatus::DEVOLUCAO_CONSIGNACAO);
@@ -455,6 +515,56 @@ class ConsignacaoRoteiroPdfTest extends TestCase
             ->where('ref_type', 'consignacao')
             ->where('ref_id', $consignacao->id)
             ->count());
+    }
+
+    public function test_compras_em_massa_confirma_venda_de_item_reservado_sem_envio_previo(): void
+    {
+        [$pedidoId] = $this->criarPedidoConsignado('pendente', PedidoStatus::CONSIGNADO);
+        $consignacao = Consignacao::where('pedido_id', $pedidoId)->firstOrFail();
+        $this->garantirEstoqueConsignacao($consignacao, 1);
+
+        $entregas = app(EntregaProdutoService::class);
+        $central = $entregas->criarDemandaConsignacao($consignacao, auth()->id());
+        $entregas->reservarItem(
+            $central,
+            $consignacao->deposito_id,
+            null,
+            auth()->id(),
+            'Reserva inicial teste venda'
+        );
+
+        $reservaId = EstoqueReserva::where('pedido_item_id', $consignacao->pedido_item_id)->value('id');
+        $this->assertNotNull($reservaId);
+        $this->assertSame('ativa', EstoqueReserva::whereKey($reservaId)->value('status'));
+
+        $this->patchJson("/api/v1/consignacoes/pedidos/{$pedidoId}/compras-em-massa", [
+            'itens' => [
+                ['consignacao_id' => $consignacao->id, 'quantidade' => 1],
+            ],
+        ])->assertOk();
+
+        $this->assertSame('consumida', EstoqueReserva::whereKey($reservaId)->value('status'));
+        $this->assertSame(1, ConsignacaoCompra::where('consignacao_id', $consignacao->id)->value('quantidade'));
+        $this->assertSame('comprado', $consignacao->fresh()->status);
+        $this->assertSame(0, (int) Estoque::where('id_variacao', $consignacao->produto_variacao_id)->where('id_deposito', $consignacao->deposito_id)->value('quantidade'));
+    }
+
+    public function test_compras_em_massa_retorna_item_invalido_sem_reserva_ou_saldo(): void
+    {
+        [$pedidoId] = $this->criarPedidoConsignado('pendente', PedidoStatus::CONSIGNADO);
+        $consignacao = Consignacao::where('pedido_id', $pedidoId)->firstOrFail();
+
+        $response = $this->patchJson("/api/v1/consignacoes/pedidos/{$pedidoId}/compras-em-massa", [
+            'itens' => [
+                ['consignacao_id' => $consignacao->id, 'quantidade' => 1],
+            ],
+        ]);
+
+        $response->assertStatus(422)
+            ->assertJsonStructure(['message', 'itens_invalidos'])
+            ->assertJsonPath('itens_invalidos.0.id', $consignacao->id);
+        $this->assertSame(0, ConsignacaoCompra::count());
+        $this->assertSame('pendente', $consignacao->fresh()->status);
     }
 
     public function test_devolucao_de_item_pendente_cancela_reserva_sem_entrada_no_estoque(): void
@@ -1161,6 +1271,35 @@ class ConsignacaoRoteiroPdfTest extends TestCase
                 return ($data['tituloRoteiro'] ?? null) === 'Roteiro de devolução'
                     && str_starts_with($imagem, 'data:image/png;base64,')
                     && !str_starts_with($imagem, 'data:image/svg+xml;base64,');
+            }))
+            ->andReturn($pdf);
+    }
+
+    private function esperarPdfConsignacaoComGrupos(int $pedidoId, string $titulo, array $gruposEsperados, string $filename): void
+    {
+        Pdf::shouldReceive('setOptions')
+            ->zeroOrMoreTimes()
+            ->with(['isRemoteEnabled' => true]);
+
+        $pdf = Mockery::mock(DomPdfWrapper::class);
+        $pdf->shouldReceive('setPaper')
+            ->once()
+            ->with('a4')
+            ->andReturnSelf();
+        $pdf->shouldReceive('download')
+            ->once()
+            ->with($filename)
+            ->andReturn(response('pdf-ok'));
+
+        Pdf::shouldReceive('loadView')
+            ->once()
+            ->with('exports.roteiro-consignacao', Mockery::on(function (array $data) use ($titulo, $gruposEsperados): bool {
+                $grupos = collect($data['grupos'] ?? []);
+                $chaves = $grupos->keys()->sort()->values()->all();
+                $esperados = collect($gruposEsperados)->sort()->values()->all();
+
+                return ($data['tituloRoteiro'] ?? null) === $titulo
+                    && $chaves === $esperados;
             }))
             ->andReturn($pdf);
     }

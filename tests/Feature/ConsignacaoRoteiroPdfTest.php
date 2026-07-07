@@ -56,7 +56,7 @@ class ConsignacaoRoteiroPdfTest extends TestCase
     {
         [$pedidoId] = $this->criarPedidoConsignado('devolvido', PedidoStatus::DEVOLUCAO_CONSIGNACAO);
 
-        $response = $this->get("/api/v1/pedidos/{$pedidoId}/pdf/roteiro");
+        $response = $this->get("/api/v1/pedidos/{$pedidoId}/pdf/roteiro?" . $this->destinosDevolucaoQuery($pedidoId));
 
         $response->assertOk();
         $this->assertStringContainsString(
@@ -69,7 +69,9 @@ class ConsignacaoRoteiroPdfTest extends TestCase
     {
         [$pedidoId] = $this->criarPedidoConsignado('pendente', PedidoStatus::CONSIGNADO);
 
-        $response = $this->get("/api/v1/consignacoes/{$pedidoId}/pdf?tipo_roteiro=devolucao");
+        $response = $this->get(
+            "/api/v1/consignacoes/{$pedidoId}/pdf?tipo_roteiro=devolucao&" . $this->destinosDevolucaoQuery($pedidoId)
+        );
 
         $response->assertOk();
         $this->assertStringContainsString(
@@ -145,7 +147,9 @@ class ConsignacaoRoteiroPdfTest extends TestCase
         $this->criarImagemDaVariacaoParaRoteiroDevolucao($variacaoId);
         $this->esperarPdfDevolucaoComImagemDaVariacao($pedidoId);
 
-        $this->get("/api/v1/consignacoes/{$pedidoId}/pdf?tipo_roteiro=devolucao")
+        $this->get(
+            "/api/v1/consignacoes/{$pedidoId}/pdf?tipo_roteiro=devolucao&" . $this->destinosDevolucaoQuery($pedidoId)
+        )
             ->assertOk()
             ->assertSee('pdf-ok');
     }
@@ -170,7 +174,9 @@ class ConsignacaoRoteiroPdfTest extends TestCase
         $this->criarImagemDaVariacaoParaRoteiroDevolucao($variacaoId);
         $this->esperarPdfDevolucaoComImagemDaVariacao($pedidoId);
 
-        $this->get("/api/v1/pedidos/{$pedidoId}/pdf/roteiro?tipo_roteiro=devolucao")
+        $this->get(
+            "/api/v1/pedidos/{$pedidoId}/pdf/roteiro?tipo_roteiro=devolucao&" . $this->destinosDevolucaoQuery($pedidoId)
+        )
             ->assertOk()
             ->assertSee('pdf-ok');
     }
@@ -1162,6 +1168,14 @@ class ConsignacaoRoteiroPdfTest extends TestCase
         ]);
 
         return [$pedido->id, $variacao->id];
+    }
+
+    private function destinosDevolucaoQuery(int $pedidoId): string
+    {
+        return Consignacao::where('pedido_id', $pedidoId)
+            ->get()
+            ->map(fn(Consignacao $consignacao): string => "destinos_devolucao[{$consignacao->id}]={$consignacao->deposito_id}")
+            ->implode('&');
     }
 
     private function criarConsignacaoParaPedido(

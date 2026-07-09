@@ -38,6 +38,8 @@ class ConsignacaoRoteiroPdfTest extends TestCase
     use RefreshDatabase;
 
     private const PNG_1X1 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7+4fQAAAAASUVORK5CYII=';
+    private const PNG_PRODUTO = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+    private const PNG_REFERENCIA = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADUlEQVR42mNkYPj/HwADAgH/ox3bWQAAAABJRU5ErkJggg==';
 
     public function test_endpoint_de_consignacao_baixa_com_nome_de_roteiro_de_consignacao(): void
     {
@@ -945,6 +947,61 @@ class ConsignacaoRoteiroPdfTest extends TestCase
         $this->assertStringContainsString('CEP 66000202', $html);
     }
 
+    public function test_endpoint_do_roteiro_de_entrega_usa_imagem_principal_do_produto(): void
+    {
+        Storage::fake('public');
+        Storage::disk('public')->put('produtos/roteiro-produto-endpoint.png', base64_decode(self::PNG_PRODUTO));
+
+        [$pedidoId, $produtoId] = $this->criarPedidoComItem();
+
+        ProdutoImagem::create([
+            'id_produto' => $produtoId,
+            'url' => 'roteiro-produto-endpoint.png',
+            'principal' => true,
+        ]);
+
+        $this->esperarPdfRoteiroPedidoComImagem($pedidoId, self::PNG_PRODUTO);
+
+        $this->get("/api/v1/pedidos/{$pedidoId}/pdf/roteiro")
+            ->assertOk()
+            ->assertSee('pdf-ok');
+    }
+
+    public function test_endpoint_do_roteiro_de_entrega_usa_fallback_por_referencia(): void
+    {
+        Storage::fake('public');
+        Storage::disk('public')->put('produtos/roteiro-referencia-endpoint.png', base64_decode(self::PNG_REFERENCIA));
+
+        [$pedidoId] = $this->criarPedidoComItem();
+        $pedidoItem = PedidoItem::where('id_pedido', $pedidoId)->firstOrFail();
+        $pedidoItem->variacao->update(['referencia' => 'REF-ROTEIRO-ENDPOINT']);
+
+        $categoria = Categoria::firstOrCreate(['nome' => 'Categoria Roteiro Referencia']);
+        $produtoComImagem = Produto::create([
+            'nome' => 'Produto Roteiro Referencia',
+            'id_categoria' => $categoria->id,
+            'ativo' => true,
+        ]);
+        ProdutoVariacao::create([
+            'produto_id' => $produtoComImagem->id,
+            'referencia' => 'REF-ROTEIRO-ENDPOINT',
+            'nome' => 'Variacao com imagem',
+            'preco' => 150,
+            'custo' => 90,
+        ]);
+        ProdutoImagem::create([
+            'id_produto' => $produtoComImagem->id,
+            'url' => 'roteiro-referencia-endpoint.png',
+            'principal' => true,
+        ]);
+
+        $this->esperarPdfRoteiroPedidoComImagem($pedidoId, self::PNG_REFERENCIA);
+
+        $this->get("/api/v1/pedidos/{$pedidoId}/pdf/roteiro")
+            ->assertOk()
+            ->assertSee('pdf-ok');
+    }
+
     public function test_adiciona_produto_a_consignacao_criando_item_e_demandas(): void
     {
         [$pedidoId] = $this->criarPedidoConsignado('pendente', PedidoStatus::CONSIGNADO);
@@ -1314,6 +1371,35 @@ class ConsignacaoRoteiroPdfTest extends TestCase
 
                 return ($data['tituloRoteiro'] ?? null) === $titulo
                     && $chaves === $esperados;
+            }))
+            ->andReturn($pdf);
+    }
+
+    private function esperarPdfRoteiroPedidoComImagem(int $pedidoId, string $pngBase64): void
+    {
+        Pdf::shouldReceive('setOptions')
+            ->zeroOrMoreTimes()
+            ->with(['isRemoteEnabled' => true]);
+
+        $pdf = Mockery::mock(DomPdfWrapper::class);
+        $pdf->shouldReceive('setPaper')
+            ->once()
+            ->with('a4')
+            ->andReturnSelf();
+        $pdf->shouldReceive('download')
+            ->once()
+            ->with("roteiro_pedido_{$pedidoId}.pdf")
+            ->andReturn(response('pdf-ok'));
+
+        Pdf::shouldReceive('loadView')
+            ->once()
+            ->with('exports.roteiro-pedido', Mockery::on(function (array $data) use ($pngBase64): bool {
+                $item = collect($data['grupos'] ?? [])
+                    ->flatMap(fn ($grupo) => collect($grupo))
+                    ->first();
+                $imagem = (string) $item?->getAttribute('pdf_imagem_data_uri');
+
+                return $imagem === 'data:image/png;base64,' . $pngBase64;
             }))
             ->andReturn($pdf);
     }

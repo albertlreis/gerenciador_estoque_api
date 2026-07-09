@@ -3,7 +3,7 @@
 namespace App\Http\Resources;
 
 use App\Helpers\AuthHelper;
-use App\Models\ProdutoImagem;
+use App\Services\PdfImageService;
 use Illuminate\Http\Resources\Json\JsonResource;
 
 class PedidoItemResource extends JsonResource
@@ -33,11 +33,7 @@ class PedidoItemResource extends JsonResource
             'subtotal' => $this->subtotal,
             'id_deposito' => $this->id_deposito,
             'observacoes' => $this->observacoes,
-            'imagem' => ProdutoImagem::normalizarUrlPublica(
-                $this->variacao?->imagem?->url
-                ?? $this->variacao?->produto?->imagemPrincipal?->url
-                ?? $this->variacao?->produto?->imagens?->first()?->url
-            ),
+            'imagem' => app(PdfImageService::class)->publicUrlFromProdutoVariacaoProdutoFirst($this->variacao),
             'atributos' => AtributoResource::collection($this->variacao->atributos),
         ];
 

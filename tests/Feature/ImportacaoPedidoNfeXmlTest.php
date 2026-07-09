@@ -335,6 +335,36 @@ class ImportacaoPedidoNfeXmlTest extends TestCase
         $this->assertCount(4, $response->json('dados.itens') ?? []);
     }
 
+    public function test_importa_nfe_com_numeros_em_formato_brasileiro_sem_distorcer_valores(): void
+    {
+        $usuario = Usuario::create([
+            'nome' => 'Usuario NFe BR',
+            'email' => 'nfe-br@example.com',
+            'senha' => 'teste',
+            'ativo' => 1,
+        ]);
+
+        $path = $this->tempXmlPath($this->xmlNfeNumerosBrasileiros());
+        $file = new UploadedFile($path, 'nfe-br.xml', 'application/xml', null, true);
+
+        try {
+            $response = $this->actingAs($usuario, 'sanctum')
+                ->post('/api/v1/pedidos/import', [
+                    'tipo_importacao' => 'ADORNOS_XML_NFE',
+                    'arquivo' => $file,
+                ]);
+        } finally {
+            @unlink($path);
+        }
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('sucesso', true);
+        $response->assertJsonPath('dados.pedido.total', 2469.12);
+        $response->assertJsonPath('dados.itens.0.quantidade', '2');
+        $response->assertJsonPath('dados.itens.0.preco_unitario', '1234.56');
+        $response->assertJsonPath('dados.itens.0.valor_total', '2469.12');
+    }
+
     public function test_rejeita_arquivo_zone_identifier_com_422(): void
     {
         $usuario = Usuario::create([
@@ -521,6 +551,47 @@ class ImportacaoPedidoNfeXmlTest extends TestCase
           <vSeg>0.00</vSeg>
           <vDesc>0.00</vDesc>
           <vNF>26474.85</vNF>
+        </ICMSTot>
+      </total>
+    </infNFe>
+  </NFe>
+</nfeProc>
+XML;
+    }
+
+    private function xmlNfeNumerosBrasileiros(): string
+    {
+        return <<<'XML'
+<?xml version="1.0" encoding="utf-8"?>
+<nfeProc versao="4.00" xmlns="http://www.portalfiscal.inf.br/nfe">
+  <NFe>
+    <infNFe versao="4.00" Id="NFe35260711222333000144550010000009001000009001">
+      <ide>
+        <nNF>900</nNF>
+        <dhEmi>2026-07-01T10:00:00-03:00</dhEmi>
+      </ide>
+      <emit>
+        <CNPJ>11222333000144</CNPJ>
+        <xNome>Fornecedor Numeros BR</xNome>
+      </emit>
+      <dest>
+        <xNome>Sierra Teste</xNome>
+      </dest>
+      <det nItem="1">
+        <prod>
+          <cProd>REF-BR-NFE</cProd>
+          <cEAN>SEM GTIN</cEAN>
+          <xProd>Produto NFe BR</xProd>
+          <uCom>UN</uCom>
+          <qCom>2,0000</qCom>
+          <vUnCom>1.234,56</vUnCom>
+          <vProd>2.469,12</vProd>
+        </prod>
+      </det>
+      <total>
+        <ICMSTot>
+          <vProd>2.469,12</vProd>
+          <vNF>2.469,12</vNF>
         </ICMSTot>
       </total>
     </infNFe>

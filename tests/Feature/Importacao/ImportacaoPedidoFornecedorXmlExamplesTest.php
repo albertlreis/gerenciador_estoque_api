@@ -66,6 +66,35 @@ class ImportacaoPedidoFornecedorXmlExamplesTest extends TestCase
         }
     }
 
+    public function test_importa_xml_fornecedor_com_numeros_em_formato_brasileiro(): void
+    {
+        $usuario = Usuario::create([
+            'nome' => 'Usuario XML Fornecedor BR',
+            'email' => 'xml-fornecedor-br@example.com',
+            'senha' => 'teste',
+            'ativo' => 1,
+        ]);
+
+        $path = $this->tempXmlPath($this->xmlFornecedorNumerosBrasileiros());
+        $file = new UploadedFile($path, 'SIERRABELM__BR.xml', 'application/xml', null, true);
+
+        try {
+            $response = $this->actingAs($usuario, 'sanctum')
+                ->post('/api/v1/pedidos/import', [
+                    'tipo_importacao' => 'PRODUTOS_XML_FORNECEDORES',
+                    'arquivo' => $file,
+                ]);
+        } finally {
+            @unlink($path);
+        }
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('sucesso', true);
+        $response->assertJsonPath('dados.itens.0.quantidade', '2');
+        $response->assertJsonPath('dados.itens.0.preco_unitario', '1234.56');
+        $response->assertJsonPath('dados.itens.0.valor_total_linha', '2469.12');
+    }
+
     public function test_rejeita_tipo_de_importacao_nao_suportado(): void
     {
         $usuario = Usuario::create([
@@ -86,5 +115,36 @@ class ImportacaoPedidoFornecedorXmlExamplesTest extends TestCase
 
         $response->assertStatus(422);
         $response->assertJsonPath('sucesso', false);
+    }
+
+    private function tempXmlPath(string $content): string
+    {
+        $path = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'pedido-fornecedor-' . uniqid('', true) . '.xml';
+        file_put_contents($path, $content);
+
+        return $path;
+    }
+
+    private function xmlFornecedorNumerosBrasileiros(): string
+    {
+        return <<<'XML'
+<?xml version="1.0" encoding="utf-8"?>
+<LISTING>
+  <NUMERO_PEDIDO>BR-001</NUMERO_PEDIDO>
+  <CLIENTE_PEDIDO>Cliente BR</CLIENTE_PEDIDO>
+  <ORDEM_COMPRA_PEDIDO>OC-BR</ORDEM_COMPRA_PEDIDO>
+  <LOJA_PEDIDO>Sierra Belem</LOJA_PEDIDO>
+  <FORNECEDOR_PEDIDO>Fornecedor BR</FORNECEDOR_PEDIDO>
+  <FORNECEDOR_CNPJ_PEDIDO>11222333000144</FORNECEDOR_CNPJ_PEDIDO>
+  <ITEMS>
+    <ITEM DESCRIPTION="Produto formato BR" QUANTITY="2,0000" PRICE="1.234,56">
+      <REFERENCES>
+        <CODE REFERENCE="REF-BR-001"/>
+        <MODEL REFERENCE="MODELO-BR"/>
+      </REFERENCES>
+    </ITEM>
+  </ITEMS>
+</LISTING>
+XML;
     }
 }

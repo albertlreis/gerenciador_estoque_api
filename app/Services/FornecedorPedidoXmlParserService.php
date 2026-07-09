@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Support\Numbers\DecimalNumberParser;
 use DOMDocument;
 use DOMXPath;
 use Illuminate\Http\UploadedFile;
@@ -158,10 +159,6 @@ class FornecedorPedidoXmlParserService
 
     private function toFloat(?string $value, float $default = 0.0): float
     {
-        if ($value === null || trim($value) === '') {
-            return $default;
-        }
-
-        return (float) str_replace(',', '.', $value);
+        return DecimalNumberParser::toFloat($value, $default);
     }
 }

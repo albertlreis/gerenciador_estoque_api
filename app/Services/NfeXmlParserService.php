@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Support\Numbers\DecimalNumberParser;
 use DOMDocument;
 use DOMXPath;
 use Illuminate\Http\UploadedFile;
@@ -182,9 +183,8 @@ class NfeXmlParserService
         $vNF = $this->texto($xpath, '//nfe:total/nfe:ICMSTot/nfe:vNF');
         $vProd = $this->texto($xpath, '//nfe:total/nfe:ICMSTot/nfe:vProd');
 
-        $total = $vNF ?? $vProd ?? '0';
-        $total = str_replace(',', '.', $total);
-        $totalBr = str_replace('.', ',', (string) (float) $total);
+        $total = DecimalNumberParser::normalize($vNF ?? $vProd, 0.0);
+        $totalBr = str_replace('.', ',', $total);
 
         return [
             'total_bruto' => $totalBr,
@@ -220,11 +220,7 @@ class NfeXmlParserService
 
     private function toFloat(?string $value, float $default = 0.0): float
     {
-        if ($value === null || trim($value) === '') {
-            return $default;
-        }
-
-        return (float) str_replace(',', '.', $value);
+        return DecimalNumberParser::toFloat($value, $default);
     }
 
     private function deveManterQuantidadeOriginal(?string $unidade, float $quantidade): bool
@@ -256,11 +252,7 @@ class NfeXmlParserService
 
     private function valorOriginalOuFloat(?string $original, float $fallback): string
     {
-        if ($original !== null && trim($original) !== '') {
-            return str_replace(',', '.', trim($original));
-        }
-
-        return (string) $fallback;
+        return DecimalNumberParser::normalize($original, $fallback) ?? (string) $fallback;
     }
 
     private function extrairAtributosComerciais(string $descricao): array

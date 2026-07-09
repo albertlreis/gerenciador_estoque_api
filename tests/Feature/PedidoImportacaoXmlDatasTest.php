@@ -213,6 +213,7 @@ class PedidoImportacaoXmlDatasTest extends TestCase
             ],
             'entregue' => true,
             'data_entrega' => '2025-01-15',
+            'movimentar_estoque' => true,
             'itens' => [
                 [
                     'ref' => 'REF-ENT-1',

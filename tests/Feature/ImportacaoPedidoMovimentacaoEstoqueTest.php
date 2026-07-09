@@ -60,7 +60,7 @@ class ImportacaoPedidoMovimentacaoEstoqueTest extends TestCase
         parent::tearDown();
     }
 
-    public function test_venda_com_movimentacao_padrao_registra_entrada_e_reserva_sem_saida(): void
+    public function test_venda_sem_movimentar_estoque_no_payload_cria_demanda_sem_movimentar(): void
     {
         [$usuario, $cliente, $categoria, $variacao, $deposito] = $this->criarContexto();
 
@@ -72,12 +72,43 @@ class ImportacaoPedidoMovimentacaoEstoqueTest extends TestCase
             depositoId: $deposito->id,
             quantidade: 2,
             entregue: false,
-            movimentarEstoque: true,
+            movimentarEstoque: false,
         );
         unset($payload['movimentar_estoque']);
 
         $response = $this->actingAs($usuario, 'sanctum')
             ->postJson('/api/v1/pedidos/import/xml/confirm', $payload);
+
+        $response->assertOk();
+
+        $pedidoId = $response->json('id');
+        $entrega = ProdutoEntregaItem::query()->where('pedido_id', $pedidoId)->firstOrFail();
+
+        $this->assertSame(0, (int) Estoque::query()->where('id_variacao', $variacao->id)->where('id_deposito', $deposito->id)->value('quantidade'));
+        $this->assertSame(0, (int) $entrega->quantidade_reservada);
+        $this->assertSame(0, (int) $entrega->quantidade_expedida);
+        $this->assertSame(0, (int) $entrega->quantidade_entregue);
+        $this->assertSame(ProdutoEntregaItem::STATUS_AGUARDANDO_ESTOQUE, $entrega->status);
+        $this->assertSame(0, EstoqueReserva::query()->where('pedido_id', $pedidoId)->where('status', 'ativa')->count());
+        $this->assertSame(0, EstoqueMovimentacao::query()->where('pedido_id', $pedidoId)->where('tipo', 'entrada_deposito')->count());
+        $this->assertSame(0, EstoqueMovimentacao::query()->where('pedido_id', $pedidoId)->where('tipo', 'saida_entrega_cliente')->count());
+    }
+
+    public function test_venda_com_movimentacao_explicita_registra_entrada_e_reserva_sem_saida(): void
+    {
+        [$usuario, $cliente, $categoria, $variacao, $deposito] = $this->criarContexto();
+
+        $response = $this->actingAs($usuario, 'sanctum')
+            ->postJson('/api/v1/pedidos/import/xml/confirm', $this->payloadImportacao(
+                tipo: 'venda',
+                clienteId: $cliente->id,
+                categoriaId: $categoria->id,
+                variacaoId: $variacao->id,
+                depositoId: $deposito->id,
+                quantidade: 2,
+                entregue: false,
+                movimentarEstoque: true,
+            ));
 
         $response->assertOk();
 
@@ -474,6 +505,11 @@ class ImportacaoPedidoMovimentacaoEstoqueTest extends TestCase
         $this->assertSame(ProdutoEntregaItem::STATUS_RECEBIDO, $entrega->status);
         $this->assertSame(1, EstoqueMovimentacao::query()->where('pedido_id', $pedidoId)->where('tipo', 'entrada_deposito')->count());
         $this->assertSame(0, EstoqueMovimentacao::query()->where('pedido_id', $pedidoId)->where('tipo', 'saida_entrega_cliente')->count());
+        $this->assertDatabaseHas('pedido_status_historico', [
+            'pedido_id' => $pedidoId,
+            'status' => PedidoStatus::ENTREGA_ESTOQUE->value,
+            'data_status' => now()->toDateString() . ' 00:00:00',
+        ]);
     }
 
     public function test_reposicao_recebida_sem_movimentacao_fica_em_recebiveis_sem_entrada(): void

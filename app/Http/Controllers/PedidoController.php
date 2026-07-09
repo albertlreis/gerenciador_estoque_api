@@ -638,7 +638,7 @@ class PedidoController extends Controller
         $pedido->itens->each(function ($item) use ($pdfImageService) {
             $item->setAttribute(
                 'pdf_imagem_data_uri',
-                $pdfImageService->fromProdutoDaVariacaoOrPlaceholder($item->variacao)
+                $pdfImageService->fromProdutoVariacaoProdutoFirstOrPlaceholder($item->variacao)
             );
         });
 

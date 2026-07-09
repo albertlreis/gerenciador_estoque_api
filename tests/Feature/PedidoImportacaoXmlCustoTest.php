@@ -108,8 +108,17 @@ class PedidoImportacaoXmlCustoTest extends TestCase
             ->postJson('/api/v1/pedidos/import/xml/confirm', $payload);
 
         $response->assertStatus(422);
-        $response->assertJsonValidationErrors(['itens.0.preco_unitario']);
+        $errors = $response->json('errors');
+        $this->assertSame(
+            ['Preço unitário obrigatório para definir o custo do item importado.'],
+            $errors['itens.0.preco_unitario'] ?? null
+        );
 
-        $this->assertDatabaseCount('pedido_itens', 0);
+        $this->assertDatabaseMissing('pedidos', [
+            'numero_externo' => $payload['pedido']['numero_externo'],
+        ]);
+        $this->assertDatabaseMissing('produtos', [
+            'nome' => 'Produto Legado',
+        ]);
     }
 }

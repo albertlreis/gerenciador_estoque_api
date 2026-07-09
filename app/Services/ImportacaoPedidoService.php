@@ -367,7 +367,7 @@ class ImportacaoPedidoService
             $entregue = $this->toBoolean($request->input('entregue', $dadosPedido['entregue'] ?? false));
             $movimentarEstoque = $request->has('movimentar_estoque')
                 ? $this->toBoolean($request->input('movimentar_estoque'))
-                : true;
+                : false;
             $tiposMovimentacaoPorIndice = [];
             foreach ($itens as $index => $itemMovimentacao) {
                 $tiposMovimentacaoPorIndice[$index] = $this->normalizarTipoMovimentacaoItem(
@@ -491,12 +491,14 @@ class ImportacaoPedidoService
             ]);
 
             if ($movimentarEstoque && ($entregue || $tipo === Pedido::TIPO_REPOSICAO)) {
+                $dataStatusMovimentacao = $dataEntrega ?? $dataBasePedido;
+
                 PedidoStatusHistorico::create([
                     'pedido_id'   => $pedido->id,
                     'status'      => $tipo === Pedido::TIPO_REPOSICAO
                         ? PedidoStatus::ENTREGA_ESTOQUE
                         : PedidoStatus::ENTREGA_CLIENTE,
-                    'data_status' => $dataEntrega?->toDateTimeString(),
+                    'data_status' => $dataStatusMovimentacao->toDateTimeString(),
                     'usuario_id'  => $usuario->id,
                     'observacoes' => 'Status aplicado na confirmação da importação XML.',
                 ]);

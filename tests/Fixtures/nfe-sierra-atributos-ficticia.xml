@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc versao="4.00" xmlns="http://www.portalfiscal.inf.br/nfe">
+  <NFe>
+    <infNFe versao="4.00" Id="NFe99999999999999999999999999999999999999999999">
+      <ide>
+        <nNF>999001</nNF>
+        <dhEmi>2026-07-13T10:00:00-03:00</dhEmi>
+      </ide>
+      <emit>
+        <CNPJ>92726785009999</CNPJ>
+        <xNome>SIERRA MÓVEIS LTDA. - AMBIENTE DE TESTE</xNome>
+      </emit>
+      <dest>
+        <xNome>CLIENTE FICTÍCIO</xNome>
+      </dest>
+      <det nItem="1">
+        <prod>
+          <cProd>5330[244271425]</cProd>
+          <cEAN>SEM GTIN</cEAN>
+          <xProd>POLTRONA NIDUS CORAC03 TECI-24805 PESPMESMA COR DO TECIDO</xProd>
+          <uCom>UN</uCom>
+          <qCom>1.0000</qCom>
+          <vUnCom>4200.00</vUnCom>
+          <vProd>4200.00</vProd>
+        </prod>
+      </det>
+      <det nItem="2">
+        <prod>
+          <cProd>TESTE[SEM-ATRIBUTO]</cProd>
+          <cEAN>SEM GTIN</cEAN>
+          <xProd>SOFÁ CORAL DECORATIVO</xProd>
+          <uCom>UN</uCom>
+          <qCom>1.0000</qCom>
+          <vUnCom>100.00</vUnCom>
+          <vProd>100.00</vProd>
+        </prod>
+      </det>
+      <total>
+        <ICMSTot>
+          <vProd>4300.00</vProd>
+          <vNF>4300.00</vNF>
+        </ICMSTot>
+      </total>
+    </infNFe>
+  </NFe>
+</nfeProc>

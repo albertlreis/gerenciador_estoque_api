@@ -9,6 +9,7 @@ use App\Models\ImportacaoNormalizadaLinha;
 use App\Models\Produto;
 use App\Models\ProdutoVariacao;
 use App\Models\Usuario;
+use App\Services\Import\ImportacaoNormalizadaPipelineService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Cache;
@@ -21,6 +22,42 @@ use Tests\TestCase;
 class ImportacaoNormalizadaPipelineTest extends TestCase
 {
     use RefreshDatabase;
+
+    public function test_payload_normalizado_preserva_atributos_repetidos_e_mapa_legado(): void
+    {
+        $linha = new ImportacaoNormalizadaLinha();
+        $linha->forceFill([
+            'nome' => 'Poltrona Nidus',
+            'nome_normalizado' => 'Poltrona Nidus',
+            'nome_base_normalizado' => 'Poltrona Nidus',
+            'codigo' => '5330',
+            'codigo_produto' => '5330',
+            'dados_brutos' => [
+                'Tecidos' => 'I-24805',
+                'Tec. 1' => 'L-18042',
+            ],
+        ]);
+
+        $service = app(ImportacaoNormalizadaPipelineService::class);
+        $montarPayload = new \ReflectionMethod($service, 'montarPayloadCatalogo');
+        $montarPayload->setAccessible(true);
+        $payload = $montarPayload->invoke($service, $linha, 1, null, true);
+
+        $this->assertSame('L-18042', data_get($payload, 'atributos.tecido_1'));
+        $this->assertSame([
+            ['atributo' => 'tecido_1', 'valor' => 'I-24805'],
+            ['atributo' => 'tecido_1', 'valor' => 'L-18042'],
+        ], $payload['atributos_lista']);
+
+        $montarIdentidade = new \ReflectionMethod($service, 'variacaoIdentityKeyFromLinha');
+        $montarIdentidade->setAccessible(true);
+        $identidade = json_decode((string) $montarIdentidade->invoke($service, $linha), true);
+
+        $this->assertSame(
+            ['i 24805', 'l 18042'],
+            data_get($identidade, 'atributos.tecido_1')
+        );
+    }
 
     /**
      * @var array<int, string>

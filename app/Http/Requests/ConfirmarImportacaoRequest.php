@@ -2,13 +2,16 @@
 
 namespace App\Http\Requests;
 
+use App\Helpers\StringHelper;
 use Illuminate\Foundation\Http\FormRequest;
-use Illuminate\Support\Str;
 use Illuminate\Validation\Validator;
 
 class ConfirmarImportacaoRequest extends FormRequest
 {
-    public function authorize(): bool { return true; }
+    public function authorize(): bool
+    {
+        return true;
+    }
 
     public function rules(): array
     {
@@ -36,9 +39,9 @@ class ConfirmarImportacaoRequest extends FormRequest
             'produtos.*.descricao_final' => ['nullable', 'string', 'max:255'],
             'produtos.*.observacao' => ['nullable', 'string'],
             'produtos.*.atributos' => ['array'],
-            'produtos.*.atributos.*.atributo' => ['required_with:produtos.*.atributos','string','max:100'],
-            'produtos.*.atributos.*.valor' => ['required_with:produtos.*.atributos','string','max:100'],
-            'produtos.*.pedido_id' => ['nullable','integer','exists:pedidos,id'],
+            'produtos.*.atributos.*.atributo' => ['required_with:produtos.*.atributos', 'string', 'max:100'],
+            'produtos.*.atributos.*.valor' => ['required_with:produtos.*.atributos', 'string', 'max:100'],
+            'produtos.*.pedido_id' => ['nullable', 'integer', 'exists:pedidos,id'],
             'data_entrada' => ['nullable', 'date'],
         ];
     }
@@ -47,7 +50,7 @@ class ConfirmarImportacaoRequest extends FormRequest
     {
         $validator->after(function (Validator $validator) {
             foreach ((array) $this->input('produtos', []) as $index => $produto) {
-                if (!is_array($produto)) {
+                if (! is_array($produto)) {
                     continue;
                 }
 
@@ -71,29 +74,27 @@ class ConfirmarImportacaoRequest extends FormRequest
                 }
 
                 $atributos = is_array($produto['atributos'] ?? null) ? $produto['atributos'] : [];
-                $nomesNormalizados = [];
+                $paresNormalizados = [];
 
                 foreach ($atributos as $attrIndex => $atributo) {
-                    $nome = self::normalizarNomeAtributo((string) ($atributo['atributo'] ?? ''));
-                    if ($nome === '') {
+                    $nome = StringHelper::normalizarAtributo((string) ($atributo['atributo'] ?? ''));
+                    $valor = StringHelper::normalizarValorAtributo((string) ($atributo['valor'] ?? ''));
+                    if ($nome === '' || $valor === '') {
                         continue;
                     }
 
-                    if (isset($nomesNormalizados[$nome])) {
+                    $par = $nome."\0".$valor;
+
+                    if (isset($paresNormalizados[$par])) {
                         $validator->errors()->add(
                             "{$prefixo}.atributos.{$attrIndex}.atributo",
-                            'Remova atributos duplicados no mesmo produto.'
+                            'Remova o par de atributo e valor duplicado no mesmo produto.'
                         );
                     }
 
-                    $nomesNormalizados[$nome] = true;
+                    $paresNormalizados[$par] = true;
                 }
             }
         });
-    }
-
-    private static function normalizarNomeAtributo(string $valor): string
-    {
-        return (string) Str::of($valor)->squish()->lower();
     }
 }

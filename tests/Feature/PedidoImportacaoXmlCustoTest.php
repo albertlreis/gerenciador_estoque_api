@@ -33,6 +33,7 @@ class PedidoImportacaoXmlCustoTest extends TestCase
 
         $payload = [
             'importacao_id' => null,
+            'idempotency_key' => 'importacao-custo-preco-unitario',
             'cliente' => [],
             'pedido' => [
                 'tipo' => 'reposicao',
@@ -59,7 +60,9 @@ class PedidoImportacaoXmlCustoTest extends TestCase
 
         $response->assertStatus(200);
 
-        $item = PedidoItem::query()->first();
+        $item = PedidoItem::query()
+            ->where('id_pedido', $response->json('id'))
+            ->first();
         $this->assertNotNull($item);
         $this->assertSame('45.90', number_format((float) $item->custo_unitario, 2, '.', ''));
         $this->assertSame('120.00', number_format((float) $item->preco_unitario, 2, '.', ''));
@@ -84,6 +87,7 @@ class PedidoImportacaoXmlCustoTest extends TestCase
 
         $payload = [
             'importacao_id' => null,
+            'idempotency_key' => 'importacao-custo-sem-preco',
             'cliente' => [],
             'pedido' => [
                 'tipo' => 'reposicao',

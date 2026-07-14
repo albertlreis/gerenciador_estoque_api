@@ -68,6 +68,8 @@ class ImportacaoPedidoPreviewContratoTest extends TestCase
         $response->assertJsonPath('dados.requer_insercao_manual', false);
         $response->assertJsonPath('dados.avisos', []);
         $this->assertGreaterThan(0, count($response->json('dados.itens') ?? []));
+        $this->assertIsArray($response->json('dados.itens.0.atributos_lista'));
+        $this->assertIsArray($response->json('dados.itens.0.atributos_detectados_lista'));
     }
 
     public function test_preview_sem_itens_mas_com_pedido_minimo_retorna_200_e_requer_insercao_manual(): void
@@ -496,6 +498,7 @@ XML
 
         $response = $this->actingAs($usuario, 'sanctum')
             ->postJson('/api/v1/pedidos/import/xml/confirm', [
+                'idempotency_key' => 'preview-confirmar-sem-fornecedor',
                 'pedido' => [
                     'tipo' => 'reposicao',
                     'numero_externo' => 'MAN-SEM-FORN',
@@ -542,6 +545,7 @@ XML
         $response = $this->actingAs($usuario, 'sanctum')
             ->postJson('/api/v1/pedidos/import/xml/confirm', [
                 'importacao_id' => null,
+                'idempotency_key' => 'preview-confirmar-reposicao-manual',
                 'tipo_importacao' => null,
                 'movimentar_estoque' => false,
                 'pedido' => [
@@ -570,6 +574,12 @@ XML
         $this->assertSame(Pedido::TIPO_REPOSICAO, $pedido->tipo);
         $this->assertSame($fornecedor->id, $pedido->id_fornecedor);
         $this->assertSame(100.0, (float) $pedido->valor_total);
-        $this->assertNull(PedidoImportacao::query()->where('pedido_id', $pedido->id)->first());
+        $importacao = PedidoImportacao::query()
+            ->where('pedido_id', $pedido->id)
+            ->first();
+
+        $this->assertNotNull($importacao);
+        $this->assertSame('reposicao-manual', $importacao->arquivo_nome);
+        $this->assertSame('confirmado', $importacao->status);
     }
 }

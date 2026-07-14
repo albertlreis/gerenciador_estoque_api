@@ -5,6 +5,7 @@ namespace App\Domain\Importacao\Services;
 use App\Domain\Importacao\DTO\NotaDTO;
 use App\Domain\Importacao\DTO\ProdutoImportadoDTO;
 use App\Domain\Importacao\DTO\AtributoDTO;
+use App\Helpers\StringHelper;
 use App\Models\Produto;
 use App\Models\ProdutoVariacao;
 use App\Models\ProdutoVariacaoAtributo;
@@ -67,7 +68,7 @@ final class ImportacaoProdutosService
                     'atributo' => self::normalizarAtributo($a['atributo'] ?? ''),
                     'valor'    => self::normalizarValor($a['valor'] ?? ''),
                 ])
-                ->unique(fn($a) => $a['atributo'] . $a['valor'])
+                ->unique(fn($a) => self::normalizarParAtributo($a['atributo'], $a['valor']))
                 ->values()
                 ->toArray();
 
@@ -312,11 +313,13 @@ final class ImportacaoProdutosService
                 throw new InvalidArgumentException('Atributo do produto maior que o permitido. Revise os atributos antes de salvar.');
             }
 
-            if (isset($vistos[$atributo])) {
+            $par = self::normalizarParAtributo($atributo, $valor);
+
+            if (isset($vistos[$par])) {
                 continue;
             }
 
-            $vistos[$atributo] = true;
+            $vistos[$par] = true;
             $normalizados[] = [
                 'atributo' => $atributo,
                 'valor' => $valor,
@@ -324,6 +327,13 @@ final class ImportacaoProdutosService
         }
 
         return $normalizados;
+    }
+
+    private static function normalizarParAtributo(string $atributo, string $valor): string
+    {
+        return StringHelper::normalizarAtributo($atributo)
+            . "\0"
+            . StringHelper::normalizarValorAtributo($valor);
     }
 
     /** Faz o parsing da descricao (nome + atributos). */

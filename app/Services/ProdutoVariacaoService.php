@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Enums\StatusRevisaoCadastro;
+use App\Helpers\StringHelper;
 use App\Models\Produto;
 use App\Models\ProdutoVariacao;
 use App\Models\ProdutoVariacaoCodigoHistorico;
@@ -328,7 +329,7 @@ class ProdutoVariacaoService
     {
         $ignoreId = $variacao?->id ?? ($data['id'] ?? null);
 
-        return Validator::make($data, [
+        $validator = Validator::make($data, [
             'id' => 'nullable|integer|exists:produto_variacoes,id',
             'preco' => 'required|numeric|min:0',
             'custo' => 'nullable|numeric|min:0',
@@ -394,6 +395,36 @@ class ProdutoVariacaoService
             'audit.motivo.max' => 'O motivo pode ter no máximo 500 caracteres.',
             'audit.origin.in' => 'A origem da alteração de preço é inválida.',
         ]);
+
+        $validator->after(function ($validator) use ($data): void {
+            $paresNormalizados = [];
+
+            foreach ((array) ($data['atributos'] ?? []) as $index => $atributo) {
+                if (!is_array($atributo)) {
+                    continue;
+                }
+
+                $par = $this->normalizarParAtributo(
+                    (string) ($atributo['atributo'] ?? ''),
+                    (string) ($atributo['valor'] ?? '')
+                );
+
+                if ($par === null) {
+                    continue;
+                }
+
+                if (isset($paresNormalizados[$par])) {
+                    $validator->errors()->add(
+                        "atributos.{$index}.atributo",
+                        'Remova o par de atributo e valor duplicado na variação.'
+                    );
+                }
+
+                $paresNormalizados[$par] = true;
+            }
+        });
+
+        return $validator;
     }
 
     private function prepararPayloadParaPersistencia(
@@ -492,30 +523,63 @@ class ProdutoVariacaoService
             return;
         }
 
-        $atributos = [];
+        $atributosPorPar = [];
 
         foreach ($atributosRecebidos as $attr) {
-            if (!empty($attr['atributo']) && !empty($attr['valor'])) {
-                $atributos[$attr['atributo']] = ['valor' => $attr['valor']];
+            if (!is_array($attr)) {
+                continue;
             }
+
+            $atributo = trim((string) ($attr['atributo'] ?? ''));
+            $valor = trim((string) ($attr['valor'] ?? ''));
+            $par = $this->normalizarParAtributo($atributo, $valor);
+
+            if ($par === null || isset($atributosPorPar[$par])) {
+                continue;
+            }
+
+            $atributosPorPar[$par] = [
+                'atributo' => $atributo,
+                'valor' => $valor,
+            ];
         }
 
-        $existentes = $variacao->atributos()->get()->keyBy('atributo');
+        $existentes = $variacao->atributos()->get();
+        $existentesPorPar = $existentes->groupBy(
+            fn ($item) => $this->normalizarParAtributo((string) $item->atributo, (string) $item->valor) ?? ''
+        );
+        $idsMantidos = [];
 
-        foreach ($atributos as $atributo => $dados) {
-            $variacao->atributos()->updateOrCreate(
-                ['atributo' => $atributo],
-                ['valor' => $dados['valor']]
-            );
+        foreach ($atributosPorPar as $par => $dados) {
+            $existente = $existentesPorPar->get($par)?->shift();
+
+            if ($existente) {
+                $idsMantidos[] = $existente->id;
+                continue;
+            }
+
+            $criado = $variacao->atributos()->create($dados);
+            $idsMantidos[] = $criado->id;
         }
 
-        $chavesRecebidas = array_keys($atributos);
+        $variacao->atributos()
+            ->when(
+                $idsMantidos !== [],
+                fn ($query) => $query->whereNotIn('id', $idsMantidos)
+            )
+            ->delete();
+    }
 
-        $existentes->each(function ($item) use ($chavesRecebidas) {
-            if (!in_array($item->atributo, $chavesRecebidas, true)) {
-                $item->delete();
-            }
-        });
+    private function normalizarParAtributo(string $atributo, string $valor): ?string
+    {
+        $nomeNormalizado = StringHelper::normalizarAtributo($atributo);
+        $valorNormalizado = StringHelper::normalizarValorAtributo($valor);
+
+        if ($nomeNormalizado === '' || $valorNormalizado === '') {
+            return null;
+        }
+
+        return $nomeNormalizado . "\0" . $valorNormalizado;
     }
 
     private function sincronizarCodigosHistoricos(

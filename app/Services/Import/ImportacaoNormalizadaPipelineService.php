@@ -1040,7 +1040,7 @@ final class ImportacaoNormalizadaPipelineService
 
         return json_encode([
             'nome' => $nome,
-            'atributos' => $this->normalizeIdentityAttrs($this->montarAtributosIdentidadeDaLinha($linha)),
+            'atributos' => $this->normalizeIdentityAttrs($this->montarAtributosIdentidadeListaDaLinha($linha)),
         ], JSON_UNESCAPED_UNICODE);
     }
 
@@ -1052,8 +1052,12 @@ final class ImportacaoNormalizadaPipelineService
         }
 
         $attrs = $variacao->relationLoaded('atributos')
-            ? $variacao->atributos->mapWithKeys(fn ($atributo) => [$atributo->atributo => $atributo->valor])->all()
+            ? $variacao->atributos->map(fn ($atributo) => [
+                'atributo' => $atributo->atributo,
+                'valor' => $atributo->valor,
+            ])->values()->all()
             : [];
+        $nomesPresentes = collect($attrs)->pluck('atributo')->flip();
 
         foreach ([
             'dimensao_1' => $variacao->dimensao_1,
@@ -1064,8 +1068,12 @@ final class ImportacaoNormalizadaPipelineService
             'material_oficial' => $variacao->material_oficial,
             'acabamento_oficial' => $variacao->acabamento_oficial,
         ] as $campo => $valor) {
-            if (($attrs[$campo] ?? null) === null && $valor !== null && $valor !== '') {
-                $attrs[$campo] = $valor;
+            if (!$nomesPresentes->has($campo) && $valor !== null && $valor !== '') {
+                $attrs[] = [
+                    'atributo' => $campo,
+                    'valor' => $valor,
+                ];
+                $nomesPresentes->put($campo, true);
             }
         }
 
@@ -1079,18 +1087,38 @@ final class ImportacaoNormalizadaPipelineService
     {
         $normalized = [];
 
-        foreach ($attrs as $chave => $valor) {
+        foreach ($attrs as $chave => $item) {
+            if (is_array($item) && (array_key_exists('atributo', $item) || array_key_exists('valor', $item))) {
+                $nome = (string) ($item['atributo'] ?? '');
+                $valor = $item['valor'] ?? null;
+            } else {
+                $nome = (string) $chave;
+                $valor = $item;
+            }
+
             if ($valor === null || trim((string) $valor) === '') {
                 continue;
             }
 
-            $identityKey = $this->normalizeIdentityAttrKey((string) $chave);
+            $identityKey = $this->normalizeIdentityAttrKey($nome);
             if ($identityKey === null) {
                 continue;
             }
 
-            $normalized[$identityKey] = $this->normalizeIdentityAttrValue($valor);
+            $valorNormalizado = $this->normalizeIdentityAttrValue($valor);
+            if ($valorNormalizado === '') {
+                continue;
+            }
+
+            $normalized[$identityKey] ??= [];
+            $normalized[$identityKey][$valorNormalizado] = $valorNormalizado;
         }
+
+        foreach ($normalized as &$valores) {
+            ksort($valores);
+            $valores = array_values($valores);
+        }
+        unset($valores);
 
         ksort($normalized);
 
@@ -1244,6 +1272,7 @@ final class ImportacaoNormalizadaPipelineService
             'modo_carga_inicial' => $modoCargaInicial,
             'forcar_nova_variacao' => false,
             'atributos' => $this->montarAtributosLegadosDaLinha($linha),
+            'atributos_lista' => $this->montarAtributosListaDaLinha($linha),
         ];
     }
 
@@ -1254,36 +1283,19 @@ final class ImportacaoNormalizadaPipelineService
     {
         $atributos = [];
 
-        foreach ([
-            'cor' => $linha->cor,
-            'lado' => $linha->lado,
-            'material_oficial' => $linha->material_oficial,
-            'acabamento_oficial' => $linha->acabamento_oficial,
-        ] as $campo => $valor) {
-            if ($valor === null || trim((string) $valor) === '') {
-                continue;
-            }
-
-            $atributos[$campo] = (string) $valor;
-        }
-
-        foreach ($this->extrairAtributosCargaInicialDaLinha($linha) as $campo => $valor) {
-            if ($this->isAtributoDimensional((string) $campo)) {
-                continue;
-            }
-
-            $atributos[$campo] = $valor;
+        foreach ($this->montarAtributosListaDaLinha($linha) as $atributo) {
+            $atributos[$atributo['atributo']] = $atributo['valor'];
         }
 
         return $atributos;
     }
 
     /**
-     * @return array<string,string>
+     * @return array<int,array{atributo:string,valor:string}>
      */
-    private function montarAtributosIdentidadeDaLinha(ImportacaoNormalizadaLinha $linha): array
+    private function montarAtributosIdentidadeListaDaLinha(ImportacaoNormalizadaLinha $linha): array
     {
-        $atributos = $this->montarAtributosLegadosDaLinha($linha);
+        $atributos = $this->montarAtributosListaDaLinha($linha);
 
         foreach ([
             'dimensao_1' => $linha->dimensao_1,
@@ -1291,17 +1303,47 @@ final class ImportacaoNormalizadaPipelineService
             'dimensao_3' => $linha->dimensao_3,
         ] as $campo => $valor) {
             if ($valor !== null && trim((string) $valor) !== '') {
-                $atributos[$campo] = (string) $valor;
+                $atributos[] = [
+                    'atributo' => $campo,
+                    'valor' => (string) $valor,
+                ];
             }
         }
 
-        return $atributos;
+        return $this->removerParesAtributosDuplicados($atributos);
     }
 
     /**
-     * @return array<string,string>
+     * @return array<int,array{atributo:string,valor:string}>
      */
-    private function extrairAtributosCargaInicialDaLinha(ImportacaoNormalizadaLinha $linha): array
+    private function montarAtributosListaDaLinha(ImportacaoNormalizadaLinha $linha): array
+    {
+        $atributos = [];
+
+        foreach ([
+            'cor' => $linha->cor,
+            'lado' => $linha->lado,
+            'material_oficial' => $linha->material_oficial,
+            'acabamento_oficial' => $linha->acabamento_oficial,
+        ] as $campo => $valor) {
+            if ($valor !== null && trim((string) $valor) !== '') {
+                $atributos[] = [
+                    'atributo' => $campo,
+                    'valor' => (string) $valor,
+                ];
+            }
+        }
+
+        return $this->removerParesAtributosDuplicados([
+            ...$atributos,
+            ...$this->extrairAtributosCargaInicialListaDaLinha($linha),
+        ]);
+    }
+
+    /**
+     * @return array<int,array{atributo:string,valor:string}>
+     */
+    private function extrairAtributosCargaInicialListaDaLinha(ImportacaoNormalizadaLinha $linha): array
     {
         $dadosBrutos = is_array($linha->dados_brutos) ? $linha->dados_brutos : [];
         if ($dadosBrutos === []) {
@@ -1343,10 +1385,43 @@ final class ImportacaoNormalizadaPipelineService
                 continue;
             }
 
-            $atributos[$atributo] = trim((string) $valor);
+            if ($this->isAtributoDimensional($atributo)) {
+                continue;
+            }
+
+            $atributos[] = [
+                'atributo' => $atributo,
+                'valor' => trim((string) $valor),
+            ];
         }
 
         return $atributos;
+    }
+
+    /**
+     * @param array<int,array{atributo:string,valor:string}> $atributos
+     * @return array<int,array{atributo:string,valor:string}>
+     */
+    private function removerParesAtributosDuplicados(array $atributos): array
+    {
+        $unicos = [];
+
+        foreach ($atributos as $atributo) {
+            $nome = (string) Str::of($atributo['atributo'])->squish()->lower()->ascii();
+            $nome = trim((string) preg_replace('/[^a-z0-9]+/', '_', $nome), '_');
+            $valor = trim((string) $atributo['valor']);
+            if ($nome === '' || $valor === '') {
+                continue;
+            }
+
+            $chave = $nome . "\0" . $this->normalizeIdentityAttrValue($valor);
+            $unicos[$chave] = [
+                'atributo' => $nome,
+                'valor' => $valor,
+            ];
+        }
+
+        return array_values($unicos);
     }
 
     private function isAtributoDimensional(string $campo): bool

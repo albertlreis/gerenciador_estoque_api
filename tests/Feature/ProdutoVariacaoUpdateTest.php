@@ -317,6 +317,63 @@ class ProdutoVariacaoUpdateTest extends TestCase
         Bus::assertNotDispatched(ExportProdutoContaAzulJob::class);
     }
 
+    public function test_put_variacao_remove_somente_o_valor_omitido_do_mesmo_nome(): void
+    {
+        $usuario = $this->criarUsuario();
+        Sanctum::actingAs($usuario);
+        Cache::put('permissoes_usuario_' . $usuario->id, ['produto_variacoes.editar'], now()->addHour());
+
+        [$produtoId, $now] = $this->criarProdutoBase();
+        $variacaoId = DB::table('produto_variacoes')->insertGetId([
+            'produto_id' => $produtoId,
+            'referencia' => 'REF-ATTR-REMOVE',
+            'nome' => 'Variacao com madeiras',
+            'preco' => 100,
+            'custo' => 40,
+            'codigo_barras' => null,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ]);
+
+        DB::table('produto_variacao_atributos')->insert([
+            [
+                'id_variacao' => $variacaoId,
+                'atributo' => 'madeira',
+                'valor' => 'AC03',
+                'created_at' => $now,
+                'updated_at' => $now,
+            ],
+            [
+                'id_variacao' => $variacaoId,
+                'atributo' => 'madeira',
+                'valor' => 'MT31-PRETO',
+                'created_at' => $now,
+                'updated_at' => $now,
+            ],
+        ]);
+
+        $response = $this->putJson("/api/v1/produtos/{$produtoId}/variacoes/{$variacaoId}", [
+            'referencia' => 'REF-ATTR-REMOVE',
+            'preco' => 100,
+            'custo' => 40,
+            'atributos' => [
+                ['atributo' => 'Madeira', 'valor' => 'AC03'],
+            ],
+        ]);
+
+        $response->assertOk();
+        $this->assertDatabaseHas('produto_variacao_atributos', [
+            'id_variacao' => $variacaoId,
+            'atributo' => 'madeira',
+            'valor' => 'AC03',
+        ]);
+        $this->assertDatabaseMissing('produto_variacao_atributos', [
+            'id_variacao' => $variacaoId,
+            'atributo' => 'madeira',
+            'valor' => 'MT31-PRETO',
+        ]);
+    }
+
     public function test_put_variacao_individual_permite_sku_interno_repetido(): void
     {
         $usuario = $this->criarUsuario();

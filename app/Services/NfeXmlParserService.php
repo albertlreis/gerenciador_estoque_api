@@ -15,6 +15,7 @@ use InvalidArgumentException;
 class NfeXmlParserService
 {
     private const NS_NFE = 'http://www.portalfiscal.inf.br/nfe';
+
     private const UNIDADES_CONTAVEIS = [
         'UN',
         'UND',
@@ -24,15 +25,25 @@ class NfeXmlParserService
         'PCA',
         'PECA',
     ];
+
     private const LINHAS_AVANTI = [
         'SE2B',
         'SMAD',
     ];
 
+    private SierraNfeProductDescriptionParser $sierraDescriptionParser;
+
+    public function __construct(?SierraNfeProductDescriptionParser $sierraDescriptionParser = null)
+    {
+        $this->sierraDescriptionParser = $sierraDescriptionParser
+            ?? new SierraNfeProductDescriptionParser;
+    }
+
     /**
      * Extrai dados da NFe no formato: pedido, itens, totais.
      *
      * @return array{pedido: array, itens: array, totais: array}
+     *
      * @throws InvalidArgumentException quando XML inválido ou sem itens
      */
     public function extrair(UploadedFile $arquivo): array
@@ -42,7 +53,7 @@ class NfeXmlParserService
             throw new InvalidArgumentException('Arquivo XML vazio ou não legível.');
         }
 
-        $dom = new DOMDocument();
+        $dom = new DOMDocument;
         $dom->preserveWhiteSpace = false;
         $dom->formatOutput = false;
 
@@ -50,7 +61,7 @@ class NfeXmlParserService
         $loaded = $dom->loadXML($content);
         libxml_clear_errors();
 
-        if (!$loaded) {
+        if (! $loaded) {
             throw new InvalidArgumentException('Conteúdo não é um XML válido.');
         }
 
@@ -58,7 +69,12 @@ class NfeXmlParserService
         $xpath->registerNamespace('nfe', self::NS_NFE);
 
         $pedido = $this->extrairPedido($xpath);
-        $itens = $this->extrairItens($xpath);
+        $fornecedorSugerido = $pedido['fornecedor_sugerido'] ?? [];
+        $emitenteSierra = $this->sierraDescriptionParser->suportaEmitente(
+            $fornecedorSugerido['cnpj'] ?? null,
+            $fornecedorSugerido['nome'] ?? null
+        );
+        $itens = $this->extrairItens($xpath, $emitenteSierra);
         $totais = $this->extrairTotais($xpath);
 
         if (count($itens) === 0) {
@@ -106,7 +122,7 @@ class NfeXmlParserService
         ];
     }
 
-    private function extrairItens(DOMXPath $xpath): array
+    private function extrairItens(DOMXPath $xpath, bool $emitenteSierra = false): array
     {
         $dets = $xpath->query('//nfe:det');
         if ($dets === false || $dets->length === 0) {
@@ -116,7 +132,7 @@ class NfeXmlParserService
         $itens = [];
         foreach ($dets as $det) {
             $prod = $xpath->query('nfe:prod', $det)->item(0);
-            if (!$prod) {
+            if (! $prod) {
                 continue;
             }
 
@@ -130,18 +146,34 @@ class NfeXmlParserService
                 $this->nodeText($prod, 'cEAN') ?: $this->nodeText($prod, 'cEANTrib')
             );
 
-            $codigo = $cProd ?: ('ITEM-' . (count($itens) + 1));
+            $codigo = $cProd ?: ('ITEM-'.(count($itens) + 1));
             $descricao = $xProd ?: $codigo;
             $qtd = $this->toFloat($qCom, 1.0);
             $vUn = $this->toFloat($vUnCom, 0.0);
             $vTot = $this->toFloat($vProd, $qtd * $vUn);
-            $controlarComoLinhaUnica = !$this->deveManterQuantidadeOriginal($uCom, $qtd);
+            $controlarComoLinhaUnica = ! $this->deveManterQuantidadeOriginal($uCom, $qtd);
             $quantidadeImportacao = $controlarComoLinhaUnica ? '1' : (string) $qtd;
             $valorUnitarioImportacao = $controlarComoLinhaUnica
                 ? $this->valorOriginalOuFloat($vProd, $vTot)
                 : $this->valorOriginalOuFloat($vUnCom, $vUn);
             $valorTotalImportacao = $this->valorOriginalOuFloat($vProd, $vTot);
+            $nome = $descricao;
+            $ref = $cProd;
             $atributos = $this->extrairAtributosComerciais($descricao);
+            $interpretacaoSierra = null;
+
+            if ($emitenteSierra) {
+                $possivelInterpretacao = $this->sierraDescriptionParser->interpretar($cProd, $descricao);
+                $interpretacaoSierra = $possivelInterpretacao;
+                $codigo = $possivelInterpretacao['codigo'] ?: $codigo;
+                $ref = $possivelInterpretacao['ref'] ?: $ref;
+
+                if ($possivelInterpretacao['identificado']) {
+                    $nome = $possivelInterpretacao['nome'];
+                    $descricao = $possivelInterpretacao['descricao'];
+                    $atributos = $possivelInterpretacao['atributos'];
+                }
+            }
             $atributosNfe = [
                 'unidade_nfe' => $uCom,
                 'quantidade_nfe' => $qCom ?? (string) $qtd,
@@ -155,11 +187,11 @@ class NfeXmlParserService
                 ),
             ];
 
-            $itens[] = [
+            $item = [
                 'codigo' => $codigo,
-                'ref' => $cProd,
+                'ref' => $ref,
                 'codigo_barras' => $cEan,
-                'nome' => $descricao,
+                'nome' => $nome,
                 'descricao' => $descricao,
                 'quantidade' => $quantidadeImportacao,
                 'unidade' => $uCom,
@@ -173,6 +205,15 @@ class NfeXmlParserService
                 'atributos' => $atributos,
                 'atributos_nfe' => $atributosNfe,
             ];
+
+            if ($interpretacaoSierra !== null) {
+                $item['codigo_origem'] = $interpretacaoSierra['codigo_origem'];
+                $item['atributos_detectados'] = $interpretacaoSierra['atributos_detectados'];
+                $item['atributos_lista'] = $interpretacaoSierra['atributos_lista'];
+                $item['atributos_detectados_lista'] = $interpretacaoSierra['atributos_detectados_lista'];
+            }
+
+            $itens[] = $item;
         }
 
         return $itens;
@@ -195,10 +236,11 @@ class NfeXmlParserService
     private function texto(DOMXPath $xpath, string $query): ?string
     {
         $node = $xpath->query($query)->item(0);
-        if (!$node) {
+        if (! $node) {
             return null;
         }
         $v = trim((string) $node->nodeValue);
+
         return $v === '' ? null : $v;
     }
 
@@ -211,10 +253,11 @@ class NfeXmlParserService
                 break;
             }
         }
-        if (!$child) {
+        if (! $child) {
             return null;
         }
         $v = trim((string) $child->nodeValue);
+
         return $v === '' ? null : $v;
     }
 
@@ -270,7 +313,7 @@ class NfeXmlParserService
         $atributos = [];
         $linha = array_shift($tokens);
         $linha = $linha !== null ? trim($linha) : '';
-        if (!$this->isLinhaAvanti($linha)) {
+        if (! $this->isLinhaAvanti($linha)) {
             return [];
         }
 
@@ -284,18 +327,21 @@ class NfeXmlParserService
             }
 
             $upper = strtoupper($token);
-            if (!isset($atributos['espessura']) && preg_match('/^\d+(?:[,.]\d+)?MM$/i', $token)) {
+            if (! isset($atributos['espessura']) && preg_match('/^\d+(?:[,.]\d+)?MM$/i', $token)) {
                 $atributos['espessura'] = $upper;
+
                 continue;
             }
 
-            if (!isset($atributos['gramatura']) && preg_match('/^\d+(?:[,.]\d+)?G$/i', $token)) {
+            if (! isset($atributos['gramatura']) && preg_match('/^\d+(?:[,.]\d+)?G$/i', $token)) {
                 $atributos['gramatura'] = $upper;
+
                 continue;
             }
 
-            if (!isset($atributos['cor']) && $this->isTokenCor($token)) {
+            if (! isset($atributos['cor']) && $this->isTokenCor($token)) {
                 $atributos['cor'] = $upper;
+
                 continue;
             }
 

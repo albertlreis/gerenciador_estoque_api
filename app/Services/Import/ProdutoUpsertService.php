@@ -3,6 +3,7 @@
 namespace App\Services\Import;
 
 use App\Enums\StatusRevisaoCadastro;
+use App\Helpers\StringHelper;
 use App\Models\Produto;
 use App\Models\ProdutoVariacao;
 use App\Models\ProdutoVariacaoAtributo;
@@ -72,7 +73,7 @@ final class ProdutoUpsertService
         return $this->localizarVariacaoPorProduto(
             $produto,
             $payload,
-            $this->normalizeAttrs((array) ($payload['atributos'] ?? []))
+            $this->normalizeAttrPairsFromPayload($payload)
         );
     }
 
@@ -93,8 +94,7 @@ final class ProdutoUpsertService
             $variacaoCriada = false;
             $codigosHistoricosCriados = 0;
 
-            $attrs = (array) ($payload['atributos'] ?? []);
-            $normalizedAttrs = $this->normalizeAttrs($attrs);
+            $normalizedAttrs = $this->normalizeAttrPairsFromPayload($payload);
             $persistableAttrs = $this->filterPersistableAttrs($normalizedAttrs);
 
             $variacaoExistente = $this->localizarVariacaoExistente($payload);
@@ -147,11 +147,11 @@ final class ProdutoUpsertService
                 ...$this->payloadVariacao($payload, null, $produto->id),
             ]);
 
-            foreach ($persistableAttrs as $k => $v) {
+            foreach ($persistableAttrs as $atributo) {
                 ProdutoVariacaoAtributo::create([
                     'id_variacao' => $variacao->id,
-                    'atributo' => $k,
-                    'valor' => $v,
+                    'atributo' => $atributo['atributo'],
+                    'valor' => $atributo['valor'],
                 ]);
             }
 
@@ -279,35 +279,23 @@ final class ProdutoUpsertService
             ->get()
             ->groupBy('id_variacao')
             ->map(fn ($items) => $items
-                ->mapWithKeys(fn ($a) => [$a->atributo => $a->valor])
-                ->sortKeys()
+                ->map(fn ($a) => [
+                    'atributo' => $a->atributo,
+                    'valor' => $a->valor,
+                ])
+                ->values()
                 ->toArray()
             )
             ->toArray();
 
         $normalizedArray = $this->attrsIdentidadeComCamposEstruturados($normalizedAttrs, $payload);
-        $compareKeys = array_keys($normalizedArray);
 
         foreach ($variacoes as $variacao) {
             $map = $attrsPorVariacao[(int) $variacao->id] ?? [];
             $map = $this->attrsIdentidadeDaVariacao($variacao, $map);
 
-            if (!empty($compareKeys)) {
-                $filtered = [];
-                foreach ($compareKeys as $k) {
-                    if (!array_key_exists($k, $map)) {
-                        $filtered = null;
-                        break;
-                    }
-                    $filtered[$k] = $map[$k];
-                }
-
-                if ($filtered === null) {
-                    continue;
-                }
-
-                ksort($filtered);
-                if ($filtered === $normalizedArray) {
+            if (!empty($normalizedArray)) {
+                if ($map === $normalizedArray) {
                     return $variacao;
                 }
             } elseif (empty($map)) {
@@ -384,37 +372,69 @@ final class ProdutoUpsertService
         ];
     }
 
-    private function normalizeAttrs(array $attrs)
+    private function normalizeAttrPairsFromPayload(array $payload)
     {
-        return collect($attrs)
-            ->filter(fn ($v) => $v !== null && $v !== '')
-            ->mapWithKeys(function ($v, $k) {
-                $normalizedKey = (string) Str::of((string) $k)->squish()->lower()->ascii();
-                $normalizedValue = $this->formatAttrValue($v);
-                return [$normalizedKey => $normalizedValue];
-            })
-            ->sortKeys();
+        $atributos = array_key_exists('atributos_lista', $payload)
+            ? (array) ($payload['atributos_lista'] ?? [])
+            : (array) ($payload['atributos'] ?? []);
+
+        return $this->normalizeAttrPairs($atributos);
+    }
+
+    private function normalizeAttrPairs(array $attrs)
+    {
+        $pares = [];
+
+        foreach ($attrs as $chave => $item) {
+            if (is_array($item) && (array_key_exists('atributo', $item) || array_key_exists('valor', $item))) {
+                $nome = (string) ($item['atributo'] ?? '');
+                $valor = $item['valor'] ?? null;
+            } else {
+                $nome = (string) $chave;
+                $valor = $item;
+            }
+
+            if ($valor === null || trim((string) $valor) === '') {
+                continue;
+            }
+
+            $nomeNormalizado = StringHelper::normalizarAtributo($nome);
+            $valorFormatado = $this->formatAttrValue($valor);
+            if ($nomeNormalizado === '' || $valorFormatado === '') {
+                continue;
+            }
+
+            $chavePar = $nomeNormalizado . "\0" . $this->normalizeAttributeValue($valorFormatado);
+            $pares[$chavePar] = [
+                'atributo' => $nomeNormalizado,
+                'valor' => $valorFormatado,
+            ];
+        }
+
+        return collect(array_values($pares))
+            ->sortBy(fn (array $item) => $item['atributo'] . "\0" . $this->normalizeAttributeValue($item['valor']))
+            ->values();
     }
 
     private function filterPersistableAttrs($normalizedAttrs)
     {
         return $normalizedAttrs
-            ->reject(fn ($valor, $chave) => $this->isDimensionAttributeKey((string) $chave))
-            ->sortKeys();
+            ->reject(fn (array $item) => $this->isDimensionAttributeKey((string) $item['atributo']))
+            ->values();
     }
 
     private function promoverDimensoesDosAtributos(array $payload): array
     {
-        $attrs = $this->normalizeAttrs((array) ($payload['atributos'] ?? []));
+        $attrs = $this->normalizeAttrPairsFromPayload($payload);
 
-        foreach ($attrs as $chave => $valor) {
-            $campo = $this->dimensionAttributeTarget((string) $chave);
+        foreach ($attrs as $atributo) {
+            $campo = $this->dimensionAttributeTarget((string) $atributo['atributo']);
             if ($campo === null) {
                 continue;
             }
 
             // Atributos dimensionais legados vencem o campo estruturado.
-            $payload[$campo] = $valor;
+            $payload[$campo] = $atributo['valor'];
         }
 
         return $payload;
@@ -422,7 +442,8 @@ final class ProdutoUpsertService
 
     private function attrsIdentidadeComCamposEstruturados($normalizedAttrs, array $payload): array
     {
-        $attrs = $this->filterPersistableAttrs($normalizedAttrs)->sortKeys()->toArray();
+        $attrs = $this->filterPersistableAttrs($normalizedAttrs)->values();
+        $nomesPresentes = $attrs->pluck('atributo')->flip();
 
         foreach ([
             'dimensao_1' => $payload['dimensao_1'] ?? $payload['w_cm'] ?? null,
@@ -433,18 +454,23 @@ final class ProdutoUpsertService
             'material_oficial' => $payload['material_oficial'] ?? null,
             'acabamento_oficial' => $payload['acabamento_oficial'] ?? null,
         ] as $campo => $valor) {
-            if (($attrs[$campo] ?? null) === null && $valor !== null && trim((string) $valor) !== '') {
-                $attrs[$campo] = $this->formatAttrValue($valor);
+            if (!$nomesPresentes->has($campo) && $valor !== null && trim((string) $valor) !== '') {
+                $attrs->push([
+                    'atributo' => $campo,
+                    'valor' => $this->formatAttrValue($valor),
+                ]);
+                $nomesPresentes->put($campo, true);
             }
         }
 
-        ksort($attrs);
-
-        return $attrs;
+        return $this->attributeValueSets($attrs->all());
     }
 
     private function attrsIdentidadeDaVariacao(ProdutoVariacao $variacao, array $attrs): array
     {
+        $pares = $this->normalizeAttrPairs($attrs);
+        $nomesPresentes = $pares->pluck('atributo')->flip();
+
         foreach ([
             'dimensao_1' => $variacao->dimensao_1,
             'dimensao_2' => $variacao->dimensao_2,
@@ -454,14 +480,16 @@ final class ProdutoUpsertService
             'material_oficial' => $variacao->material_oficial,
             'acabamento_oficial' => $variacao->acabamento_oficial,
         ] as $campo => $valor) {
-            if (($attrs[$campo] ?? null) === null && $valor !== null && $valor !== '') {
-                $attrs[$campo] = $this->formatAttrValue($valor);
+            if (!$nomesPresentes->has($campo) && $valor !== null && $valor !== '') {
+                $pares->push([
+                    'atributo' => $campo,
+                    'valor' => $this->formatAttrValue($valor),
+                ]);
+                $nomesPresentes->put($campo, true);
             }
         }
 
-        ksort($attrs);
-
-        return $attrs;
+        return $this->attributeValueSets($pares->all());
     }
 
     private function dimensionAttributeTarget(string $key): ?string
@@ -607,7 +635,7 @@ final class ProdutoUpsertService
 
         return json_encode([
             'nome' => $nome,
-            'atributos' => $this->normalizeIdentityAttrsFromArray(
+            'atributos' => $this->filterIdentityAttributeSets(
                 $this->attrsIdentidadeComCamposEstruturados($normalizedAttrs, $payload)
             ),
         ], JSON_UNESCAPED_UNICODE);
@@ -621,8 +649,14 @@ final class ProdutoUpsertService
         }
 
         $attrs = $variacao->relationLoaded('atributos')
-            ? $variacao->atributos->mapWithKeys(fn (ProdutoVariacaoAtributo $atributo) => [$atributo->atributo => $atributo->valor])->all()
+            ? $variacao->atributos->map(fn (ProdutoVariacaoAtributo $atributo) => [
+                'atributo' => $atributo->atributo,
+                'valor' => $atributo->valor,
+            ])->values()->all()
             : [];
+
+        $pares = $this->normalizeAttrPairs($attrs);
+        $nomesPresentes = $pares->pluck('atributo')->flip();
 
         foreach ([
             'dimensao_1' => $variacao->dimensao_1,
@@ -633,37 +667,75 @@ final class ProdutoUpsertService
             'material_oficial' => $variacao->material_oficial,
             'acabamento_oficial' => $variacao->acabamento_oficial,
         ] as $campo => $valor) {
-            if (($attrs[$campo] ?? null) === null && $valor !== null && $valor !== '') {
-                $attrs[$campo] = $valor;
+            if (!$nomesPresentes->has($campo) && $valor !== null && $valor !== '') {
+                $pares->push([
+                    'atributo' => $campo,
+                    'valor' => $this->formatAttrValue($valor),
+                ]);
+                $nomesPresentes->put($campo, true);
             }
         }
 
         return json_encode([
             'nome' => $nome,
-            'atributos' => $this->normalizeIdentityAttrsFromArray($attrs),
+            'atributos' => $this->filterIdentityAttributeSets(
+                $this->attributeValueSets($pares->all())
+            ),
         ], JSON_UNESCAPED_UNICODE);
     }
 
-    private function normalizeIdentityAttrsFromCollection($normalizedAttrs): array
+    private function attributeValueSets(array $attrs): array
     {
-        $attrs = [];
-        foreach ($normalizedAttrs as $chave => $valor) {
-            $identityKey = $this->normalizeIdentityAttrKey((string) $chave);
+        $conjuntos = [];
+
+        foreach ($this->normalizeAttrPairs($attrs) as $atributo) {
+            $nome = (string) $atributo['atributo'];
+            $valor = $this->normalizeAttributeValue($this->formatAttrValue($atributo['valor']));
+            if ($nome === '' || $valor === '') {
+                continue;
+            }
+
+            $conjuntos[$nome] ??= [];
+            $conjuntos[$nome][$valor] = $valor;
+        }
+
+        foreach ($conjuntos as &$valores) {
+            ksort($valores);
+            $valores = array_values($valores);
+        }
+        unset($valores);
+        ksort($conjuntos);
+
+        return $conjuntos;
+    }
+
+    private function filterIdentityAttributeSets(array $conjuntos): array
+    {
+        $identidade = [];
+
+        foreach ($conjuntos as $nome => $valores) {
+            $identityKey = $this->normalizeIdentityAttrKey((string) $nome);
             if ($identityKey === null) {
                 continue;
             }
 
-            $attrs[$identityKey] = $this->normalizeIdentityText((string) $valor);
+            $identidade[$identityKey] ??= [];
+            foreach ((array) $valores as $valor) {
+                $normalizado = $this->normalizeAttributeValue((string) $valor);
+                if ($normalizado !== '') {
+                    $identidade[$identityKey][$normalizado] = $normalizado;
+                }
+            }
         }
 
-        ksort($attrs);
+        foreach ($identidade as &$valores) {
+            ksort($valores);
+            $valores = array_values($valores);
+        }
+        unset($valores);
+        ksort($identidade);
 
-        return $attrs;
-    }
-
-    private function normalizeIdentityAttrsFromArray(array $attrs): array
-    {
-        return $this->normalizeIdentityAttrsFromCollection($this->normalizeAttrs($attrs));
+        return $identidade;
     }
 
     private function normalizeIdentityAttrKey(string $key): ?string
@@ -691,6 +763,11 @@ final class ProdutoUpsertService
         return trim((string) $normalized);
     }
 
+    private function normalizeAttributeValue(string $value): string
+    {
+        return StringHelper::normalizarValorAtributo($value);
+    }
+
     private function normalizeIdentityCode(string $value): string
     {
         return trim((string) Str::of($value)->squish()->upper());
@@ -698,12 +775,33 @@ final class ProdutoUpsertService
 
     private function syncAtributos(int $variacaoId, $normalizedAttrs): void
     {
-        foreach ($normalizedAttrs as $k => $v) {
-            ProdutoVariacaoAtributo::updateOrCreate(
-                ['id_variacao' => $variacaoId, 'atributo' => $k],
-                ['valor' => $v]
-            );
+        $paresExistentes = ProdutoVariacaoAtributo::query()
+            ->where('id_variacao', $variacaoId)
+            ->get()
+            ->mapWithKeys(fn (ProdutoVariacaoAtributo $atributo) => [
+                $this->normalizedAttributePairKey($atributo->atributo, $atributo->valor) => true,
+            ]);
+
+        foreach ($normalizedAttrs as $atributo) {
+            $chavePar = $this->normalizedAttributePairKey($atributo['atributo'], $atributo['valor']);
+            if ($paresExistentes->has($chavePar)) {
+                continue;
+            }
+
+            ProdutoVariacaoAtributo::create([
+                'id_variacao' => $variacaoId,
+                'atributo' => $atributo['atributo'],
+                'valor' => $atributo['valor'],
+            ]);
+            $paresExistentes->put($chavePar, true);
         }
+    }
+
+    private function normalizedAttributePairKey(string $atributo, string $valor): string
+    {
+        return StringHelper::normalizarAtributo($atributo)
+            . "\0"
+            . $this->normalizeAttributeValue($valor);
     }
 
     private function syncCodigosHistoricos(ProdutoVariacao $variacao, array $payload): int

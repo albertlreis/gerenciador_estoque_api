@@ -52,7 +52,10 @@ class ProdutoVariacao extends Model
 
     public function atributos(): HasMany
     {
-        return $this->hasMany(ProdutoVariacaoAtributo::class, 'id_variacao');
+        return $this->hasMany(ProdutoVariacaoAtributo::class, 'id_variacao')
+            ->orderBy('atributo')
+            ->orderBy('valor')
+            ->orderBy('id');
     }
 
     public function codigosHistoricos(): HasMany
@@ -126,16 +129,16 @@ class ProdutoVariacao extends Model
         $produtoNome = '';
 
         if ($this->relationLoaded('produto')) {
-            $produtoNome = trim((string)($this->produto?->nome ?? ''));
+            $produtoNome = trim((string) ($this->produto?->nome ?? ''));
         } elseif (array_key_exists('produto_nome', $this->attributes)) {
-            $produtoNome = trim((string)($this->attributes['produto_nome'] ?? ''));
+            $produtoNome = trim((string) ($this->attributes['produto_nome'] ?? ''));
         }
 
         // Atributos: só usar se estiverem carregados (evita query)
         $atributos = $this->relationLoaded('atributos') ? $this->atributos : collect();
 
         // Base do nome quando produto não veio carregado
-        $nomeVar = trim((string)($this->nome ?? ''));
+        $nomeVar = trim((string) ($this->nome ?? ''));
         $base = $produtoNome !== '' ? $produtoNome : ($nomeVar !== '' ? $nomeVar : '-');
 
         if ($atributos->isNotEmpty()) {
@@ -145,15 +148,15 @@ class ProdutoVariacao extends Model
                 ->sortKeys()
                 ->map(function ($itens, $atributo) {
                     $valores = $itens->pluck('valor')
-                        ->filter(fn($v) => $v !== null && $v !== '')
+                        ->filter(fn ($v) => $v !== null && $v !== '')
                         ->unique()
                         ->sort()
                         ->values()
                         ->join(', ');
 
-                    $label = (string) Str::of((string)$atributo)->replace('_', ' ')->headline();
+                    $label = (string) Str::of((string) $atributo)->replace('_', ' ')->headline();
 
-                    return trim($label . ': ' . $valores);
+                    return trim($label.': '.$valores);
                 })
                 ->filter()
                 ->values();

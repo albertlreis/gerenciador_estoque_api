@@ -192,14 +192,48 @@ class ImportacaoProdutosXmlConfirmacaoTest extends TestCase
         $this->assertFalse($estoqueTruncado);
     }
 
-    public function test_atributos_duplicados_retorna_422_sem_erro_sql(): void
+    public function test_mesmo_nome_com_valores_diferentes_e_preservado(): void
+    {
+        Storage::fake('local');
+        $this->autenticarComPermissao();
+        $payload = $this->payload([
+            'atributos' => [
+                ['atributo' => 'Madeira', 'valor' => 'AC03'],
+                ['atributo' => ' madeira ', 'valor' => 'MT31-PRETO'],
+            ],
+        ]);
+        $referencia = $payload['produtos'][0]['referencia'];
+
+        $response = $this->postJson('/api/v1/produtos/importacoes/xml/confirmar', $payload);
+
+        $response->assertOk();
+
+        $variacaoId = DB::table('produto_variacoes')->where('referencia', $referencia)->value('id');
+        $this->assertNotNull($variacaoId);
+        $this->assertSame(2, DB::table('produto_variacao_atributos')
+            ->where('id_variacao', $variacaoId)
+            ->where('atributo', 'madeira')
+            ->count());
+        $this->assertDatabaseHas('produto_variacao_atributos', [
+            'id_variacao' => $variacaoId,
+            'atributo' => 'madeira',
+            'valor' => 'Ac03',
+        ]);
+        $this->assertDatabaseHas('produto_variacao_atributos', [
+            'id_variacao' => $variacaoId,
+            'atributo' => 'madeira',
+            'valor' => 'Mt31-preto',
+        ]);
+    }
+
+    public function test_par_atributo_valor_duplicado_retorna_422_sem_erro_sql(): void
     {
         Storage::fake('local');
         $this->autenticarComPermissao();
         $payload = $this->payload([
             'atributos' => [
                 ['atributo' => 'Cor', 'valor' => 'Azul'],
-                ['atributo' => ' cor ', 'valor' => 'Verde'],
+                ['atributo' => ' cor ', 'valor' => ' azul '],
             ],
         ]);
         $referencia = $payload['produtos'][0]['referencia'];

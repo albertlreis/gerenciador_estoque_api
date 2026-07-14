@@ -21,4 +21,13 @@ class StringHelper
         $texto = preg_replace('/[^a-z0-9]+/i', '_', $texto);
         return trim($texto, '_');
     }
+
+    /**
+     * Normaliza valores de atributos para comparação, desconsiderando caixa,
+     * acentos, espaços e pontuação, sem alterar o valor salvo/exibido.
+     */
+    public static function normalizarValorAtributo(string $texto): string
+    {
+        return str_replace('_', '', self::normalizarAtributo($texto));
+    }
 }

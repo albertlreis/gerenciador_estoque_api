@@ -113,6 +113,62 @@ class ProdutoVariacaoStoreTest extends TestCase
         Bus::assertNotDispatched(ExportProdutoContaAzulJob::class);
     }
 
+    public function test_post_variacao_permite_mesmo_nome_com_valores_diferentes(): void
+    {
+        Bus::fake();
+
+        $usuario = $this->criarUsuario();
+        Sanctum::actingAs($usuario);
+        Cache::put('permissoes_usuario_' . $usuario->id, ['produto_variacoes.criar'], now()->addHour());
+
+        [$produtoId] = $this->criarProdutoBase();
+
+        $response = $this->postJson("/api/v1/produtos/{$produtoId}/variacoes", [
+            'referencia' => 'REF-ATTR-REPETIDO',
+            'preco' => 100,
+            'custo' => 40,
+            'atributos' => [
+                ['atributo' => 'Madeira', 'valor' => 'AC03'],
+                ['atributo' => 'madeira', 'valor' => 'MT31-PRETO'],
+            ],
+        ]);
+
+        $response->assertCreated();
+        $variacaoId = $response->json('data.id') ?? $response->json('id');
+
+        $this->assertSame(2, DB::table('produto_variacao_atributos')
+            ->where('id_variacao', $variacaoId)
+            ->where('atributo', 'madeira')
+            ->count());
+    }
+
+    public function test_post_variacao_bloqueia_par_equivalente_repetido(): void
+    {
+        $usuario = $this->criarUsuario();
+        Sanctum::actingAs($usuario);
+        Cache::put('permissoes_usuario_' . $usuario->id, ['produto_variacoes.criar'], now()->addHour());
+
+        [$produtoId] = $this->criarProdutoBase();
+
+        $response = $this->postJson("/api/v1/produtos/{$produtoId}/variacoes", [
+            'referencia' => 'REF-ATTR-PAR-DUP',
+            'preco' => 100,
+            'custo' => 40,
+            'atributos' => [
+                ['atributo' => 'Modelo Referência', 'valor' => 'Azul-Fosco'],
+                ['atributo' => 'modelo_referencia', 'valor' => ' azul fosco '],
+            ],
+        ]);
+
+        $response->assertStatus(422)
+            ->assertJsonValidationErrors(['atributos.1.atributo']);
+
+        $this->assertDatabaseMissing('produto_variacoes', [
+            'produto_id' => $produtoId,
+            'referencia' => 'REF-ATTR-PAR-DUP',
+        ]);
+    }
+
     public function test_post_variacao_permite_sku_interno_repetido(): void
     {
         $usuario = $this->criarUsuario();

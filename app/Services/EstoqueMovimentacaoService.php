@@ -935,11 +935,12 @@ class EstoqueMovimentacaoService
         ?int $reservaId = null,
         string $tipoMovimentacao = EstoqueMovimentacaoTipo::SAIDA_ENTREGA_CLIENTE->value,
         ?string $refType = null,
-        ?int $refId = null
+        ?int $refId = null,
+        mixed $dataMovimentacao = null
     ): EstoqueMovimentacao {
         return DB::transaction(function () use (
             $variacaoId, $depositoSaidaId, $quantidade, $usuarioId, $observacao,
-            $pedidoId, $pedidoItemId, $loteId, $reservaId, $tipoMovimentacao, $refType, $refId
+            $pedidoId, $pedidoItemId, $loteId, $reservaId, $tipoMovimentacao, $refType, $refId, $dataMovimentacao
         ) {
             // 1) Consome reservas ativas vinculadas ao pedido/pedido_item antes da baixa fisica.
             if ($reservaId || $pedidoId) {
@@ -1013,6 +1014,7 @@ class EstoqueMovimentacaoService
                 'quantidade'          => $quantidade,
                 'id_usuario'          => $usuarioId,
                 'observacao'          => $observacao,
+                'data_movimentacao'   => $dataMovimentacao,
 
                 // ✅ rastreio
                 'lote_id'        => $loteId,

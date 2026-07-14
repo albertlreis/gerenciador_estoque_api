@@ -45,6 +45,9 @@ use App\Http\Controllers\{
     OutletCatalogoController,
     ParceiroController,
     PedidoController,
+    PedidoAntecipacaoController,
+    PedidoReconciliacaoPreviewController,
+    PedidoRecebimentoController,
     PedidoEstoqueController,
     PedidoFabricaController,
     PedidoItemController,
@@ -370,8 +373,12 @@ Route::middleware(['auth:sanctum', 'senha.nao_obrigatoria'])
         Route::prefix('pedidos/{pedido}')->whereNumber('pedido')->group(function () {
             Route::get('detalhado', [PedidoController::class, 'completo']);
             Route::get('nota-entrega/itens', [PedidoController::class, 'notaEntregaItens']);
+            Route::get('reconciliacao-preview', [PedidoReconciliacaoPreviewController::class, 'show']);
             Route::get('pdf/roteiro', [PedidoController::class, 'roteiroPdf']);
             Route::post('pdf/nota-entrega', [PedidoController::class, 'notaEntregaPdf']);
+            Route::post('recebimentos', [PedidoRecebimentoController::class, 'store']);
+            Route::post('itens/{item}/antecipacao', [PedidoAntecipacaoController::class, 'store'])->whereNumber('item');
+            Route::post('itens/{item}/antecipacao/cancelar', [PedidoAntecipacaoController::class, 'cancelar'])->whereNumber('item');
             Route::patch('cancelar', [PedidoController::class, 'cancelar']);
             Route::post('xml', [PedidoController::class, 'uploadXml']);
             Route::get('xml', [PedidoController::class, 'downloadXml']);

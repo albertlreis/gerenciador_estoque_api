@@ -37,6 +37,7 @@ class PedidoListResource extends JsonResource
     public function toArray($request): array
     {
         $entregaResumo = app(\App\Services\EntregaProdutoService::class)->resumoPedido($this->resource);
+        $statusOperacional = app(\App\Services\EntregaProdutoService::class)->statusOperacionalPedido($this->resource);
         $statusFluxo = app(PedidoStatusFluxoService::class);
         $statusAtualValue = $this->getStatusAtualCodigo($this->resource);
         $statusAtualMeta = $statusFluxo->statusMeta($statusAtualValue);
@@ -84,6 +85,11 @@ class PedidoListResource extends JsonResource
 
             'status'                 => $statusAtualValue,
             'status_label'           => $statusAtualValue ? $statusAtualMeta['label'] : null,
+            'status_acompanhamento'  => $statusAtualValue,
+            'status_operacional'     => $statusOperacional,
+            'proxima_acao'           => $statusOperacional['proxima_acao'],
+            'tipo'                   => $this->tipo,
+            'origem_abastecimento'   => $this->origem_abastecimento,
             'proximo_status'         => $proximoStatus['codigo'] ?? null,
             'proximo_status_label'   => $proximoStatus['label'] ?? null,
             'previsao'               => $previsao?->toDateString(),

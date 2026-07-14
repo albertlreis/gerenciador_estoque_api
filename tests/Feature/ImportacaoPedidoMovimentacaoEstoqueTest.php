@@ -10,6 +10,8 @@ use App\Models\Estoque;
 use App\Models\EstoqueMovimentacao;
 use App\Models\EstoqueReserva;
 use App\Models\Fornecedor;
+use App\Models\Pedido;
+use App\Models\PedidoImportacao;
 use App\Models\Produto;
 use App\Models\ProdutoEntregaEvento;
 use App\Models\ProdutoEntregaItem;
@@ -94,8 +96,79 @@ class ImportacaoPedidoMovimentacaoEstoqueTest extends TestCase
         $this->assertSame(0, EstoqueMovimentacao::query()->where('pedido_id', $pedidoId)->where('tipo', 'saida_entrega_cliente')->count());
     }
 
-    public function test_venda_com_movimentacao_explicita_registra_entrada_e_reserva_sem_saida(): void
+    public function test_deposito_de_recebimento_prevalece_sobre_fallback_legado_na_confirmacao(): void
     {
+        [$usuario, $cliente, $categoria, $variacao, $depositoLegado] = $this->criarContexto();
+        $depositoRecebimento = Deposito::create(['nome' => 'Deposito Recebimento Prioritario']);
+        $payload = $this->payloadImportacao(
+            tipo: 'venda',
+            clienteId: $cliente->id,
+            categoriaId: $categoria->id,
+            variacaoId: $variacao->id,
+            depositoId: $depositoLegado->id,
+            quantidade: 1,
+            entregue: false,
+            movimentarEstoque: false,
+        );
+        $payload['itens'][0]['deposito_recebimento_id'] = $depositoRecebimento->id;
+
+        $response = $this->actingAs($usuario, 'sanctum')
+            ->postJson('/api/v1/pedidos/import/xml/confirm', $payload)
+            ->assertOk();
+        $pedidoId = (int) $response->json('id');
+
+        $this->assertDatabaseHas('pedido_itens', [
+            'id_pedido' => $pedidoId,
+            'id_deposito' => $depositoRecebimento->id,
+        ]);
+        $dadosConfirmados = json_decode((string) DB::table('pedido_importacao_itens')
+            ->where('pedido_id', $pedidoId)
+            ->value('dados_confirmados_json'), true);
+        $this->assertSame((int) $depositoRecebimento->id, (int) $dadosConfirmados['id_deposito']);
+        $this->assertSame((int) $depositoRecebimento->id, (int) $dadosConfirmados['deposito_recebimento_id']);
+    }
+
+    public function test_reposicao_manual_exige_chave_e_retry_nao_duplica_pedido(): void
+    {
+        [$usuario, , $categoria, $variacao, $deposito] = $this->criarContexto();
+        $payload = $this->payloadImportacao(
+            tipo: 'reposicao',
+            clienteId: null,
+            categoriaId: $categoria->id,
+            variacaoId: $variacao->id,
+            depositoId: $deposito->id,
+            quantidade: 1,
+            entregue: false,
+            movimentarEstoque: false,
+        );
+        $payload['tipo_importacao'] = null;
+
+        $this->actingAs($usuario, 'sanctum')
+            ->postJson('/api/v1/pedidos/import/xml/confirm', $payload)
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('idempotency_key');
+
+        $payload['idempotency_key'] = 'reposicao-manual-retry-1';
+        $primeira = $this->actingAs($usuario, 'sanctum')
+            ->postJson('/api/v1/pedidos/import/xml/confirm', $payload)
+            ->assertOk();
+        $pedidoId = (int) $primeira->json('id');
+        $this->actingAs($usuario, 'sanctum')
+            ->postJson('/api/v1/pedidos/import/xml/confirm', $payload)
+            ->assertStatus(409)
+            ->assertJsonPath('pedido_id', $pedidoId);
+
+        $this->assertSame(1, Pedido::query()->where('id', $pedidoId)->count());
+        $this->assertSame(1, PedidoImportacao::query()
+            ->where('arquivo_hash', hash('sha256', "manual:{$usuario->id}:{$payload['idempotency_key']}"))
+            ->where('pedido_id', $pedidoId)
+            ->where('status', 'confirmado')
+            ->count());
+    }
+
+    public function test_flag_v2_desligada_preserva_movimentacao_da_importacao_legada(): void
+    {
+        config()->set('pedidos.fluxo_operacional_v2_enabled', false);
         [$usuario, $cliente, $categoria, $variacao, $deposito] = $this->criarContexto();
 
         $response = $this->actingAs($usuario, 'sanctum')
@@ -111,17 +184,66 @@ class ImportacaoPedidoMovimentacaoEstoqueTest extends TestCase
             ));
 
         $response->assertOk();
+        $pedidoId = (int) $response->json('id');
+
+        $this->assertSame(2, (int) Estoque::query()
+            ->where('id_variacao', $variacao->id)
+            ->where('id_deposito', $deposito->id)
+            ->value('quantidade'));
+        $this->assertSame(1, EstoqueMovimentacao::query()
+            ->where('pedido_id', $pedidoId)
+            ->where('tipo', 'entrada_deposito')
+            ->count());
+        $this->assertSame(1, EstoqueReserva::query()
+            ->where('pedido_id', $pedidoId)
+            ->where('status', 'ativa')
+            ->count());
+
+        config()->set('pedidos.fluxo_operacional_v2_enabled', true);
+    }
+
+    public function test_campos_legacy_sao_ignorados_e_antecipacao_reserva_sem_reduzir_esperado_da_fabrica(): void
+    {
+        [$usuario, $cliente, $categoria, $variacao, $deposito] = $this->criarContexto();
+
+        Estoque::updateOrCreate(
+            ['id_variacao' => $variacao->id, 'id_deposito' => $deposito->id],
+            ['quantidade' => 2]
+        );
+
+        $payload = $this->payloadImportacao(
+            tipo: 'venda',
+            clienteId: $cliente->id,
+            categoriaId: $categoria->id,
+            variacaoId: $variacao->id,
+            depositoId: $deposito->id,
+            quantidade: 2,
+            entregue: false,
+            movimentarEstoque: true,
+        );
+        $payload['itens'][0]['deposito_recebimento_id'] = $deposito->id;
+        $payload['itens'][0]['antecipacoes'] = [[
+            'deposito_id' => $deposito->id,
+            'quantidade' => 2,
+        ]];
+
+        $response = $this->actingAs($usuario, 'sanctum')
+            ->postJson('/api/v1/pedidos/import/xml/confirm', $payload);
+
+        $response->assertOk();
 
         $pedidoId = $response->json('id');
         $entrega = ProdutoEntregaItem::query()->where('pedido_id', $pedidoId)->firstOrFail();
 
         $this->assertSame(2, (int) Estoque::query()->where('id_variacao', $variacao->id)->where('id_deposito', $deposito->id)->value('quantidade'));
+        $this->assertSame(2, (int) $entrega->quantidade_total);
+        $this->assertSame(0, (int) $entrega->quantidade_recebida);
         $this->assertSame(2, (int) $entrega->quantidade_reservada);
         $this->assertSame(0, (int) $entrega->quantidade_expedida);
         $this->assertSame(0, (int) $entrega->quantidade_entregue);
         $this->assertSame(ProdutoEntregaItem::STATUS_RESERVADO, $entrega->status);
         $this->assertSame(1, EstoqueReserva::query()->where('pedido_id', $pedidoId)->where('status', 'ativa')->count());
-        $this->assertSame(1, EstoqueMovimentacao::query()->where('pedido_id', $pedidoId)->where('tipo', 'entrada_deposito')->count());
+        $this->assertSame(0, EstoqueMovimentacao::query()->where('pedido_id', $pedidoId)->where('tipo', 'entrada_deposito')->count());
         $this->assertSame(0, EstoqueMovimentacao::query()->where('pedido_id', $pedidoId)->where('tipo', 'saida_entrega_cliente')->count());
     }
 
@@ -160,6 +282,33 @@ class ImportacaoPedidoMovimentacaoEstoqueTest extends TestCase
             'pedido_id' => $pedido->id,
             'usuario_id' => $usuario->id,
         ]);
+    }
+
+    public function test_antecipacao_sem_saldo_aborta_importacao_sem_criar_pedido(): void
+    {
+        [$usuario, $cliente, $categoria, $variacao, $deposito] = $this->criarContexto();
+        $payload = $this->payloadImportacao(
+            tipo: 'venda',
+            clienteId: $cliente->id,
+            categoriaId: $categoria->id,
+            variacaoId: $variacao->id,
+            depositoId: $deposito->id,
+            quantidade: 2,
+            entregue: false,
+            movimentarEstoque: false,
+        );
+        $payload['itens'][0]['antecipacoes'] = [[
+            'deposito_id' => $deposito->id,
+            'quantidade' => 2,
+        ]];
+
+        $this->actingAs($usuario, 'sanctum')
+            ->postJson('/api/v1/pedidos/import/xml/confirm', $payload)
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('itens.0.antecipacoes.0.quantidade');
+
+        $this->assertSame(0, \App\Models\Pedido::query()->count());
+        $this->assertSame(0, ProdutoEntregaItem::query()->count());
     }
 
     public function test_importacao_sem_vendedor_selecionado_salva_usuario_logado(): void
@@ -216,7 +365,7 @@ class ImportacaoPedidoMovimentacaoEstoqueTest extends TestCase
         $this->assertSame(0, \App\Models\Pedido::query()->count());
     }
 
-    public function test_venda_com_saida_explicita_baixa_estoque_e_marca_expedida_sem_entregar(): void
+    public function test_venda_com_saida_legacy_permanece_pendente_sem_baixar_estoque(): void
     {
         [$usuario, $cliente, $categoria, $variacao, $deposito] = $this->criarContexto();
 
@@ -245,18 +394,18 @@ class ImportacaoPedidoMovimentacaoEstoqueTest extends TestCase
         $pedidoId = $response->json('id');
         $entrega = ProdutoEntregaItem::query()->where('pedido_id', $pedidoId)->firstOrFail();
 
-        $this->assertSame(3, (int) Estoque::query()->where('id_variacao', $variacao->id)->where('id_deposito', $deposito->id)->value('quantidade'));
-        $this->assertSame(2, (int) $entrega->quantidade_reservada);
-        $this->assertSame(2, (int) $entrega->quantidade_expedida);
+        $this->assertSame(5, (int) Estoque::query()->where('id_variacao', $variacao->id)->where('id_deposito', $deposito->id)->value('quantidade'));
+        $this->assertSame(0, (int) $entrega->quantidade_reservada);
+        $this->assertSame(0, (int) $entrega->quantidade_expedida);
         $this->assertSame(0, (int) $entrega->quantidade_entregue);
-        $this->assertSame(ProdutoEntregaItem::STATUS_RESERVADO, $entrega->status);
-        $this->assertSame(1, EstoqueMovimentacao::query()->where('pedido_id', $pedidoId)->count());
-        $this->assertSame(1, ProdutoEntregaEvento::query()->where('produto_entrega_item_id', $entrega->id)->where('tipo_evento', ProdutoEntregaEvento::EXPEDIDO_CLIENTE)->count());
+        $this->assertSame(ProdutoEntregaItem::STATUS_AGUARDANDO_ESTOQUE, $entrega->status);
+        $this->assertSame(0, EstoqueMovimentacao::query()->where('pedido_id', $pedidoId)->count());
+        $this->assertSame(0, ProdutoEntregaEvento::query()->where('produto_entrega_item_id', $entrega->id)->where('tipo_evento', ProdutoEntregaEvento::EXPEDIDO_CLIENTE)->count());
         $this->assertSame(0, ProdutoEntregaEvento::query()->where('produto_entrega_item_id', $entrega->id)->where('tipo_evento', ProdutoEntregaEvento::ENTREGUE_CLIENTE)->count());
-        $this->assertSame('consumida', EstoqueReserva::query()->where('pedido_id', $pedidoId)->first()?->status);
+        $this->assertNull(EstoqueReserva::query()->where('pedido_id', $pedidoId)->first());
     }
 
-    public function test_venda_entregue_com_saida_explicita_baixa_estoque_e_marca_entregue(): void
+    public function test_venda_entregue_com_saida_legacy_permanece_pendente(): void
     {
         [$usuario, $cliente, $categoria, $variacao, $deposito] = $this->criarContexto();
 
@@ -283,15 +432,15 @@ class ImportacaoPedidoMovimentacaoEstoqueTest extends TestCase
         $pedidoId = $response->json('id');
         $entrega = ProdutoEntregaItem::query()->where('pedido_id', $pedidoId)->firstOrFail();
 
-        $this->assertSame(3, (int) Estoque::query()->where('id_variacao', $variacao->id)->where('id_deposito', $deposito->id)->value('quantidade'));
-        $this->assertSame(2, (int) $entrega->quantidade_expedida);
-        $this->assertSame(2, (int) $entrega->quantidade_entregue);
-        $this->assertSame(ProdutoEntregaItem::STATUS_ENTREGUE, $entrega->status);
-        $this->assertSame(1, ProdutoEntregaEvento::query()->where('produto_entrega_item_id', $entrega->id)->where('tipo_evento', ProdutoEntregaEvento::EXPEDIDO_CLIENTE)->count());
-        $this->assertSame(1, ProdutoEntregaEvento::query()->where('produto_entrega_item_id', $entrega->id)->where('tipo_evento', ProdutoEntregaEvento::ENTREGUE_CLIENTE)->count());
+        $this->assertSame(5, (int) Estoque::query()->where('id_variacao', $variacao->id)->where('id_deposito', $deposito->id)->value('quantidade'));
+        $this->assertSame(0, (int) $entrega->quantidade_expedida);
+        $this->assertSame(0, (int) $entrega->quantidade_entregue);
+        $this->assertSame(ProdutoEntregaItem::STATUS_AGUARDANDO_ESTOQUE, $entrega->status);
+        $this->assertSame(0, ProdutoEntregaEvento::query()->where('produto_entrega_item_id', $entrega->id)->where('tipo_evento', ProdutoEntregaEvento::EXPEDIDO_CLIENTE)->count());
+        $this->assertSame(0, ProdutoEntregaEvento::query()->where('produto_entrega_item_id', $entrega->id)->where('tipo_evento', ProdutoEntregaEvento::ENTREGUE_CLIENTE)->count());
     }
 
-    public function test_venda_entregue_com_entrada_retorna_validacao(): void
+    public function test_venda_entregue_com_entrada_legacy_e_importada_pendente(): void
     {
         [$usuario, $cliente, $categoria, $variacao, $deposito] = $this->criarContexto();
 
@@ -312,21 +461,13 @@ class ImportacaoPedidoMovimentacaoEstoqueTest extends TestCase
         $response = $this->actingAs($usuario, 'sanctum')
             ->postJson('/api/v1/pedidos/import/xml/confirm', $payload);
 
-        $response
-            ->assertStatus(422)
-            ->assertJsonValidationErrors('itens');
-
-        $mensagem = $response->json('errors.itens.0');
-
-        $this->assertStringContainsString('Pedido entregue', $mensagem);
-        $this->assertStringContainsString('Saída', $mensagem);
-        $this->assertStringContainsString('Salvar sem movimentar', $mensagem);
-        $this->assertStringContainsString('Item pendente: Item 1', $mensagem);
-        $this->assertStringNotContainsString('MESA APOIO NIX', $mensagem);
-        $this->assertStringNotContainsString('E66008', $mensagem);
+        $response->assertOk();
+        $pedidoId = (int) $response->json('id');
+        $this->assertSame(0, EstoqueMovimentacao::query()->where('pedido_id', $pedidoId)->count());
+        $this->assertSame(0, (int) ProdutoEntregaItem::query()->where('pedido_id', $pedidoId)->value('quantidade_recebida'));
     }
 
-    public function test_venda_entregue_com_varios_itens_em_entrada_resume_lista_na_validacao(): void
+    public function test_venda_entregue_com_varios_itens_legacy_cria_demandas_pendentes(): void
     {
         [$usuario, $cliente, $categoria, $variacao, $deposito] = $this->criarContexto();
 
@@ -352,18 +493,10 @@ class ImportacaoPedidoMovimentacaoEstoqueTest extends TestCase
         $response = $this->actingAs($usuario, 'sanctum')
             ->postJson('/api/v1/pedidos/import/xml/confirm', $payload);
 
-        $response
-            ->assertStatus(422)
-            ->assertJsonValidationErrors('itens');
-
-        $mensagem = $response->json('errors.itens.0');
-
-        $this->assertStringContainsString('Pedido entregue: 5 itens precisam estar como Saída', $mensagem);
-        $this->assertStringContainsString('Aplicar a todos > Saída', $mensagem);
-        $this->assertStringContainsString('Salvar sem movimentar', $mensagem);
-        $this->assertStringContainsString('Itens pendentes: Item 1, Item 2, Item 3 e mais 2.', $mensagem);
-        $this->assertStringNotContainsString('Produto 1', $mensagem);
-        $this->assertStringNotContainsString('REF-1', $mensagem);
+        $response->assertOk();
+        $pedidoId = (int) $response->json('id');
+        $this->assertSame(5, ProdutoEntregaItem::query()->where('pedido_id', $pedidoId)->count());
+        $this->assertSame(0, EstoqueMovimentacao::query()->where('pedido_id', $pedidoId)->count());
     }
 
     public function test_venda_entregue_sem_movimentacao_cria_demanda_pendente_sem_baixa(): void
@@ -444,7 +577,7 @@ class ImportacaoPedidoMovimentacaoEstoqueTest extends TestCase
         $this->assertSame(2, \App\Models\Pedido::query()->where('numero_externo', $numeroExterno)->count());
     }
 
-    public function test_reposicao_recebida_com_movimentacao_registra_entrada_no_deposito(): void
+    public function test_reposicao_com_movimentacao_legacy_permanece_pendente(): void
     {
         [$usuario, , $categoria, $variacao, $deposito] = $this->criarContexto();
 
@@ -465,20 +598,20 @@ class ImportacaoPedidoMovimentacaoEstoqueTest extends TestCase
         $pedidoId = $response->json('id');
         $entrega = ProdutoEntregaItem::query()->where('pedido_id', $pedidoId)->firstOrFail();
 
-        $this->assertSame(4, (int) Estoque::query()->where('id_variacao', $variacao->id)->where('id_deposito', $deposito->id)->value('quantidade'));
+        $this->assertSame(0, (int) Estoque::query()->where('id_variacao', $variacao->id)->where('id_deposito', $deposito->id)->value('quantidade'));
         $this->assertNull($entrega->id_deposito_origem);
         $this->assertSame($deposito->id, (int) $entrega->id_deposito_destino);
-        $this->assertSame(4, (int) $entrega->quantidade_recebida);
-        $this->assertSame(ProdutoEntregaItem::STATUS_RECEBIDO, $entrega->status);
-        $this->assertSame(1, EstoqueMovimentacao::query()->where('pedido_id', $pedidoId)->count());
-        $this->assertSame(1, ProdutoEntregaEvento::query()->where('produto_entrega_item_id', $entrega->id)->where('tipo_evento', ProdutoEntregaEvento::RECEBIDO_ESTOQUE)->count());
-        $this->assertDatabaseHas('pedido_status_historico', [
+        $this->assertSame(0, (int) $entrega->quantidade_recebida);
+        $this->assertSame(ProdutoEntregaItem::STATUS_AGUARDANDO_ESTOQUE, $entrega->status);
+        $this->assertSame(0, EstoqueMovimentacao::query()->where('pedido_id', $pedidoId)->count());
+        $this->assertSame(0, ProdutoEntregaEvento::query()->where('produto_entrega_item_id', $entrega->id)->where('tipo_evento', ProdutoEntregaEvento::RECEBIDO_ESTOQUE)->count());
+        $this->assertDatabaseMissing('pedido_status_historico', [
             'pedido_id' => $pedidoId,
             'status' => PedidoStatus::ENTREGA_ESTOQUE->value,
         ]);
     }
 
-    public function test_reposicao_com_saida_no_payload_movimenta_como_entrada(): void
+    public function test_reposicao_com_saida_legacy_tambem_permanece_pendente(): void
     {
         [$usuario, , $categoria, $variacao, $deposito] = $this->criarContexto();
 
@@ -500,15 +633,14 @@ class ImportacaoPedidoMovimentacaoEstoqueTest extends TestCase
         $pedidoId = $response->json('id');
         $entrega = ProdutoEntregaItem::query()->where('pedido_id', $pedidoId)->firstOrFail();
 
-        $this->assertSame(3, (int) Estoque::query()->where('id_variacao', $variacao->id)->where('id_deposito', $deposito->id)->value('quantidade'));
-        $this->assertSame(3, (int) $entrega->quantidade_recebida);
-        $this->assertSame(ProdutoEntregaItem::STATUS_RECEBIDO, $entrega->status);
-        $this->assertSame(1, EstoqueMovimentacao::query()->where('pedido_id', $pedidoId)->where('tipo', 'entrada_deposito')->count());
+        $this->assertSame(0, (int) Estoque::query()->where('id_variacao', $variacao->id)->where('id_deposito', $deposito->id)->value('quantidade'));
+        $this->assertSame(0, (int) $entrega->quantidade_recebida);
+        $this->assertSame(ProdutoEntregaItem::STATUS_AGUARDANDO_ESTOQUE, $entrega->status);
+        $this->assertSame(0, EstoqueMovimentacao::query()->where('pedido_id', $pedidoId)->where('tipo', 'entrada_deposito')->count());
         $this->assertSame(0, EstoqueMovimentacao::query()->where('pedido_id', $pedidoId)->where('tipo', 'saida_entrega_cliente')->count());
-        $this->assertDatabaseHas('pedido_status_historico', [
+        $this->assertDatabaseMissing('pedido_status_historico', [
             'pedido_id' => $pedidoId,
             'status' => PedidoStatus::ENTREGA_ESTOQUE->value,
-            'data_status' => now()->toDateString() . ' 00:00:00',
         ]);
     }
 
@@ -558,7 +690,7 @@ class ImportacaoPedidoMovimentacaoEstoqueTest extends TestCase
             ->assertJsonPath('data.entrega_itens.0.deposito_destino.id', $deposito->id);
     }
 
-    public function test_reposicao_recebida_sem_deposito_retorna_validacao(): void
+    public function test_reposicao_de_fabrica_sem_deposito_aguarda_recebimento_sem_divergencia(): void
     {
         [$usuario, , $categoria, $variacao] = $this->criarContexto();
 
@@ -574,12 +706,14 @@ class ImportacaoPedidoMovimentacaoEstoqueTest extends TestCase
                 movimentarEstoque: true,
             ));
 
-        $response
-            ->assertStatus(422)
-            ->assertJsonValidationErrors('itens');
+        $response->assertOk();
+        $entrega = ProdutoEntregaItem::query()->where('pedido_id', $response->json('id'))->firstOrFail();
+        $this->assertFalse((bool) $entrega->em_revisao);
+        $this->assertNull($entrega->bloqueio_motivo);
+        $this->assertSame(0, EstoqueMovimentacao::query()->where('pedido_id', $response->json('id'))->count());
     }
 
-    public function test_movimentacao_sem_deposito_retorna_validacao_mesmo_sem_entrega(): void
+    public function test_venda_de_fabrica_sem_deposito_aguarda_recebimento_sem_divergencia(): void
     {
         [$usuario, $cliente, $categoria, $variacao] = $this->criarContexto();
 
@@ -595,9 +729,10 @@ class ImportacaoPedidoMovimentacaoEstoqueTest extends TestCase
                 movimentarEstoque: true,
             ));
 
-        $response
-            ->assertStatus(422)
-            ->assertJsonValidationErrors('itens');
+        $response->assertOk();
+        $entrega = ProdutoEntregaItem::query()->where('pedido_id', $response->json('id'))->firstOrFail();
+        $this->assertFalse((bool) $entrega->em_revisao);
+        $this->assertNull($entrega->bloqueio_motivo);
     }
 
     public function test_referencia_ambigua_retorna_validacao_com_produto_e_referencia(): void

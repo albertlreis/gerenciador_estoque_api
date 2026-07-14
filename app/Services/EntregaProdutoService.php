@@ -17,11 +17,12 @@ use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use InvalidArgumentException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
 class EntregaProdutoService
 {
+    private const OPERACAO_ANTECIPACAO = 'antecipacao_estoque_atual';
+
     public function __construct(
         private readonly EstoqueDisponibilidadeService $disponibilidade,
         private readonly ReservaEstoqueService $reservas,
@@ -59,7 +60,12 @@ class EntregaProdutoService
                 ->get()
                 ->each(fn (ProdutoEntregaItem $item) => $this->cancelarItem($item, $usuarioId, 'Item removido do pedido.'));
 
-            return $this->criarDemandaPedido($pedido, $usuarioId, true);
+            $reservarAutomaticamente = ! (
+                $pedido->isVenda()
+                && $pedido->origem_abastecimento === Pedido::ORIGEM_ABASTECIMENTO_FABRICA
+            );
+
+            return $this->criarDemandaPedido($pedido, $usuarioId, $reservarAutomaticamente);
         });
     }
 
@@ -275,15 +281,243 @@ class EntregaProdutoService
         });
     }
 
+    public function registrarAntecipacao(
+        Pedido $pedido,
+        PedidoItem $pedidoItem,
+        int $depositoId,
+        int $quantidade,
+        string $idempotencyKey,
+        ?int $usuarioId = null,
+        ?string $observacao = null
+    ): ProdutoEntregaItem {
+        return DB::transaction(function () use ($pedido, $pedidoItem, $depositoId, $quantidade, $idempotencyKey, $usuarioId, $observacao) {
+            $this->validarContextoAntecipacao($pedido, $pedidoItem);
+
+            $entrega = ProdutoEntregaItem::query()
+                ->where('pedido_id', $pedido->id)
+                ->where('pedido_item_id', $pedidoItem->id)
+                ->where('tipo_origem', ProdutoEntregaItem::ORIGEM_PEDIDO)
+                ->lockForUpdate()
+                ->first();
+
+            if (! $entrega) {
+                $entrega = $this->criarOuAtualizarItemPedido($pedido, $pedidoItem, $usuarioId);
+                $entrega = $this->lockItem($entrega->id);
+            }
+
+            $eventoExistente = ProdutoEntregaEvento::query()
+                ->where('idempotency_key', $idempotencyKey)
+                ->lockForUpdate()
+                ->first();
+
+            if ($eventoExistente) {
+                $metadata = (array) ($eventoExistente->metadata_json ?? []);
+                $mesmaOperacao = (int) $eventoExistente->produto_entrega_item_id === (int) $entrega->id
+                    && $eventoExistente->tipo_evento === ProdutoEntregaEvento::RESERVA_CRIADA
+                    && ($metadata['operacao'] ?? null) === self::OPERACAO_ANTECIPACAO
+                    && ($metadata['acao'] ?? null) === 'registrar'
+                    && (int) ($metadata['deposito_id'] ?? 0) === $depositoId
+                    && (int) ($metadata['quantidade'] ?? 0) === $quantidade;
+
+                if (! $mesmaOperacao) {
+                    throw ValidationException::withMessages([
+                        'idempotency_key' => ['Chave de idempotencia ja utilizada em outra operacao ou com outro payload.'],
+                    ]);
+                }
+
+                return $entrega->fresh($this->relacoesEstadoAntecipacao());
+            }
+
+            if (in_array($entrega->status, [ProdutoEntregaItem::STATUS_CANCELADO, ProdutoEntregaItem::STATUS_ENTREGUE], true)) {
+                throw ValidationException::withMessages([
+                    'item' => ['Item cancelado ou ja entregue nao pode ser antecipado.'],
+                ]);
+            }
+
+            $atendido = max(
+                (int) $entrega->quantidade_reservada,
+                (int) $entrega->quantidade_expedida,
+                (int) $entrega->quantidade_entregue
+            );
+            $pendente = max(0, (int) $entrega->quantidade_total - $atendido);
+
+            if ($quantidade > $pendente) {
+                throw ValidationException::withMessages([
+                    'quantidade' => ["Quantidade excede o pendente que ainda pode ser antecipado ({$pendente})."],
+                ]);
+            }
+
+            $disponivel = $this->disponibilidade->getDisponivel((int) $entrega->id_variacao, $depositoId);
+            if ($disponivel < $quantidade) {
+                throw ValidationException::withMessages([
+                    'quantidade' => ["Estoque liquido insuficiente para antecipacao. Disponivel: {$disponivel}, solicitado: {$quantidade}."],
+                ]);
+            }
+
+            $entrega = $this->reservarItem(
+                $entrega,
+                $depositoId,
+                $quantidade,
+                $usuarioId,
+                $observacao ?: 'Atendimento antecipado com estoque atual.',
+                $idempotencyKey,
+                [
+                    'operacao' => self::OPERACAO_ANTECIPACAO,
+                    'acao' => 'registrar',
+                    'pedido_id' => (int) $pedido->id,
+                    'pedido_item_id' => (int) $pedidoItem->id,
+                    'deposito_id' => $depositoId,
+                    'quantidade' => $quantidade,
+                ],
+                self::OPERACAO_ANTECIPACAO
+            );
+
+            if (! ProdutoEntregaEvento::query()->where('idempotency_key', $idempotencyKey)->exists()) {
+                throw ValidationException::withMessages([
+                    'quantidade' => [$entrega->bloqueio_motivo ?: 'Nao foi possivel reservar o estoque para antecipacao.'],
+                ]);
+            }
+
+            return $entrega->fresh($this->relacoesEstadoAntecipacao());
+        });
+    }
+
+    public function cancelarAntecipacao(
+        Pedido $pedido,
+        PedidoItem $pedidoItem,
+        string $idempotencyKey,
+        ?int $usuarioId = null,
+        ?string $observacao = null
+    ): ProdutoEntregaItem {
+        return DB::transaction(function () use ($pedido, $pedidoItem, $idempotencyKey, $usuarioId, $observacao) {
+            $this->validarContextoAntecipacao($pedido, $pedidoItem);
+
+            $entrega = ProdutoEntregaItem::query()
+                ->where('pedido_id', $pedido->id)
+                ->where('pedido_item_id', $pedidoItem->id)
+                ->where('tipo_origem', ProdutoEntregaItem::ORIGEM_PEDIDO)
+                ->lockForUpdate()
+                ->first();
+
+            if (! $entrega) {
+                throw ValidationException::withMessages([
+                    'item' => ['Item ainda nao possui demanda operacional para cancelamento da antecipacao.'],
+                ]);
+            }
+
+            $eventoExistente = ProdutoEntregaEvento::query()
+                ->where('idempotency_key', $idempotencyKey)
+                ->lockForUpdate()
+                ->first();
+            if ($eventoExistente) {
+                $metadata = (array) ($eventoExistente->metadata_json ?? []);
+                $mesmaOperacao = (int) $eventoExistente->produto_entrega_item_id === (int) $entrega->id
+                    && $eventoExistente->tipo_evento === ProdutoEntregaEvento::RESERVA_CANCELADA
+                    && ($metadata['operacao'] ?? null) === self::OPERACAO_ANTECIPACAO
+                    && ($metadata['acao'] ?? null) === 'cancelar';
+
+                if (! $mesmaOperacao) {
+                    throw ValidationException::withMessages([
+                        'idempotency_key' => ['Chave de idempotencia ja utilizada em outra operacao.'],
+                    ]);
+                }
+
+                return $entrega->fresh($this->relacoesEstadoAntecipacao());
+            }
+
+            $eventosReserva = ProdutoEntregaEvento::query()
+                ->with('reserva')
+                ->where('produto_entrega_item_id', $entrega->id)
+                ->where('tipo_evento', ProdutoEntregaEvento::RESERVA_CRIADA)
+                ->orderBy('id')
+                ->get()
+                ->filter(fn (ProdutoEntregaEvento $evento) => $this->eventoEhAntecipacao($evento));
+            $reservaIds = $eventosReserva->pluck('estoque_reserva_id')->filter()->unique()->values();
+            $reservas = EstoqueReserva::query()
+                ->whereIn('id', $reservaIds)
+                ->lockForUpdate()
+                ->get()
+                ->keyBy('id');
+            $cancelaveis = $eventosReserva->filter(function (ProdutoEntregaEvento $evento) use ($reservas) {
+                $reserva = $reservas->get((int) $evento->estoque_reserva_id);
+
+                return $reserva
+                    && $reserva->status === 'ativa'
+                    && (int) $reserva->quantidade_consumida === 0
+                    && (int) $reserva->quantidade > 0;
+            })->values();
+
+            if ($cancelaveis->isEmpty()) {
+                $mensagem = $eventosReserva->isEmpty()
+                    ? 'Nao ha reserva antecipada ativa para este item.'
+                    : 'A reserva antecipada ja foi consumida ou cancelada e nao pode ser cancelada novamente.';
+                throw ValidationException::withMessages(['item' => [$mensagem]]);
+            }
+
+            $quantidadeCancelada = 0;
+            foreach ($cancelaveis as $indice => $eventoReserva) {
+                /** @var EstoqueReserva $reserva */
+                $reserva = $reservas->get((int) $eventoReserva->estoque_reserva_id);
+                $quantidadeReserva = (int) $reserva->quantidade;
+                $reserva->update([
+                    'status' => 'cancelada',
+                    'motivo' => 'antecipacao_cancelada',
+                ]);
+                $quantidadeCancelada += $quantidadeReserva;
+                $chaveEvento = $indice === 0
+                    ? $idempotencyKey
+                    : 'antecipacao-cancelar:' . hash('sha256', $idempotencyKey) . ':reserva:' . $reserva->id;
+
+                $this->registrarEvento(
+                    $entrega,
+                    ProdutoEntregaEvento::RESERVA_CANCELADA,
+                    $quantidadeReserva,
+                    (int) $reserva->id_deposito,
+                    null,
+                    (int) $reserva->id,
+                    null,
+                    $usuarioId,
+                    $observacao ?: 'Reserva de atendimento antecipado cancelada.',
+                    [
+                        'operacao' => self::OPERACAO_ANTECIPACAO,
+                        'acao' => 'cancelar',
+                        'pedido_id' => (int) $pedido->id,
+                        'pedido_item_id' => (int) $pedidoItem->id,
+                        'evento_reserva_id' => (int) $eventoReserva->id,
+                        'idempotency_key_requisicao' => $idempotencyKey,
+                    ],
+                    $chaveEvento
+                );
+            }
+
+            $entrega->quantidade_reservada = max(0, (int) $entrega->quantidade_reservada - $quantidadeCancelada);
+            if (
+                (int) $entrega->quantidade_reservada === 0
+                && (int) $entrega->quantidade_expedida === 0
+                && (int) $entrega->quantidade_entregue === 0
+            ) {
+                $entrega->id_deposito_origem = null;
+            }
+            $entrega->bloqueio_motivo = null;
+            $entrega->em_revisao = false;
+            $entrega->status = $this->statusOperacional($entrega);
+            $entrega->save();
+
+            return $entrega->fresh($this->relacoesEstadoAntecipacao());
+        });
+    }
+
     public function reservarItem(
         ProdutoEntregaItem|int $item,
         ?int $depositoId = null,
         ?int $quantidade = null,
         ?int $usuarioId = null,
         ?string $observacao = null,
-        ?string $idempotencyKey = null
+        ?string $idempotencyKey = null,
+        array $metadata = [],
+        ?string $motivoReserva = null
     ): ProdutoEntregaItem {
-        return DB::transaction(function () use ($item, $depositoId, $quantidade, $usuarioId, $observacao, $idempotencyKey) {
+        return DB::transaction(function () use ($item, $depositoId, $quantidade, $usuarioId, $observacao, $idempotencyKey, $metadata, $motivoReserva) {
             $entrega = $this->lockItem($item);
 
             if (in_array($entrega->status, [ProdutoEntregaItem::STATUS_CANCELADO, ProdutoEntregaItem::STATUS_ENTREGUE], true)) {
@@ -300,7 +534,12 @@ class EntregaProdutoService
                 return $entrega->fresh();
             }
 
-            $pendente = max(0, (int) $entrega->quantidade_total - (int) $entrega->quantidade_reservada - (int) $entrega->quantidade_expedida);
+            $atendido = max(
+                (int) $entrega->quantidade_reservada,
+                (int) $entrega->quantidade_expedida,
+                (int) $entrega->quantidade_entregue
+            );
+            $pendente = max(0, (int) $entrega->quantidade_total - $atendido);
             $quantidade = $quantidade !== null ? min((int) $quantidade, $pendente) : $pendente;
             if ($quantidade <= 0) {
                 return $entrega;
@@ -330,7 +569,7 @@ class EntregaProdutoService
                     pedidoId: $entrega->pedido_id ? (int) $entrega->pedido_id : null,
                     pedidoItemId: $entrega->pedido_item_id ? (int) $entrega->pedido_item_id : null,
                     usuarioId: $usuarioId,
-                    motivo: 'produto_entrega'
+                    motivo: $motivoReserva ?: 'produto_entrega'
                 );
             } catch (InvalidArgumentException $e) {
                 $entrega->update([
@@ -359,7 +598,7 @@ class EntregaProdutoService
                 null,
                 $usuarioId,
                 $observacao ?: 'Reserva criada pelo fluxo central de entrega.',
-                [],
+                $metadata,
                 $key
             );
 
@@ -375,9 +614,11 @@ class EntregaProdutoService
         ?string $observacao = null,
         ?string $idempotencyKey = null,
         string $tipoEvento = ProdutoEntregaEvento::RECEBIDO_ESTOQUE,
-        ?int $depositoOrigemId = null
+        ?int $depositoOrigemId = null,
+        mixed $ocorridoEm = null,
+        bool $rejeitarExcesso = false
     ): ProdutoEntregaItem {
-        return DB::transaction(function () use ($item, $depositoId, $quantidade, $usuarioId, $observacao, $idempotencyKey, $tipoEvento, $depositoOrigemId) {
+        return DB::transaction(function () use ($item, $depositoId, $quantidade, $usuarioId, $observacao, $idempotencyKey, $tipoEvento, $depositoOrigemId, $ocorridoEm, $rejeitarExcesso) {
             $entrega = $this->lockItem($item);
             $depositoId = $depositoId ?: $entrega->id_deposito_destino ?: $entrega->id_deposito_origem;
 
@@ -387,7 +628,33 @@ class EntregaProdutoService
                 ]);
             }
 
+            if ($idempotencyKey) {
+                $eventoExistente = ProdutoEntregaEvento::query()
+                    ->where('idempotency_key', $idempotencyKey)
+                    ->lockForUpdate()
+                    ->first();
+
+                if ($eventoExistente) {
+                    if (
+                        (int) $eventoExistente->produto_entrega_item_id === (int) $entrega->id
+                        && $eventoExistente->tipo_evento === $tipoEvento
+                    ) {
+                        return $entrega;
+                    }
+
+                    throw ValidationException::withMessages([
+                        'idempotency_key' => ['Chave de idempotencia ja utilizada em outra operacao.'],
+                    ]);
+                }
+            }
+
             $pendente = max(0, (int) $entrega->quantidade_total - (int) $entrega->quantidade_recebida);
+            if ($rejeitarExcesso && $quantidade !== null && (int) $quantidade > $pendente) {
+                throw ValidationException::withMessages([
+                    'quantidade' => ["Quantidade excede o pendente de recebimento ({$pendente})."],
+                ]);
+            }
+
             $quantidade = $quantidade !== null ? min((int) $quantidade, $pendente) : $pendente;
             if ($quantidade <= 0) {
                 return $entrega;
@@ -411,7 +678,7 @@ class EntregaProdutoService
                 'tipo' => $tipoMovimentacao,
                 'quantidade' => (int) $quantidade,
                 'observacao' => $observacao ?: "Recebimento central do item de entrega #{$entrega->id}",
-                'data_movimentacao' => now(),
+                'data_movimentacao' => $ocorridoEm ?: now(),
                 'ref_type' => $entrega->tipo_origem,
                 'ref_id' => $entrega->origem_id,
                 'pedido_id' => $entrega->pedido_id,
@@ -420,7 +687,9 @@ class EntregaProdutoService
 
             $entrega->quantidade_recebida = (int) $entrega->quantidade_recebida + (int) $quantidade;
             $entrega->id_deposito_destino = $depositoId;
-            $entrega->status = $this->statusRecebimento((int) $entrega->quantidade_total, (int) $entrega->quantidade_recebida);
+            $entrega->status = $entrega->tipo_origem === ProdutoEntregaItem::ORIGEM_PEDIDO
+                ? $this->statusOperacional($entrega)
+                : $this->statusRecebimento((int) $entrega->quantidade_total, (int) $entrega->quantidade_recebida);
             $entrega->bloqueio_motivo = null;
             $entrega->em_revisao = false;
             $entrega->save();
@@ -436,7 +705,8 @@ class EntregaProdutoService
                 $usuarioId,
                 $observacao ?: 'Recebimento registrado pelo fluxo central de entrega.',
                 [],
-                $key
+                $key,
+                $ocorridoEm
             );
 
             if ($tipoEvento === ProdutoEntregaEvento::RECEBIDO_ESTOQUE) {
@@ -456,9 +726,11 @@ class EntregaProdutoService
         ?string $observacao = null,
         string $tipoEvento = ProdutoEntregaEvento::EXPEDIDO_CLIENTE,
         ?string $idempotencyKey = null,
-        ?int $depositoDestinoId = null
+        ?int $depositoDestinoId = null,
+        mixed $ocorridoEm = null,
+        array $metadata = []
     ): ProdutoEntregaItem {
-        return DB::transaction(function () use ($item, $depositoId, $quantidade, $usuarioId, $observacao, $tipoEvento, $idempotencyKey, $depositoDestinoId) {
+        return DB::transaction(function () use ($item, $depositoId, $quantidade, $usuarioId, $observacao, $tipoEvento, $idempotencyKey, $depositoDestinoId, $ocorridoEm, $metadata) {
             $entrega = $this->lockItem($item);
 
             if (in_array($entrega->status, [ProdutoEntregaItem::STATUS_CANCELADO, ProdutoEntregaItem::STATUS_ENTREGUE], true)) {
@@ -513,7 +785,7 @@ class EntregaProdutoService
                     'tipo' => EstoqueMovimentacaoTipo::ASSISTENCIA_ENVIO->value,
                     'quantidade' => (int) $quantidade,
                     'observacao' => $observacao ?: "Envio central do item de entrega #{$entrega->id}",
-                    'data_movimentacao' => now(),
+                    'data_movimentacao' => $ocorridoEm ?: now(),
                     'ref_type' => $entrega->tipo_origem,
                     'ref_id' => $entrega->origem_id,
                     'pedido_id' => $entrega->pedido_id,
@@ -536,6 +808,7 @@ class EntregaProdutoService
                     tipoMovimentacao: $tipoMovimentacao,
                     refType: $entrega->tipo_origem,
                     refId: $entrega->origem_id ? (int) $entrega->origem_id : null,
+                    dataMovimentacao: $ocorridoEm,
                 );
             }
 
@@ -556,8 +829,9 @@ class EntregaProdutoService
                 $movimentacao?->id,
                 $usuarioId,
                 $observacao ?: 'Expedicao registrada pelo fluxo central de entrega.',
-                [],
-                $key
+                $metadata,
+                $key,
+                $ocorridoEm
             );
 
             return $entrega->fresh(['eventos']);
@@ -630,9 +904,11 @@ class EntregaProdutoService
         ?int $usuarioId = null,
         ?string $observacao = null,
         ?string $idempotencyKey = null,
-        bool $permitirSemExpedicao = false
+        bool $permitirSemExpedicao = false,
+        mixed $ocorridoEm = null,
+        array $metadata = []
     ): ProdutoEntregaItem {
-        return DB::transaction(function () use ($item, $quantidade, $usuarioId, $observacao, $idempotencyKey, $permitirSemExpedicao) {
+        return DB::transaction(function () use ($item, $quantidade, $usuarioId, $observacao, $idempotencyKey, $permitirSemExpedicao, $ocorridoEm, $metadata) {
             $entrega = $this->lockItem($item);
 
             if ($entrega->status === ProdutoEntregaItem::STATUS_CANCELADO) {
@@ -669,8 +945,9 @@ class EntregaProdutoService
                 null,
                 $usuarioId,
                 $observacao ?: 'Entrega ao cliente registrada pelo fluxo central.',
-                [],
-                $key
+                $metadata,
+                $key,
+                $ocorridoEm
             );
 
             return $entrega->fresh(['eventos']);
@@ -778,26 +1055,246 @@ class EntregaProdutoService
         });
     }
 
+    /**
+     * @return array<string,mixed>
+     */
+    public function estadoAntecipacaoItem(ProdutoEntregaItem $item): array
+    {
+        $estadoCalculado = $item->getAttribute('_estado_antecipacao_calculado');
+        if (is_array($estadoCalculado)) {
+            return $estadoCalculado;
+        }
+
+        $item->loadMissing($this->relacoesEstadoAntecipacao());
+        $pedido = $item->pedido;
+        $permitida = $pedido
+            && $pedido->isVenda()
+            && $pedido->origem_abastecimento === Pedido::ORIGEM_ABASTECIMENTO_FABRICA
+            && $item->tipo_origem === ProdutoEntregaItem::ORIGEM_PEDIDO
+            && $item->status !== ProdutoEntregaItem::STATUS_CANCELADO;
+        $eventosReserva = $item->eventos
+            ->where('tipo_evento', ProdutoEntregaEvento::RESERVA_CRIADA)
+            ->filter(fn (ProdutoEntregaEvento $evento) => $this->eventoEhAntecipacao($evento));
+        $reservas = $eventosReserva
+            ->pluck('reserva')
+            ->filter()
+            ->unique('id')
+            ->values();
+        $quantidadeReservada = (int) $reservas
+            ->where('status', 'ativa')
+            ->sum(fn (EstoqueReserva $reserva) => max(0, (int) $reserva->quantidade - (int) $reserva->quantidade_consumida));
+        $quantidadeAtendida = (int) $reservas->sum('quantidade_consumida');
+        $quantidadeCancelavel = (int) $reservas
+            ->filter(fn (EstoqueReserva $reserva) => (
+                $reserva->status === 'ativa'
+                && (int) $reserva->quantidade_consumida === 0
+            ))
+            ->sum('quantidade');
+        $depositosOrigem = $reservas
+            ->filter(fn (EstoqueReserva $reserva) => in_array($reserva->status, ['ativa', 'consumida'], true))
+            ->groupBy('id_deposito')
+            ->map(function (Collection $reservasDeposito) {
+                /** @var EstoqueReserva $primeira */
+                $primeira = $reservasDeposito->first();
+
+                return [
+                    'id' => (int) $primeira->id_deposito,
+                    'nome' => (string) ($primeira->deposito?->nome ?? ''),
+                    'quantidade_reservada' => (int) $reservasDeposito
+                        ->where('status', 'ativa')
+                        ->sum(fn (EstoqueReserva $reserva) => max(0, (int) $reserva->quantidade - (int) $reserva->quantidade_consumida)),
+                    'quantidade_atendida' => (int) $reservasDeposito->sum('quantidade_consumida'),
+                ];
+            })
+            ->values();
+        $depositoOrigem = $depositosOrigem->first();
+        $atendidoOperacional = max(
+            (int) $item->quantidade_reservada,
+            (int) $item->quantidade_expedida,
+            (int) $item->quantidade_entregue
+        );
+
+        $estado = [
+            'permitida' => (bool) $permitida,
+            'ativa' => $quantidadeReservada > 0,
+            'cancelavel' => $quantidadeCancelavel > 0,
+            'quantidade_cancelavel' => $quantidadeCancelavel,
+            'quantidade_reservada' => $quantidadeReservada,
+            'quantidade_atendida' => $quantidadeAtendida,
+            'quantidade_pendente' => max(0, (int) $item->quantidade_total - $atendidoOperacional),
+            'quantidade_aguardando_fabrica' => max(0, (int) $item->quantidade_total - (int) $item->quantidade_recebida),
+            'deposito_origem_id' => $depositoOrigem['id'] ?? null,
+            'deposito_origem' => $depositoOrigem,
+            'depositos_origem' => $depositosOrigem->all(),
+            'depositos_disponiveis' => $permitida && $item->id_variacao
+                ? $this->disponibilidade->getDisponiveisPorDeposito((int) $item->id_variacao)
+                : [],
+        ];
+        $item->setAttribute('_estado_antecipacao_calculado', $estado);
+
+        return $estado;
+    }
+
+    /**
+     * @return array<string,mixed>
+     */
+    public function resumoAntecipacaoPedido(Pedido $pedido): array
+    {
+        $pedido->loadMissing([
+            'entregaItens.pedido:id,tipo,origem_abastecimento',
+            'entregaItens.eventos.reserva.deposito:id,nome',
+        ]);
+        $itens = $pedido->entregaItens
+            ->where('tipo_origem', ProdutoEntregaItem::ORIGEM_PEDIDO)
+            ->reject(fn (ProdutoEntregaItem $item) => $item->status === ProdutoEntregaItem::STATUS_CANCELADO)
+            ->values();
+        $estados = $itens->map(fn (ProdutoEntregaItem $item) => [
+            'produto_entrega_item_id' => (int) $item->id,
+            'pedido_item_id' => (int) $item->pedido_item_id,
+            ...$this->estadoAntecipacaoItem($item),
+        ]);
+
+        return [
+            'permitida' => $pedido->isVenda()
+                && $pedido->origem_abastecimento === Pedido::ORIGEM_ABASTECIMENTO_FABRICA,
+            'ativa' => $estados->sum('quantidade_reservada') > 0,
+            'quantidade_reservada' => (int) $estados->sum('quantidade_reservada'),
+            'quantidade_atendida' => (int) $estados->sum('quantidade_atendida'),
+            'quantidade_aguardando_fabrica' => (int) $estados->sum('quantidade_aguardando_fabrica'),
+            'itens' => $estados->all(),
+        ];
+    }
+
     public function resumoPedido(Pedido $pedido): array
     {
         $itens = $pedido->relationLoaded('entregaItens')
             ? $pedido->entregaItens
             : $pedido->entregaItens()->get();
 
-        return $this->resumirItens($itens);
+        $principais = $itens
+            ->where('tipo_origem', ProdutoEntregaItem::ORIGEM_PEDIDO)
+            ->reject(fn (ProdutoEntregaItem $item) => $item->status === ProdutoEntregaItem::STATUS_CANCELADO)
+            ->values();
+        $devolucoes = $itens
+            ->where('tipo_origem', ProdutoEntregaItem::ORIGEM_DEVOLUCAO)
+            ->reject(fn (ProdutoEntregaItem $item) => $item->status === ProdutoEntregaItem::STATUS_CANCELADO)
+            ->values();
+        $resumo = $this->resumirItens($principais);
+        $fluxoFabrica = $pedido->isReposicao()
+            || $pedido->origem_abastecimento === Pedido::ORIGEM_ABASTECIMENTO_FABRICA;
+
+        return [
+            ...$resumo,
+            'fluxos' => [
+                'recebimento_fabrica' => [
+                    'quantidade_esperada' => $fluxoFabrica ? $resumo['quantidade_total'] : 0,
+                    'quantidade_recebida' => $fluxoFabrica ? $resumo['quantidade_recebida'] : 0,
+                    'quantidade_faltante' => $fluxoFabrica ? max(0, $resumo['quantidade_total'] - $resumo['quantidade_recebida']) : 0,
+                ],
+                'entrega_cliente' => [
+                    'quantidade_total' => $resumo['quantidade_total'],
+                    'quantidade_reservada' => $resumo['quantidade_reservada'],
+                    'quantidade_expedida' => $resumo['quantidade_expedida'],
+                    'quantidade_entregue' => $resumo['quantidade_entregue'],
+                    'quantidade_faltante' => max(0, $resumo['quantidade_total'] - $resumo['quantidade_entregue']),
+                ],
+                'devolucoes' => $this->resumirItens($devolucoes),
+            ],
+        ];
+    }
+
+    public function statusOperacionalPedido(Pedido $pedido): array
+    {
+        $resumo = $this->resumoPedido($pedido);
+        $total = (int) $resumo['quantidade_total'];
+        $recebido = (int) $resumo['quantidade_recebida'];
+        $reservado = (int) $resumo['quantidade_reservada'];
+        $expedido = (int) $resumo['quantidade_expedida'];
+        $entregue = (int) $resumo['quantidade_entregue'];
+        $statusAcompanhamento = (string) ($pedido->statusAtual?->getRawOriginal('status') ?? '');
+        $itensPrincipais = $pedido->relationLoaded('entregaItens')
+            ? $pedido->entregaItens->where('tipo_origem', ProdutoEntregaItem::ORIGEM_PEDIDO)
+            : $pedido->entregaItens()->where('tipo_origem', ProdutoEntregaItem::ORIGEM_PEDIDO)->get();
+        $contadorExcedido = $itensPrincipais->contains(function (ProdutoEntregaItem $item) {
+            $totalItem = (int) $item->quantidade_total;
+
+            return max(
+                (int) $item->quantidade_recebida,
+                (int) $item->quantidade_reservada,
+                (int) $item->quantidade_expedida,
+                (int) $item->quantidade_entregue
+            ) > $totalItem;
+        });
+        $fluxoFabrica = $pedido->isReposicao()
+            || $pedido->origem_abastecimento === Pedido::ORIGEM_ABASTECIMENTO_FABRICA;
+        $conflitoEntregaEstoque = $statusAcompanhamento === PedidoStatus::ENTREGA_ESTOQUE->value
+            && (($fluxoFabrica && $recebido < $total) || $expedido > 0 || $entregue > 0);
+
+        $etapaRecebimento = match (true) {
+            ! $fluxoFabrica => 'nao_aplicavel',
+            $statusAcompanhamento === PedidoStatus::ENTREGA_ESTOQUE->value => 'recebido_estoque',
+            $total <= 0, $recebido <= 0 => 'aguardando_fabrica',
+            $recebido < $total => 'recebimento_parcial',
+            default => 'recebido_estoque',
+        };
+
+        $etapaEntrega = null;
+        if ($pedido->isVenda()) {
+            $etapaEntrega = match (true) {
+                $conflitoEntregaEstoque => 'aguardando_entrega_cliente',
+                $total > 0 && $entregue >= $total => 'entregue_cliente',
+                $entregue > 0 => 'entrega_parcial',
+                $expedido > 0 => 'em_entrega',
+                $reservado > 0 && (! $fluxoFabrica || $recebido >= $total) => 'pronto_para_entrega',
+                $recebido > 0 => 'aguardando_entrega_cliente',
+                default => 'aguardando_estoque',
+            };
+        }
+
+        $proximaAcao = match (true) {
+            $conflitoEntregaEstoque || $contadorExcedido || (int) $resumo['pendentes_revisao'] > 0 => 'reconciliar_divergencia',
+            $fluxoFabrica && $recebido < $total => 'registrar_recebimento_estoque',
+            $pedido->isVenda() && $entregue < $total => 'registrar_entrega_cliente',
+            default => null,
+        };
+
+        return [
+            'recebimento_fabrica' => [
+                'etapa' => $etapaRecebimento,
+                'quantidade_esperada' => $fluxoFabrica ? $total : 0,
+                'quantidade_recebida' => $fluxoFabrica ? $recebido : 0,
+                'quantidade_faltante' => $fluxoFabrica ? max(0, $total - $recebido) : 0,
+            ],
+            'entrega_cliente' => $etapaEntrega === null ? null : [
+                'etapa' => $etapaEntrega,
+                'quantidade_total' => $total,
+                'quantidade_reservada' => min($total, $reservado),
+                'quantidade_expedida' => min($total, $expedido),
+                'quantidade_entregue' => min($total, $entregue),
+                'quantidade_faltante' => max(0, $total - $entregue),
+            ],
+            'devolucoes' => $resumo['fluxos']['devolucoes'],
+            'divergencia' => $conflitoEntregaEstoque || $contadorExcedido || (int) $resumo['pendentes_revisao'] > 0,
+            'proxima_acao' => $proximaAcao,
+        ];
     }
 
     public function resumirItens(Collection|EloquentCollection $itens): array
     {
         $total = (int) $itens->sum('quantidade_total');
 
+        $reservada = min($total, (int) $itens->sum('quantidade_reservada'));
+        $recebida = min($total, (int) $itens->sum('quantidade_recebida'));
+        $expedida = min($total, (int) $itens->sum('quantidade_expedida'));
+        $entregue = min($total, (int) $itens->sum('quantidade_entregue'));
+
         return [
             'total_itens' => $itens->count(),
             'quantidade_total' => $total,
-            'quantidade_reservada' => (int) $itens->sum('quantidade_reservada'),
-            'quantidade_recebida' => (int) $itens->sum('quantidade_recebida'),
-            'quantidade_expedida' => (int) $itens->sum('quantidade_expedida'),
-            'quantidade_entregue' => (int) $itens->sum('quantidade_entregue'),
+            'quantidade_reservada' => $reservada,
+            'quantidade_recebida' => $recebida,
+            'quantidade_expedida' => $expedida,
+            'quantidade_entregue' => $entregue,
             'pendentes_revisao' => $itens->where('em_revisao', true)->count(),
             'parcial' => $this->temParcialidade($itens, $total),
             'status' => $this->statusAgregado($itens, $total),
@@ -807,9 +1304,10 @@ class EntregaProdutoService
     private function criarOuAtualizarItemPedido(Pedido $pedido, PedidoItem $pedidoItem, ?int $usuarioId = null): ProdutoEntregaItem
     {
         $reposicao = $pedido->isReposicao();
+        $aguardaFabrica = $pedido->origem_abastecimento === Pedido::ORIGEM_ABASTECIMENTO_FABRICA;
         $status = ProdutoEntregaItem::STATUS_AGUARDANDO_ESTOQUE;
 
-        $bloqueio = $pedidoItem->id_deposito
+        $bloqueio = $pedidoItem->id_deposito || $aguardaFabrica
             ? null
             : ($reposicao ? 'Pedido item sem deposito de destino.' : 'Pedido item sem deposito de origem.');
 
@@ -817,40 +1315,56 @@ class EntregaProdutoService
             'tipo_origem' => ProdutoEntregaItem::ORIGEM_PEDIDO,
             'pedido_item_id' => $pedidoItem->id,
         ]);
-        $statusAtual = (string) ($entrega->status ?? '');
-        $statusAtual = ProdutoEntregaItem::normalizarStatus($statusAtual) ?: $statusAtual;
-        $mantemStatus = in_array($statusAtual, [
-            ProdutoEntregaItem::STATUS_ENTREGUE,
-            ProdutoEntregaItem::STATUS_RECEBIDO,
-            ProdutoEntregaItem::STATUS_CANCELADO,
-        ], true);
+        $possuiEstadoOperacional = $entrega->exists && (
+            max(
+                (int) $entrega->quantidade_reservada,
+                (int) $entrega->quantidade_recebida,
+                (int) $entrega->quantidade_expedida,
+                (int) $entrega->quantidade_entregue
+            ) > 0
+            || $entrega->eventos()
+                ->where('tipo_evento', '!=', ProdutoEntregaEvento::DEMANDA_CRIADA)
+                ->exists()
+        );
 
-        $entrega->fill([
+        $dadosEntrega = [
                 'tipo_origem' => ProdutoEntregaItem::ORIGEM_PEDIDO,
                 'origem_id' => $pedido->id,
                 'pedido_id' => $pedido->id,
                 'pedido_item_id' => $pedidoItem->id,
                 'id_variacao' => $pedidoItem->id_variacao,
                 'quantidade_total' => (int) $pedidoItem->quantidade,
-                'id_deposito_origem' => $reposicao ? null : $pedidoItem->id_deposito,
-                'id_deposito_destino' => $reposicao ? $pedidoItem->id_deposito : null,
                 'previsao_entrega' => $pedido->data_limite_entrega,
-                'status' => $mantemStatus ? $statusAtual : $status,
-                'em_revisao' => ! $pedidoItem->id_deposito,
+        ];
+
+        if (! $possuiEstadoOperacional) {
+            $dadosEntrega += [
+                'id_deposito_origem' => $aguardaFabrica ? null : ($reposicao ? null : $pedidoItem->id_deposito),
+                'id_deposito_destino' => $aguardaFabrica || $reposicao ? $pedidoItem->id_deposito : null,
+                'status' => $status,
+                'em_revisao' => ! $pedidoItem->id_deposito && ! $aguardaFabrica,
                 'bloqueio_motivo' => $bloqueio,
-        ]);
+            ];
+        }
+
+        $entrega->fill($dadosEntrega);
+        if ($possuiEstadoOperacional) {
+            $entrega->status = $this->statusOperacional($entrega);
+        }
         $entrega->save();
 
         $this->registrarEvento(
             $entrega,
             ProdutoEntregaEvento::DEMANDA_CRIADA,
             (int) $pedidoItem->quantidade,
-            $reposicao ? null : $pedidoItem->id_deposito,
-            $reposicao ? $pedidoItem->id_deposito : null,
+            $aguardaFabrica ? null : ($reposicao ? null : $pedidoItem->id_deposito),
+            $aguardaFabrica || $reposicao ? $pedidoItem->id_deposito : null,
             null,
             null,
             $usuarioId,
-            $reposicao ? 'Demanda de recebimento de reposicao criada.' : 'Demanda de pedido criada.',
+            $aguardaFabrica
+                ? 'Demanda de recebimento de fabrica criada.'
+                : ($reposicao ? 'Demanda de recebimento de reposicao criada.' : 'Demanda de pedido criada.'),
             ['pedido_item_id' => $pedidoItem->id],
             "pedido-item:{$pedidoItem->id}:demanda"
         );
@@ -869,13 +1383,15 @@ class EntregaProdutoService
         ?int $usuarioId,
         ?string $observacao,
         array $metadata,
-        string $idempotencyKey
+        string $idempotencyKey,
+        mixed $ocorridoEm = null
     ): ProdutoEntregaEvento {
         return ProdutoEntregaEvento::query()->firstOrCreate(
             ['idempotency_key' => $idempotencyKey],
             [
                 'produto_entrega_item_id' => $item->id,
                 'tipo_evento' => $tipo,
+                'ocorrido_em' => $ocorridoEm ?: now(),
                 'quantidade' => max(0, $quantidade),
                 'id_deposito_origem' => $depositoOrigem,
                 'id_deposito_destino' => $depositoDestino,
@@ -898,6 +1414,53 @@ class EntregaProdutoService
     private function eventoJaRegistrado(string $idempotencyKey): bool
     {
         return ProdutoEntregaEvento::query()->where('idempotency_key', $idempotencyKey)->exists();
+    }
+
+    private function validarContextoAntecipacao(Pedido $pedido, PedidoItem $pedidoItem): void
+    {
+        if ((int) $pedidoItem->id_pedido !== (int) $pedido->id) {
+            throw ValidationException::withMessages([
+                'item' => ['O item informado nao pertence a este pedido.'],
+            ]);
+        }
+
+        if (! $pedido->isVenda()) {
+            throw ValidationException::withMessages([
+                'pedido' => ['Atendimento antecipado e permitido somente para pedidos de venda.'],
+            ]);
+        }
+
+        if ($pedido->origem_abastecimento !== Pedido::ORIGEM_ABASTECIMENTO_FABRICA) {
+            throw ValidationException::withMessages([
+                'pedido' => ['Atendimento antecipado exige pedido com abastecimento vindo da fabrica.'],
+            ]);
+        }
+
+        if (! $pedidoItem->id_variacao) {
+            throw ValidationException::withMessages([
+                'item' => ['O item precisa estar vinculado a uma variacao canonica antes da antecipacao.'],
+            ]);
+        }
+    }
+
+    private function eventoEhAntecipacao(ProdutoEntregaEvento $evento): bool
+    {
+        $metadata = (array) ($evento->metadata_json ?? []);
+
+        return ($metadata['operacao'] ?? null) === self::OPERACAO_ANTECIPACAO
+            || str_contains((string) $evento->idempotency_key, ':antecipacao:')
+            || str_contains(mb_strtolower((string) $evento->observacao), 'atendimento antecipado');
+    }
+
+    /** @return array<int,string> */
+    private function relacoesEstadoAntecipacao(): array
+    {
+        return [
+            'pedido:id,tipo,origem_abastecimento',
+            'eventos.reserva.deposito:id,nome',
+            'depositoOrigem:id,nome',
+            'variacao.produto',
+        ];
     }
 
     private function statusRecebimento(int $total, int $recebido): string
@@ -972,35 +1535,40 @@ class EntregaProdutoService
             return;
         }
 
-        $restante = $quantidadeRecebida;
-        ProdutoEntregaItem::query()
-            ->where('pedido_id', $recebimento->pedido_id)
-            ->where('id_variacao', $recebimento->id_variacao)
-            ->where('status', ProdutoEntregaItem::STATUS_AGUARDANDO_ESTOQUE)
-            ->where('em_revisao', false)
-            ->orderBy('id')
-            ->get()
-            ->each(function (ProdutoEntregaItem $demanda) use (&$restante, $depositoId, $usuarioId) {
-                if ($restante <= 0) {
-                    return;
-                }
+        $demanda = $recebimento->tipo_origem === ProdutoEntregaItem::ORIGEM_PEDIDO
+            ? $recebimento
+            : ProdutoEntregaItem::query()
+                ->where('pedido_id', $recebimento->pedido_id)
+                ->where('id_variacao', $recebimento->id_variacao)
+                ->where('tipo_origem', ProdutoEntregaItem::ORIGEM_PEDIDO)
+                ->where('status', '!=', ProdutoEntregaItem::STATUS_CANCELADO)
+                ->orderBy('id')
+                ->first();
 
-                $pendente = max(0, (int) $demanda->quantidade_total - (int) $demanda->quantidade_reservada);
-                if ($pendente <= 0) {
-                    return;
-                }
+        if (!$demanda || $demanda->em_revisao) {
+            return;
+        }
 
-                $reservar = min($restante, $pendente);
-                $this->reservarItem(
-                    $demanda,
-                    $depositoId,
-                    $reservar,
-                    $usuarioId,
-                    'Reserva criada apos recebimento de fabrica.',
-                    'recebimento:' . Str::uuid()
-                );
-                $restante -= $reservar;
-            });
+        $atendido = max(
+            (int) $demanda->quantidade_reservada,
+            (int) $demanda->quantidade_expedida,
+            (int) $demanda->quantidade_entregue
+        );
+        $pendente = max(0, (int) $demanda->quantidade_total - $atendido);
+        $reservar = min($quantidadeRecebida, $pendente);
+
+        if ($reservar <= 0) {
+            return;
+        }
+
+        $this->reservarItem(
+            $demanda,
+            $depositoId,
+            $reservar,
+            $usuarioId,
+            'Reserva criada apos recebimento de fabrica.',
+            "recebimento:{$recebimento->id}:recebido:" . (int) $recebimento->quantidade_recebida
+        );
     }
 
     private function finalizarReposicaoSeRecebidaIntegralmente(ProdutoEntregaItem $recebimento, ?int $usuarioId): void
@@ -1046,6 +1614,15 @@ class EntregaProdutoService
 
         if ($possuiPendente) {
             return;
+        }
+
+        if (! $pedido->historicoStatus()->where('status', PedidoStatus::ENTREGA_ESTOQUE->value)->exists()) {
+            $pedido->historicoStatus()->create([
+                'status' => PedidoStatus::ENTREGA_ESTOQUE,
+                'data_status' => now(),
+                'usuario_id' => $usuarioId,
+                'observacoes' => 'Recebimento integral da fabrica registrado pelo fluxo operacional.',
+            ]);
         }
 
         $pedido->historicoStatus()->create([

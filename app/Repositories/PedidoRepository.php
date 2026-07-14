@@ -41,6 +41,10 @@ class PedidoRepository
             $query->where('tipo', $request->input('tipo'));
         }
 
+        if ($request->filled('status_operacional')) {
+            $this->aplicarFiltroOperacional($query, (string) $request->input('status_operacional'));
+        }
+
         if ($request->filled('data_inicio')) {
             $query->where('data_pedido', '>=', $request->input('data_inicio') . ' 00:00:00');
         }
@@ -70,5 +74,78 @@ class PedidoRepository
         }
 
         return $query;
+    }
+
+    private function aplicarFiltroOperacional(Builder $query, string $status): void
+    {
+        $principal = fn (Builder $item) => $item
+            ->where('tipo_origem', \App\Models\ProdutoEntregaItem::ORIGEM_PEDIDO)
+            ->where('status', '!=', \App\Models\ProdutoEntregaItem::STATUS_CANCELADO);
+
+        match ($status) {
+            'aguardando_fabrica', 'recebimento_pendente' => $query
+                ->where(function (Builder $pedido) {
+                    $pedido->where('origem_abastecimento', Pedido::ORIGEM_ABASTECIMENTO_FABRICA)
+                        ->orWhere('tipo', Pedido::TIPO_REPOSICAO);
+                })
+                ->whereHas('entregaItens', $principal)
+                ->whereDoesntHave('entregaItens', fn (Builder $item) => $item
+                    ->where('tipo_origem', \App\Models\ProdutoEntregaItem::ORIGEM_PEDIDO)
+                    ->where('status', '!=', \App\Models\ProdutoEntregaItem::STATUS_CANCELADO)
+                    ->where('quantidade_recebida', '>', 0)),
+            'recebimento_parcial' => $query
+                ->whereHas('entregaItens', fn (Builder $item) => $item
+                    ->where('tipo_origem', \App\Models\ProdutoEntregaItem::ORIGEM_PEDIDO)
+                    ->where('status', '!=', \App\Models\ProdutoEntregaItem::STATUS_CANCELADO)
+                    ->where('quantidade_recebida', '>', 0))
+                ->whereHas('entregaItens', fn (Builder $item) => $item
+                    ->where('tipo_origem', \App\Models\ProdutoEntregaItem::ORIGEM_PEDIDO)
+                    ->where('status', '!=', \App\Models\ProdutoEntregaItem::STATUS_CANCELADO)
+                    ->whereColumn('quantidade_recebida', '<', 'quantidade_total')),
+            'recebido_estoque' => $query->where(function (Builder $recebido) use ($principal) {
+                $recebido->where(function (Builder $integral) use ($principal) {
+                    $integral->whereHas('entregaItens', $principal)
+                        ->whereDoesntHave('entregaItens', fn (Builder $item) => $item
+                            ->where('tipo_origem', \App\Models\ProdutoEntregaItem::ORIGEM_PEDIDO)
+                            ->where('status', '!=', \App\Models\ProdutoEntregaItem::STATUS_CANCELADO)
+                            ->whereColumn('quantidade_recebida', '<', 'quantidade_total'));
+                })->orWhereHas('statusAtual', fn (Builder $status) => $status->where('status', 'entrega_estoque'));
+            }),
+            'aguardando_entrega_cliente' => $query
+                ->where('tipo', Pedido::TIPO_VENDA)
+                ->whereHas('entregaItens', fn (Builder $item) => $item
+                    ->where('tipo_origem', \App\Models\ProdutoEntregaItem::ORIGEM_PEDIDO)
+                    ->where('status', '!=', \App\Models\ProdutoEntregaItem::STATUS_CANCELADO)
+                    ->whereColumn('quantidade_entregue', '<', 'quantidade_total')),
+            'entregue_cliente' => $query
+                ->where('tipo', Pedido::TIPO_VENDA)
+                ->whereHas('entregaItens', $principal)
+                ->whereDoesntHave('entregaItens', fn (Builder $item) => $item
+                    ->where('tipo_origem', \App\Models\ProdutoEntregaItem::ORIGEM_PEDIDO)
+                    ->where('status', '!=', \App\Models\ProdutoEntregaItem::STATUS_CANCELADO)
+                    ->whereColumn('quantidade_entregue', '<', 'quantidade_total')),
+            'divergencia' => $query->where(function (Builder $pedido) {
+                $pedido->whereHas('entregaItens', fn (Builder $item) => $item->where('em_revisao', true))
+                    ->orWhereHas('entregaItens', fn (Builder $item) => $item
+                        ->where('tipo_origem', \App\Models\ProdutoEntregaItem::ORIGEM_PEDIDO)
+                        ->where(function (Builder $contador) {
+                            $contador->whereColumn('quantidade_recebida', '>', 'quantidade_total')
+                                ->orWhereColumn('quantidade_reservada', '>', 'quantidade_total')
+                                ->orWhereColumn('quantidade_expedida', '>', 'quantidade_total')
+                                ->orWhereColumn('quantidade_entregue', '>', 'quantidade_total');
+                        }))
+                    ->orWhere(function (Builder $legado) {
+                        $legado->whereHas('statusAtual', fn (Builder $status) => $status->where('status', 'entrega_estoque'))
+                            ->whereHas('entregaItens', fn (Builder $item) => $item
+                                ->where('tipo_origem', \App\Models\ProdutoEntregaItem::ORIGEM_PEDIDO)
+                                ->where(function (Builder $movimento) {
+                                    $movimento->where('quantidade_expedida', '>', 0)
+                                        ->orWhere('quantidade_entregue', '>', 0)
+                                        ->orWhereColumn('quantidade_recebida', '<', 'quantidade_total');
+                                }));
+                    });
+            }),
+            default => null,
+        };
     }
 }

@@ -20,6 +20,7 @@ class UpdatePedidoRequest extends FormRequest
 
             'id_cliente' => ['nullable', 'integer', 'exists:clientes,id'],
             'id_parceiro' => ['nullable', 'integer', 'exists:parceiros,id'],
+            'id_fornecedor' => ['nullable', 'integer', 'exists:fornecedores,id'],
 
             'data_pedido' => ['nullable', 'date'],
             'observacoes' => ['nullable', 'string', 'max:1000'],
@@ -58,7 +59,9 @@ class UpdatePedidoRequest extends FormRequest
 
         if (isset($input['itens']) && is_array($input['itens'])) {
             $input['itens'] = array_map(function ($item) {
-                if (!is_array($item)) return $item;
+                if (! is_array($item)) {
+                    return $item;
+                }
 
                 foreach (['observacoes'] as $k) {
                     if (array_key_exists($k, $item) && is_string($item[$k])) {

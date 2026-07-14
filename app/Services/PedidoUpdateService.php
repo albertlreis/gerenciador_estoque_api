@@ -6,6 +6,7 @@ use App\Helpers\AuthHelper;
 use App\Integrations\ContaAzul\Services\ContaAzulExportDispatchService;
 use App\Models\Pedido;
 use App\Models\PedidoItem;
+use App\Models\ProdutoEntregaItem;
 use App\Models\ProdutoVariacao;
 use App\Support\Auditoria\AuditoriaDiff;
 use Carbon\Carbon;
@@ -212,6 +213,7 @@ class PedidoUpdateService
                 }
 
                 $itemModel = $existentes->get($idItem);
+                $this->validarAlteracaoItemProcessado($itemModel, $variacaoId, $quantidade, $index);
                 $itemModel->update($payload);
                 $manterIds[] = $itemModel->id;
                 $itensAtualizados[] = $itemModel;
@@ -221,6 +223,18 @@ class PedidoUpdateService
             $novo = $pedido->itens()->create($payload);
             $manterIds[] = $novo->id;
             $itensAtualizados[] = $novo;
+        }
+
+        $removidos = ! empty($manterIds)
+            ? $existentes->whereNotIn('id', $manterIds)
+            : $existentes;
+        foreach ($removidos->values() as $indiceRemovido => $itemRemovido) {
+            $this->validarAlteracaoItemProcessado(
+                $itemRemovido,
+                (int) $itemRemovido->id_variacao,
+                0,
+                count($itensInput) + $indiceRemovido
+            );
         }
 
         if (!empty($manterIds)) {
@@ -269,6 +283,37 @@ class PedidoUpdateService
         }
 
         return (int) $variacao->id;
+    }
+
+    private function validarAlteracaoItemProcessado(PedidoItem $item, int $variacaoId, int $quantidade, int $index): void
+    {
+        $entrega = ProdutoEntregaItem::query()
+            ->where('tipo_origem', ProdutoEntregaItem::ORIGEM_PEDIDO)
+            ->where('pedido_item_id', $item->id)
+            ->first();
+
+        if (! $entrega) {
+            return;
+        }
+
+        $processado = max(
+            (int) $entrega->quantidade_reservada,
+            (int) $entrega->quantidade_recebida,
+            (int) $entrega->quantidade_expedida,
+            (int) $entrega->quantidade_entregue
+        );
+
+        if ($processado > 0 && (int) $item->id_variacao !== $variacaoId) {
+            throw ValidationException::withMessages([
+                "itens.$index.id_variacao" => ['A variacao nao pode ser alterada depois de haver recebimento, reserva ou entrega.'],
+            ]);
+        }
+
+        if ($quantidade < $processado) {
+            throw ValidationException::withMessages([
+                "itens.$index.quantidade" => ["A quantidade nao pode ser menor que o total ja processado ({$processado})."],
+            ]);
+        }
     }
 
     private function normalizarMoney(mixed $valor): float

@@ -232,7 +232,12 @@ class PedidoStatusHistoricoController extends Controller
             return response()->json(['message' => 'Status inválido para esse pedido.'], 422);
         }
 
-        $exigePrevisao = $this->statusFluxo->exigePrevisaoManual($pedido, $novoStatus);
+        if ($bloqueio = $this->validarStatusOperacionalCentral($pedido, $novoStatus)) {
+            return $bloqueio;
+        }
+
+        $exigePrevisao = $novoStatus !== PedidoStatus::ENTREGA_ESTOQUE->value
+            && $this->statusFluxo->exigePrevisaoManual($pedido, $novoStatus);
 
         if ($exigePrevisao && empty($dados['data_prevista'])) {
             return response()->json([
@@ -294,10 +299,6 @@ class PedidoStatusHistoricoController extends Controller
             if ($posAtual !== false && $posNovo < $posAtual) {
                 return response()->json(['message' => 'Não é permitido regredir o status.'], 422);
             }
-        }
-
-        if ($bloqueio = $this->validarStatusOperacionalCentral($pedido, $novoStatus)) {
-            return $bloqueio;
         }
 
         $previsaoSalva = null;
@@ -375,21 +376,86 @@ class PedidoStatusHistoricoController extends Controller
             ], 422);
         }
 
+        $fluxoV2 = (bool) config('pedidos.fluxo_operacional_v2_enabled');
+        $statusRecebimento = $fluxoV2 ? [PedidoStatus::ENTREGA_ESTOQUE->value] : [];
         $statusExpedicao = [PedidoStatus::ENVIO_CLIENTE->value];
         $statusEntrega = [PedidoStatus::ENTREGA_CLIENTE->value, PedidoStatus::FINALIZADO->value];
 
-        if (!in_array($novoStatus, [...$statusExpedicao, ...$statusEntrega], true)) {
+        if (!in_array($novoStatus, [...$statusRecebimento, ...$statusExpedicao, ...$statusEntrega], true)) {
             return null;
         }
 
+        if (
+            $fluxoV2
+            &&
+            in_array($novoStatus, $statusRecebimento, true)
+            && ! $pedido->isReposicao()
+            && $pedido->origem_abastecimento !== Pedido::ORIGEM_ABASTECIMENTO_FABRICA
+        ) {
+            return response()->json([
+                'code' => 'RECEBIMENTO_NAO_APLICAVEL',
+                'message' => 'Este pedido e atendido pelo estoque atual e nao possui recebimento de fabrica.',
+            ], 422);
+        }
+
+        $entregaService = app(EntregaProdutoService::class);
         $pedido->loadMissing('entregaItens');
-        $resumo = app(EntregaProdutoService::class)->resumoPedido($pedido);
+
+        if (
+            $fluxoV2
+            && $pedido->entregaItens->where('tipo_origem', \App\Models\ProdutoEntregaItem::ORIGEM_PEDIDO)->isEmpty()
+        ) {
+            $entregaService->criarDemandaPedido($pedido, auth()->id(), false);
+            $pedido->load('entregaItens');
+        }
+
+        $itens = $pedido->entregaItens
+            ->where('tipo_origem', \App\Models\ProdutoEntregaItem::ORIGEM_PEDIDO)
+            ->reject(fn ($item) => $item->status === \App\Models\ProdutoEntregaItem::STATUS_CANCELADO)
+            ->values();
+        $itens->loadMissing('variacao.produto');
+        $resumo = $entregaService->resumoPedido($pedido);
         $total = (int) ($resumo['quantidade_total'] ?? 0);
 
         if ($total <= 0) {
             return response()->json([
                 'message' => 'Pedido ainda nao possui demanda no fluxo central de entrega.',
             ], 422);
+        }
+
+        if (in_array($novoStatus, $statusRecebimento, true) && (int) $resumo['quantidade_recebida'] < $total) {
+            $pendencias = $itens
+                ->filter(fn ($item) => (int) $item->quantidade_recebida < (int) $item->quantidade_total)
+                ->map(function ($item) {
+                    $esperado = (int) $item->quantidade_total;
+                    $recebido = min($esperado, (int) $item->quantidade_recebida);
+
+                    return [
+                        'produto_entrega_item_id' => (int) $item->id,
+                        'pedido_item_id' => $item->pedido_item_id ? (int) $item->pedido_item_id : null,
+                        'id_variacao' => (int) $item->id_variacao,
+                        'produto' => $item->variacao?->produto?->nome,
+                        'esperado' => $esperado,
+                        'recebido' => $recebido,
+                        'faltante' => max(0, $esperado - $recebido),
+                        'id_deposito_destino' => $item->id_deposito_destino,
+                        'deposito_sugerido_id' => $item->id_deposito_destino,
+                    ];
+                })
+                ->values();
+
+            return response()->json([
+                'code' => 'RECEBIMENTO_ITENS_PENDENTE',
+                'message' => 'Registre o recebimento de todos os itens antes de marcar o pedido como recebido no estoque.',
+                'status_solicitado' => $novoStatus,
+                'resumo' => [
+                    'esperado' => $total,
+                    'recebido' => (int) $resumo['quantidade_recebida'],
+                    'faltante' => max(0, $total - (int) $resumo['quantidade_recebida']),
+                ],
+                'pendencias' => $pendencias,
+                'itens' => $pendencias,
+            ], 409);
         }
 
         if (in_array($novoStatus, $statusExpedicao, true) && (int) $resumo['quantidade_expedida'] < $total) {
@@ -399,9 +465,33 @@ class PedidoStatusHistoricoController extends Controller
         }
 
         if (in_array($novoStatus, $statusEntrega, true) && (int) $resumo['quantidade_entregue'] < $total) {
+            if (! $fluxoV2) {
+                return response()->json([
+                    'message' => 'Registre a entrega pelo fluxo central antes de marcar entrega ou finalizacao.',
+                ], 422);
+            }
+
             return response()->json([
-                'message' => 'Registre a entrega pelo fluxo central antes de marcar entrega ou finalizacao.',
-            ], 422);
+                'code' => 'ENTREGA_CLIENTE_ITENS_PENDENTE',
+                'message' => 'Registre a entrega de todos os itens antes de marcar a entrega ao cliente.',
+                'status_solicitado' => $novoStatus,
+                'resumo' => [
+                    'total' => $total,
+                    'entregue' => (int) $resumo['quantidade_entregue'],
+                    'faltante' => max(0, $total - (int) $resumo['quantidade_entregue']),
+                ],
+                'itens' => $itens
+                    ->filter(fn ($item) => (int) $item->quantidade_entregue < (int) $item->quantidade_total)
+                    ->map(fn ($item) => [
+                        'produto_entrega_item_id' => (int) $item->id,
+                        'pedido_item_id' => $item->pedido_item_id ? (int) $item->pedido_item_id : null,
+                        'id_variacao' => (int) $item->id_variacao,
+                        'produto' => $item->variacao?->produto?->nome,
+                        'total' => (int) $item->quantidade_total,
+                        'entregue' => min((int) $item->quantidade_total, (int) $item->quantidade_entregue),
+                        'faltante' => max(0, (int) $item->quantidade_total - (int) $item->quantidade_entregue),
+                    ])->values(),
+            ], 409);
         }
 
         return null;

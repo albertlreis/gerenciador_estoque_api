@@ -7,6 +7,7 @@ use App\Http\Requests\StorePedidoRequest;
 use App\Http\Requests\UpdatePedidoRequest;
 use App\Http\Resources\PedidoCompletoResource;
 use App\Enums\EstrategiaVinculoImportacao;
+use App\Enums\PedidoStatus;
 use App\Enums\TipoImportacao;
 use App\Models\Categoria;
 use App\Models\Deposito;
@@ -36,6 +37,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -124,6 +126,9 @@ class PedidoController extends Controller
             'historicoStatus.usuario:id,nome',
             'entregaItens.variacao.produto',
             'entregaItens.variacao.atributos',
+            'entregaItens.pedido:id,tipo,origem_abastecimento',
+            'entregaItens.eventos.reserva.deposito:id,nome',
+            'entregaItens.depositoOrigem:id,nome',
             'entregaItens.depositoDestino:id,nome',
             'devolucoes.itens.pedidoItem.variacao.produto',
             'devolucoes.itens.trocaItens.variacaoNova.produto',
@@ -706,12 +711,12 @@ class PedidoController extends Controller
                 'depositoOrigem:id,nome',
                 'depositoDestino:id,nome',
             ])
-            ->where('pedido_id', $pedido->id);
+            ->where('pedido_id', $pedido->id)
+            ->where('tipo_origem', ProdutoEntregaItem::ORIGEM_PEDIDO);
 
         $itens = $queryBase()
             ->whereNotIn('status', [
                 ProdutoEntregaItem::STATUS_CANCELADO,
-                ProdutoEntregaItem::STATUS_RECEBIDO,
                 ProdutoEntregaItem::STATUS_ENTREGUE,
             ])
             ->whereColumn('quantidade_entregue', '<', 'quantidade_total')
@@ -744,10 +749,14 @@ class PedidoController extends Controller
         Request $request,
         EntregaProdutoService $entregaService,
         EstoqueDisponibilidadeService $disponibilidade
-    ): Response {
+    ): Response|JsonResponse {
         $data = $request->validate([
+            'acao' => ['nullable', 'in:somente_pdf,registrar_entrega'],
             'registrar_entrega' => ['sometimes', 'boolean'],
-            'idempotency_key' => ['nullable', 'string', 'max:120'],
+            'idempotency_key' => ['nullable', 'string', 'max:120', 'regex:/^[A-Za-z0-9._:-]+$/'],
+            'data_entrega' => ['nullable', 'date'],
+            'recebedor' => ['nullable', 'string', 'max:255'],
+            'confirmar_entrega_sem_saldo' => ['sometimes', 'boolean'],
             'observacao' => ['nullable', 'string', 'max:1000'],
             'cliente_endereco_id' => ['nullable', 'integer'],
             'itens' => ['required', 'array', 'min:1'],
@@ -759,12 +768,22 @@ class PedidoController extends Controller
             'itens.*.alocacoes.*.quantidade' => ['required', 'integer', 'min:1'],
         ]);
 
-        $registrarEntrega = (bool) ($data['registrar_entrega'] ?? false);
+        $acao = $data['acao'] ?? ((bool) ($data['registrar_entrega'] ?? false)
+            ? 'registrar_entrega'
+            : 'somente_pdf');
+        $fluxoV2 = (bool) config('pedidos.fluxo_operacional_v2_enabled');
+        $registrarEntrega = $acao === 'registrar_entrega';
         $idempotencyKey = trim((string) ($data['idempotency_key'] ?? ''));
 
         if ($registrarEntrega && $idempotencyKey === '') {
             throw ValidationException::withMessages([
                 'idempotency_key' => ['Informe a chave de idempotencia para registrar a entrega.'],
+            ]);
+        }
+
+        if ($fluxoV2 && $registrarEntrega && empty($data['data_entrega'])) {
+            throw ValidationException::withMessages([
+                'data_entrega' => ['Informe a data efetiva da entrega ao cliente.'],
             ]);
         }
 
@@ -775,6 +794,24 @@ class PedidoController extends Controller
             'parceiro',
             'fornecedor',
         ])->findOrFail($pedidoId);
+
+        if ($fluxoV2 && $registrarEntrega && ! AuthHelper::hasPermissao('estoque.movimentar')) {
+            return response()->json([
+                'message' => 'Sem permissao para registrar entrega e movimentar estoque.',
+            ], 403);
+        }
+
+        if ($fluxoV2 && $registrarEntrega) {
+            $statusOperacional = $entregaService->statusOperacionalPedido($pedido->loadMissing(['statusAtual', 'entregaItens']));
+            if ((bool) ($statusOperacional['divergencia'] ?? false)) {
+                return response()->json([
+                    'code' => 'PEDIDO_DIVERGENTE_REQUER_RECONCILIACAO',
+                    'message' => 'O pedido possui divergencia operacional e precisa ser reconciliado antes da entrega.',
+                    'status_operacional' => $statusOperacional,
+                ], 409);
+            }
+        }
+
         $enderecoEntrega = ClienteEnderecoPdf::resolverParaPedido(
             $pedido,
             $data['cliente_endereco_id'] ?? null
@@ -797,6 +834,7 @@ class PedidoController extends Controller
                 'variacao.atributos',
             ])
             ->where('pedido_id', $pedido->id)
+            ->where('tipo_origem', ProdutoEntregaItem::ORIGEM_PEDIDO)
             ->whereIn('id', $selecionados->pluck('id'))
             ->get()
             ->keyBy('id');
@@ -815,6 +853,33 @@ class PedidoController extends Controller
             $disponibilidade
         );
 
+        $itensSemSaldo = $notaItens
+            ->filter(fn (ProdutoEntregaItem $item) => (int) $item->getAttribute('nota_entregar_sem_expedicao') > 0)
+            ->map(fn (ProdutoEntregaItem $item) => [
+                'produto_entrega_item_id' => (int) $item->id,
+                'pedido_item_id' => $item->pedido_item_id ? (int) $item->pedido_item_id : null,
+                'id_variacao' => (int) $item->id_variacao,
+                'produto' => $item->variacao?->produto?->nome,
+                'quantidade' => (int) $item->getAttribute('nota_quantidade'),
+                'disponivel' => max(0, (int) $item->getAttribute('nota_quantidade') - (int) $item->getAttribute('nota_entregar_sem_expedicao')),
+                'faltante' => (int) $item->getAttribute('nota_entregar_sem_expedicao'),
+                'quantidade_sem_saldo' => (int) $item->getAttribute('nota_entregar_sem_expedicao'),
+            ])
+            ->values();
+
+        if (
+            $fluxoV2
+            && $registrarEntrega
+            && $itensSemSaldo->isNotEmpty()
+            && ! ($data['confirmar_entrega_sem_saldo'] ?? false)
+        ) {
+            return response()->json([
+                'code' => 'ENTREGA_SEM_SALDO_REQUER_CONFIRMACAO',
+                'message' => 'Ha itens sem saldo disponivel. Confirme para registrar a entrega sem movimento fisico.',
+                'itens' => $itensSemSaldo,
+            ], 409);
+        }
+
         $pdfImageService = app(PdfImageService::class);
         $notaItens->each(function (ProdutoEntregaItem $item) use ($pdfImageService) {
             $item->setAttribute(
@@ -829,13 +894,23 @@ class PedidoController extends Controller
             'itens' => $notaItens,
             'geradoEm' => now('America/Belem')->format('d/m/Y H:i'),
             'observacaoNota' => $data['observacao'] ?? null,
+            'recebedor' => $data['recebedor'] ?? null,
             'registrarEntrega' => $registrarEntrega,
             'enderecoEntrega' => $enderecoEntrega,
         ])->setPaper('a4')->output();
 
         if ($registrarEntrega) {
-            DB::transaction(function () use ($notaItens, $entregaService, $idempotencyKey, $data) {
-                $notaItens->each(function (ProdutoEntregaItem $item) use ($entregaService, $idempotencyKey, $data) {
+            DB::transaction(function () use ($notaItens, $entregaService, $idempotencyKey, $data, $pedido, $fluxoV2) {
+                $ocorridoEm = ! empty($data['data_entrega'])
+                    ? Carbon::parse($data['data_entrega'], config('app.timezone'))
+                    : now();
+                $metadata = array_filter([
+                    'recebedor' => $data['recebedor'] ?? null,
+                    'confirmado_sem_saldo' => (bool) ($data['confirmar_entrega_sem_saldo'] ?? false),
+                    'origem' => 'nota_entrega',
+                ], fn ($valor) => $valor !== null && $valor !== '');
+
+                $notaItens->each(function (ProdutoEntregaItem $item) use ($entregaService, $idempotencyKey, $data, $ocorridoEm, $metadata) {
                     $entregarExpedido = (int) $item->getAttribute('nota_entregar_expedido');
                     $entregarExpedidoRegistrado = (bool) $item->getAttribute('nota_entregar_expedido_registrado');
 
@@ -845,7 +920,9 @@ class PedidoController extends Controller
                             $entregarExpedido,
                             auth()->id(),
                             $data['observacao'] ?? 'Entrega registrada via nota de entrega.',
-                            $this->notaEntregaEventoKey($idempotencyKey, (int) $item->id)
+                            $this->notaEntregaEventoKey($idempotencyKey, (int) $item->id, 'entregar-expedido'),
+                            ocorridoEm: $ocorridoEm,
+                            metadata: $metadata
                         );
                     }
 
@@ -858,8 +935,10 @@ class PedidoController extends Controller
                             $entregarSemExpedicao,
                             auth()->id(),
                             $data['observacao'] ?? 'Entrega registrada via nota de entrega sem saldo em estoque.',
-                            $this->notaEntregaEventoKey($idempotencyKey, (int) $item->id),
-                            true
+                            $this->notaEntregaEventoKey($idempotencyKey, (int) $item->id, 'entregar-sem-saldo'),
+                            true,
+                            $ocorridoEm,
+                            $metadata
                         );
                     }
 
@@ -879,7 +958,9 @@ class PedidoController extends Controller
                                 auth()->id(),
                                 $data['observacao'] ?? 'Expedicao registrada via nota de entrega.',
                                 ProdutoEntregaEvento::EXPEDIDO_CLIENTE,
-                                $this->notaEntregaEventoKey($idempotencyKey, (int) $item->id, 'expedir', $depositoId)
+                                $this->notaEntregaEventoKey($idempotencyKey, (int) $item->id, 'expedir', $depositoId),
+                                ocorridoEm: $ocorridoEm,
+                                metadata: $metadata
                             );
                         }
 
@@ -888,17 +969,62 @@ class PedidoController extends Controller
                             $quantidade,
                             auth()->id(),
                             $data['observacao'] ?? 'Entrega registrada via nota de entrega.',
-                            $this->notaEntregaEventoKey($idempotencyKey, (int) $item->id, 'entregar', $depositoId)
+                            $this->notaEntregaEventoKey($idempotencyKey, (int) $item->id, 'entregar', $depositoId),
+                            ocorridoEm: $ocorridoEm,
+                            metadata: $metadata
                         );
                     }
                 });
+
+                if (! $fluxoV2) {
+                    return;
+                }
+
+                $pedidoAtualizado = $pedido->fresh('entregaItens');
+                $resumo = $entregaService->resumoPedido($pedidoAtualizado);
+                $entregaCompleta = (int) $resumo['quantidade_total'] > 0
+                    && (int) $resumo['quantidade_entregue'] >= (int) $resumo['quantidade_total'];
+                $entregaIniciada = (int) $resumo['quantidade_entregue'] > 0;
+                $possuiStatusTerminal = $pedidoAtualizado->historicoStatus()
+                    ->whereIn('status', [
+                        PedidoStatus::ENTREGA_CLIENTE->value,
+                        PedidoStatus::FINALIZADO->value,
+                        PedidoStatus::CANCELADO->value,
+                    ])
+                    ->exists();
+
+                if ($entregaCompleta && ! $possuiStatusTerminal) {
+                    $pedidoAtualizado->historicoStatus()->create([
+                        'status' => PedidoStatus::ENTREGA_CLIENTE,
+                        'data_status' => $ocorridoEm,
+                        'usuario_id' => auth()->id(),
+                        'observacoes' => 'Entrega ao cliente concluida pela nota de entrega.',
+                    ]);
+                } elseif ($entregaIniciada && ! $possuiStatusTerminal) {
+                    $possuiEnvio = $pedidoAtualizado->historicoStatus()
+                        ->where('status', PedidoStatus::ENVIO_CLIENTE->value)
+                        ->exists();
+
+                    if (! $possuiEnvio) {
+                        $pedidoAtualizado->historicoStatus()->create([
+                            'status' => PedidoStatus::ENVIO_CLIENTE,
+                            'data_status' => $ocorridoEm,
+                            'usuario_id' => auth()->id(),
+                            'observacoes' => 'Entrega parcial ao cliente iniciada pela nota de entrega.',
+                        ]);
+                    }
+                }
             });
         }
 
         logAuditoria('pedido_pdf', 'Geração de PDF (nota de entrega)', [
-            'acao' => 'nota_entrega_pdf',
+            'evento' => 'nota_entrega_pdf',
             'pedido_id' => $pedido->id,
             'registrar_entrega' => $registrarEntrega,
+            'acao' => $acao,
+            'data_entrega' => $data['data_entrega'] ?? null,
+            'recebedor' => $data['recebedor'] ?? null,
+            'confirmar_entrega_sem_saldo' => (bool) ($data['confirmar_entrega_sem_saldo'] ?? false),
             'itens' => $notaItens->map(fn (ProdutoEntregaItem $item) => [
                 'produto_entrega_item_id' => $item->id,
                 'pedido_item_id' => $item->pedido_item_id,
@@ -1070,7 +1196,10 @@ class PedidoController extends Controller
             $entregarExpedidoRegistrado = false;
             $eventoEntregaExpedido = $registrarEntrega && $entregarExpedidoSolicitado > 0
                 ? ProdutoEntregaEvento::query()
-                    ->where('idempotency_key', $this->notaEntregaEventoKey($idempotencyKey, (int) $item->id))
+                    ->whereIn('idempotency_key', [
+                        $this->notaEntregaEventoKey($idempotencyKey, (int) $item->id, 'entregar-expedido'),
+                        $this->notaEntregaEventoKey($idempotencyKey, (int) $item->id),
+                    ])
                     ->first()
                 : null;
 
@@ -1090,14 +1219,17 @@ class PedidoController extends Controller
             if ($quantidadeDocumental !== null
                 && $entregarExpedidoSolicitado <= 0
                 && collect($selecionado['alocacoes'] ?? [])->isEmpty()) {
-                $eventoEntregaDireta = $registrarEntrega
+                $prefixoEventoDireto = "nota-entrega:{$idempotencyKey}:item:{$item->id}";
+                $eventosEntregaDireta = $registrarEntrega
                     ? ProdutoEntregaEvento::query()
-                        ->where('idempotency_key', $this->notaEntregaEventoKey($idempotencyKey, (int) $item->id))
-                        ->first()
-                    : null;
+                        ->where('tipo_evento', ProdutoEntregaEvento::ENTREGUE_CLIENTE)
+                        ->where('idempotency_key', 'like', $prefixoEventoDireto . '%')
+                        ->get()
+                    : collect();
+                $entregaDiretaJaRegistrada = $eventosEntregaDireta->isNotEmpty();
                 $quantidadeDocumental = (int) $quantidadeDocumental;
-                $quantidadeNota = $eventoEntregaDireta
-                    ? (int) $eventoEntregaDireta->quantidade
+                $quantidadeNota = $entregaDiretaJaRegistrada
+                    ? (int) $eventosEntregaDireta->sum('quantidade')
                     : $quantidadeDocumental;
 
                 if ($quantidadeNota <= 0) {
@@ -1106,25 +1238,84 @@ class PedidoController extends Controller
                     ]);
                 }
 
-                if (! $eventoEntregaDireta && $quantidadeNota > $pendenteTotal) {
+                if (! $entregaDiretaJaRegistrada && $quantidadeNota > $pendenteTotal) {
                     throw ValidationException::withMessages([
                         'itens' => ["A quantidade do item de entrega #{$item->id} excede o pendente total de entrega ({$pendenteTotal})."],
                     ]);
                 }
 
-                $entregarExpedidoDireto = $registrarEntrega && $quantidadeNota <= $pendenteExpedido
-                    ? $quantidadeNota
-                    : 0;
-                $entregarSemExpedicao = $registrarEntrega
-                    ? max(0, $quantidadeNota - $entregarExpedidoDireto)
-                    : 0;
+                if ($entregaDiretaJaRegistrada) {
+                    $chaveExpedido = $this->notaEntregaEventoKey($idempotencyKey, (int) $item->id, 'entregar-expedido');
+                    $chaveSemSaldo = $this->notaEntregaEventoKey($idempotencyKey, (int) $item->id, 'entregar-sem-saldo');
+                    $chaveLegada = $this->notaEntregaEventoKey($idempotencyKey, (int) $item->id);
+                    $entregarExpedidoDireto = (int) $eventosEntregaDireta
+                        ->whereIn('idempotency_key', [$chaveExpedido, $chaveLegada])
+                        ->sum('quantidade');
+                    $entregarSemExpedicao = (int) $eventosEntregaDireta
+                        ->where('idempotency_key', $chaveSemSaldo)
+                        ->sum('quantidade');
+                    $alocacoesAutomaticas = $eventosEntregaDireta
+                        ->map(function (ProdutoEntregaEvento $evento) use ($idempotencyKey, $item) {
+                            if (! preg_match('/:deposito:(\\d+):entregar$/', (string) $evento->idempotency_key, $matches)) {
+                                return null;
+                            }
+
+                            $depositoId = (int) $matches[1];
+
+                            return [
+                                'deposito_id' => $depositoId,
+                                'quantidade' => (int) $evento->quantidade,
+                                'expedicao_registrada' => ProdutoEntregaEvento::query()
+                                    ->where('idempotency_key', $this->notaEntregaEventoKey($idempotencyKey, (int) $item->id, 'expedir', $depositoId))
+                                    ->exists(),
+                                'entrega_registrada' => true,
+                            ];
+                        })
+                        ->filter()
+                        ->values();
+                } else {
+                    $entregarExpedidoDireto = $registrarEntrega
+                        ? min($quantidadeNota, $pendenteExpedido)
+                        : 0;
+                    $restanteAlocacao = $registrarEntrega
+                        ? max(0, $quantidadeNota - $entregarExpedidoDireto)
+                        : 0;
+                    $alocacoesAutomaticas = collect();
+
+                    foreach ($this->depositosDisponiveisNotaEntrega($item, $disponibilidade, $restanteAlocacao) as $deposito) {
+                        if ($restanteAlocacao <= 0) {
+                            break;
+                        }
+
+                        $quantidadeAlocada = min($restanteAlocacao, (int) $deposito['quantidade_utilizavel']);
+                        if ($quantidadeAlocada <= 0) {
+                            continue;
+                        }
+
+                        $alocacoesAutomaticas->push([
+                            'deposito_id' => (int) $deposito['id'],
+                            'quantidade' => $quantidadeAlocada,
+                            'expedicao_registrada' => false,
+                            'entrega_registrada' => false,
+                        ]);
+                        $restanteAlocacao -= $quantidadeAlocada;
+                    }
+
+                    $entregarSemExpedicao = $registrarEntrega ? $restanteAlocacao : 0;
+                }
 
                 $item->setAttribute('nota_quantidade', $quantidadeNota);
                 $item->setAttribute('nota_entregar_expedido', $entregarExpedidoDireto);
-                $item->setAttribute('nota_entregar_expedido_registrado', (bool) $eventoEntregaDireta);
+                $item->setAttribute(
+                    'nota_entregar_expedido_registrado',
+                    $entregaDiretaJaRegistrada && $entregarExpedidoDireto > 0
+                );
                 $item->setAttribute('nota_entregar_sem_expedicao', $entregarSemExpedicao);
-                $item->setAttribute('nota_entregar_sem_expedicao_registrado', (bool) $eventoEntregaDireta);
-                $item->setAttribute('nota_alocacoes', []);
+                $item->setAttribute(
+                    'nota_entregar_sem_expedicao_registrado',
+                    $entregaDiretaJaRegistrada && $entregarSemExpedicao > 0
+                );
+                $item->setAttribute('nota_alocacoes', $alocacoesAutomaticas->all());
                 $item->setAttribute('nota_modo', $registrarEntrega && $entregarSemExpedicao > 0 ? 'entrega_sem_saldo' : 'pendente_documental');
                 $itens->push($item);
 
@@ -1252,7 +1443,10 @@ class PedidoController extends Controller
             $temQuantidade = true;
 
             if (! ProdutoEntregaEvento::query()
-                ->where('idempotency_key', $this->notaEntregaEventoKey($idempotencyKey, (int) $item->id))
+                ->whereIn('idempotency_key', [
+                    $this->notaEntregaEventoKey($idempotencyKey, (int) $item->id, 'entregar-expedido'),
+                    $this->notaEntregaEventoKey($idempotencyKey, (int) $item->id),
+                ])
                 ->exists()) {
                 return false;
             }
@@ -1261,9 +1455,12 @@ class PedidoController extends Controller
         if ($quantidadeDireta > 0 && $entregarExpedido <= 0 && collect($selecionado['alocacoes'] ?? [])->isEmpty()) {
             $temQuantidade = true;
 
-            if (! ProdutoEntregaEvento::query()
-                ->where('idempotency_key', $this->notaEntregaEventoKey($idempotencyKey, (int) $item->id))
-                ->exists()) {
+            $quantidadeRegistrada = (int) ProdutoEntregaEvento::query()
+                ->where('tipo_evento', ProdutoEntregaEvento::ENTREGUE_CLIENTE)
+                ->where('idempotency_key', 'like', "nota-entrega:{$idempotencyKey}:item:{$item->id}%")
+                ->sum('quantidade');
+
+            if ($quantidadeRegistrada < $quantidadeDireta) {
                 return false;
             }
         }
@@ -1297,10 +1494,7 @@ class PedidoController extends Controller
             return 'Item de entrega nao encontrado.';
         }
 
-        if (in_array($item->status, [
-            ProdutoEntregaItem::STATUS_CANCELADO,
-            ProdutoEntregaItem::STATUS_RECEBIDO,
-        ], true)) {
+        if ($item->status === ProdutoEntregaItem::STATUS_CANCELADO) {
             return "O item de entrega #{$item->id} nao pode compor nota de entrega.";
         }
 

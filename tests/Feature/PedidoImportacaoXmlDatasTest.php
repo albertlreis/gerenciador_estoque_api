@@ -6,10 +6,12 @@ use App\Enums\PedidoStatus;
 use App\Models\Categoria;
 use App\Models\Deposito;
 use App\Models\Estoque;
+use App\Models\EstoqueMovimentacao;
 use App\Models\Fornecedor;
 use App\Models\Pedido;
 use App\Models\PedidoStatusHistorico;
 use App\Models\Produto;
+use App\Models\ProdutoEntregaItem;
 use App\Models\ProdutoVariacao;
 use App\Models\Usuario;
 use Carbon\CarbonImmutable;
@@ -39,6 +41,7 @@ class PedidoImportacaoXmlDatasTest extends TestCase
 
         $payload = [
             'importacao_id' => null,
+            'idempotency_key' => 'importacao-data-dd-mm-yyyy',
             'cliente' => [],
             'pedido' => [
                 'tipo' => 'reposicao',
@@ -88,6 +91,7 @@ class PedidoImportacaoXmlDatasTest extends TestCase
 
         $payload = [
             'importacao_id' => null,
+            'idempotency_key' => 'importacao-data-dd-mm-yy-ponto',
             'cliente' => [],
             'pedido' => [
                 'tipo' => 'reposicao',
@@ -134,6 +138,7 @@ class PedidoImportacaoXmlDatasTest extends TestCase
 
         $payload = [
             'importacao_id' => null,
+            'idempotency_key' => 'importacao-data-limite-dias-uteis',
             'cliente' => [],
             'pedido' => [
                 'tipo' => 'reposicao',
@@ -167,7 +172,7 @@ class PedidoImportacaoXmlDatasTest extends TestCase
         $this->assertSame('2025-01-06', optional($pedido->data_limite_entrega)->toDateString());
     }
 
-    public function test_confirma_importacao_com_reposicao_entregue_cria_status_criado_e_entrega_estoque(): void
+    public function test_confirma_importacao_com_reposicao_legada_permanece_pendente_no_fluxo_v2(): void
     {
         $usuario = Usuario::create([
             'nome' => 'Usuario Entrega',
@@ -203,6 +208,7 @@ class PedidoImportacaoXmlDatasTest extends TestCase
 
         $payload = [
             'importacao_id' => null,
+            'idempotency_key' => 'importacao-reposicao-legada-fluxo-v2',
             'cliente' => [],
             'pedido' => [
                 'tipo' => 'reposicao',
@@ -247,10 +253,17 @@ class PedidoImportacaoXmlDatasTest extends TestCase
             ->first();
 
         $this->assertNotNull($statusCriado);
-        $this->assertNotNull($statusEntregue);
-        $this->assertSame(
-            '2025-01-15',
-            CarbonImmutable::parse($statusEntregue->data_status)->toDateString()
-        );
+        $this->assertNull($statusEntregue);
+        $this->assertSame(Pedido::ORIGEM_ABASTECIMENTO_FABRICA, $pedido->origem_abastecimento);
+        $this->assertSame(0, (int) ProdutoEntregaItem::query()
+            ->where('pedido_id', $pedido->id)
+            ->value('quantidade_recebida'));
+        $this->assertSame(10, (int) Estoque::query()
+            ->where('id_variacao', $variacao->id)
+            ->where('id_deposito', $deposito->id)
+            ->value('quantidade'));
+        $this->assertSame(0, EstoqueMovimentacao::query()
+            ->where('pedido_id', $pedido->id)
+            ->count());
     }
 }

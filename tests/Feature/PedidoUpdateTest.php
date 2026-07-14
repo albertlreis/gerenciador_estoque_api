@@ -9,6 +9,8 @@ use App\Models\Parceiro;
 use App\Models\Pedido;
 use App\Models\PedidoItem;
 use App\Models\Produto;
+use App\Models\ProdutoEntregaEvento;
+use App\Models\ProdutoEntregaItem;
 use App\Models\ProdutoVariacao;
 use App\Models\Usuario;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -178,6 +180,69 @@ class PedidoUpdateTest extends TestCase
 
         $response = $this->putJson("/api/v1/pedidos/{$pedido->id}", $payload);
         $response->assertStatus(422);
+    }
+
+    public function test_bloqueia_variacao_e_quantidade_incompativeis_apos_evento_processado(): void
+    {
+        [$pedido, $item, $variacaoA, $variacaoB, $deposito] = $this->seedBase();
+
+        $item->update([
+            'quantidade' => 3,
+            'subtotal' => 300,
+        ]);
+
+        $entrega = ProdutoEntregaItem::create([
+            'tipo_origem' => ProdutoEntregaItem::ORIGEM_PEDIDO,
+            'origem_id' => $pedido->id,
+            'pedido_id' => $pedido->id,
+            'pedido_item_id' => $item->id,
+            'id_variacao' => $variacaoA->id,
+            'quantidade_total' => 3,
+            'quantidade_reservada' => 2,
+            'id_deposito_origem' => $deposito->id,
+            'status' => ProdutoEntregaItem::STATUS_RESERVADO,
+        ]);
+
+        ProdutoEntregaEvento::create([
+            'produto_entrega_item_id' => $entrega->id,
+            'tipo_evento' => ProdutoEntregaEvento::RESERVA_CRIADA,
+            'quantidade' => 2,
+            'id_deposito_origem' => $deposito->id,
+            'idempotency_key' => "pedido-update:{$pedido->id}:reserva-processada",
+        ]);
+
+        $this->putJson("/api/v1/pedidos/{$pedido->id}", [
+            'itens' => [[
+                'id' => $item->id,
+                'id_variacao' => $variacaoB->id,
+                'quantidade' => 3,
+                'preco_unitario' => 100,
+                'id_deposito' => $deposito->id,
+            ]],
+        ])->assertStatus(422)
+            ->assertJsonValidationErrors('itens.0.id_variacao');
+
+        $this->putJson("/api/v1/pedidos/{$pedido->id}", [
+            'itens' => [[
+                'id' => $item->id,
+                'id_variacao' => $variacaoA->id,
+                'quantidade' => 1,
+                'preco_unitario' => 100,
+                'id_deposito' => $deposito->id,
+            ]],
+        ])->assertStatus(422)
+            ->assertJsonValidationErrors('itens.0.quantidade');
+
+        $this->assertDatabaseHas('pedido_itens', [
+            'id' => $item->id,
+            'id_variacao' => $variacaoA->id,
+            'quantidade' => 3,
+        ]);
+        $this->assertSame(2, (int) $entrega->fresh()->quantidade_reservada);
+        $this->assertSame(1, ProdutoEntregaEvento::query()
+            ->where('produto_entrega_item_id', $entrega->id)
+            ->where('tipo_evento', ProdutoEntregaEvento::RESERVA_CRIADA)
+            ->count());
     }
 
     public function test_permite_editar_numero_externo_para_valor_ja_usado_por_outro_pedido(): void

@@ -16,6 +16,7 @@ class PedidoCompletoResource extends JsonResource
     public function toArray($request): array
     {
         $entregaResumo = app(\App\Services\EntregaProdutoService::class)->resumoPedido($this->resource);
+        $statusOperacional = app(\App\Services\EntregaProdutoService::class)->statusOperacionalPedido($this->resource);
         $agoraBelem = Carbon::now('America/Belem');
         $dataLimite = $this->data_limite_entrega ? Carbon::parse($this->data_limite_entrega) : null;
         $dataLimiteCalculada = null;
@@ -52,7 +53,11 @@ class PedidoCompletoResource extends JsonResource
             'data_pedido' => $this->data_pedido,
             'status'      => $statusAtualValor,
             'status_label' => $statusAtualValor ? $statusAtualMeta['label'] : null,
+            'status_acompanhamento' => $statusAtualValor,
+            'status_operacional' => $statusOperacional,
+            'proxima_acao' => $statusOperacional['proxima_acao'],
             'tipo'        => $this->tipo,
+            'origem_abastecimento' => $this->origem_abastecimento,
 
             'id_cliente'  => $this->id_cliente,
             'cliente' => $this->cliente ? [
@@ -96,6 +101,8 @@ class PedidoCompletoResource extends JsonResource
             'dias_uteis_restantes' => $diasUteisRestantes, // null quando não se aplica
             'atrasado_entrega'     => $atrasadoEntrega,
             'entrega_produtos'      => $entregaResumo,
+            'antecipacao'            => app(\App\Services\EntregaProdutoService::class)
+                ->resumoAntecipacaoPedido($this->resource),
             'entrega_itens'          => ProdutoEntregaItemResource::collection($this->whenLoaded('entregaItens')),
 
             'itens'      => PedidoItemResource::collection($this->itens),

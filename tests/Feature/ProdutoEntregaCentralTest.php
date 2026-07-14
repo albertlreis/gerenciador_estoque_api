@@ -55,7 +55,10 @@ class ProdutoEntregaCentralTest extends TestCase
         $this->assertSame(2, (int) $entrega->quantidade_expedida);
         $this->assertSame(3, (int) Estoque::query()->where('id_variacao', $variacao->id)->where('id_deposito', $deposito->id)->value('quantidade'));
         $this->assertSame(1, EstoqueMovimentacao::query()->where('pedido_id', $pedido->id)->count());
-        $this->assertSame('consumida', EstoqueReserva::query()->first()?->status);
+        $this->assertSame(
+            'consumida',
+            EstoqueReserva::query()->where('pedido_id', $pedido->id)->first()?->status
+        );
 
         $service->entregarPedido($pedido, $usuario->id);
 
@@ -239,8 +242,8 @@ class ProdutoEntregaCentralTest extends TestCase
         ]);
 
         $response
-            ->assertStatus(422)
-            ->assertJsonPath('message', 'Registre a entrega pelo fluxo central antes de marcar entrega ou finalizacao.');
+            ->assertStatus(409)
+            ->assertJsonPath('code', 'ENTREGA_CLIENTE_ITENS_PENDENTE');
 
         $this->assertDatabaseMissing('pedido_status_historico', [
             'pedido_id' => $pedido->id,
@@ -288,8 +291,8 @@ class ProdutoEntregaCentralTest extends TestCase
         $this->patchJson("/api/v1/pedidos/{$pedido->id}/status", [
             'status' => PedidoStatus::FINALIZADO->value,
             'data_prevista' => now()->toDateString(),
-        ])->assertStatus(422)
-            ->assertJsonPath('message', 'Registre a entrega pelo fluxo central antes de marcar entrega ou finalizacao.');
+        ])->assertStatus(409)
+            ->assertJsonPath('code', 'ENTREGA_CLIENTE_ITENS_PENDENTE');
 
         $service->entregarItem($entrega, 2, $usuario->id, 'Entrega restante teste', 'entrega-parcial-restante');
 
@@ -386,6 +389,8 @@ class ProdutoEntregaCentralTest extends TestCase
 
         $payload = [
             'registrar_entrega' => true,
+            'data_entrega' => now()->toDateString(),
+            'confirmar_entrega_sem_saldo' => true,
             'idempotency_key' => 'nota-entrega-sem-saldo',
             'observacao' => 'Tentativa de registro sem saldo',
             'itens' => [
@@ -404,7 +409,7 @@ class ProdutoEntregaCentralTest extends TestCase
         $this->assertSame(1, (int) $entrega->quantidade_entregue);
         $this->assertSame(0, EstoqueMovimentacao::query()->where('pedido_id', $pedido->id)->count());
         $this->assertSame(1, ProdutoEntregaEvento::query()
-            ->where('idempotency_key', "nota-entrega:nota-entrega-sem-saldo:item:{$entrega->id}:entregar")
+            ->where('idempotency_key', "nota-entrega:nota-entrega-sem-saldo:item:{$entrega->id}:entregar-sem-saldo")
             ->where('tipo_evento', ProdutoEntregaEvento::ENTREGUE_CLIENTE)
             ->whereNull('estoque_movimentacao_id')
             ->count());
@@ -479,6 +484,7 @@ class ProdutoEntregaCentralTest extends TestCase
         $entrega = ProdutoEntregaItem::query()->where('pedido_id', $pedido->id)->firstOrFail();
         $payload = [
             'registrar_entrega' => true,
+            'data_entrega' => now()->toDateString(),
             'idempotency_key' => 'nota-entrega-teste-1',
             'observacao' => 'Entrega pela nota',
             'itens' => [
@@ -498,7 +504,7 @@ class ProdutoEntregaCentralTest extends TestCase
         $this->assertSame(0, (int) Estoque::query()->where('id_variacao', $variacao->id)->where('id_deposito', $deposito->id)->value('quantidade'));
         $this->assertSame(1, EstoqueMovimentacao::query()->where('pedido_id', $pedido->id)->count());
         $this->assertSame(1, ProdutoEntregaEvento::query()
-            ->where('idempotency_key', "nota-entrega:nota-entrega-teste-1:item:{$entrega->id}:entregar")
+            ->where('idempotency_key', "nota-entrega:nota-entrega-teste-1:item:{$entrega->id}:entregar-expedido")
             ->where('tipo_evento', ProdutoEntregaEvento::ENTREGUE_CLIENTE)
             ->count());
     }
@@ -700,6 +706,7 @@ class ProdutoEntregaCentralTest extends TestCase
 
         $this->postJson("/api/v1/pedidos/{$pedido->id}/pdf/nota-entrega", [
             'registrar_entrega' => true,
+            'data_entrega' => now()->toDateString(),
             'idempotency_key' => 'reimpressao-nao-registra',
             'itens' => [
                 [
@@ -742,6 +749,7 @@ class ProdutoEntregaCentralTest extends TestCase
         $entrega = ProdutoEntregaItem::query()->where('pedido_id', $pedido->id)->firstOrFail();
         $payload = [
             'registrar_entrega' => true,
+            'data_entrega' => now()->toDateString(),
             'idempotency_key' => 'nota-entrega-split-depositos',
             'observacao' => 'Entrega dividida por depositos',
             'itens' => [
@@ -925,6 +933,7 @@ class ProdutoEntregaCentralTest extends TestCase
             'senha' => 'senha',
             'ativo' => true,
         ]);
+        Cache::put('permissoes_usuario_' . $usuario->id, ['estoque.movimentar'], now()->addHour());
 
         $cliente = Cliente::create([
             'nome' => 'Cliente Entrega',

@@ -15,9 +15,12 @@ class Pedido extends Model
 
     public const TIPO_VENDA     = 'venda';
     public const TIPO_REPOSICAO = 'reposicao';
+    public const ORIGEM_ABASTECIMENTO_FABRICA = 'fabrica';
+    public const ORIGEM_ABASTECIMENTO_ESTOQUE = 'estoque';
 
     protected $fillable = [
         'tipo',
+        'origem_abastecimento',
         'id_cliente',
         'id_usuario',
         'id_parceiro',

@@ -26,6 +26,7 @@ class ProdutoEntregaEvento extends Model
     protected $fillable = [
         'produto_entrega_item_id',
         'tipo_evento',
+        'ocorrido_em',
         'quantidade',
         'id_deposito_origem',
         'id_deposito_destino',
@@ -40,7 +41,15 @@ class ProdutoEntregaEvento extends Model
     protected $casts = [
         'metadata_json' => 'array',
         'quantidade' => 'integer',
+        'ocorrido_em' => 'datetime',
     ];
+
+    protected static function booted(): void
+    {
+        static::creating(function (ProdutoEntregaEvento $evento) {
+            $evento->ocorrido_em ??= now();
+        });
+    }
 
     public function item(): BelongsTo
     {

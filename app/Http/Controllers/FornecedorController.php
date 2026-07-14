@@ -27,14 +27,7 @@ class FornecedorController extends Controller
         $paginado = $this->service->listar($request->validated());
 
         return FornecedorResource::collection($paginado)
-            ->additional([
-                'meta' => [
-                    'current_page' => $paginado->currentPage(),
-                    'per_page'     => $paginado->perPage(),
-                    'total'        => $paginado->total(),
-                    'last_page'    => $paginado->lastPage(),
-                ]
-            ])->response();
+            ->response();
     }
 
     /**

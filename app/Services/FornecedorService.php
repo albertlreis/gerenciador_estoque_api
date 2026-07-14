@@ -64,7 +64,8 @@ class FornecedorService
         $orderDir = $filtros['order_dir'] ?? 'asc';
         $perPage  = (int)($filtros['per_page'] ?? 20);
 
-        $query->orderBy($orderBy, $orderDir);
+        $query->orderBy($orderBy, $orderDir)
+            ->orderBy('id', $orderDir);
 
         return $query->paginate($perPage);
     }

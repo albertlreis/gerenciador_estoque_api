@@ -135,3 +135,23 @@ jobs:
           remote_command="cd /home/docker/acadsoft/sierra-estoque && repo_git_dir=\$(find . -maxdepth 3 -type d -name .git -print -quit) && repo_dir=\${repo_git_dir%/.git} && if [ -n \"\${repo_dir}\" ]; then git -C \"\${repo_dir}\" fetch origin master && git -C \"\${repo_dir}\" reset --hard origin/master && git -C \"\${repo_dir}\" clean -fd; fi && ${compose_fix_cmd} && ${backup_cmd}./deploy.sh ${deploy_args} && docker exec sierra_estoque_app sh -lc 'mkdir -p /var/www/html/storage/framework/cache/data /var/www/html/storage/logs /var/www/html/bootstrap/cache && chown -R www-data:www-data /var/www/html/storage/framework/cache /var/www/html/storage/logs /var/www/html/bootstrap/cache && chmod -R ug+rwX /var/www/html/storage/framework/cache /var/www/html/storage/logs /var/www/html/bootstrap/cache'"
 
           ssh -p "${{ secrets.DEPLOY_PORT }}" "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" "${remote_command}"
+
+      - name: Verify production API health
+        run: |
+          health_url="https://estoque.sierra.acadsoft.com.br/api/v1/health"
+
+          for attempt in {1..12}; do
+            http_code="$(curl --silent --show-error --location --output health-response.json --write-out '%{http_code}' "${health_url}" || true)"
+
+            if [[ "${http_code}" =~ ^2[0-9][0-9]$ ]] && grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"' health-response.json; then
+              cat health-response.json
+              exit 0
+            fi
+
+            echo "Health check attempt ${attempt}/12 failed with HTTP ${http_code:-unavailable}."
+            cat health-response.json 2>/dev/null || true
+            sleep 5
+          done
+
+          echo "Production API did not become healthy at ${health_url}."
+          exit 1

@@ -12,6 +12,7 @@ use App\Services\AuditoriaLogService;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\LazyCollection;
 use Illuminate\Support\Str;
 
 class ImportacaoContaAzulService
@@ -509,7 +510,7 @@ class ImportacaoContaAzulService
 
         DB::table($table)->upsert(
             [$row],
-            ['loja_id', 'identificador_externo'],
+            ['loja_scope_id', 'identificador_externo'],
             $updateColumns
         );
     }
@@ -561,11 +562,10 @@ class ImportacaoContaAzulService
     }
 
     /**
-     * @return array<int, array{identificador_externo:string, tipo_evento:string, origem:string, payload:array<string, mixed>}>
+     * @return \Generator<int, array{identificador_externo:string, tipo_evento:string, origem:string, payload:array<string, mixed>}>
      */
-    private function parcelaSources(?int $lojaId): array
+    private function parcelaSources(?int $lojaId): \Generator
     {
-        $sources = [];
         foreach ([
             ['table' => 'stg_conta_azul_financeiro', 'tipo' => ContaAzulEntityType::TITULO, 'origem' => 'busca_contas_receber'],
             ['table' => 'stg_conta_azul_contas_pagar', 'tipo' => ContaAzulEntityType::CONTA_PAGAR, 'origem' => 'busca_contas_pagar'],
@@ -580,7 +580,7 @@ class ImportacaoContaAzulService
                     continue;
                 }
 
-                $sources[$config['tipo'] . ':' . $parcelaId] = [
+                yield [
                     'identificador_externo' => $parcelaId,
                     'tipo_evento' => $config['tipo'],
                     'origem' => $config['origem'],
@@ -588,8 +588,6 @@ class ImportacaoContaAzulService
                 ];
             }
         }
-
-        return array_values($sources);
     }
 
     /**
@@ -625,19 +623,19 @@ class ImportacaoContaAzulService
     }
 
     /**
-     * @return array<int, array{identificador_externo:string, payload:array<string, mixed>}>
+     * @return LazyCollection<int, array{identificador_externo:string, payload:array<string, mixed>}>
      */
-    private function stagingPayloadRows(string $table, ?int $lojaId): array
+    private function stagingPayloadRows(string $table, ?int $lojaId): LazyCollection
     {
         if (!Schema::hasTable($table)) {
-            return [];
+            return LazyCollection::make([]);
         }
 
         return DB::table($table)
+            ->select(['id', 'identificador_externo', 'payload_json'])
             ->when($lojaId !== null, fn ($q) => $q->where('loja_id', $lojaId))
             ->when($lojaId === null, fn ($q) => $q->whereNull('loja_id'))
-            ->orderBy('id')
-            ->get()
+            ->lazyById(500, 'id')
             ->map(function ($row) {
                 $payload = json_decode((string) $row->payload_json, true);
 
@@ -646,9 +644,7 @@ class ImportacaoContaAzulService
                     'payload' => is_array($payload) ? $payload : [],
                 ];
             })
-            ->filter(fn (array $row) => $row['payload'] !== [])
-            ->values()
-            ->all();
+            ->filter(fn (array $row) => $row['payload'] !== []);
     }
 
     private function countRows(string $table, ?int $lojaId): int

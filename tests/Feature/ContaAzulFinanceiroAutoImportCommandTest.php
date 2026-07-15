@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Integrations\ContaAzul\ContaAzulEntityType;
 use App\Integrations\ContaAzul\Models\ContaAzulConexao;
 use App\Integrations\ContaAzul\Services\ConciliacaoContaAzulService;
 use App\Integrations\ContaAzul\Services\ContaAzulConnectionService;
@@ -57,9 +58,15 @@ class ContaAzulFinanceiroAutoImportCommandTest extends TestCase
             ->with($conexao)
             ->andReturnTrue();
 
+        $entidadesImportadas = [];
         $importacao = $this->mock(ImportacaoContaAzulService::class);
         $importacao->shouldReceive('importarParaStaging')
             ->times(11)
+            ->withArgs(function ($conexaoRecebida, string $entidade, $lojaId) use ($conexao, &$entidadesImportadas): bool {
+                $entidadesImportadas[] = $entidade;
+
+                return $conexaoRecebida->is($conexao) && $lojaId === null;
+            })
             ->andReturn(['batch_id' => 1, 'lidos' => 0]);
 
         $this->mock(ConciliacaoContaAzulService::class)
@@ -86,5 +93,18 @@ class ContaAzulFinanceiroAutoImportCommandTest extends TestCase
             'acao' => 'financeiro_auto_import',
             'status' => 'concluido',
         ]);
+        $this->assertSame([
+            ContaAzulEntityType::PESSOA,
+            ContaAzulEntityType::CONTA_FINANCEIRA,
+            ContaAzulEntityType::CATEGORIA_FINANCEIRA,
+            ContaAzulEntityType::CENTRO_CUSTO,
+            ContaAzulEntityType::TITULO,
+            ContaAzulEntityType::CONTA_PAGAR,
+            ContaAzulEntityType::PARCELA,
+            ContaAzulEntityType::BAIXA,
+            ContaAzulEntityType::SALDO_CONTA_FINANCEIRA,
+            ContaAzulEntityType::FORMA_PAGAMENTO,
+            ContaAzulEntityType::NOTA,
+        ], $entidadesImportadas);
     }
 }

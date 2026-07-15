@@ -2,7 +2,6 @@
 
 namespace Tests\Unit\Integrations\ContaAzul;
 
-use App\Integrations\ContaAzul\Auth\ContaAzulOAuthService;
 use App\Integrations\ContaAzul\ContaAzulEntityType;
 use App\Integrations\ContaAzul\Import\CategoriaFinanceiraContaAzulImportAdapter;
 use App\Integrations\ContaAzul\Import\CentroCustoContaAzulImportAdapter;
@@ -35,8 +34,8 @@ class ImportacaoContaAzulServiceTest extends TestCase
             ->with('v1/financeiro/eventos-financeiros/contas-a-receber/buscar', 'token-valido', Mockery::on(function (array $query) {
                 return ($query['pagina'] ?? null) === 1
                     && ($query['tamanho_pagina'] ?? null) === 2
-                    && !empty($query['data_vencimento_de'])
-                    && !empty($query['data_vencimento_ate']);
+                    && ! empty($query['data_vencimento_de'])
+                    && ! empty($query['data_vencimento_ate']);
             }))
             ->andReturn([
                 'status' => 200,
@@ -73,11 +72,11 @@ class ImportacaoContaAzulServiceTest extends TestCase
             $connections,
             $client,
             [
-                new PessoaContaAzulImportAdapter(),
-                new ProdutoContaAzulImportAdapter(),
-                new VendaContaAzulImportAdapter(),
-                new TituloContaAzulImportAdapter(),
-                new NotaContaAzulImportAdapter(),
+                new PessoaContaAzulImportAdapter,
+                new ProdutoContaAzulImportAdapter,
+                new VendaContaAzulImportAdapter,
+                new TituloContaAzulImportAdapter,
+                new NotaContaAzulImportAdapter,
             ]
         );
 
@@ -94,6 +93,129 @@ class ImportacaoContaAzulServiceTest extends TestCase
             3,
             DB::table('stg_conta_azul_financeiro')->whereIn('identificador_externo', ['titulo-1', 'titulo-2', 'titulo-3'])->count()
         );
+    }
+
+    public function test_reimportacao_global_atualiza_o_mesmo_registro_de_staging(): void
+    {
+        $config = config('conta_azul');
+        $config['throttle_seconds_per_connection'] = 0;
+
+        $client = Mockery::mock(\App\Integrations\ContaAzul\Clients\ContaAzulClient::class);
+        $client->shouldReceive('get')
+            ->twice()
+            ->andReturn(
+                [
+                    'status' => 200,
+                    'json' => [
+                        'items' => [['id' => 'titulo-global-1', 'descricao' => 'Versao inicial']],
+                        'paginacao' => ['total_paginas' => 1],
+                    ],
+                ],
+                [
+                    'status' => 200,
+                    'json' => [
+                        'items' => [['id' => 'titulo-global-1', 'descricao' => 'Versao atualizada']],
+                        'paginacao' => ['total_paginas' => 1],
+                    ],
+                ]
+            );
+
+        $connections = Mockery::mock(ContaAzulConnectionService::class);
+        $connections->shouldReceive('getValidAccessToken')->twice()->andReturn('token-valido');
+
+        $service = $this->service($config, $connections, $client, [new TituloContaAzulImportAdapter]);
+        $conexao = ContaAzulConexao::create(['status' => 'ativa', 'ambiente' => 'homologacao']);
+
+        $service->importarParaStaging($conexao, ContaAzulEntityType::TITULO);
+        $service->importarParaStaging($conexao, ContaAzulEntityType::TITULO);
+
+        $rows = DB::table('stg_conta_azul_financeiro')
+            ->whereNull('loja_id')
+            ->where('identificador_externo', 'titulo-global-1')
+            ->get();
+
+        $this->assertCount(1, $rows);
+        $this->assertSame(0, (int) $rows->first()->loja_scope_id);
+        $this->assertSame('Versao atualizada', json_decode($rows->first()->payload_json, true)['descricao']);
+    }
+
+    public function test_mesmo_identificador_fica_isolado_entre_conexao_global_e_lojas(): void
+    {
+        $config = config('conta_azul');
+        $config['throttle_seconds_per_connection'] = 0;
+
+        $client = Mockery::mock(\App\Integrations\ContaAzul\Clients\ContaAzulClient::class);
+        $client->shouldReceive('get')
+            ->times(3)
+            ->andReturn([
+                'status' => 200,
+                'json' => [
+                    'items' => [['id' => 'titulo-compartilhado', 'descricao' => 'Mesmo identificador']],
+                    'paginacao' => ['total_paginas' => 1],
+                ],
+            ]);
+
+        $connections = Mockery::mock(ContaAzulConnectionService::class);
+        $connections->shouldReceive('getValidAccessToken')->times(3)->andReturn('token-valido');
+
+        $service = $this->service($config, $connections, $client, [new TituloContaAzulImportAdapter]);
+        $conexao = ContaAzulConexao::create(['status' => 'ativa', 'ambiente' => 'homologacao']);
+
+        $service->importarParaStaging($conexao, ContaAzulEntityType::TITULO);
+        $service->importarParaStaging($conexao, ContaAzulEntityType::TITULO, 10);
+        $service->importarParaStaging($conexao, ContaAzulEntityType::TITULO, 20);
+
+        $scopes = DB::table('stg_conta_azul_financeiro')
+            ->where('identificador_externo', 'titulo-compartilhado')
+            ->orderBy('loja_scope_id')
+            ->pluck('loja_scope_id')
+            ->map(fn ($scope) => (int) $scope)
+            ->all();
+
+        $this->assertSame([0, 10, 20], $scopes);
+    }
+
+    public function test_importacao_de_baixas_percorre_mais_de_um_lote_de_parcelas(): void
+    {
+        $config = config('conta_azul');
+        $config['throttle_seconds_per_connection'] = 0;
+
+        $client = Mockery::mock(\App\Integrations\ContaAzul\Clients\ContaAzulClient::class);
+        $client->shouldReceive('get')
+            ->times(501)
+            ->andReturn(['status' => 404, 'json' => []]);
+
+        $connections = Mockery::mock(ContaAzulConnectionService::class);
+        $connections->shouldReceive('getValidAccessToken')->once()->andReturn('token-valido');
+
+        $now = now();
+        $rows = [];
+        for ($i = 1; $i <= 501; $i++) {
+            $payload = json_encode(['id_parcela' => 'parcela-'.$i], JSON_UNESCAPED_UNICODE);
+            $rows[] = [
+                'loja_id' => null,
+                'identificador_externo' => 'parcela-'.$i,
+                'payload_json' => $payload,
+                'hash_payload' => hash('sha256', $payload),
+                'status_conciliacao' => 'novo',
+                'created_at' => $now,
+                'updated_at' => $now,
+            ];
+        }
+        foreach (array_chunk($rows, 250) as $chunk) {
+            DB::table('stg_conta_azul_parcelas')->insert($chunk);
+        }
+
+        $service = $this->service($config, $connections, $client, []);
+        $conexao = ContaAzulConexao::create(['status' => 'ativa', 'ambiente' => 'homologacao']);
+
+        $resultado = $service->importarParaStaging($conexao, ContaAzulEntityType::BAIXA);
+
+        $this->assertSame(0, $resultado['lidos']);
+        $this->assertDatabaseHas('auditoria_logs', [
+            'id' => $resultado['batch_id'],
+            'status' => 'concluido',
+        ]);
     }
 
     /**
@@ -126,7 +248,7 @@ class ImportacaoContaAzulServiceTest extends TestCase
             $config,
             $connections,
             $client,
-            [new $adapterClass()]
+            [new $adapterClass]
         );
 
         $conexao = ContaAzulConexao::create([
@@ -163,5 +285,10 @@ class ImportacaoContaAzulServiceTest extends TestCase
                 'stg_conta_azul_centros_custo',
             ],
         ];
+    }
+
+    private function service(array $config, $connections, $client, array $adapters): ImportacaoContaAzulService
+    {
+        return new ImportacaoContaAzulService($config, $connections, $client, $adapters);
     }
 }

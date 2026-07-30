@@ -1,6 +1,6 @@
 <?php
 
-namespace Tests\Unit\Integrations\ContaAzul;
+namespace Tests\Feature\Integration\ContaAzul;
 
 use App\Integrations\ContaAzul\Mappers\ContaAzulTituloMapper;
 use App\Models\ContaReceber;

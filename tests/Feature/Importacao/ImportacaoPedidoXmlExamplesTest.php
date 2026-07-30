@@ -66,7 +66,7 @@ class ImportacaoPedidoXmlExamplesTest extends TestCase
 
     public function test_reimportacao_xml_gera_novo_preview(): void
     {
-        $entry = self::xmlExamplesProvider()['Xml/nfe-35250207.xml'][0];
+        $entry = self::xmlExamplesProvider()['Xml/35250207266606000112550020000450551000623840-nfe.xml'][0];
 
         $usuario = Usuario::create([
             'nome' => 'Usuario Preview XML',

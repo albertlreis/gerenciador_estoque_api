@@ -1,6 +1,6 @@
 <?php
 
-namespace Tests\Unit;
+namespace Tests\Feature\Integration;
 
 use App\Models\Produto;
 use App\Models\ProdutoConjunto;

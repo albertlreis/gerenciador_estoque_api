@@ -9,20 +9,22 @@ trait CreatesTestDatabase
 {
     protected function ensureTestDatabaseExists(): void
     {
-        if (env('APP_ENV') !== 'testing') {
+        if (!app()->environment('testing')) {
             return;
         }
 
-        $dbName = env('DB_DATABASE');
+        $connection = (string) config('database.default');
+        $dbConfig = (array) config("database.connections.{$connection}", []);
+        $dbName = $dbConfig['database'] ?? null;
         if (!$dbName) {
             $this->logTestDbWarning('DB_DATABASE não definido para testes.');
             return;
         }
 
-        $host = env('DB_HOST', '127.0.0.1');
-        $port = env('DB_PORT', '3306');
-        $user = env('DB_USERNAME', 'root');
-        $pass = env('DB_PASSWORD', '');
+        $host = $dbConfig['host'] ?? '127.0.0.1';
+        $port = $dbConfig['port'] ?? '3306';
+        $user = $dbConfig['username'] ?? 'root';
+        $pass = $dbConfig['password'] ?? '';
 
         try {
             $dsn = "mysql:host={$host};port={$port};charset=utf8mb4";

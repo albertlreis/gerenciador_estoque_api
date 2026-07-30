@@ -1,6 +1,6 @@
 <?php
 
-namespace Tests\Unit\Integrations\ContaAzul;
+namespace Tests\Feature\Integration\ContaAzul;
 
 use App\Console\Commands\ContaAzul\ContaAzulImportAllCommand;
 use App\Console\Commands\ContaAzul\ContaAzulImportCommand;

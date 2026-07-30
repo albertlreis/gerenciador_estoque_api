@@ -2,6 +2,7 @@
 
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\V1\DashboardController as DashboardV1Controller;
+use App\Http\Controllers\Api\V1\DashboardHomePreferenceController;
 use App\Http\Controllers\Api\V1\UsuarioPreferenciaController;
 
 use App\Http\Controllers\{

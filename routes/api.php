@@ -124,6 +124,9 @@ Route::middleware(['auth:sanctum', 'senha.nao_obrigatoria'])
         });
 
         Route::prefix('dashboard')->group(function () {
+            Route::get('home/preferencias', [DashboardHomePreferenceController::class, 'show']);
+            Route::patch('home/preferencias', [DashboardHomePreferenceController::class, 'update']);
+            Route::delete('home/preferencias', [DashboardHomePreferenceController::class, 'destroy']);
             Route::get('admin/preferencias', [DashboardV1Controller::class, 'adminPreferencias']);
             Route::put('admin/preferencias', [DashboardV1Controller::class, 'atualizarAdminPreferencias']);
             Route::get('admin', [DashboardV1Controller::class, 'admin']);
@@ -679,6 +682,7 @@ Route::middleware(['auth:sanctum', 'senha.nao_obrigatoria'])
         Route::prefix('integrations/conta-azul')->group(function () {
             Route::get('oauth/authorize', [ContaAzulOAuthController::class, 'redirect']);
             Route::get('status', [ContaAzulIntegracaoController::class, 'status']);
+            Route::get('health', [ContaAzulIntegracaoController::class, 'health']);
             Route::get('local-lookup', [ContaAzulIntegracaoController::class, 'localLookup']);
             Route::get('pendencias', [ContaAzulIntegracaoController::class, 'pendencias']);
             Route::get('pendencias/detalhes', [ContaAzulIntegracaoController::class, 'pendenciasDetalhadas']);

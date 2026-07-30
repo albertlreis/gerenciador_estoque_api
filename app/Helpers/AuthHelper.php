@@ -300,6 +300,34 @@ class AuthHelper
     }
 
     /**
+     * Permite consultar o estado sanitizado da integracao Conta Azul para
+     * usuarios que possuam qualquer capacidade do modulo financeiro.
+     */
+    public static function podeVisualizarSaudeContaAzulNoFinanceiro(): bool
+    {
+        if (!auth()->check()) {
+            return false;
+        }
+
+        foreach (self::getPermissoes() as $permissao) {
+            if (!is_string($permissao)) {
+                continue;
+            }
+
+            if (Str::startsWith($permissao, [
+                'contas.pagar.',
+                'contas.receber.',
+                'financeiro.',
+                'despesas_recorrentes.',
+            ])) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * Identifica perfil administrador/vendedor sem depender de outro servico.
      * Usa cache e protege cenarios de teste onde tabelas de acesso nao existem.
      */

@@ -9,10 +9,13 @@ use App\Integrations\ContaAzul\Models\ContaAzulConexao;
 use App\Integrations\ContaAzul\Models\ContaAzulToken;
 use App\Integrations\ContaAzul\Support\StructuredLog;
 use Carbon\CarbonImmutable;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
 class ContaAzulConnectionService
 {
+    private const HEALTH_CACHE_TTL_MINUTES = 5;
+
     public function __construct(
         private readonly array $config,
         private readonly ContaAzulOAuthService $oauth,
@@ -65,7 +68,7 @@ class ContaAzulConnectionService
 
         $expiresAt = CarbonImmutable::now()->addSeconds(max(60, $expiresIn));
 
-        return DB::transaction(function () use ($conexao, $access, $refresh, $expiresAt, $scope) {
+        $token = DB::transaction(function () use ($conexao, $access, $refresh, $expiresAt, $scope) {
             $conexao->update([
                 'status' => 'ativa',
                 'ultimo_erro' => null,
@@ -83,6 +86,10 @@ class ContaAzulConnectionService
 
             return $token;
         });
+
+        $this->forgetHealthCache($conexao);
+
+        return $token;
     }
 
     /**
@@ -170,25 +177,175 @@ class ContaAzulConnectionService
      */
     public function healthcheck(ContaAzulConexao $conexao): bool
     {
+        try {
+            $res = $this->requestHealthcheck($conexao);
+            $ok = $res['status'] >= 200 && $res['status'] < 300;
+            $conexao->update([
+                'ultimo_healthcheck_em' => now(),
+                'ultimo_erro' => $ok ? null : $this->formatHealthcheckError($res),
+                'status' => $ok ? 'ativa' : 'erro',
+            ]);
+
+            return $ok;
+        } finally {
+            $this->forgetHealthCache($conexao);
+        }
+    }
+
+    /**
+     * @return array{
+     *     state:string,
+     *     connected:bool,
+     *     checked_at:string,
+     *     message:string
+     * }
+     */
+    public function healthStatus(?int $lojaId = null): array
+    {
+        $conexao = $this->latestForLoja($lojaId);
+        if (!$conexao || !$conexao->token) {
+            return $this->healthPayload(
+                'not_configured',
+                false,
+                'A integração com o Conta Azul não está conectada.'
+            );
+        }
+
+        return Cache::remember(
+            $this->healthCacheKey($conexao),
+            now()->addMinutes(self::HEALTH_CACHE_TTL_MINUTES),
+            fn () => $this->probeHealth($conexao->fresh(['token']))
+        );
+    }
+
+    public function forgetHealthCache(ContaAzulConexao $conexao): void
+    {
+        Cache::forget($this->healthCacheKey($conexao));
+    }
+
+    /**
+     * @return array{
+     *     state:string,
+     *     connected:bool,
+     *     checked_at:string,
+     *     message:string
+     * }
+     */
+    private function probeHealth(ContaAzulConexao $conexao): array
+    {
+        try {
+            $res = $this->requestHealthcheck($conexao);
+            $status = (int) $res['status'];
+
+            if ($status >= 200 && $status < 300) {
+                $conexao->update([
+                    'ultimo_healthcheck_em' => now(),
+                    'ultimo_erro' => null,
+                    'status' => 'ativa',
+                ]);
+
+                return $this->healthPayload(
+                    'healthy',
+                    true,
+                    'A integração com o Conta Azul está funcionando.'
+                );
+            }
+
+            $conexao->update([
+                'ultimo_healthcheck_em' => now(),
+                'ultimo_erro' => $this->formatHealthcheckError($res),
+                'status' => 'erro',
+            ]);
+
+            if (in_array($status, [401, 403], true)) {
+                return $this->healthPayload(
+                    'authentication_expired',
+                    false,
+                    'A autenticação com o Conta Azul expirou. Reconecte a integração.'
+                );
+            }
+        } catch (ContaAzulException $e) {
+            $conexao->update([
+                'ultimo_healthcheck_em' => now(),
+                'ultimo_erro' => $e->getMessage(),
+                'status' => 'erro',
+            ]);
+
+            if ($this->isAuthenticationFailure($e)) {
+                return $this->healthPayload(
+                    'authentication_expired',
+                    false,
+                    'A autenticação com o Conta Azul expirou. Reconecte a integração.'
+                );
+            }
+        } catch (\Throwable $e) {
+            $conexao->update([
+                'ultimo_healthcheck_em' => now(),
+                'ultimo_erro' => $e->getMessage(),
+                'status' => 'erro',
+            ]);
+
+            StructuredLog::integration('conta_azul.healthcheck.unexpected_failed', [
+                'conexao_id' => $conexao->id,
+            ], 'error');
+        }
+
+        return $this->healthPayload(
+            'unavailable',
+            false,
+            'Não foi possível conectar ao Conta Azul. Os dados podem não estar sincronizados.'
+        );
+    }
+
+    /**
+     * @return array{status:int, body?:?string, json?:mixed}
+     */
+    private function requestHealthcheck(ContaAzulConexao $conexao): array
+    {
         $path = (string) ($this->config['paths']['pessoas'] ?? '/v1/pessoas');
         $pageParam = (string) ($this->config['pagination']['page_param'] ?? 'pagina');
         $sizeParam = (string) ($this->config['pagination']['page_size_param'] ?? 'tamanho_pagina');
         $pageSize = max(10, (int) ($this->config['healthcheck_page_size'] ?? 10));
 
         $token = $this->getValidAccessToken($conexao);
-        $res = $this->client->get($path, $token, [
+
+        return $this->client->get($path, $token, [
             $pageParam => 1,
             $sizeParam => $pageSize,
         ]);
+    }
 
-        $ok = $res['status'] >= 200 && $res['status'] < 300;
-        $conexao->update([
-            'ultimo_healthcheck_em' => now(),
-            'ultimo_erro' => $ok ? null : $this->formatHealthcheckError($res),
-            'status' => $ok ? 'ativa' : 'erro',
-        ]);
+    private function healthCacheKey(ContaAzulConexao $conexao): string
+    {
+        return 'conta_azul:health:' . $conexao->id;
+    }
 
-        return $ok;
+    private function isAuthenticationFailure(ContaAzulException $e): bool
+    {
+        return in_array($e->reason, [
+            'refresh_token_ausente',
+            'refresh_token_falhou',
+            'token_nao_encontrado',
+            'invalid_grant',
+        ], true);
+    }
+
+    /**
+     * @return array{
+     *     state:string,
+     *     connected:bool,
+     *     checked_at:string,
+     *     message:string
+     * }
+     */
+    private function healthPayload(string $state, bool $connected, string $message): array
+    {
+        return [
+            'state' => $state,
+            'connected' => $connected,
+            'checked_at' => now()->toISOString(),
+            'message' => $message,
+        ];
     }
 
     /**

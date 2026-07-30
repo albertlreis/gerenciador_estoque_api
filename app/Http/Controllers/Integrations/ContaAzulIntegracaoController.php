@@ -54,6 +54,18 @@ class ContaAzulIntegracaoController extends Controller
         ]);
     }
 
+    public function health(Request $request): JsonResponse
+    {
+        if ($response = $this->autorizar('financeiro')) {
+            return $response;
+        }
+
+        return response()->json(array_merge(
+            $this->connections->healthStatus($this->lojaId($request)),
+            ['can_reconnect' => AuthHelper::podeAutenticarContaAzul()]
+        ));
+    }
+
     public function pendencias(Request $request): JsonResponse
     {
         if ($response = $this->autorizar('operacao')) {
@@ -521,6 +533,7 @@ class ContaAzulIntegracaoController extends Controller
         $permitido = match ($escopo) {
             'auth' => AuthHelper::podeAutenticarContaAzul(),
             'operacao' => AuthHelper::podeOperarContaAzul(),
+            'financeiro' => AuthHelper::podeVisualizarSaudeContaAzulNoFinanceiro(),
             default => false,
         };
 

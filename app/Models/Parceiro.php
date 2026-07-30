@@ -16,6 +16,7 @@ class Parceiro extends Model
         'nome',
         'tipo',
         'documento',
+        'data_nascimento',
         'email',
         'telefone',
         'consultor_nome',

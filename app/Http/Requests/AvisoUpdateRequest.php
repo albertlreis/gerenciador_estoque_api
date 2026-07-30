@@ -11,17 +11,35 @@ class AvisoUpdateRequest extends FormRequest
         return true;
     }
 
+    protected function prepareForValidation(): void
+    {
+        if ($this->has('ativo')) {
+            $this->merge([
+                'ativo' => $this->boolean('ativo'),
+            ]);
+        }
+
+        if ($this->has('data_inicio')) {
+            $this->merge([
+                'data_inicio' => $this->filled('data_inicio') ? $this->input('data_inicio') : null,
+            ]);
+        }
+
+        if ($this->has('data_fim')) {
+            $this->merge([
+                'data_fim' => $this->filled('data_fim') ? $this->input('data_fim') : null,
+            ]);
+        }
+    }
+
     public function rules(): array
     {
         return [
             'titulo' => ['sometimes', 'required', 'string', 'max:255'],
             'conteudo' => ['sometimes', 'required', 'string'],
-            'status' => ['sometimes', 'required', 'in:rascunho,publicado,arquivado'],
-            'prioridade' => ['sometimes', 'required', 'in:normal,importante'],
-            'pinned' => ['sometimes', 'boolean'],
-            'publicar_em' => ['sometimes', 'nullable', 'date'],
-            'expirar_em' => ['sometimes', 'nullable', 'date'],
+            'ativo' => ['sometimes', 'boolean'],
+            'data_inicio' => ['sometimes', 'nullable', 'date'],
+            'data_fim' => ['sometimes', 'nullable', 'date', 'after_or_equal:data_inicio'],
         ];
     }
 }
-

@@ -3,7 +3,6 @@
 namespace App\Http\Resources;
 
 use App\Enums\PedidoStatus;
-use App\Services\PedidoStatusFluxoService;
 use App\Traits\PedidoStatusTrait;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
@@ -36,11 +35,9 @@ class PedidoListResource extends JsonResource
      */
     public function toArray($request): array
     {
-        $entregaResumo = app(\App\Services\EntregaProdutoService::class)->resumoPedido($this->resource);
-        $statusOperacional = app(\App\Services\EntregaProdutoService::class)->statusOperacionalPedido($this->resource);
-        $statusFluxo = app(PedidoStatusFluxoService::class);
-        $statusAtualValue = $this->getStatusAtualCodigo($this->resource);
-        $statusAtualMeta = $statusFluxo->statusMeta($statusAtualValue);
+        $statusAtualEnum  = $this->getStatusAtualEnum($this->resource);
+        $statusAtualRaw   = $this->statusAtual?->getRawOriginal('status');
+        $statusAtualValue = $statusAtualEnum?->value ?? (is_string($statusAtualRaw) ? $statusAtualRaw : null);
 
         $dataUltimoStatus = $this->getDataUltimoStatus($this->resource);
         $proximoStatus    = $this->getProximoStatus($this->resource);
@@ -73,25 +70,15 @@ class PedidoListResource extends JsonResource
             'data'                   => $this->data_pedido,
             'cliente'                => $this->cliente,
             'parceiro'               => $this->parceiro,
-            'id_fornecedor'          => $this->id_fornecedor,
-            'fornecedor'             => $this->fornecedor ? [
-                'id' => $this->fornecedor->id,
-                'nome' => $this->fornecedor->nome,
-                'cnpj' => $this->fornecedor->cnpj,
-            ] : null,
             'vendedor'               => $this->usuario,
             'data_ultimo_status'     => $dataUltimoStatus,
             'valor_total'            => $this->valor_total,
 
             'status'                 => $statusAtualValue,
-            'status_label'           => $statusAtualValue ? $statusAtualMeta['label'] : null,
-            'status_acompanhamento'  => $statusAtualValue,
-            'status_operacional'     => $statusOperacional,
-            'proxima_acao'           => $statusOperacional['proxima_acao'],
-            'tipo'                   => $this->tipo,
-            'origem_abastecimento'   => $this->origem_abastecimento,
-            'proximo_status'         => $proximoStatus['codigo'] ?? null,
-            'proximo_status_label'   => $proximoStatus['label'] ?? null,
+            'status_label'           => $statusAtualEnum?->label(),
+            'separacao_status'       => $this->separacao_status,
+            'proximo_status'         => $proximoStatus?->value,
+            'proximo_status_label'   => $proximoStatus?->label(),
             'previsao'               => $previsao?->toDateString(),
             'atrasado'               => $atrasadoFluxo,
 
@@ -103,7 +90,6 @@ class PedidoListResource extends JsonResource
             'dias_atraso'            => $diasAtraso,
             'dias_uteis_restantes'   => $diasUteisRestantes, // null quando nao se aplica
             'atrasado_entrega'       => $atrasadoEntrega,
-            'entrega_produtos'        => $entregaResumo,
 
             'observacoes'            => $this->observacoes,
             'tem_devolucao'          => $this->devolucoes->isNotEmpty(),

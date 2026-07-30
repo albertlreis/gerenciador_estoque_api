@@ -20,6 +20,7 @@ class PedidoItem extends Model
         'id_carrinho_item',
         'id_variacao',
         'quantidade',
+        'preco_original',
         'preco_unitario',
         'custo_unitario',
         'subtotal',
@@ -28,12 +29,22 @@ class PedidoItem extends Model
     ];
 
     protected $casts = [
+        'preco_original' => 'decimal:2',
         'preco_unitario' => 'decimal:2',
         'custo_unitario' => 'decimal:2',
         'subtotal' => 'decimal:2',
         'entrega_pendente' => 'boolean',
         'data_liberacao_entrega' => 'datetime',
     ];
+
+    protected static function booted(): void
+    {
+        static::creating(function (PedidoItem $item) {
+            if ($item->preco_original === null && $item->preco_unitario !== null) {
+                $item->preco_original = $item->preco_unitario;
+            }
+        });
+    }
 
     public function pedido(): BelongsTo
     {

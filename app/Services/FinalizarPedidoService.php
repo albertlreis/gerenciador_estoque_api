@@ -4,24 +4,27 @@ namespace App\Services;
 
 use App\Enums\PedidoStatus;
 use App\Helpers\AuthHelper;
-use App\Integrations\ContaAzul\Services\ContaAzulExportDispatchService;
 use App\Http\Requests\StorePedidoRequest;
 use App\Models\Carrinho;
+use App\Models\CarrinhoItem;
+use App\Models\PedidoItem;
+use App\Services\Movimentacao\ReservarEstoqueStrategy;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
+use RuntimeException;
 use Throwable;
 
 /**
  * Caso de uso de finalização de pedido.
  *
  * Orquestra:
- * - Validação de depósitos/estoque (quando registrar movimentação);
+ * - Validação de depósitos/estoque para reserva;
  * - Criação do Pedido + Itens + Status;
  * - Criação de registros de Consignação (quando aplicável);
- * - Movimentação OU Reserva de estoque (ambos os modos: normal e consignado);
+ * - Reserva automática de estoque;
  * - Definição de data limite;
  * - Finalização do carrinho.
  */
@@ -33,17 +36,17 @@ final class FinalizarPedidoService
      * @param PedidoPrazoService           $prazoService          Cálculo/definição de data limite.
      * @param PedidoFinalizacaoValidator   $validator             Regras de validação antes de movimentar.
      * @param DepositoResolver             $resolver              Resolve depósito por item (mapa > item).
-     * @param MovimentarEstoqueStrategy    $movimentarStrategy    Strategy para registrar saídas (estoque).
      * @param ReservarEstoqueStrategy      $reservarStrategy      Strategy para criar reservas.
      */
     public function __construct(
         private readonly PedidoFactory $pedidoFactory,
         private readonly ConsignacaoFactory $consignacaoFactory,
         private readonly PedidoPrazoService $prazoService,
+        private readonly PedidoFinalizacaoValidator $validator,
         private readonly DepositoResolver $resolver,
-        private readonly EntregaProdutoService $entregaProdutoService,
-        private readonly EstoqueDisponibilidadeService $disponibilidade,
-        private readonly ContaAzulExportDispatchService $contaAzulExports,
+        private readonly ReservarEstoqueStrategy $reservarStrategy,
+        private readonly ContaReceberService $contaReceberService,
+        private readonly AuditLogger $auditLogger,
     ) {}
 
     /**
@@ -70,6 +73,7 @@ final class FinalizarPedidoService
 
         $query = Carrinho::with(['itens.variacao.produto'])
             ->where('id', $request->id_carrinho);
+        $query->with('itens.outlet.formasPagamento');
 
         if (!AuthHelper::podeVisualizarCarrinhosDeTodos()) {
             $query->where('id_usuario', $usuarioId);
@@ -91,50 +95,21 @@ final class FinalizarPedidoService
         }
 
         // 1) Mapa bruto vindo da UI
-        $depositosPorItemInput = collect($request->input('depositos_por_item', []))
-            ->keyBy('id_carrinho_item');
-
-        $itensFinalizacao = $this->aplicarAlocacoesPorDeposito($carrinho->itens, $depositosPorItemInput);
-
-        $depositosMapBruto = $depositosPorItemInput
-            ->filter(fn($r) => empty($r['alocacoes']))
+        $depositosMapBruto = collect($request->input('depositos_por_item', []))
+            ->keyBy('id_carrinho_item')
             ->map(fn($r) => $r['id_deposito'] ?? null)
             ->all();
 
         // 2) Mapa RESOLVIDO usando o service (mapa > item.id_deposito > null)
-        $depositosResolvidos = $this->resolverDepositosPorItem($itensFinalizacao, $depositosMapBruto);
+        $depositosResolvidos = $this->resolverDepositosPorItem($carrinho->itens, $depositosMapBruto);
 
         $emConsignacao = $request->boolean('modo_consignacao');
 
-        if ($emConsignacao) {
-            $this->validarDepositosConsignacao($itensFinalizacao, $depositosResolvidos);
-        }
+        $this->validator->validarAntesDeMovimentar($carrinho->itens, $depositosResolvidos);
+        $this->validarPrecosEditados($carrinho->itens);
 
-        if (!$emConsignacao && $request->boolean('registrar_movimentacao')) {
-            $saldoInsuficiente = $this->validarSaldoParaMovimentacao($itensFinalizacao, $depositosResolvidos);
-
-            if ($saldoInsuficiente->isNotEmpty()) {
-                $mensagens = $saldoInsuficiente
-                    ->map(fn (array $item) => $this->mensagemSaldoInsuficiente($item))
-                    ->values();
-
-                $message = $mensagens->count() === 1
-                    ? $mensagens->first()
-                    : 'Saldo insuficiente em ' . $mensagens->count() . ' produtos: ' . $mensagens->join('; ');
-
-                return response()->json([
-                    'message' => $message,
-                    'itens_saldo_insuficiente' => $saldoInsuficiente->values(),
-                    'errors' => [
-                        'estoque' => $mensagens->all(),
-                    ],
-                ], 422);
-            }
-        }
-
-        // Validação quando for movimentar estoque físico em pedido normal.
-        return DB::transaction(function () use ($request, $carrinho, $itensFinalizacao, $idUsuarioFinal, $depositosResolvidos, $emConsignacao) {
-            $total        = $itensFinalizacao->sum('subtotal');
+        return DB::transaction(function () use ($request, $carrinho, $usuarioId, $idUsuarioFinal, $depositosResolvidos, $emConsignacao) {
+            $total        = $this->calcularTotalItens($carrinho->itens);
             $dataPedido   = Carbon::now('America/Belem');
             $prazoPadrao  = (int) config('orders.prazo_padrao_dias_uteis', 60);
             $prazoUteis   = (int) ($request->input('prazo_dias_uteis') ?? $prazoPadrao);
@@ -156,8 +131,11 @@ final class FinalizarPedidoService
                 'prazo_dias_uteis' => $prazoUteis,
             ]);
 
-            $pedidoItensMap = $this->pedidoFactory->criarItens($pedido, $itensFinalizacao);
+            $this->auditLogger->logModel('created', $pedido, null, $pedido->fresh()->toArray(), $usuarioId);
+
+            $itensPedido = $this->pedidoFactory->criarItens($pedido, $carrinho->itens);
             $this->pedidoFactory->registrarStatus($pedido, PedidoStatus::PEDIDO_CRIADO, $idUsuarioFinal);
+            $this->registrarAuditoriaPrecoEditado($itensPedido, $usuarioId);
 
             // Consignação (registros + status)
             if ($emConsignacao) {
@@ -165,179 +143,45 @@ final class FinalizarPedidoService
                 $prazoData  = Carbon::now('America/Belem')->addDays($prazoDias);
 
                 // Usa o mapa resolvido para definir depósito das consignações
-                $this->consignacaoFactory->criarLote($pedido, $itensFinalizacao, $depositosResolvidos, $prazoData, $pedidoItensMap);
+                $this->consignacaoFactory->criarLote($pedido, $carrinho->itens, $depositosResolvidos, $prazoData);
                 $this->pedidoFactory->registrarStatus($pedido, PedidoStatus::CONSIGNADO, $idUsuarioFinal);
             }
 
-            // Movimentação OU Reserva (ambos usam o mapa resolvido)
-            $this->entregaProdutoService->criarDemandaPedido($pedido, $idUsuarioFinal, !$emConsignacao);
-
-            if ($emConsignacao) {
-                $pedido->load('consignacoes');
-                foreach ($pedido->consignacoes as $consignacao) {
-                    $central = $this->entregaProdutoService->criarDemandaConsignacao($consignacao, $idUsuarioFinal);
-
-                    $this->entregaProdutoService->reservarItem(
-                        $central,
-                        $consignacao->deposito_id,
-                        null,
-                        $idUsuarioFinal,
-                        "Reserva inicial da consignacao #{$consignacao->id}",
-                        "consignacao:{$consignacao->id}:reserva-inicial"
-                    );
-                }
-            }
+            $this->reservarStrategy->processar($pedido, $carrinho->itens, $depositosResolvidos, $idUsuarioFinal);
+            $pedido->forceFill(['separacao_status' => 'pendente'])->save();
 
             // Data limite
             $this->prazoService->definirDataLimite($pedido, $prazoUteis);
 
-            if (!$emConsignacao && $pedido->isVenda()) {
-                $this->exportarContaAzulBestEffort((int) $pedido->id, 'pedido_finalizado');
+            // Cria conta a receber (apenas se não for consignado)
+            if (!$emConsignacao) {
+                try {
+                    $this->contaReceberService->gerarPorPedido($pedido);
+                } catch (Throwable $e) {
+                    report($e);
+                    throw new RuntimeException("Falha ao gerar conta a receber: {$e->getMessage()}");
+                }
             }
 
             // Finaliza carrinho
             $carrinho->itens()->delete();
             $carrinho->update(['status' => 'finalizado']);
 
+            $pedidoFresh = $pedido->fresh(['itens.variacao', 'statusAtual']);
+            $this->auditLogger->logModel('finalized', $pedido, null, [
+                'status' => $pedidoFresh?->statusAtual?->status,
+                'separacao_status' => $pedidoFresh?->separacao_status,
+                'modo_consignacao' => $emConsignacao,
+                'registrar_movimentacao' => false,
+                'itens' => $pedidoFresh?->itens?->toArray() ?? [],
+            ], $usuarioId);
+
             return response()->json([
                 'message' => 'Pedido criado com sucesso.',
                 'pedido'  => $pedido->load('itens.variacao'),
+                'is_consignacao' => $emConsignacao,
             ], 201);
         });
-    }
-
-    private function aplicarAlocacoesPorDeposito(Collection $itensCarrinho, Collection $depositosPorItemInput): Collection
-    {
-        return $itensCarrinho->flatMap(function ($item) use ($depositosPorItemInput) {
-            $linha = $depositosPorItemInput->get($item->id);
-            $alocacoes = is_array($linha['alocacoes'] ?? null) ? $linha['alocacoes'] : [];
-
-            if (empty($alocacoes)) {
-                return [$item];
-            }
-
-            $totalAlocado = collect($alocacoes)->sum(fn ($alocacao) => (int) ($alocacao['quantidade'] ?? 0));
-            if ($totalAlocado !== (int) $item->quantidade) {
-                throw ValidationException::withMessages([
-                    'depositos_por_item' => ["A soma das alocações do item {$item->id} deve ser igual à quantidade do carrinho."],
-                ]);
-            }
-
-            return collect($alocacoes)->map(function ($alocacao) use ($item) {
-                $quantidade = (int) ($alocacao['quantidade'] ?? 0);
-                $depositoId = (int) ($alocacao['id_deposito'] ?? 0);
-
-                if ($quantidade <= 0 || $depositoId <= 0) {
-                    throw ValidationException::withMessages([
-                        'depositos_por_item' => ["Informe depósito e quantidade válidos para o item {$item->id}."],
-                    ]);
-                }
-
-                $clone = clone $item;
-                $clone->setAttribute('quantidade', $quantidade);
-                $clone->setAttribute('id_deposito', $depositoId);
-                $clone->setAttribute('subtotal', round($quantidade * (float) $item->preco_unitario, 2));
-
-                return $clone;
-            });
-        })->values();
-    }
-
-    private function exportarContaAzulBestEffort(int $pedidoId, string $evento): void
-    {
-        try {
-            DB::afterCommit(function () use ($pedidoId, $evento) {
-                try {
-                    $this->contaAzulExports->pedido($pedidoId, null, ['evento' => $evento]);
-                } catch (Throwable $e) {
-                    report($e);
-                }
-            });
-        } catch (Throwable $e) {
-            report($e);
-        }
-    }
-
-    private function validarSaldoParaMovimentacao(Collection $itensFinalizacao, array $depositosResolvidos): Collection
-    {
-        return $itensFinalizacao
-            ->filter(fn ($item) => ! empty($depositosResolvidos[$item->id] ?? $item->id_deposito))
-            ->groupBy(fn ($item) => ((int) $item->id_variacao) . ':' . ((int) ($depositosResolvidos[$item->id] ?? $item->id_deposito)))
-            ->flatMap(function (Collection $grupo) use ($depositosResolvidos) {
-                $primeiro = $grupo->first();
-                $depositoId = (int) ($depositosResolvidos[$primeiro->id] ?? $primeiro->id_deposito);
-                $disponivel = $this->disponibilidade->getDisponivel((int) $primeiro->id_variacao, $depositoId);
-                $solicitadoTotal = (int) $grupo->sum(fn ($item) => (int) $item->quantidade);
-
-                if ($disponivel >= $solicitadoTotal) {
-                    return collect();
-                }
-
-                $restante = $disponivel;
-
-                return $grupo
-                    ->filter(function ($item) use (&$restante) {
-                        $solicitado = (int) $item->quantidade;
-                        $temSaldoParaItem = $restante >= $solicitado;
-                        $restante = max(0, $restante - $solicitado);
-
-                        return ! $temSaldoParaItem;
-                    })
-                    ->map(fn ($item) => [
-                        'id_carrinho_item' => (int) $item->id,
-                        'id_variacao' => (int) $item->id_variacao,
-                        'id_deposito' => $depositoId,
-                        'produto' => $this->nomeProdutoItem($item),
-                        'disponivel' => max(0, $disponivel),
-                        'solicitado' => (int) $item->quantidade,
-                    ]);
-            })
-            ->values();
-    }
-
-    private function validarDepositosConsignacao(Collection $itensFinalizacao, array $depositosResolvidos): void
-    {
-        $itensSemDeposito = $itensFinalizacao
-            ->filter(fn ($item) => empty($depositosResolvidos[$item->id] ?? $item->id_deposito))
-            ->values();
-
-        if ($itensSemDeposito->isEmpty()) {
-            return;
-        }
-
-        $nomes = $itensSemDeposito
-            ->map(fn ($item) => $this->nomeProdutoItem($item))
-            ->unique()
-            ->values();
-
-        $message = 'Selecione o deposito de saida para todos os itens da consignacao.';
-        if ($nomes->count() === 1) {
-            $message .= ' Item pendente: ' . $nomes->first() . '.';
-        } elseif ($nomes->count() > 1) {
-            $message .= ' Itens pendentes: ' . $nomes->join(', ') . '.';
-        }
-
-        throw ValidationException::withMessages([
-            'depositos_por_item' => [$message],
-        ]);
-    }
-
-    private function nomeProdutoItem(object $item): string
-    {
-        $nomeCompleto = trim((string) ($item->nome_completo ?? $item->variacao?->nome_completo ?? ''));
-
-        if ($nomeCompleto !== '') {
-            return $nomeCompleto;
-        }
-
-        $produtoNome = trim((string) ($item->variacao?->produto?->nome ?? ''));
-
-        return $produtoNome !== '' ? $produtoNome : "Variação #{$item->id_variacao}";
-    }
-
-    private function mensagemSaldoInsuficiente(array $item): string
-    {
-        return "Saldo insuficiente para {$item['produto']}. Disponível: {$item['disponivel']}, solicitado: {$item['solicitado']}.";
     }
 
     /**
@@ -355,5 +199,62 @@ final class FinalizarPedidoService
             $resolvido[$item->id] = $this->resolver->resolverParaItem($item, $depositosMapBruto);
         }
         return $resolvido;
+    }
+
+    private function validarPrecosEditados(Collection $itensCarrinho): void
+    {
+        $erros = [];
+
+        foreach ($itensCarrinho as $index => $item) {
+            $precoOriginal = $this->resolverPrecoOriginal($item);
+            $precoFinal = round((float) $item->preco_unitario, 2);
+
+            if (abs($precoFinal - $precoOriginal) < 0.01) {
+                continue;
+            }
+
+            if (!AuthHelper::podeEditarPrecoPedido()) {
+                $erros["itens.{$index}.preco_unitario"] = 'Sem permissão para editar o preço do item na finalização.';
+            }
+        }
+
+        if ($erros !== []) {
+            throw ValidationException::withMessages($erros);
+        }
+    }
+
+    private function calcularTotalItens(Collection $itensCarrinho): float
+    {
+        return round($itensCarrinho->sum(function (CarrinhoItem $item) {
+            return round((float) $item->preco_unitario, 2) * (int) $item->quantidade;
+        }), 2);
+    }
+
+    private function registrarAuditoriaPrecoEditado(Collection $itensPedido, ?int $usuarioId): void
+    {
+        $itensPedido
+            ->filter(fn (PedidoItem $item) => round((float) $item->preco_original, 2) !== round((float) $item->preco_unitario, 2))
+            ->each(function (PedidoItem $item) use ($usuarioId) {
+                $this->auditLogger->logModel('price_overridden', $item, [
+                    'preco_original' => (float) $item->preco_original,
+                ], [
+                    'preco_original' => (float) $item->preco_original,
+                    'preco_unitario' => (float) $item->preco_unitario,
+                    'quantidade' => (int) $item->quantidade,
+                    'subtotal' => (float) $item->subtotal,
+                ], $usuarioId);
+            });
+    }
+
+    private function resolverPrecoOriginal(CarrinhoItem $item): float
+    {
+        $precoBase = round((float) ($item->variacao?->preco ?? 0), 2);
+        $percentualOutlet = round((float) ($item->outlet?->formasPagamento?->max('percentual_desconto') ?? 0), 2);
+
+        if ($item->outlet_id && $percentualOutlet > 0) {
+            return round($precoBase * (1 - ($percentualOutlet / 100)), 2);
+        }
+
+        return $precoBase;
     }
 }

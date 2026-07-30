@@ -11,17 +11,23 @@ class AvisoStoreRequest extends FormRequest
         return true;
     }
 
+    protected function prepareForValidation(): void
+    {
+        $this->merge([
+            'ativo' => $this->has('ativo') ? $this->boolean('ativo') : true,
+            'data_inicio' => $this->filled('data_inicio') ? $this->input('data_inicio') : null,
+            'data_fim' => $this->filled('data_fim') ? $this->input('data_fim') : null,
+        ]);
+    }
+
     public function rules(): array
     {
         return [
             'titulo' => ['required', 'string', 'max:255'],
             'conteudo' => ['required', 'string'],
-            'status' => ['nullable', 'in:rascunho,publicado,arquivado'],
-            'prioridade' => ['nullable', 'in:normal,importante'],
-            'pinned' => ['nullable', 'boolean'],
-            'publicar_em' => ['nullable', 'date'],
-            'expirar_em' => ['nullable', 'date', 'after:publicar_em'],
+            'ativo' => ['nullable', 'boolean'],
+            'data_inicio' => ['nullable', 'date'],
+            'data_fim' => ['nullable', 'date', 'after_or_equal:data_inicio'],
         ];
     }
 }
-

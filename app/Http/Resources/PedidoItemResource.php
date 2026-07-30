@@ -28,8 +28,10 @@ class PedidoItemResource extends JsonResource
                 ?? $this->variacao->chave_variacao
                 ?? null,
             'quantidade' => $quantidade,
+            'preco_original' => (float) ($this->preco_original ?? $precoVenda),
             'preco_venda' => $precoVenda,
             'preco_unitario' => $precoVenda,
+            'preco_editado' => round((float) ($this->preco_original ?? $precoVenda), 2) !== round($precoVenda, 2),
             'subtotal' => $this->subtotal,
             'id_deposito' => $this->id_deposito,
             'observacoes' => $this->observacoes,

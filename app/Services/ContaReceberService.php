@@ -79,6 +79,7 @@ final class ContaReceberService
 
             return $this->cmd->criar([
                 'pedido_id'        => (int) $pedido->id,
+                'cliente_id'       => (int) $pedido->id_cliente,
                 'descricao'        => $descricao,
                 'numero_documento' => $numeroDoc,
                 'data_emissao'     => $dataEmissao->toDateString(),

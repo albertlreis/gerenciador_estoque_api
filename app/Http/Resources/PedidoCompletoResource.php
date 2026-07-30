@@ -3,8 +3,6 @@
 namespace App\Http\Resources;
 
 use App\Services\BusinessDayService;
-use App\Services\PedidoStatusFluxoService;
-use App\Support\Pdf\ClienteEnderecoPdf;
 use App\Traits\PedidoStatusTrait;
 use Carbon\Carbon;
 use Illuminate\Http\Resources\Json\JsonResource;
@@ -15,8 +13,6 @@ class PedidoCompletoResource extends JsonResource
 
     public function toArray($request): array
     {
-        $entregaResumo = app(\App\Services\EntregaProdutoService::class)->resumoPedido($this->resource);
-        $statusOperacional = app(\App\Services\EntregaProdutoService::class)->statusOperacionalPedido($this->resource);
         $agoraBelem = Carbon::now('America/Belem');
         $dataLimite = $this->data_limite_entrega ? Carbon::parse($this->data_limite_entrega) : null;
         $dataLimiteCalculada = null;
@@ -35,13 +31,12 @@ class PedidoCompletoResource extends JsonResource
             $dataLimiteCalculada = $dataLimite->toDateString();
         }
 
-        $statusAtualValor = $this->getStatusAtualCodigo($this->resource);
-        $statusAtualMeta = app(PedidoStatusFluxoService::class)->statusMeta($statusAtualValor);
+        $statusAtualEnum = optional($this->statusAtual)->status;
 
         $diasUteisRestantes = null;
         $atrasadoEntrega = false;
 
-        if ($dataLimite && $this->contaPrazoEntrega($statusAtualValor)) {
+        if ($dataLimite && $this->contaPrazoEntrega($statusAtualEnum)) {
             $diasUteisRestantes = $agoraBelem->diffInWeekdays($dataLimite, false);
             $atrasadoEntrega    = $agoraBelem->greaterThan($dataLimite);
         }
@@ -51,13 +46,8 @@ class PedidoCompletoResource extends JsonResource
             'numero'      => $this->numero_externo,
             'numero_externo' => $this->numero_externo,
             'data_pedido' => $this->data_pedido,
-            'status'      => $statusAtualValor,
-            'status_label' => $statusAtualValor ? $statusAtualMeta['label'] : null,
-            'status_acompanhamento' => $statusAtualValor,
-            'status_operacional' => $statusOperacional,
-            'proxima_acao' => $statusOperacional['proxima_acao'],
+            'status'      => $statusAtualEnum,
             'tipo'        => $this->tipo,
-            'origem_abastecimento' => $this->origem_abastecimento,
 
             'id_cliente'  => $this->id_cliente,
             'cliente' => $this->cliente ? [
@@ -65,20 +55,12 @@ class PedidoCompletoResource extends JsonResource
                 'nome'     => $this->cliente->nome,
                 'email'    => $this->cliente->email,
                 'telefone' => $this->cliente->telefone,
-                'enderecos' => ClienteEnderecoPdf::paraResposta($this->cliente),
             ] : null,
 
             'id_parceiro' => $this->id_parceiro,
             'parceiro' => $this->parceiro ? [
                 'id'   => $this->parceiro->id,
                 'nome' => $this->parceiro->nome,
-            ] : null,
-
-            'id_fornecedor' => $this->id_fornecedor,
-            'fornecedor' => $this->fornecedor ? [
-                'id'   => $this->fornecedor->id,
-                'nome' => $this->fornecedor->nome,
-                'cnpj' => $this->fornecedor->cnpj,
             ] : null,
 
             'id_usuario' => $this->id_usuario,
@@ -100,10 +82,9 @@ class PedidoCompletoResource extends JsonResource
             'data_limite_entrega_calculada' => $dataLimiteCalculada,
             'dias_uteis_restantes' => $diasUteisRestantes, // null quando não se aplica
             'atrasado_entrega'     => $atrasadoEntrega,
-            'entrega_produtos'      => $entregaResumo,
-            'antecipacao'            => app(\App\Services\EntregaProdutoService::class)
-                ->resumoAntecipacaoPedido($this->resource),
-            'entrega_itens'          => ProdutoEntregaItemResource::collection($this->whenLoaded('entregaItens')),
+            'separacao_status'     => $this->separacao_status,
+            'separado_em'          => optional($this->separado_em)->toIso8601String(),
+            'entregue_em'          => optional($this->entregue_em)->toIso8601String(),
 
             'itens'      => PedidoItemResource::collection($this->itens),
             'historico'  => PedidoStatusResource::collection(

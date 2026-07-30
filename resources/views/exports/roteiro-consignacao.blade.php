@@ -34,31 +34,21 @@
 </head>
 <body>
 <div class="header">
-    <img src="{{ !extension_loaded('gd') ? 'data:image/svg+xml;base64,' . base64_encode('<svg xmlns="http://www.w3.org/2000/svg" width="120" height="26" viewBox="0 0 120 26"><rect width="120" height="26" rx="4" fill="#1f1a17"/><text x="60" y="17" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" fill="#f5ede2">Sierra</text></svg>') : public_path('logo.png') }}" width="120" alt="Logo"/>
+    <img src="{{ public_path('logo.png') }}" width="120" alt="Logo"/>
     <h3>{{ mb_strtoupper($tituloRoteiro ?? 'Roteiro de consignação') }}</h3>
 </div>
 
 @php
-    $enderecoPrincipal = $enderecoEntrega ?? $pedido->cliente?->enderecoPrincipal ?? null;
-    $enderecoTexto = '-';
-
-    if ($enderecoPrincipal) {
-        $cidade = trim((string)($enderecoPrincipal->cidade ?? ''));
-        $estado = trim((string)($enderecoPrincipal->estado ?? ''));
-        $cidadeEstado = trim($cidade . ($cidade !== '' && $estado !== '' ? '/' : '') . $estado);
-        $cep = trim((string)($enderecoPrincipal->cep ?? ''));
-
-        $enderecoTexto = trim(implode(' - ', array_filter([
-            $enderecoPrincipal->endereco ?? null,
+    $enderecoPrincipal = $pedido->cliente?->enderecoPrincipal ?? null;
+    $enderecoTexto = $enderecoPrincipal
+        ? trim(implode(' - ', array_filter([
+            $enderecoPrincipal->logradouro ?? null,
             $enderecoPrincipal->numero ?? null,
-            $enderecoPrincipal->complemento ?? null,
             $enderecoPrincipal->bairro ?? null,
-            $cidadeEstado !== '' ? $cidadeEstado : null,
-            $cep !== '' ? 'CEP ' . $cep : null,
-        ], fn($valor) => trim((string)$valor) !== '')));
-    } elseif (!empty($pedido->cliente?->endereco)) {
-        $enderecoTexto = $pedido->cliente->endereco;
-    }
+            $enderecoPrincipal->cidade ?? null,
+            $enderecoPrincipal->uf ?? null,
+        ])))
+        : ($pedido->cliente?->endereco ?? '-'); // fallback caso exista coluna legada
 @endphp
 
 <table width="100%" style="margin-bottom: 10px;">
@@ -85,6 +75,7 @@
                 <tr>
                     <th style="width: 90px;">IMG</th>
                     <th style="width: 45px;">QTD</th>
+                    <th style="width: 80px;">REF</th>
                     <th>DESCRIÇÃO</th>
                     <th style="width: 100px;">LOCALIZAÇÃO</th>
                 </tr>
@@ -93,16 +84,14 @@
                 @foreach ($itens as $item)
                     @php
                         $variacao   = $item->produtoVariacao;
-                        $referencia = trim((string)($variacao?->referencia ?? ''));
-                        $descricao  = trim((string)($variacao?->nome_completo ?? ''));
-                        $temReferencia = $referencia !== '' && $referencia !== '-';
-                        $temDescricao = $descricao !== '' && $descricao !== '-';
-                        $descricaoComReferencia = $temReferencia
-                            ? ($temDescricao ? "{$referencia} - {$descricao}" : $referencia)
-                            : ($temDescricao ? $descricao : '-');
+                        $produto    = $variacao?->produto;
+                        $referencia = $variacao?->referencia ?? '-';
+                        $descricao  = $variacao?->nome_completo ?? '-';
 
-                        $imgDataUri = trim((string)($item->pdf_imagem_data_uri ?? ''))
-                            ?: app(\App\Services\PdfImageService::class)->placeholderDataUri();
+                        $imgRel = optional($produto?->imagemPrincipal)->url ?? '';
+                        $imgAbs = ($imgRel && !empty($baseFsDir ?? null))
+                            ? ($baseFsDir . DIRECTORY_SEPARATOR . $imgRel)
+                            : '';
 
                         // LOCALIZAÇÃO: Estoque.id_deposito (corrigido!) x item->deposito_id (Consignacao)
                         $locTexto = '—';
@@ -132,10 +121,13 @@
                     @endphp
                     <tr>
                         <td style="text-align:center;">
-                            <img src="{{ $imgDataUri }}" width="80" height="64" style="object-fit:cover;" alt="Imagem produto"/>
+                            @if($imgAbs)
+                                <img src="{{ $imgAbs }}" width="80" style="max-height:64px;" alt="Imagem produto"/>
+                            @endif
                         </td>
                         <td class="nowrap">{{ (int)($item->quantidade ?? 0) }}</td>
-                        <td class="wrap">{{ $descricaoComReferencia }}</td>
+                        <td class="nowrap">{{ $referencia }}</td>
+                        <td class="wrap">{{ $descricao }}</td>
                         <td class="wrap">{{ $locTexto }}</td>
                     </tr>
                 @endforeach

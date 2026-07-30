@@ -12,7 +12,6 @@ class CentroCustoUpsertRequest extends FormRequest
     {
         $this->merge([
             'nome' => $this->input('nome') ? trim((string)$this->input('nome')) : null,
-            'slug' => $this->input('slug') ? trim((string)$this->input('slug')) : null,
             'ativo' => $this->toBoolOrNull($this->input('ativo')) ?? true,
             'padrao' => $this->toBoolOrNull($this->input('padrao')) ?? false,
         ]);
@@ -28,7 +27,6 @@ class CentroCustoUpsertRequest extends FormRequest
     {
         return [
             'nome' => ['required', 'string', 'max:255'],
-            'slug' => ['nullable', 'string', 'max:255'],
             'centro_custo_pai_id' => ['nullable', 'integer', 'exists:centros_custo,id'],
             'ativo' => ['nullable', 'boolean'],
             'padrao' => ['nullable', 'boolean'],

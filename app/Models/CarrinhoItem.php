@@ -44,6 +44,11 @@ class CarrinhoItem extends Model
         return $this->belongsTo(Deposito::class, 'id_deposito');
     }
 
+    public function outlet(): BelongsTo
+    {
+        return $this->belongsTo(ProdutoVariacaoOutlet::class, 'outlet_id');
+    }
+
     /**
      * Retorna o nome do produto relacionado, se carregado.
      */

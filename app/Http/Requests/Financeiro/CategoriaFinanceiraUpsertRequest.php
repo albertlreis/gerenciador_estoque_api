@@ -12,7 +12,6 @@ class CategoriaFinanceiraUpsertRequest extends FormRequest
     {
         $this->merge([
             'nome' => $this->input('nome') ? trim((string)$this->input('nome')) : null,
-            'slug' => $this->input('slug') ? trim((string)$this->input('slug')) : null,
             'tipo' => $this->input('tipo') ? strtolower(trim((string)$this->input('tipo'))) : null,
             'ativo' => $this->toBoolOrNull($this->input('ativo')) ?? true,
             'padrao' => $this->toBoolOrNull($this->input('padrao')) ?? false,
@@ -29,7 +28,6 @@ class CategoriaFinanceiraUpsertRequest extends FormRequest
     {
         return [
             'nome' => ['required', 'string', 'max:255'],
-            'slug' => ['nullable', 'string', 'max:255'],
             'tipo' => ['required', 'in:receita,despesa'],
             'categoria_pai_id' => ['nullable', 'integer', 'exists:categorias_financeiras,id'],
             'ativo' => ['nullable', 'boolean'],

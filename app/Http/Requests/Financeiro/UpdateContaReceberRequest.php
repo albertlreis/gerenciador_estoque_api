@@ -57,6 +57,14 @@ class UpdateContaReceberRequest extends FormRequest
                     // deixa o validator padrão lidar com formato inválido
                 }
             }
+
+            $conta = $this->route('conta');
+            $pedidoId = $this->input('pedido_id', $conta?->pedido_id);
+            $clienteId = $this->input('cliente_id', $conta?->cliente_id);
+
+            if (!$pedidoId && !$clienteId) {
+                $v->errors()->add('cliente_id', 'Cliente é obrigatório quando nenhum pedido for informado.');
+            }
         });
     }
 }

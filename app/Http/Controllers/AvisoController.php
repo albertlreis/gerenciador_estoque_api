@@ -3,207 +3,141 @@
 namespace App\Http\Controllers;
 
 use App\Helpers\AuthHelper;
-use App\Http\Requests\StoreAvisoRequest;
-use App\Http\Requests\UpdateAvisoRequest;
+use App\Http\Requests\AvisoIndexRequest;
+use App\Http\Requests\AvisoStoreRequest;
+use App\Http\Requests\AvisoUpdateRequest;
+use App\Http\Resources\AvisoResource;
 use App\Models\Aviso;
-use App\Models\AvisoLeitura;
-use App\Services\AuditoriaEventoService;
-use Illuminate\Database\Eloquent\Builder;
+use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Http\Request;
 
 class AvisoController extends Controller
 {
-    public function __construct(private readonly AuditoriaEventoService $auditoria)
+    public function index(AvisoIndexRequest $request): JsonResponse
     {
-    }
-
-    public function index(Request $request): JsonResponse
-    {
-        $usuarioId = (int) auth()->id();
-
-        $query = Aviso::query()
-            ->with([
-                'leituras' => fn ($q) => $q->where('usuario_id', $usuarioId),
-            ]);
-
-        $ativos = (int) $request->query('ativos', 1) === 1;
-        if ($ativos) {
-            $query->ativos();
+        if (!AuthHelper::podeVisualizarAvisos()) {
+            return response()->json(['message' => 'Sem permissão para visualizar avisos.'], 403);
         }
 
-        if ($request->filled('status')) {
-            $query->where('status', $request->string('status'));
-        }
+        $query = Aviso::query()->orderByDesc('created_at');
 
-        if ($request->filled('search')) {
-            $busca = '%' . trim((string) $request->string('search')) . '%';
-            $query->where(function (Builder $q) use ($busca): void {
-                $q->where('titulo', 'like', $busca)
-                    ->orWhere('conteudo', 'like', $busca);
+        if ($q = trim((string) $request->input('q', ''))) {
+            $query->where(function ($builder) use ($q) {
+                $builder
+                    ->where('titulo', 'like', "%{$q}%")
+                    ->orWhere('conteudo', 'like', "%{$q}%");
             });
         }
 
-        $query
-            ->orderByDesc('pinned')
-            ->orderByRaw("CASE WHEN prioridade = 'importante' THEN 0 ELSE 1 END")
-            ->orderByRaw('COALESCE(publicar_em, created_at) DESC');
+        if ($request->has('ativo')) {
+            $query->where('ativo', $request->boolean('ativo'));
+        }
 
-        $perPage = max(1, min(100, (int) $request->query('per_page', 15)));
+        if ($request->has('vigente')) {
+            $this->aplicarFiltroVigencia($query, $request->boolean('vigente'));
+        }
 
-        $paginado = $query->paginate($perPage)->through(function (Aviso $aviso) {
-            $arr = $aviso->toArray();
-            $arr['lido'] = !empty($arr['leituras']);
-            return $arr;
-        });
-
-        return response()->json($paginado);
+        return response()->json([
+            'data' => AvisoResource::collection($query->get()),
+        ]);
     }
 
-    public function store(StoreAvisoRequest $request): JsonResponse
+    public function ativos(AvisoIndexRequest $request): JsonResponse
     {
-        if (!$this->podeGerenciar()) {
+        if (!AuthHelper::podeVisualizarAvisos()) {
+            return response()->json(['message' => 'Sem permissão para visualizar avisos.'], 403);
+        }
+
+        $limit = (int) ($request->validated()['limit'] ?? 10);
+
+        $query = Aviso::query()
+            ->where('ativo', true)
+            ->orderByDesc('data_inicio')
+            ->orderByDesc('created_at')
+            ->limit($limit);
+
+        $this->aplicarFiltroVigencia($query, true);
+
+        return response()->json([
+            'data' => AvisoResource::collection($query->get()),
+        ]);
+    }
+
+    public function store(AvisoStoreRequest $request): JsonResponse
+    {
+        if (!AuthHelper::podeGerenciarAvisos()) {
             return response()->json(['message' => 'Sem permissão para gerenciar avisos.'], 403);
         }
 
-        $payload = $request->validated();
-        $payload['criado_por_usuario_id'] = auth()->id();
-        $payload['atualizado_por_usuario_id'] = auth()->id();
+        $aviso = Aviso::create([
+            ...$request->validated(),
+            'criado_por' => auth()->id(),
+        ]);
 
-        $aviso = Aviso::create($payload);
-
-        $this->auditoria->registrar(
-            module: 'avisos',
-            action: 'create',
-            label: 'Aviso criado',
-            auditable: $aviso,
-            metadata: [
-                'pinned' => (bool) $aviso->pinned,
-                'prioridade' => $aviso->prioridade,
-                'status_novo' => $aviso->status,
-            ]
-        );
-
-        return response()->json($aviso, 201);
+        return response()->json([
+            'data' => new AvisoResource($aviso),
+        ], 201);
     }
 
     public function show(Aviso $aviso): JsonResponse
     {
-        $usuarioId = (int) auth()->id();
-        $aviso->load([
-            'leituras' => fn ($q) => $q->where('usuario_id', $usuarioId),
+        if (!AuthHelper::podeVisualizarAvisos()) {
+            return response()->json(['message' => 'Sem permissão para visualizar avisos.'], 403);
+        }
+
+        return response()->json([
+            'data' => new AvisoResource($aviso),
         ]);
-
-        $arr = $aviso->toArray();
-        $arr['lido'] = !empty($arr['leituras']);
-
-        return response()->json($arr);
     }
 
-    public function update(UpdateAvisoRequest $request, Aviso $aviso): JsonResponse
+    public function update(AvisoUpdateRequest $request, Aviso $aviso): JsonResponse
     {
-        if (!$this->podeGerenciar()) {
+        if (!AuthHelper::podeGerenciarAvisos()) {
             return response()->json(['message' => 'Sem permissão para gerenciar avisos.'], 403);
         }
 
-        $payload = $request->validated();
-        $payload['atualizado_por_usuario_id'] = auth()->id();
+        $aviso->fill($request->validated());
+        $aviso->save();
 
-        $before = $aviso->only(['titulo', 'conteudo', 'status', 'prioridade', 'pinned', 'publicar_em', 'expirar_em']);
-        $aviso->fill($payload);
-
-        $mudancas = [];
-        foreach (array_keys($before) as $campo) {
-            $old = $before[$campo] ?? null;
-            $new = $aviso->{$campo};
-            if ((string) $old === (string) $new) {
-                continue;
-            }
-
-            $mudancas[] = [
-                'campo' => $campo,
-                'old' => $old,
-                'new' => $new,
-            ];
-        }
-
-        if ($aviso->isDirty()) {
-            $statusAnterior = $before['status'] ?? null;
-            $aviso->save();
-
-            $this->auditoria->registrar(
-                module: 'avisos',
-                action: 'update',
-                label: 'Aviso atualizado',
-                auditable: $aviso,
-                mudancas: $mudancas,
-                metadata: [
-                    'pinned' => (bool) $aviso->pinned,
-                    'prioridade' => $aviso->prioridade,
-                    'status_anterior' => $statusAnterior,
-                    'status_novo' => $aviso->status,
-                ]
-            );
-        }
-
-        return response()->json($aviso->fresh());
+        return response()->json([
+            'data' => new AvisoResource($aviso),
+        ]);
     }
 
     public function destroy(Aviso $aviso): JsonResponse
     {
-        if (!$this->podeGerenciar()) {
+        if (!AuthHelper::podeGerenciarAvisos()) {
             return response()->json(['message' => 'Sem permissão para gerenciar avisos.'], 403);
         }
 
-        $statusAnterior = $aviso->status;
-
-        if ($aviso->status !== 'arquivado') {
-            $aviso->status = 'arquivado';
-            $aviso->atualizado_por_usuario_id = auth()->id();
-            $aviso->save();
-
-            $this->auditoria->registrar(
-                module: 'avisos',
-                action: 'archive',
-                label: 'Aviso arquivado',
-                auditable: $aviso,
-                mudancas: [[
-                    'campo' => 'status',
-                    'old' => $statusAnterior,
-                    'new' => 'arquivado',
-                ]],
-                metadata: [
-                    'status_anterior' => $statusAnterior,
-                    'status_novo' => 'arquivado',
-                ]
-            );
-        }
-
-        return response()->json(['message' => 'Aviso arquivado com sucesso.']);
-    }
-
-    public function marcarComoLido(Aviso $aviso): JsonResponse
-    {
-        $usuarioId = (int) auth()->id();
-
-        $leitura = AvisoLeitura::updateOrCreate(
-            [
-                'aviso_id' => $aviso->id,
-                'usuario_id' => $usuarioId,
-            ],
-            [
-                'lido_em' => now(),
-            ]
-        );
+        $aviso->forceFill(['ativo' => false])->save();
 
         return response()->json([
-            'message' => 'Aviso marcado como lido.',
-            'leitura' => $leitura,
+            'message' => 'Aviso inativado com sucesso.',
         ]);
     }
 
-    private function podeGerenciar(): bool
+    private function aplicarFiltroVigencia($query, bool $vigente): void
     {
-        return AuthHelper::hasPermissao('avisos.manage');
+        $agora = CarbonImmutable::now(config('app.timezone', 'America/Sao_Paulo'));
+
+        if ($vigente) {
+            $query
+                ->where(function ($builder) use ($agora) {
+                    $builder->whereNull('data_inicio')->orWhere('data_inicio', '<=', $agora);
+                })
+                ->where(function ($builder) use ($agora) {
+                    $builder->whereNull('data_fim')->orWhere('data_fim', '>=', $agora);
+                });
+
+            return;
+        }
+
+        $query->where(function ($builder) use ($agora) {
+            $builder
+                ->where('ativo', false)
+                ->orWhere('data_inicio', '>', $agora)
+                ->orWhere('data_fim', '<', $agora);
+        });
     }
 }

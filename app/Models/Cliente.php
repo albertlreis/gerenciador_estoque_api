@@ -21,7 +21,7 @@ class Cliente extends Model
     ];
 
     protected $casts = [
-        'data_nascimento' => 'date',
+        'data_nascimento' => 'date:Y-m-d',
     ];
 
     public function enderecos(): HasMany

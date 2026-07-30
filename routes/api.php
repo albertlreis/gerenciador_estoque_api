@@ -1,21 +1,17 @@
 <?php
 
 use Illuminate\Support\Facades\Route;
-use App\Http\Controllers\Api\V1\DashboardController as DashboardV1Controller;
-use App\Http\Controllers\Api\V1\UsuarioPreferenciaController;
 
-use App\Http\Controllers\{
+use App\Http\Controllers\{AreaEstoqueController,
     AniversarioController,
-    AuditoriaLogController,
-    AvisoController,
+    EventoController,
     CarrinhoController,
     CarrinhoItemController,
+    AvisoController,
     CategoriaController,
     CategoriaFinanceiraController,
     CentroCustoController,
-    ClientLogController,
     ClienteController,
-    ConciliacaoBancariaController,
     ConfiguracaoController,
     ConsignacaoController,
     ConsignacaoRelatorioController,
@@ -29,34 +25,27 @@ use App\Http\Controllers\{
     DevolucaoController,
     DepositoController,
     EstoqueController,
+    EstoqueSeparacaoController,
     EstoqueMovimentacaoController,
     EstoqueRelatorioController,
     EstoqueTransferenciaController,
     FeriadoController,
     FinanceiroDashboardController,
-    FinanceiroExtratoController,
-    FinanceiroRelatorioController,
     FornecedorController,
     FormaPagamentoController,
     ImportEstoqueController,
-    ImportacaoNormalizadaController,
     LancamentoFinanceiroController,
+    LocalizacaoDimensaoController,
     LocalizacaoEstoqueController,
     OutletCatalogoController,
     ParceiroController,
     PedidoController,
-    PedidoAntecipacaoController,
-    PedidoReconciliacaoPreviewController,
-    PedidoRecebimentoController,
     PedidoEstoqueController,
     PedidoFabricaController,
     PedidoItemController,
     PedidosRelatorioController,
-    PedidoStatusConfiguracaoController,
     PedidoStatusHistoricoController,
-    ProdutoEntregaController,
     ProdutoController,
-    ProdutoConjuntoController,
     ProdutoImagemController,
     ProdutoVariacaoController,
     ProdutoVariacaoImagemController,
@@ -75,24 +64,13 @@ use App\Http\Controllers\Assistencia\{
 };
 
 use App\Http\Controllers\AssistenciaRelatorioController;
-use App\Http\Controllers\Integrations\BancoDoBrasilExtratosController;
-use App\Http\Controllers\Integrations\ContaAzulIntegracaoController;
-use App\Http\Controllers\Integrations\ContaAzulOAuthController;
-use App\Http\Controllers\Integrations\GoogleCalendarController;
-use App\Http\Controllers\Integrations\GoogleCalendarOAuthController;
 
 Route::get('v1/health', fn () => response()->json([
     'status' => 'ok',
     'service' => 'gerenciador-estoque-api',
 ]));
 
-Route::post('v1/client-logs', [ClientLogController::class, 'store'])
-    ->middleware('throttle:client-logs');
-
-Route::get('v1/integrations/conta-azul/callback', [ContaAzulOAuthController::class, 'callback']);
-Route::get('v1/integrations/google-calendar/callback', [GoogleCalendarOAuthController::class, 'callback']);
-
-Route::middleware(['auth:sanctum', 'senha.nao_obrigatoria'])
+Route::middleware('auth:sanctum')
     ->prefix('v1')
     ->group(function () {
 
@@ -101,36 +79,23 @@ Route::middleware(['auth:sanctum', 'senha.nao_obrigatoria'])
          * ============================================================ */
         Route::get('configuracoes', [ConfiguracaoController::class, 'listar']);
         Route::put('configuracoes/{chave}', [ConfiguracaoController::class, 'atualizar']);
-        Route::prefix('preferencias/telas')->group(function () {
-            Route::get('{screenKey}', [UsuarioPreferenciaController::class, 'show']);
-            Route::patch('{screenKey}', [UsuarioPreferenciaController::class, 'update']);
-            Route::delete('{screenKey}', [UsuarioPreferenciaController::class, 'destroy']);
-        });
-        Route::prefix('configuracoes/pedidos')->group(function () {
-            Route::get('statuses', [PedidoStatusConfiguracaoController::class, 'index']);
-            Route::post('statuses', [PedidoStatusConfiguracaoController::class, 'store']);
-            Route::put('statuses/{codigo}', [PedidoStatusConfiguracaoController::class, 'update']);
-            Route::delete('statuses/{codigo}', [PedidoStatusConfiguracaoController::class, 'destroy']);
-            Route::get('status-fluxos/{tipo}', [PedidoStatusConfiguracaoController::class, 'fluxo']);
-            Route::put('status-fluxos/{tipo}', [PedidoStatusConfiguracaoController::class, 'atualizarFluxo']);
-        });
 
         Route::get('dashboard/resumo', [DashboardController::class, 'resumo']);
-        Route::prefix('auditoria')->group(function () {
-            Route::get('logs', [AuditoriaLogController::class, 'index']);
-            Route::get('logs/filtros', [AuditoriaLogController::class, 'filters']);
-            Route::get('logs/{id}', [AuditoriaLogController::class, 'show'])->whereNumber('id');
-        });
-
-        Route::prefix('dashboard')->group(function () {
-            Route::get('admin/preferencias', [DashboardV1Controller::class, 'adminPreferencias']);
-            Route::put('admin/preferencias', [DashboardV1Controller::class, 'atualizarAdminPreferencias']);
-            Route::get('admin', [DashboardV1Controller::class, 'admin']);
-            Route::get('financeiro', [DashboardV1Controller::class, 'financeiro']);
-            Route::get('estoque', [DashboardV1Controller::class, 'estoque']);
-            Route::get('vendedor', [DashboardV1Controller::class, 'vendedor']);
-            Route::get('series/comercial', [DashboardV1Controller::class, 'seriesComercial']);
-        });
+        Route::get('aniversarios', [AniversarioController::class, 'index']);
+        Route::get('avisos/ativos', [AvisoController::class, 'ativos']);
+        Route::apiResource('avisos', AvisoController::class)
+            ->parameters(['avisos' => 'aviso'])
+            ->whereNumber('aviso')
+            ->except(['create', 'edit']);
+        Route::get('eventos/usuarios', [EventoController::class, 'usuarios']);
+        Route::post('eventos/{evento}/participantes', [EventoController::class, 'adicionarParticipante'])
+            ->whereNumber('evento');
+        Route::delete('eventos/{evento}/participantes/{usuario}', [EventoController::class, 'removerParticipante'])
+            ->whereNumber(['evento', 'usuario']);
+        Route::apiResource('eventos', EventoController::class)
+            ->parameters(['eventos' => 'evento'])
+            ->whereNumber('evento')
+            ->except(['create', 'edit']);
 
         /* ============================================================
          * CATÁLOGO (CATEGORIAS / ATRIBUTOS / PRODUTOS / VARIAÇÕES / OUTLET)
@@ -144,27 +109,12 @@ Route::middleware(['auth:sanctum', 'senha.nao_obrigatoria'])
 
         // Variações (busca/listagem global)
         Route::get('variacoes', [ProdutoVariacaoController::class, 'buscar']);
-        Route::get('variacoes/precos-custos', [ProdutoVariacaoController::class, 'precosCustos']);
-        Route::patch('produto-variacoes/precos-custos/bulk', [ProdutoVariacaoController::class, 'bulkPrecosCustos']);
-        Route::patch('produto-variacoes/{variacao}', [ProdutoVariacaoController::class, 'patchGlobal'])
-            ->whereNumber('variacao');
 
         Route::prefix('variacoes/{variacao}')->whereNumber('variacao')->group(function () {
             Route::get('imagem', [ProdutoVariacaoImagemController::class, 'show']);
-            Route::post('imagem', [ProdutoVariacaoImagemController::class, 'legacyStore']);
+            Route::post('imagem', [ProdutoVariacaoImagemController::class, 'store']);
             Route::put('imagem', [ProdutoVariacaoImagemController::class, 'update']);
             Route::delete('imagem', [ProdutoVariacaoImagemController::class, 'destroy']);
-
-            Route::get('imagens', [ProdutoVariacaoImagemController::class, 'index']);
-            Route::post('imagens', [ProdutoVariacaoImagemController::class, 'store']);
-            Route::put('imagens/{imagem}', [ProdutoVariacaoImagemController::class, 'updateImagem'])
-                ->whereNumber('imagem');
-            Route::patch('imagens/{imagem}', [ProdutoVariacaoImagemController::class, 'updateImagem'])
-                ->whereNumber('imagem');
-            Route::post('imagens/{imagem}/definir-principal', [ProdutoVariacaoImagemController::class, 'definirPrincipal'])
-                ->whereNumber('imagem');
-            Route::delete('imagens/{imagem}', [ProdutoVariacaoImagemController::class, 'destroyImagem'])
-                ->whereNumber('imagem');
         });
 
         // Catálogo Outlet
@@ -172,13 +122,6 @@ Route::middleware(['auth:sanctum', 'senha.nao_obrigatoria'])
             Route::get('motivos', [OutletCatalogoController::class, 'motivos']);
             Route::get('formas-pagamento', [OutletCatalogoController::class, 'formas']);
         });
-
-        Route::apiResource('produto-conjuntos', ProdutoConjuntoController::class)
-            ->parameters(['produto-conjuntos' => 'produtoConjunto'])
-            ->whereNumber('produtoConjunto')
-            ->except(['create', 'edit']);
-        Route::post('produto-conjuntos/{produtoConjunto}/hero', [ProdutoConjuntoController::class, 'uploadHero'])
-            ->whereNumber('produtoConjunto');
 
         // Outlet por variação (plural + padrão)
         Route::prefix('variacoes/{variacao}/outlets')->whereNumber('variacao')->group(function () {
@@ -230,7 +173,11 @@ Route::middleware(['auth:sanctum', 'senha.nao_obrigatoria'])
         Route::prefix('estoque')->group(function () {
             Route::get('atual', [EstoqueController::class, 'listarEstoqueAtual']);
             Route::get('resumo', [EstoqueController::class, 'resumoEstoque']);
-            Route::post('ajustes-manuais', [EstoqueController::class, 'registrarAjusteManual']);
+            Route::get('separacoes', [EstoqueSeparacaoController::class, 'index']);
+            Route::post('separacoes/{pedido}/marcar-separado', [EstoqueSeparacaoController::class, 'marcarSeparado'])
+                ->whereNumber('pedido');
+            Route::post('separacoes/{pedido}/marcar-entregue', [EstoqueSeparacaoController::class, 'marcarEntregue'])
+                ->whereNumber('pedido');
 
             // padroniza rota "por variação"
             Route::get('variacoes/{variacao}', [EstoqueController::class, 'porVariacao'])
@@ -247,12 +194,19 @@ Route::middleware(['auth:sanctum', 'senha.nao_obrigatoria'])
 
             Route::post('movimentacoes/lote', [EstoqueMovimentacaoController::class, 'lote']);
 
-            // Vinculo do estoque com uma posicao do mapa do deposito.
-            Route::get('localizacoes/pendencias', [LocalizacaoEstoqueController::class, 'pendencias']);
-            Route::patch('localizacoes/vinculos-em-massa', [LocalizacaoEstoqueController::class, 'atribuirEstoquesEmMassa']);
+            // Áreas (sem show)
+            Route::apiResource('areas', AreaEstoqueController::class)
+                ->parameters(['areas' => 'area'])
+                ->whereNumber('area')
+                ->only(['index', 'store', 'update', 'destroy'])
+                ->except(['create', 'edit']);
 
-            Route::patch('{estoque}/localizacao', [LocalizacaoEstoqueController::class, 'atribuirEstoque'])
-                ->whereNumber('estoque');
+            // Dimensões (sem show)
+            Route::apiResource('dimensoes', LocalizacaoDimensaoController::class)
+                ->parameters(['dimensoes' => 'dimensao'])
+                ->whereNumber('dimensao')
+                ->only(['index', 'store', 'update', 'destroy'])
+                ->except(['create', 'edit']);
 
             Route::get('transferencias', [EstoqueTransferenciaController::class, 'index']);
             Route::get('transferencias/{transferencia}', [EstoqueTransferenciaController::class, 'show'])->whereNumber('transferencia');
@@ -276,9 +230,9 @@ Route::middleware(['auth:sanctum', 'senha.nao_obrigatoria'])
             ->except(['create', 'edit']);
 
         // Localizações de estoque
-        Route::apiResource('depositos.localizacoes', LocalizacaoEstoqueController::class)
-            ->parameters(['depositos' => 'deposito', 'localizacoes' => 'localizacao'])
-            ->whereNumber(['deposito', 'localizacao'])
+        Route::apiResource('localizacoes-estoque', LocalizacaoEstoqueController::class)
+            ->parameters(['localizacoes-estoque' => 'localizacao'])
+            ->whereNumber('localizacao')
             ->except(['create', 'edit']);
 
         // Importações de estoque (pt-BR)
@@ -286,22 +240,6 @@ Route::middleware(['auth:sanctum', 'senha.nao_obrigatoria'])
             Route::post('/', [ImportEstoqueController::class, 'store']);
             Route::post('{importacao}/processar', [ImportEstoqueController::class, 'processar'])->whereNumber('importacao');
             Route::get('{importacao}', [ImportEstoqueController::class, 'show'])->whereNumber('importacao');
-        });
-
-        Route::prefix('importacoes/normalizadas')->group(function () {
-            Route::post('/', [ImportacaoNormalizadaController::class, 'store']);
-            Route::get('{importacao}', [ImportacaoNormalizadaController::class, 'show'])->whereNumber('importacao');
-            Route::get('{importacao}/preview', [ImportacaoNormalizadaController::class, 'preview'])->whereNumber('importacao');
-            Route::get('{importacao}/linhas', [ImportacaoNormalizadaController::class, 'linhas'])->whereNumber('importacao');
-            Route::get('{importacao}/conflitos', [ImportacaoNormalizadaController::class, 'conflitos'])->whereNumber('importacao');
-            Route::get('{importacao}/pendencias', [ImportacaoNormalizadaController::class, 'pendencias'])->whereNumber('importacao');
-            Route::post('{importacao}/confirmar', [ImportacaoNormalizadaController::class, 'confirmar'])->whereNumber('importacao');
-            Route::post('{importacao}/efetivar', [ImportacaoNormalizadaController::class, 'efetivar'])->whereNumber('importacao');
-            Route::get('{importacao}/relatorio', [ImportacaoNormalizadaController::class, 'relatorio'])->whereNumber('importacao');
-            Route::patch('linhas/{linha}/revisao', [ImportacaoNormalizadaController::class, 'revisarLinha'])
-                ->whereNumber('linha');
-            Route::patch('conflitos/{conflito}/revisao', [ImportacaoNormalizadaController::class, 'revisarConflito'])
-                ->whereNumber('conflito');
         });
 
         /* ============================================================
@@ -332,54 +270,23 @@ Route::middleware(['auth:sanctum', 'senha.nao_obrigatoria'])
             ->whereNumber('parceiro')
             ->except(['create', 'edit']);
 
-        Route::get('aniversarios', [AniversarioController::class, 'index']);
-
         Route::patch('parceiros/{parceiro}/restaurar', [ParceiroController::class, 'restore'])
             ->whereNumber('parceiro');
-
-        Route::apiResource('avisos', AvisoController::class)
-            ->parameters(['avisos' => 'aviso'])
-            ->whereNumber('aviso')
-            ->except(['create', 'edit']);
-
-        Route::post('avisos/{aviso}/ler', [AvisoController::class, 'marcarComoLido'])
-            ->whereNumber('aviso');
-
-        /* ============================================================
-         * ENTREGAS CENTRALIZADAS
-         * ============================================================ */
-        Route::prefix('entregas')->group(function () {
-            Route::get('itens', [ProdutoEntregaController::class, 'index']);
-            Route::post('itens/{item}/reservar', [ProdutoEntregaController::class, 'reservar'])->whereNumber('item');
-            Route::post('itens/{item}/receber', [ProdutoEntregaController::class, 'receber'])->whereNumber('item');
-            Route::post('itens/{item}/expedir', [ProdutoEntregaController::class, 'expedir'])->whereNumber('item');
-            Route::post('itens/{item}/entregar', [ProdutoEntregaController::class, 'entregar'])->whereNumber('item');
-            Route::post('itens/{item}/cancelar', [ProdutoEntregaController::class, 'cancelar'])->whereNumber('item');
-            Route::post('eventos/{evento}/estornar', [ProdutoEntregaController::class, 'estornar'])->whereNumber('evento');
-        });
 
         /* ============================================================
          * PEDIDOS / ITENS / STATUS / ESTOQUE DO PEDIDO
          * ============================================================ */
         Route::prefix('pedidos')->group(function () {
-            Route::get('statuses', [PedidoStatusConfiguracaoController::class, 'catalogo']);
             Route::get('export', [PedidoController::class, 'exportar']);
             Route::get('stats', [PedidoController::class, 'estatisticas']);
 
             Route::post('import', [PedidoController::class, 'importar']);
-            Route::post('import/xml/confirm', [PedidoController::class, 'confirmarImportacaoXml']);
+            Route::post('import/pdf/confirm', [PedidoController::class, 'confirmarImportacaoPDF']);
         });
 
         Route::prefix('pedidos/{pedido}')->whereNumber('pedido')->group(function () {
             Route::get('detalhado', [PedidoController::class, 'completo']);
-            Route::get('nota-entrega/itens', [PedidoController::class, 'notaEntregaItens']);
-            Route::get('reconciliacao-preview', [PedidoReconciliacaoPreviewController::class, 'show']);
             Route::get('pdf/roteiro', [PedidoController::class, 'roteiroPdf']);
-            Route::post('pdf/nota-entrega', [PedidoController::class, 'notaEntregaPdf']);
-            Route::post('recebimentos', [PedidoRecebimentoController::class, 'store']);
-            Route::post('itens/{item}/antecipacao', [PedidoAntecipacaoController::class, 'store'])->whereNumber('item');
-            Route::post('itens/{item}/antecipacao/cancelar', [PedidoAntecipacaoController::class, 'cancelar'])->whereNumber('item');
-            Route::patch('cancelar', [PedidoController::class, 'cancelar']);
             Route::post('xml', [PedidoController::class, 'uploadXml']);
             Route::get('xml', [PedidoController::class, 'downloadXml']);
 
@@ -387,8 +294,6 @@ Route::middleware(['auth:sanctum', 'senha.nao_obrigatoria'])
             Route::patch('status', [PedidoStatusHistoricoController::class, 'atualizarStatus']);
             Route::get('status/historico', [PedidoStatusHistoricoController::class, 'historico']);
             Route::get('status/previsoes', [PedidoStatusHistoricoController::class, 'previsoes']);
-            Route::patch('status/previsoes', [PedidoStatusHistoricoController::class, 'salvarPrevisoes']);
-            Route::get('status/opcoes', [PedidoStatusHistoricoController::class, 'opcoes']);
             Route::get('status/fluxo', [PedidoStatusHistoricoController::class, 'fluxoStatus']);
 
             // ações de estoque do pedido
@@ -432,7 +337,6 @@ Route::middleware(['auth:sanctum', 'senha.nao_obrigatoria'])
             Route::post('/', [CarrinhoItemController::class, 'store']);
             Route::delete('{item}', [CarrinhoItemController::class, 'destroy'])->whereNumber('item');
             Route::delete('/', [CarrinhoItemController::class, 'clear']);
-            Route::patch('depositos', [CarrinhoItemController::class, 'atualizarDepositos']);
             Route::patch('atualizar-deposito', [CarrinhoItemController::class, 'atualizarDeposito']);
         });
 
@@ -443,38 +347,17 @@ Route::middleware(['auth:sanctum', 'senha.nao_obrigatoria'])
             Route::get('/', [ConsignacaoController::class, 'index']);
 
             Route::get('pedidos/{pedido}', [ConsignacaoController::class, 'porPedido'])->whereNumber('pedido');
-            Route::post('pedidos/{pedido}/itens', [ConsignacaoController::class, 'adicionarItensAoPedido'])
-                ->whereNumber('pedido');
-            Route::post('pedidos/{pedido}/desfazer', [ConsignacaoController::class, 'desfazerPedido'])
-                ->whereNumber('pedido');
-            Route::post('pedidos/{pedido}/devolucoes-em-massa', [ConsignacaoController::class, 'registrarDevolucoesEmMassa'])
-                ->whereNumber('pedido');
-            Route::post('pedidos/{pedido}/envios-em-massa', [ConsignacaoController::class, 'registrarEnviosEmMassa'])
-                ->whereNumber('pedido');
-            Route::patch('pedidos/{pedido}/compras-em-massa', [ConsignacaoController::class, 'confirmarComprasEmMassa'])
-                ->whereNumber('pedido');
 
             Route::get('vencendo', [ConsignacaoController::class, 'vencendo']);
             Route::get('clientes', [ConsignacaoController::class, 'clientes']);
             Route::get('vendedores', [ConsignacaoController::class, 'vendedores']);
-            Route::get('parceiros', [ConsignacaoController::class, 'parceiros']);
 
             Route::get('{consignacao}', [ConsignacaoController::class, 'show'])->whereNumber('consignacao');
 
             Route::patch('{consignacao}/status', [ConsignacaoController::class, 'atualizarStatus'])
                 ->whereNumber('consignacao');
-            Route::post('{consignacao}/desfazer', [ConsignacaoController::class, 'desfazer'])
-                ->whereNumber('consignacao');
 
             Route::post('{consignacao}/devolucoes', [ConsignacaoController::class, 'registrarDevolucao'])
-                ->whereNumber('consignacao');
-            Route::post('{consignacao}/envio', [ConsignacaoController::class, 'registrarEnvio'])
-                ->whereNumber('consignacao');
-
-            Route::delete('{consignacao}/devolucoes/{devolucao}', [ConsignacaoController::class, 'cancelarDevolucao'])
-                ->whereNumber(['consignacao', 'devolucao']);
-
-            Route::post('{consignacao}/cancelar-venda', [ConsignacaoController::class, 'cancelarVenda'])
                 ->whereNumber('consignacao');
 
             Route::get('{pedido}/pdf', [ConsignacaoController::class, 'gerarPdf'])->whereNumber('pedido');
@@ -578,29 +461,6 @@ Route::middleware(['auth:sanctum', 'senha.nao_obrigatoria'])
          * ============================================================ */
         Route::prefix('financeiro')->group(function () {
             Route::get('dashboard', [FinanceiroDashboardController::class, 'show']);
-            Route::get('extrato', [FinanceiroExtratoController::class, 'show']);
-            Route::get('extrato/resumo', [FinanceiroExtratoController::class, 'resumo']);
-            Route::get('extrato/export/pdf', [FinanceiroExtratoController::class, 'exportPdf']);
-            Route::get('extrato/export/excel', [FinanceiroExtratoController::class, 'exportExcel']);
-            Route::get('relatorios/{tipo}', [FinanceiroRelatorioController::class, 'show']);
-            Route::get('relatorios/{tipo}/export/excel', [FinanceiroRelatorioController::class, 'exportExcel']);
-            Route::get('relatorios/{tipo}/export/pdf', [FinanceiroRelatorioController::class, 'exportPdf']);
-
-            Route::prefix('conciliacao-bancaria')->group(function () {
-                Route::post('ofx', [ConciliacaoBancariaController::class, 'importarOfx']);
-                Route::post('sincronizar-banco', [ConciliacaoBancariaController::class, 'sincronizarBanco']);
-                Route::get('importacoes/{importacao}', [ConciliacaoBancariaController::class, 'showImportacao'])
-                    ->whereNumber('importacao');
-                Route::post('importacoes/{importacao}/reanalisar', [ConciliacaoBancariaController::class, 'reanalisarImportacao'])
-                    ->whereNumber('importacao');
-                Route::post('importacoes/{importacao}/confirmar', [ConciliacaoBancariaController::class, 'confirmarImportacao'])
-                    ->whereNumber('importacao');
-                Route::get('transacoes', [ConciliacaoBancariaController::class, 'transacoes']);
-                Route::patch('transacoes/{transacao}/candidato', [ConciliacaoBancariaController::class, 'definirCandidato'])
-                    ->whereNumber('transacao');
-                Route::post('transacoes/{transacao}/confirmar', [ConciliacaoBancariaController::class, 'confirmarTransacao'])
-                    ->whereNumber('transacao');
-            });
 
             Route::apiResource('categorias-financeiras', CategoriaFinanceiraController::class)
                 ->parameters(['categorias-financeiras' => 'categoria_financeira'])
@@ -623,10 +483,9 @@ Route::middleware(['auth:sanctum', 'senha.nao_obrigatoria'])
                 ->only(['index', 'store'])
                 ->except(['create', 'edit']);
 
+            Route::get('extrato/totais', [LancamentoFinanceiroController::class, 'totais']);
+            Route::get('extrato', [LancamentoFinanceiroController::class, 'index']);
             Route::get('lancamentos/totais', [LancamentoFinanceiroController::class, 'totais']);
-            Route::get('lancamentos/export/excel', [LancamentoFinanceiroController::class, 'exportExcel']);
-            Route::get('lancamentos/export/pdf', [LancamentoFinanceiroController::class, 'exportPdf']);
-            Route::get('lancamentos/{lancamento}/recibo.pdf', [LancamentoFinanceiroController::class, 'recibo'])->whereNumber('lancamento');
             Route::apiResource('lancamentos', LancamentoFinanceiroController::class)->except(['create', 'edit']);
 
             Route::prefix('contas-pagar')->group(function () {
@@ -650,7 +509,6 @@ Route::middleware(['auth:sanctum', 'senha.nao_obrigatoria'])
                 Route::get('kpis', [ContaReceberExportController::class, 'kpis']);
 
                 Route::post('{conta}/pagar', [ContaReceberController::class, 'pagar'])->whereNumber('conta');
-                Route::post('{conta}/boleto-conta-azul', [ContaReceberController::class, 'gerarBoletoContaAzul'])->whereNumber('conta');
                 Route::delete('{conta}/pagamentos/{pagamento}', [ContaReceberController::class, 'estornarPagamento'])
                     ->whereNumber(['conta', 'pagamento']);
             });
@@ -675,51 +533,6 @@ Route::middleware(['auth:sanctum', 'senha.nao_obrigatoria'])
         /* ============================================================
          * COMUNICAÇÃO
          * ============================================================ */
-        Route::prefix('integrations/conta-azul')->group(function () {
-            Route::get('oauth/authorize', [ContaAzulOAuthController::class, 'redirect']);
-            Route::get('status', [ContaAzulIntegracaoController::class, 'status']);
-            Route::get('local-lookup', [ContaAzulIntegracaoController::class, 'localLookup']);
-            Route::get('pendencias', [ContaAzulIntegracaoController::class, 'pendencias']);
-            Route::get('pendencias/detalhes', [ContaAzulIntegracaoController::class, 'pendenciasDetalhadas']);
-            Route::get('pendencias/{entidade}/{id}/criacao-local/preview', [ContaAzulIntegracaoController::class, 'previewCriacaoLocal']);
-            Route::post('pendencias/criar-local-lote', [ContaAzulIntegracaoController::class, 'criarRegistrosLocaisLote']);
-            Route::post('pendencias/{entidade}/{id}/criar-local', [ContaAzulIntegracaoController::class, 'criarRegistroLocal']);
-            Route::post('pendencias/{entidade}/{id}/resolver', [ContaAzulIntegracaoController::class, 'resolverPendencia']);
-            Route::post('manual-token', [ContaAzulIntegracaoController::class, 'registrarTokenManual']);
-            Route::post('test-connection', [ContaAzulIntegracaoController::class, 'testarConexao']);
-            Route::get('batches', [ContaAzulIntegracaoController::class, 'batches']);
-            Route::get('batches/{id}', [ContaAzulIntegracaoController::class, 'batchDetalhe'])->whereNumber('id');
-            Route::get('sync-logs', [ContaAzulIntegracaoController::class, 'syncLogs']);
-            Route::post('import/{entidade}', [ContaAzulIntegracaoController::class, 'importar']);
-            Route::post('conciliar', [ContaAzulIntegracaoController::class, 'conciliar']);
-            Route::post('conciliar/{entidade}', [ContaAzulIntegracaoController::class, 'conciliarEntidade']);
-            Route::post('reconciliar', [ContaAzulIntegracaoController::class, 'reconciliar']);
-            Route::post('reconciliar-todos', [ContaAzulIntegracaoController::class, 'reconciliarTodos']);
-        });
-
-        Route::prefix('integrations/bancos/bb-extratos')->group(function () {
-            Route::get('status', [BancoDoBrasilExtratosController::class, 'status']);
-            Route::post('test-connection', [BancoDoBrasilExtratosController::class, 'testarConexao']);
-        });
-
-        Route::prefix('integrations/google-calendar')->group(function () {
-            Route::get('oauth/authorize', [GoogleCalendarOAuthController::class, 'redirect']);
-            Route::get('status', [GoogleCalendarController::class, 'status']);
-            Route::get('calendars', [GoogleCalendarController::class, 'calendars']);
-            Route::post('calendars/{calendarId}/enable', [GoogleCalendarController::class, 'enableCalendar'])
-                ->where('calendarId', '[^/]+');
-            Route::post('calendars/{calendarId}/disable', [GoogleCalendarController::class, 'disableCalendar'])
-                ->where('calendarId', '[^/]+');
-            Route::get('events', [GoogleCalendarController::class, 'events']);
-            Route::post('events', [GoogleCalendarController::class, 'store']);
-            Route::match(['put', 'patch'], 'events/{eventId}', [GoogleCalendarController::class, 'update'])
-                ->where('eventId', '[^/]+');
-            Route::delete('events/{eventId}', [GoogleCalendarController::class, 'destroy'])
-                ->where('eventId', '[^/]+');
-            Route::get('contacts', [GoogleCalendarController::class, 'contacts']);
-            Route::get('logs', [GoogleCalendarController::class, 'logs']);
-        });
-
         Route::prefix('comunicacao')->group(function () {
             Route::get('templates', [CommsProxyController::class, 'templatesIndex']);
             Route::get('templates/{id}', [CommsProxyController::class, 'templatesShow']);

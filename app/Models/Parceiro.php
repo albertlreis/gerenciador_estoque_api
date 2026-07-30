@@ -16,12 +16,11 @@ class Parceiro extends Model
         'nome',
         'tipo',
         'documento',
-        'data_nascimento',
         'email',
         'telefone',
+        'data_nascimento',
         'consultor_nome',
         'nivel_fidelidade',
-        'data_nascimento',
         'endereco',
         'status',
         'observacoes',
@@ -29,7 +28,7 @@ class Parceiro extends Model
 
     protected $casts = [
         'status' => 'integer',
-        'data_nascimento' => 'date',
+        'data_nascimento' => 'date:Y-m-d',
     ];
 
     /** Normaliza documento (CPF/CNPJ) para dígitos */

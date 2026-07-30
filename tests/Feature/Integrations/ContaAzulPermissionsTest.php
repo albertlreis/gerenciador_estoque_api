@@ -25,6 +25,29 @@ class ContaAzulPermissionsTest extends TestCase
         $this->getJson('/api/v1/integrations/conta-azul/status')
             ->assertForbidden()
             ->assertJsonPath('message', 'Sem permissao para acessar a integracao Conta Azul.');
+
+        $this->getJson('/api/v1/integrations/conta-azul/health')
+            ->assertForbidden();
+    }
+
+    public function test_usuario_com_permissao_financeira_acessa_health_sanitizado(): void
+    {
+        $this->actingWithAcesso([], ['financeiro.dashboard.visualizar']);
+
+        $this->getJson('/api/v1/integrations/conta-azul/health?loja_id=999999')
+            ->assertOk()
+            ->assertJsonPath('state', 'not_configured')
+            ->assertJsonPath('connected', false)
+            ->assertJsonPath('can_reconnect', false)
+            ->assertJsonMissingPath('token')
+            ->assertJsonMissingPath('error')
+            ->assertJsonStructure([
+                'state',
+                'connected',
+                'checked_at',
+                'message',
+                'can_reconnect',
+            ]);
     }
 
     public function test_header_x_permissoes_nao_concede_acesso_conta_azul(): void

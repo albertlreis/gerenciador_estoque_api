@@ -1,6 +1,8 @@
 <?php
 
 use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\Api\V1\DashboardHomePreferenceController;
+use App\Http\Controllers\Integrations\ContaAzulIntegracaoController;
 
 use App\Http\Controllers\{AreaEstoqueController,
     AniversarioController,
@@ -81,6 +83,9 @@ Route::middleware('auth:sanctum')
         Route::put('configuracoes/{chave}', [ConfiguracaoController::class, 'atualizar']);
 
         Route::get('dashboard/resumo', [DashboardController::class, 'resumo']);
+        Route::get('dashboard/home/preferencias', [DashboardHomePreferenceController::class, 'show']);
+        Route::patch('dashboard/home/preferencias', [DashboardHomePreferenceController::class, 'update']);
+        Route::delete('dashboard/home/preferencias', [DashboardHomePreferenceController::class, 'destroy']);
         Route::get('aniversarios', [AniversarioController::class, 'index']);
         Route::get('avisos/ativos', [AvisoController::class, 'ativos']);
         Route::apiResource('avisos', AvisoController::class)
@@ -96,6 +101,8 @@ Route::middleware('auth:sanctum')
             ->parameters(['eventos' => 'evento'])
             ->whereNumber('evento')
             ->except(['create', 'edit']);
+
+        Route::get('integrations/conta-azul/health', [ContaAzulIntegracaoController::class, 'health']);
 
         /* ============================================================
          * CATÁLOGO (CATEGORIAS / ATRIBUTOS / PRODUTOS / VARIAÇÕES / OUTLET)

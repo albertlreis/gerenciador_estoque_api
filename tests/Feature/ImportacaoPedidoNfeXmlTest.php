@@ -32,7 +32,7 @@ class ImportacaoPedidoNfeXmlTest extends TestCase
             'status' => 1,
         ]);
 
-        $path = $this->fixturePath('nfe-35250207.xml');
+        $path = $this->fixturePath('Importacao/Xml/35250207266606000112550020000450551000623840-nfe.xml');
         $this->assertFileExists($path);
         $file = new UploadedFile($path, 'nfe-35250207.xml', 'application/xml', null, true);
 
@@ -61,7 +61,7 @@ class ImportacaoPedidoNfeXmlTest extends TestCase
             'ativo' => 1,
         ]);
 
-        $path = $this->fixturePath('nfe-35260201.xml');
+        $path = $this->fixturePath('Importacao/Xml/35260201368233000104550030000450951891771400-nfe.xml');
         $this->assertFileExists($path);
         $file = new UploadedFile($path, 'nfe-35260201.xml', 'application/xml', null, true);
 
@@ -374,7 +374,7 @@ class ImportacaoPedidoNfeXmlTest extends TestCase
             'ativo' => 1,
         ]);
 
-        $path = $this->fixturePath('nfe-35250207.xml');
+        $path = $this->fixturePath('Importacao/Xml/35250207266606000112550020000450551000623840-nfe.xml');
         $file = new UploadedFile($path, 'arquivo.xml:Zone.Identifier', 'application/xml', null, true);
 
         $response = $this->actingAs($usuario, 'sanctum')
@@ -396,7 +396,7 @@ class ImportacaoPedidoNfeXmlTest extends TestCase
             'ativo' => 1,
         ]);
 
-        $path = $this->fixturePath('nfe-35250207.xml');
+        $path = $this->fixturePath('Importacao/Xml/35250207266606000112550020000450551000623840-nfe.xml');
         $file1 = new UploadedFile($path, 'nfe-35250207.xml', 'application/xml', null, true);
         $file2 = new UploadedFile($path, 'nfe-35250207.xml', 'application/xml', null, true);
 

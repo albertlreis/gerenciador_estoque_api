@@ -1,6 +1,6 @@
 <?php
 
-namespace Tests\Unit;
+namespace Tests\Feature\Integration;
 
 use App\Models\Categoria;
 use App\Models\Produto;

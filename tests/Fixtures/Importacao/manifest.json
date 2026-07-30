@@ -18,24 +18,6 @@
       "expected_items": 44,
       "requires_ocr": false,
       "notes": "NFe fixture completa"
-    },
-    {
-      "file": "Xml/nfe-35250207.xml",
-      "type": "xml",
-      "tipo_importacao": "ADORNOS_XML_NFE",
-      "vendor": "NFE",
-      "expected_items": 14,
-      "requires_ocr": false,
-      "notes": "Alias curto da fixture 352502..."
-    },
-    {
-      "file": "Xml/nfe-35260201.xml",
-      "type": "xml",
-      "tipo_importacao": "ADORNOS_XML_NFE",
-      "vendor": "NFE",
-      "expected_items": 44,
-      "requires_ocr": false,
-      "notes": "Alias curto da fixture 352602..."
     }
   ]
 }

@@ -52,7 +52,9 @@
         ],
         "post-create-project-cmd": [
             "@php artisan key:generate --ansi"
-        ]
+        ],
+        "test:unit": "php vendor/bin/phpunit --testsuite Unit",
+        "test:full": "php artisan test --without-tty"
     },
     "extra": {
         "laravel": {

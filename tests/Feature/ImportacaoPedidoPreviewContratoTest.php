@@ -52,7 +52,7 @@ class ImportacaoPedidoPreviewContratoTest extends TestCase
             'ativo' => 1,
         ]);
 
-        $path = base_path('tests/Fixtures/nfe-35250207.xml');
+        $path = base_path('tests/Fixtures/Importacao/Xml/35250207266606000112550020000450551000623840-nfe.xml');
         $this->assertFileExists($path);
         $file = new UploadedFile($path, 'nfe-35250207.xml', 'application/xml', null, true);
 

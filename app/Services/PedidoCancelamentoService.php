@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Enums\ContaStatus;
 use App\Enums\EstoqueMovimentacaoTipo;
 use App\Enums\PedidoStatus;
+use App\Models\Consignacao;
 use App\Models\ContaReceber;
 use App\Models\EstoqueMovimentacao;
 use App\Models\EstoqueReserva;
@@ -35,6 +36,8 @@ final class PedidoCancelamentoService
                 ]);
             }
 
+            $this->validarConsignacoesEmAberto($pedido);
+
             $resultado = [
                 'reservas_canceladas' => 0,
                 'movimentacoes_estornadas' => 0,
@@ -42,15 +45,15 @@ final class PedidoCancelamentoService
                 'entrega_itens_cancelados' => 0,
             ];
 
-            if (!empty($opcoes['cancelar_reservas'])) {
+            if (! empty($opcoes['cancelar_reservas'])) {
                 $resultado['reservas_canceladas'] = $this->cancelarReservas($pedido, $usuarioId);
             }
 
-            if (!empty($opcoes['estornar_estoque'])) {
+            if (! empty($opcoes['estornar_estoque'])) {
                 $resultado['movimentacoes_estornadas'] = $this->estornarMovimentacoesDoPedido($pedido, $usuarioId);
             }
 
-            if (!empty($opcoes['cancelar_financeiro'])) {
+            if (! empty($opcoes['cancelar_financeiro'])) {
                 $resultado['contas_canceladas'] = $this->cancelarContasReceber($pedido);
             }
 
@@ -97,7 +100,6 @@ final class PedidoCancelamentoService
         $tiposSaida = [
             EstoqueMovimentacaoTipo::SAIDA->value,
             EstoqueMovimentacaoTipo::SAIDA_ENTREGA_CLIENTE->value,
-            EstoqueMovimentacaoTipo::CONSIGNACAO_ENVIO->value,
         ];
 
         $movimentacoes = EstoqueMovimentacao::query()
@@ -128,6 +130,28 @@ final class PedidoCancelamentoService
         return $estornadas;
     }
 
+    private function validarConsignacoesEmAberto(Pedido $pedido): void
+    {
+        $consignacoes = Consignacao::query()
+            ->with(['devolucoes', 'compras', 'entregaItem'])
+            ->where('pedido_id', $pedido->id)
+            ->lockForUpdate()
+            ->get();
+
+        $emPoderDoCliente = (int) $consignacoes->sum(
+            fn (Consignacao $consignacao) => $consignacao->quantidadeDisponivelCliente()
+        );
+
+        if ($emPoderDoCliente > 0) {
+            throw ValidationException::withMessages([
+                'consignacao' => [
+                    "Existem {$emPoderDoCliente} unidade(s) consignada(s) ainda em poder do cliente. ".
+                    'Registre a devolução ou desfaça a consignação antes de cancelar o pedido.',
+                ],
+            ]);
+        }
+    }
+
     private function cancelarContasReceber(Pedido $pedido): int
     {
         $contas = ContaReceber::query()
@@ -149,7 +173,7 @@ final class PedidoCancelamentoService
             }
 
             $conta->status = ContaStatus::CANCELADA;
-            $conta->observacoes = trim((string) ($conta->observacoes ?? '') . "\nCancelada pelo cancelamento do Pedido #{$pedido->id}.");
+            $conta->observacoes = trim((string) ($conta->observacoes ?? '')."\nCancelada pelo cancelamento do Pedido #{$pedido->id}.");
             $conta->save();
             $canceladas++;
         }

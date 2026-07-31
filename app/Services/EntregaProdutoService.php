@@ -14,10 +14,10 @@ use App\Models\PedidoItem;
 use App\Models\ProdutoEntregaEvento;
 use App\Models\ProdutoEntregaItem;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
-use InvalidArgumentException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
+use InvalidArgumentException;
 
 class EntregaProdutoService
 {
@@ -466,7 +466,7 @@ class EntregaProdutoService
                 $quantidadeCancelada += $quantidadeReserva;
                 $chaveEvento = $indice === 0
                     ? $idempotencyKey
-                    : 'antecipacao-cancelar:' . hash('sha256', $idempotencyKey) . ':reserva:' . $reserva->id;
+                    : 'antecipacao-cancelar:'.hash('sha256', $idempotencyKey).':reserva:'.$reserva->id;
 
                 $this->registrarEvento(
                     $entrega,
@@ -525,12 +525,13 @@ class EntregaProdutoService
             }
 
             $depositoId = $depositoId ?: $entrega->id_deposito_origem;
-            if (!$depositoId) {
+            if (! $depositoId) {
                 $entrega->update([
                     'status' => ProdutoEntregaItem::STATUS_AGUARDANDO_ESTOQUE,
                     'em_revisao' => true,
                     'bloqueio_motivo' => 'Deposito de origem nao definido para reserva.',
                 ]);
+
                 return $entrega->fresh();
             }
 
@@ -553,10 +554,11 @@ class EntregaProdutoService
                     'em_revisao' => false,
                     'bloqueio_motivo' => "Estoque insuficiente para reserva. Disponivel: {$disponivel}, solicitado: {$quantidade}.",
                 ]);
+
                 return $entrega->fresh();
             }
 
-            $key = $idempotencyKey ?: "entrega:{$entrega->id}:reserva:" . ((int) $entrega->quantidade_reservada) . ":{$quantidade}:{$depositoId}";
+            $key = $idempotencyKey ?: "entrega:{$entrega->id}:reserva:".((int) $entrega->quantidade_reservada).":{$quantidade}:{$depositoId}";
             if ($this->eventoJaRegistrado($key)) {
                 return $entrega;
             }
@@ -578,6 +580,7 @@ class EntregaProdutoService
                     'em_revisao' => false,
                     'bloqueio_motivo' => $e->getMessage(),
                 ]);
+
                 return $entrega->fresh();
             }
 
@@ -622,7 +625,7 @@ class EntregaProdutoService
             $entrega = $this->lockItem($item);
             $depositoId = $depositoId ?: $entrega->id_deposito_destino ?: $entrega->id_deposito_origem;
 
-            if (!$depositoId) {
+            if (! $depositoId) {
                 throw ValidationException::withMessages([
                     'deposito_id' => ['Informe o deposito de recebimento.'],
                 ]);
@@ -660,7 +663,7 @@ class EntregaProdutoService
                 return $entrega;
             }
 
-            $key = $idempotencyKey ?: "entrega:{$entrega->id}:receber:" . ((int) $entrega->quantidade_recebida) . ":{$quantidade}:{$depositoId}";
+            $key = $idempotencyKey ?: "entrega:{$entrega->id}:receber:".((int) $entrega->quantidade_recebida).":{$quantidade}:{$depositoId}";
             if ($this->eventoJaRegistrado($key)) {
                 return $entrega;
             }
@@ -738,7 +741,7 @@ class EntregaProdutoService
             }
 
             $depositoId = $depositoId ?: $entrega->id_deposito_origem;
-            if (!$depositoId) {
+            if (! $depositoId) {
                 throw ValidationException::withMessages([
                     'deposito_id' => ['Informe o deposito de saida.'],
                 ]);
@@ -758,7 +761,7 @@ class EntregaProdutoService
                 $entrega = $this->lockItem($entrega->id);
             }
 
-            $key = $idempotencyKey ?: "entrega:{$entrega->id}:{$tipoEvento}:" . ((int) $entrega->quantidade_expedida) . ":{$quantidade}:{$depositoId}";
+            $key = $idempotencyKey ?: "entrega:{$entrega->id}:{$tipoEvento}:".((int) $entrega->quantidade_expedida).":{$quantidade}:{$depositoId}";
             if ($this->eventoJaRegistrado($key)) {
                 return $entrega;
             }
@@ -772,7 +775,7 @@ class EntregaProdutoService
                 ->value('estoque_reserva_id');
 
             if ($tipoEvento === ProdutoEntregaEvento::ENVIADO_ASSISTENCIA) {
-                if (!$depositoDestinoId) {
+                if (! $depositoDestinoId) {
                     throw ValidationException::withMessages([
                         'deposito_destino_id' => ['Informe o deposito de destino.'],
                     ]);
@@ -838,6 +841,113 @@ class EntregaProdutoService
         });
     }
 
+    /**
+     * Registra uma saída física histórica ausente sem duplicar a confirmação
+     * de entrega que já pode existir no controle central.
+     *
+     * @return array{item:ProdutoEntregaItem,movimentacao:\App\Models\EstoqueMovimentacao,evento:ProdutoEntregaEvento}
+     */
+    public function reconciliarBaixaEntrega(
+        ProdutoEntregaItem|int $item,
+        int $depositoId,
+        int $quantidade,
+        ?int $usuarioId,
+        string $observacao,
+        string $loteId,
+        string $idempotencyKey,
+        mixed $ocorridoEm = null,
+        array $metadata = []
+    ): array {
+        return DB::transaction(function () use (
+            $item,
+            $depositoId,
+            $quantidade,
+            $usuarioId,
+            $observacao,
+            $loteId,
+            $idempotencyKey,
+            $ocorridoEm,
+            $metadata
+        ) {
+            $entrega = $this->lockItem($item);
+
+            if ($entrega->status === ProdutoEntregaItem::STATUS_CANCELADO) {
+                throw ValidationException::withMessages([
+                    'item' => ['Não é possível reconciliar a baixa de um item cancelado.'],
+                ]);
+            }
+
+            $existente = ProdutoEntregaEvento::query()
+                ->where('idempotency_key', $idempotencyKey)
+                ->lockForUpdate()
+                ->first();
+            if ($existente) {
+                return [
+                    'item' => $entrega,
+                    'movimentacao' => $existente->movimentacao()->firstOrFail(),
+                    'evento' => $existente,
+                ];
+            }
+
+            $pendente = max(0, (int) $entrega->quantidade_total - (int) $entrega->quantidade_expedida);
+            if ($quantidade <= 0 || $quantidade > $pendente) {
+                throw ValidationException::withMessages([
+                    'quantidade' => ["Quantidade inválida para a baixa pendente ({$pendente})."],
+                ]);
+            }
+
+            $movimentacao = $this->movimentacoes->registrarSaidaPedido(
+                variacaoId: (int) $entrega->id_variacao,
+                depositoSaidaId: $depositoId,
+                quantidade: $quantidade,
+                usuarioId: $usuarioId,
+                observacao: $observacao,
+                pedidoId: $entrega->pedido_id ? (int) $entrega->pedido_id : null,
+                pedidoItemId: $entrega->pedido_item_id ? (int) $entrega->pedido_item_id : null,
+                loteId: $loteId,
+                tipoMovimentacao: EstoqueMovimentacaoTipo::SAIDA_ENTREGA_CLIENTE->value,
+                refType: 'pedido_reconciliacao',
+                refId: $entrega->pedido_id ? (int) $entrega->pedido_id : null,
+                dataMovimentacao: $ocorridoEm,
+            );
+
+            $entrega->quantidade_expedida = min(
+                (int) $entrega->quantidade_total,
+                (int) $entrega->quantidade_expedida + $quantidade
+            );
+            $entrega->id_deposito_origem = $depositoId;
+            $entrega->status = $this->statusOperacional($entrega);
+            $entrega->bloqueio_motivo = null;
+            $entrega->em_revisao = false;
+            $entrega->save();
+
+            $evento = $this->registrarEvento(
+                $entrega,
+                ProdutoEntregaEvento::EXPEDIDO_CLIENTE,
+                $quantidade,
+                $depositoId,
+                null,
+                $movimentacao->reserva_id,
+                (int) $movimentacao->id,
+                $usuarioId,
+                $observacao,
+                [
+                    ...$metadata,
+                    'origem' => 'reconciliacao_controlada',
+                    'lote_id' => $loteId,
+                ],
+                $idempotencyKey,
+                $ocorridoEm
+            );
+
+            return [
+                'item' => $entrega->fresh(['eventos']),
+                'movimentacao' => $movimentacao,
+                'evento' => $evento,
+            ];
+        });
+    }
+
     public function enviarAssistenciaItem(
         ProdutoEntregaItem|int $item,
         int $depositoAssistenciaId,
@@ -849,7 +959,7 @@ class EntregaProdutoService
             $entrega = $this->lockItem($item);
             $depositoOrigemId = $entrega->id_deposito_origem;
 
-            if (!$depositoOrigemId) {
+            if (! $depositoOrigemId) {
                 throw ValidationException::withMessages([
                     'deposito_origem_id' => ['Informe o deposito de origem.'],
                 ]);
@@ -924,7 +1034,7 @@ class EntregaProdutoService
                 return $entrega;
             }
 
-            $key = $idempotencyKey ?: "entrega:{$entrega->id}:entregar:" . ((int) $entrega->quantidade_entregue) . ":{$quantidade}";
+            $key = $idempotencyKey ?: "entrega:{$entrega->id}:entregar:".((int) $entrega->quantidade_entregue).":{$quantidade}";
             if ($this->eventoJaRegistrado($key)) {
                 return $entrega;
             }
@@ -1328,13 +1438,13 @@ class EntregaProdutoService
         );
 
         $dadosEntrega = [
-                'tipo_origem' => ProdutoEntregaItem::ORIGEM_PEDIDO,
-                'origem_id' => $pedido->id,
-                'pedido_id' => $pedido->id,
-                'pedido_item_id' => $pedidoItem->id,
-                'id_variacao' => $pedidoItem->id_variacao,
-                'quantidade_total' => (int) $pedidoItem->quantidade,
-                'previsao_entrega' => $pedido->data_limite_entrega,
+            'tipo_origem' => ProdutoEntregaItem::ORIGEM_PEDIDO,
+            'origem_id' => $pedido->id,
+            'pedido_id' => $pedido->id,
+            'pedido_item_id' => $pedidoItem->id,
+            'id_variacao' => $pedidoItem->id_variacao,
+            'quantidade_total' => (int) $pedidoItem->quantidade,
+            'previsao_entrega' => $pedido->data_limite_entrega,
         ];
 
         if (! $possuiEstadoOperacional) {
@@ -1526,12 +1636,12 @@ class EntregaProdutoService
 
     private function reservarDemandasLiberadasPorRecebimento(ProdutoEntregaItem $recebimento, int $depositoId, int $quantidadeRecebida, ?int $usuarioId): void
     {
-        if (!$recebimento->pedido_id || $quantidadeRecebida <= 0) {
+        if (! $recebimento->pedido_id || $quantidadeRecebida <= 0) {
             return;
         }
 
         $pedido = Pedido::query()->select('id', 'tipo')->find($recebimento->pedido_id);
-        if (!$pedido?->isVenda()) {
+        if (! $pedido?->isVenda()) {
             return;
         }
 
@@ -1545,7 +1655,7 @@ class EntregaProdutoService
                 ->orderBy('id')
                 ->first();
 
-        if (!$demanda || $demanda->em_revisao) {
+        if (! $demanda || $demanda->em_revisao) {
             return;
         }
 
@@ -1567,21 +1677,21 @@ class EntregaProdutoService
             $reservar,
             $usuarioId,
             'Reserva criada apos recebimento de fabrica.',
-            "recebimento:{$recebimento->id}:recebido:" . (int) $recebimento->quantidade_recebida
+            "recebimento:{$recebimento->id}:recebido:".(int) $recebimento->quantidade_recebida
         );
     }
 
     private function finalizarReposicaoSeRecebidaIntegralmente(ProdutoEntregaItem $recebimento, ?int $usuarioId): void
     {
         if (
-            !$recebimento->pedido_id
+            ! $recebimento->pedido_id
             || $recebimento->tipo_origem !== ProdutoEntregaItem::ORIGEM_PEDIDO
         ) {
             return;
         }
 
         $pedido = Pedido::query()->find($recebimento->pedido_id);
-        if (!$pedido?->isReposicao()) {
+        if (! $pedido?->isReposicao()) {
             return;
         }
 
@@ -1604,7 +1714,7 @@ class EntregaProdutoService
             ->where('tipo_origem', ProdutoEntregaItem::ORIGEM_PEDIDO)
             ->where('status', '!=', ProdutoEntregaItem::STATUS_CANCELADO);
 
-        if (!(clone $itensRecebiveis)->exists()) {
+        if (! (clone $itensRecebiveis)->exists()) {
             return;
         }
 

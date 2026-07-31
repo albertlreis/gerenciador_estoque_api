@@ -3,19 +3,16 @@
 namespace App\Http\Controllers;
 
 use App\DTOs\FiltroEstoqueDTO;
-use App\Enums\EstoqueMovimentacaoTipo;
 use App\Helpers\AuthHelper;
 use App\Http\Requests\FiltroEstoqueRequest;
 use App\Http\Resources\MovimentacaoResource;
 use App\Http\Resources\ProdutoEstoqueResource;
 use App\Http\Resources\ResumoEstoqueResource;
 use App\Models\Estoque;
-use App\Services\EstoqueMovimentacaoService;
+use App\Services\EstoqueAjusteService;
 use App\Services\EstoqueService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Database\QueryException;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\Response;
@@ -27,9 +24,8 @@ class EstoqueController extends Controller
      *
      * @queryParam periodo array Opcional. [YYYY-MM-DD, YYYY-MM-DD] para considerar movimentações no intervalo.
      *
-     * @param \App\Http\Requests\FiltroEstoqueRequest $request Instância da requisição HTTP com os parâmetros de filtro
-     * @param EstoqueService $service Serviço responsável pela lógica de estoque
-     * @return \Illuminate\Http\JsonResponse|\Symfony\Component\HttpFoundation\Response|\Symfony\Component\HttpFoundation\BinaryFileResponse
+     * @param  \App\Http\Requests\FiltroEstoqueRequest  $request  Instância da requisição HTTP com os parâmetros de filtro
+     * @param  EstoqueService  $service  Serviço responsável pela lógica de estoque
      */
     public function listarEstoqueAtual(FiltroEstoqueRequest $request, EstoqueService $service): JsonResponse|Response|BinaryFileResponse
     {
@@ -54,9 +50,7 @@ class EstoqueController extends Controller
     /**
      * Retorna um resumo com total de produtos, peças e depósitos.
      *
-     * @param Request $request
-     * @param EstoqueService $service
-     * @return JsonResponse
+     * @param  Request  $request
      */
     public function resumoEstoque(FiltroEstoqueRequest $request, EstoqueService $service): JsonResponse
     {
@@ -68,9 +62,6 @@ class EstoqueController extends Controller
 
     /**
      * Lista os depósitos com estoque positivo de uma variação específica.
-     *
-     * @param int $id_variacao
-     * @return JsonResponse
      */
     public function porVariacao(int $id_variacao): JsonResponse
     {
@@ -78,11 +69,11 @@ class EstoqueController extends Controller
             ->where('id_variacao', $id_variacao)
             ->where('quantidade', '>', 0)
             ->get()
-            ->filter(fn($e) => $e->deposito)
-            ->map(fn($e) => [
+            ->filter(fn ($e) => $e->deposito)
+            ->map(fn ($e) => [
                 'id' => $e->deposito->id,
                 'nome' => $e->deposito->nome,
-                'quantidade' => $e->quantidade
+                'quantidade' => $e->quantidade,
             ])
             ->values();
 
@@ -92,9 +83,9 @@ class EstoqueController extends Controller
     /**
      * Registra um ajuste manual auditavel a partir do saldo final desejado.
      */
-    public function registrarAjusteManual(Request $request, EstoqueMovimentacaoService $movimentacaoService): JsonResponse
+    public function registrarAjusteManual(Request $request, EstoqueAjusteService $ajustes): JsonResponse
     {
-        if (!AuthHelper::podeRegistrarAjusteManualEstoque()) {
+        if (! AuthHelper::podeRegistrarAjusteManualEstoque()) {
             return response()->json([
                 'message' => 'Sem permissao para registrar ajuste manual de estoque.',
             ], 403);
@@ -109,46 +100,20 @@ class EstoqueController extends Controller
         ]);
 
         try {
-            $movimentacao = DB::transaction(function () use ($dados, $movimentacaoService) {
-                /** @var Estoque $estoque */
-                $estoque = $this->resolverEstoqueAjusteManual($dados);
+            if (! empty($dados['estoque_id'])) {
+                $estoque = Estoque::query()->findOrFail((int) $dados['estoque_id']);
+                $dados['variacao_id'] = (int) $estoque->id_variacao;
+                $dados['deposito_id'] = (int) $estoque->id_deposito;
+            }
 
-                $quantidadeAtual = (int) $estoque->quantidade;
-                $quantidadeFinal = (int) $dados['quantidade_final'];
-                $diferenca = $quantidadeFinal - $quantidadeAtual;
-
-                if ($diferenca === 0) {
-                    throw ValidationException::withMessages([
-                        'quantidade_final' => ['A quantidade final deve ser diferente da quantidade atual.'],
-                    ]);
-                }
-
-                $tipo = $diferenca > 0
-                    ? EstoqueMovimentacaoTipo::ENTRADA->value
-                    : EstoqueMovimentacaoTipo::SAIDA->value;
-
-                $observacaoUsuario = trim((string) ($dados['observacao'] ?? ''));
-                $observacao = sprintf(
-                    'Ajuste manual de estoque. Saldo anterior: %d. Saldo final: %d.',
-                    $quantidadeAtual,
-                    $quantidadeFinal
-                );
-
-                if ($observacaoUsuario !== '') {
-                    $observacao .= ' ' . $observacaoUsuario;
-                }
-
-                return $movimentacaoService->registrarMovimentacaoManual([
-                    'id_variacao' => (int) $estoque->id_variacao,
-                    'id_deposito_origem' => $diferenca < 0 ? (int) $estoque->id_deposito : null,
-                    'id_deposito_destino' => $diferenca > 0 ? (int) $estoque->id_deposito : null,
-                    'tipo' => $tipo,
-                    'quantidade' => abs($diferenca),
-                    'observacao' => $observacao,
-                    'ref_type' => 'ajuste_manual',
-                    'ref_id' => (int) $estoque->id,
-                ], auth()->id());
-            });
+            $resultado = $ajustes->ajustarSaldoFinal(
+                (int) $dados['variacao_id'],
+                (int) $dados['deposito_id'],
+                (int) $dados['quantidade_final'],
+                auth()->id(),
+                $dados['observacao'] ?? null
+            );
+            $movimentacao = $resultado['movimentacao'];
 
             return response()->json([
                 'data' => new MovimentacaoResource($movimentacao),
@@ -158,49 +123,5 @@ class EstoqueController extends Controller
         } catch (\InvalidArgumentException $e) {
             return response()->json(['error' => $e->getMessage()], 422);
         }
-    }
-
-    /**
-     * @param array<string, mixed> $dados
-     */
-    private function resolverEstoqueAjusteManual(array $dados): Estoque
-    {
-        if (!empty($dados['estoque_id'])) {
-            return Estoque::query()
-                ->whereKey((int) $dados['estoque_id'])
-                ->lockForUpdate()
-                ->firstOrFail();
-        }
-
-        $variacaoId = (int) $dados['variacao_id'];
-        $depositoId = (int) $dados['deposito_id'];
-
-        $estoque = Estoque::query()
-            ->where('id_variacao', $variacaoId)
-            ->where('id_deposito', $depositoId)
-            ->lockForUpdate()
-            ->first();
-
-        if ($estoque) {
-            return $estoque;
-        }
-
-        try {
-            return Estoque::query()->create([
-                'id_variacao' => $variacaoId,
-                'id_deposito' => $depositoId,
-                'quantidade' => 0,
-            ]);
-        } catch (QueryException $e) {
-            if (($e->errorInfo[0] ?? null) !== '23000') {
-                throw $e;
-            }
-        }
-
-        return Estoque::query()
-            ->where('id_variacao', $variacaoId)
-            ->where('id_deposito', $depositoId)
-            ->lockForUpdate()
-            ->firstOrFail();
     }
 }

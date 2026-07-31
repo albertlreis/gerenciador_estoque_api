@@ -37,6 +37,11 @@ class ConsignacaoDevolucao extends Model
         return $this->belongsTo(Usuario::class, 'usuario_id');
     }
 
+    public function deposito(): BelongsTo
+    {
+        return $this->belongsTo(Deposito::class, 'deposito_id');
+    }
+
     public function canceladaPor(): BelongsTo
     {
         return $this->belongsTo(Usuario::class, 'cancelada_por');

@@ -72,6 +72,8 @@ class ConsignacaoDetalhadaResource extends JsonResource
                 return [
                     'id' => $devolucao->id,
                     'quantidade' => $devolucao->quantidade,
+                    'deposito_id' => $devolucao->deposito_id,
+                    'deposito_nome' => $devolucao->deposito->nome ?? null,
                     'observacoes' => $devolucao->observacoes,
                     'data_devolucao' => optional($devolucao->data_devolucao)->format('d/m/Y H:i'),
                     'cancelada' => $cancelada,

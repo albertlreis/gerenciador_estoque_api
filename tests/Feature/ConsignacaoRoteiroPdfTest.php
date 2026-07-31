@@ -209,6 +209,50 @@ class ConsignacaoRoteiroPdfTest extends TestCase
         $this->assertDatabaseCount('consignacao_devolucoes', 0);
     }
 
+    public function test_post_devolucao_com_roteiro_inclui_historico_selecionado_sem_nova_movimentacao_historica(): void
+    {
+        [$pedidoId, $consignacao, $deposito] = $this->criarPedidoConsignado('pendente', PedidoStatus::CONSIGNADO, 2);
+        ProdutoEntregaItem::create([
+            'tipo_origem' => ProdutoEntregaItem::ORIGEM_CONSIGNACAO,
+            'origem_id' => $consignacao->id,
+            'pedido_id' => $pedidoId,
+            'consignacao_id' => $consignacao->id,
+            'id_variacao' => $consignacao->produto_variacao_id,
+            'quantidade_total' => 2,
+            'quantidade_expedida' => 2,
+            'id_deposito_origem' => $deposito->id,
+            'status' => ProdutoEntregaItem::STATUS_RESERVADO,
+        ]);
+        $consignacaoHistorica = Consignacao::create([
+            'pedido_id' => $pedidoId,
+            'produto_variacao_id' => $consignacao->produto_variacao_id,
+            'deposito_id' => $deposito->id,
+            'quantidade' => 1,
+            'data_envio' => now()->toDateString(),
+            'prazo_resposta' => now()->addDays(15),
+            'status' => 'devolvido',
+        ]);
+        ConsignacaoDevolucao::create([
+            'consignacao_id' => $consignacaoHistorica->id,
+            'usuario_id' => auth()->id(),
+            'deposito_id' => $deposito->id,
+            'quantidade' => 1,
+        ]);
+
+        $response = $this->post("/api/v1/consignacoes/pedidos/{$pedidoId}/devolucoes/roteiro", [
+            'itens' => [[
+                'consignacao_id' => $consignacao->id,
+                'quantidade' => 1,
+                'deposito_id' => $deposito->id,
+            ]],
+            'consignacao_ids_historico' => [$consignacaoHistorica->id],
+        ]);
+
+        $response->assertOk();
+        $this->assertDatabaseCount('consignacao_devolucoes', 2);
+        $this->assertSame(1, EstoqueMovimentacao::query()->where('pedido_id', $pedidoId)->count());
+    }
+
     public function test_post_devolucao_com_roteiro_rejeita_saldo_excedido_item_finalizado_e_deposito_invalido(): void
     {
         [$pedidoId, $consignacao, $deposito] = $this->criarPedidoConsignado('pendente', PedidoStatus::CONSIGNADO);
@@ -238,6 +282,75 @@ class ConsignacaoRoteiroPdfTest extends TestCase
             ]],
         ])->assertUnprocessable()->assertJsonValidationErrors('itens.0.deposito_id');
         $this->assertDatabaseCount('consignacao_devolucoes', 0);
+    }
+
+    public function test_reimpressao_do_roteiro_usa_todas_as_devolucoes_ativas_sem_criar_movimentacao(): void
+    {
+        [$pedidoId, $consignacao, $deposito] = $this->criarPedidoConsignado(
+            'devolvido',
+            PedidoStatus::DEVOLUCAO_CONSIGNACAO,
+            4
+        );
+        $segundoDeposito = Deposito::create(['nome' => 'Depósito Histórico']);
+        $segundaConsignacao = Consignacao::create([
+            'pedido_id' => $pedidoId,
+            'produto_variacao_id' => $consignacao->produto_variacao_id,
+            'deposito_id' => $deposito->id,
+            'quantidade' => 3,
+            'data_envio' => now()->toDateString(),
+            'prazo_resposta' => now()->addDays(15),
+            'status' => 'devolvido',
+        ]);
+
+        ConsignacaoDevolucao::create([
+            'consignacao_id' => $consignacao->id,
+            'usuario_id' => auth()->id(),
+            'deposito_id' => $deposito->id,
+            'quantidade' => 1,
+        ]);
+        ConsignacaoDevolucao::create([
+            'consignacao_id' => $consignacao->id,
+            'usuario_id' => auth()->id(),
+            'deposito_id' => $segundoDeposito->id,
+            'quantidade' => 2,
+        ]);
+        ConsignacaoDevolucao::create([
+            'consignacao_id' => $segundaConsignacao->id,
+            'usuario_id' => auth()->id(),
+            'deposito_id' => $segundoDeposito->id,
+            'quantidade' => 3,
+        ]);
+        ConsignacaoDevolucao::create([
+            'consignacao_id' => $consignacao->id,
+            'usuario_id' => auth()->id(),
+            'deposito_id' => $deposito->id,
+            'quantidade' => 1,
+            'cancelada_em' => now(),
+        ]);
+
+        $pedido = Pedido::with([
+            'consignacoes.deposito',
+            'consignacoes.devolucoes.deposito',
+            'consignacoes.produtoVariacao.produto',
+        ])->findOrFail($pedidoId);
+        $method = new \ReflectionMethod(ConsignacaoController::class, 'gruposRoteiroDevolucoesRegistradas');
+        $method->setAccessible(true);
+        $grupos = $method->invoke(app(ConsignacaoController::class), $pedido->consignacoes);
+
+        $this->assertSame(1, (int) $grupos->get($deposito->nome)->sole()->quantidade_roteiro);
+        $this->assertSame(5, (int) $grupos->get($segundoDeposito->nome)->sole()->quantidade_roteiro);
+
+        $quantidadeDevolucoesAntes = ConsignacaoDevolucao::query()->count();
+        $quantidadeMovimentacoesAntes = EstoqueMovimentacao::query()->count();
+        $response = $this->get("/api/v1/consignacoes/pedidos/{$pedidoId}/devolucoes/roteiro");
+
+        $response->assertOk();
+        $this->assertStringContainsString(
+            "roteiro-de-devolucao-{$pedidoId}-2-via.pdf",
+            (string) $response->headers->get('content-disposition')
+        );
+        $this->assertSame($quantidadeDevolucoesAntes, ConsignacaoDevolucao::query()->count());
+        $this->assertSame($quantidadeMovimentacoesAntes, EstoqueMovimentacao::query()->count());
     }
 
     private function criarPedidoConsignado(string $statusConsignacao, PedidoStatus $statusPedido, int $quantidade = 1): array

@@ -180,6 +180,7 @@ class ConsignacaoController extends Controller
             'compras.canceladaPor',
             'devolucoes.usuario',
             'devolucoes.canceladaPor',
+            'devolucoes.deposito',
             'entregaItem',
             'movimentacoes.usuario',
             'movimentacoes.depositoOrigem',
@@ -792,27 +793,51 @@ class ConsignacaoController extends Controller
             'itens.*.consignacao_id' => 'required|integer|min:1|distinct',
             'itens.*.quantidade' => 'required|integer|min:1',
             'itens.*.deposito_id' => 'required|exists:depositos,id',
+            'consignacao_ids_historico' => 'nullable|array',
+            'consignacao_ids_historico.*' => 'integer|min:1|distinct',
         ]);
 
         $pedido = Pedido::with(['cliente.enderecoPrincipal', 'cliente.enderecos', 'usuario', 'parceiro'])
             ->findOrFail($pedidoId);
         $itensPayload = collect($validated['itens'])->keyBy('consignacao_id');
+        $historicoIds = collect($validated['consignacao_ids_historico'] ?? [])
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values();
 
-        $itensRoteiro = DB::transaction(function () use ($pedidoId, $itensPayload) {
+        if ($historicoIds->intersect($itensPayload->keys()->map(fn ($id) => (int) $id))->isNotEmpty()) {
+            throw ValidationException::withMessages([
+                'consignacao_ids_historico' => ['Um produto não pode ser informado como nova devolução e histórico ao mesmo tempo.'],
+            ]);
+        }
+
+        $itensRoteiro = DB::transaction(function () use ($pedidoId, $itensPayload, $historicoIds) {
             $consignacoes = Consignacao::with([
-                'devolucoes', 'compras', 'entregaItem', 'deposito',
+                'devolucoes.deposito', 'compras', 'entregaItem', 'deposito',
                 'produtoVariacao.imagem', 'produtoVariacao.produto.imagemPrincipal',
                 'produtoVariacao.produto', 'produtoVariacao.atributos',
                 'produtoVariacao.estoquesComLocalizacao',
             ])
                 ->where('pedido_id', $pedidoId)
-                ->whereIn('id', $itensPayload->keys())
+                ->whereIn('id', $itensPayload->keys()->merge($historicoIds)->unique())
                 ->lockForUpdate()
                 ->get()
                 ->keyBy('id');
 
-            if ($consignacoes->count() !== $itensPayload->count()) {
+            if ($consignacoes->count() !== $itensPayload->count() + $historicoIds->count()) {
                 throw ValidationException::withMessages(['itens' => ['Um ou mais produtos não pertencem a este pedido.']]);
+            }
+
+            $historicosInvalidos = $historicoIds->filter(function (int $consignacaoId) use ($consignacoes) {
+                return $consignacoes->get($consignacaoId)->devolucoes
+                    ->whereNull('cancelada_em')
+                    ->isEmpty();
+            });
+
+            if ($historicosInvalidos->isNotEmpty()) {
+                throw ValidationException::withMessages([
+                    'consignacao_ids_historico' => ['Um ou mais produtos selecionados não possuem devoluções ativas para reimpressão.'],
+                ]);
             }
 
             $usuarioId = AuthHelper::getUsuarioId();
@@ -845,7 +870,9 @@ class ConsignacaoController extends Controller
                 $resultado->push($consignacao);
             }
 
-            return $resultado;
+            return $resultado->concat(
+                $this->gruposRoteiroDevolucoesRegistradas($consignacoes->only($historicoIds->all()))->flatten(1)
+            );
         });
 
         $pdfImageService = app(PdfImageService::class);
@@ -855,13 +882,82 @@ class ConsignacaoController extends Controller
 
         $pdf = Pdf::loadView('exports.roteiro-consignacao', [
             'pedido' => $pedido,
-            'grupos' => $itensRoteiro->groupBy(fn ($item) => $item->deposito_roteiro_nome),
+            'grupos' => $this->agruparItensRoteiroPorDepositoEProduto($itensRoteiro),
             'geradoEm' => now('America/Belem')->format('d/m/Y H:i'),
             'tituloRoteiro' => 'Roteiro de devolução',
             'enderecoEntrega' => ClienteEnderecoPdf::resolverParaPedido($pedido, $validated['cliente_endereco_id'] ?? null),
         ])->setPaper('a4');
 
         return $pdf->download("roteiro-de-devolucao-{$pedidoId}.pdf");
+    }
+
+    public function reimprimirRoteiroDevolucoes(int $pedidoId, Request $request): Response
+    {
+        $validated = $request->validate([
+            'consignacao_ids' => 'nullable|array',
+            'consignacao_ids.*' => 'integer|min:1|distinct',
+            'cliente_endereco_id' => 'nullable|integer',
+        ]);
+        $pedido = Pedido::with([
+            'cliente.enderecoPrincipal', 'cliente.enderecos', 'usuario', 'parceiro',
+            'consignacoes.deposito',
+            'consignacoes.devolucoes.deposito',
+            'consignacoes.produtoVariacao.imagem',
+            'consignacoes.produtoVariacao.produto.imagemPrincipal',
+            'consignacoes.produtoVariacao.produto',
+            'consignacoes.produtoVariacao.atributos',
+            'consignacoes.produtoVariacao.estoquesComLocalizacao',
+        ])->findOrFail($pedidoId);
+
+        $consignacaoIds = collect($validated['consignacao_ids'] ?? [])
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values();
+
+        if ($consignacaoIds->isNotEmpty()) {
+            $consignacoesSelecionadas = $pedido->consignacoes
+                ->whereIn('id', $consignacaoIds)
+                ->values();
+
+            if ($consignacoesSelecionadas->count() !== $consignacaoIds->count()) {
+                throw ValidationException::withMessages([
+                    'consignacao_ids' => ['Um ou mais produtos não pertencem a este pedido.'],
+                ]);
+            }
+
+            $pedido->setRelation('consignacoes', $consignacoesSelecionadas);
+        }
+
+        $grupos = $this->gruposRoteiroDevolucoesRegistradas($pedido->consignacoes);
+
+        if ($grupos->isEmpty()) {
+            throw ValidationException::withMessages([
+                'devolucoes' => ['Este pedido não possui devoluções ativas para reimpressão.'],
+            ]);
+        }
+
+        $pdfImageService = app(PdfImageService::class);
+        $grupos->flatten(1)->each(fn (Consignacao $item) => $item->setAttribute(
+            'pdf_imagem_data_uri', $pdfImageService->fromProdutoVariacaoOrPlaceholder($item->produtoVariacao)
+        ));
+
+        logAuditoria('consignacao_pdf', 'Reimpressão de PDF de roteiro de devolução', [
+            'acao' => 'reimprimir_roteiro_devolucao',
+            'pedido_id' => $pedidoId,
+            'documento' => 'Roteiro de devolução - 2ª via',
+        ]);
+
+        Pdf::setOptions(['isRemoteEnabled' => true]);
+
+        $pdf = Pdf::loadView('exports.roteiro-consignacao', [
+            'pedido' => $pedido,
+            'grupos' => $grupos,
+            'geradoEm' => now('America/Belem')->format('d/m/Y H:i'),
+            'tituloRoteiro' => 'Roteiro de devolução - 2ª via',
+            'enderecoEntrega' => ClienteEnderecoPdf::resolverParaPedido($pedido, $validated['cliente_endereco_id'] ?? null),
+        ])->setPaper('a4');
+
+        return $pdf->download("roteiro-de-devolucao-{$pedidoId}-2-via.pdf");
     }
 
     public function confirmarComprasEmMassa(int $pedidoId, Request $request): JsonResponse
@@ -1315,6 +1411,46 @@ class ConsignacaoController extends Controller
 
             return $depositos->get($depositoId)?->nome ?? 'Sem depósito';
         });
+    }
+
+    private function gruposRoteiroDevolucoesRegistradas($consignacoes)
+    {
+        $itens = collect($consignacoes)
+            ->flatMap(function (Consignacao $consignacao) {
+                return $consignacao->devolucoes
+                    ->filter(fn (ConsignacaoDevolucao $devolucao) => !$devolucao->cancelada_em)
+                    ->groupBy('deposito_id')
+                    ->map(function ($devolucoes, $depositoId) use ($consignacao) {
+                        $item = $consignacao->replicate();
+                        $item->setRelation('produtoVariacao', $consignacao->produtoVariacao);
+                        $item->setRelation('deposito', $consignacao->deposito);
+                        $item->setAttribute('quantidade_roteiro', $devolucoes->sum('quantidade'));
+                        $item->setAttribute('deposito_roteiro_nome', $devolucoes->first()?->deposito?->nome ?? "Depósito #{$depositoId}");
+
+                        return $item;
+                    })
+                    ->values();
+            });
+
+        return $this->agruparItensRoteiroPorDepositoEProduto($itens);
+    }
+
+    private function agruparItensRoteiroPorDepositoEProduto($itens)
+    {
+        return collect($itens)
+            ->groupBy(fn (Consignacao $item) => $item->deposito_roteiro_nome)
+            ->map(function ($itensDoDeposito) {
+                return $itensDoDeposito
+                    ->groupBy('produto_variacao_id')
+                    ->map(function ($itensDoProduto) {
+                        $item = $itensDoProduto->first();
+                        $item->setAttribute('quantidade_roteiro', $itensDoProduto->sum('quantidade_roteiro'));
+
+                        return $item;
+                    })
+                    ->values();
+            })
+            ->filter(fn ($itensDoDeposito) => $itensDoDeposito->isNotEmpty());
     }
 
     private function garantirEnvioParaVendaConsignacao(

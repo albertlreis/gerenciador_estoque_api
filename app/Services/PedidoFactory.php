@@ -31,11 +31,11 @@ final class PedidoFactory
      */
     public function criarItens(Pedido $pedido, Collection $itensCarrinho): Collection
     {
-        return $itensCarrinho->map(function (CarrinhoItem $item) use ($pedido) {
+        return $itensCarrinho->mapWithKeys(function (CarrinhoItem $item) use ($pedido) {
             $precoOriginal = $this->resolverPrecoOriginal($item);
             $precoFinal = round((float) $item->preco_unitario, 2);
 
-            return PedidoItem::create([
+            $pedidoItem = PedidoItem::create([
                 'id_pedido'      => $pedido->id,
                 'id_carrinho_item' => $item->id,
                 'id_variacao'    => $item->id_variacao,
@@ -45,6 +45,8 @@ final class PedidoFactory
                 'subtotal'       => round($precoFinal * (int) $item->quantidade, 2),
                 'id_deposito'    => $item->id_deposito ?? null,
             ]);
+
+            return [(int) $item->id => $pedidoItem];
         });
     }
 

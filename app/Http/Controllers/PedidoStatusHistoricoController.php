@@ -349,9 +349,9 @@ class PedidoStatusHistoricoController extends Controller
         ]);
     }
 
-    public function cancelarStatus(PedidoStatusHistorico $statusHistorico): JsonResponse
+    public function cancelarStatus(Pedido $pedido, PedidoStatusHistorico $statusHistorico): JsonResponse
     {
-        $pedido = $statusHistorico->pedido;
+        abort_unless((int) $statusHistorico->pedido_id === (int) $pedido->id, 404);
 
         $statusCancelado = $statusHistorico->getRawOriginal('status');
         $dataStatus = $statusHistorico->data_status;

@@ -40,7 +40,7 @@ class ContaAzulOperationalEndpointsTest extends TestCase
             DB::table('acesso_usuario_perfil')->updateOrInsert([
                 'id_usuario' => $usuario->id,
                 'id_perfil' => $perfilId,
-            ], ['updated_at' => now()]);
+            ]);
         }
 
         Cache::put('perfis_usuario_' . $usuario->id, ['Desenvolvedor'], now()->addHour());

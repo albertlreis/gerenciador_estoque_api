@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\Usuario;
 use Carbon\Carbon;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
@@ -12,6 +13,8 @@ use Tests\TestCase;
 
 class AniversariosApiTest extends TestCase
 {
+    use RefreshDatabase;
+
     protected function tearDown(): void
     {
         Carbon::setTestNow();

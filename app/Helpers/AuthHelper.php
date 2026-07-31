@@ -3,6 +3,7 @@
 namespace App\Helpers;
 
 use App\Models\Evento;
+use App\Support\Logging\SierraLog;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -106,6 +107,7 @@ class AuthHelper
     {
         $slugs = [
             'avisos.visualizar',
+            'avisos.view',
             'configuracoes.visualizar',
             'home.visualizar',
         ];
@@ -123,6 +125,7 @@ class AuthHelper
     {
         $slugs = [
             'avisos.gerenciar',
+            'avisos.manage',
             'configuracoes.editar',
         ];
 
@@ -173,6 +176,22 @@ class AuthHelper
     public static function podeVisualizarPedidosDeTodos(): bool
     {
         if (self::hasPermissao('pedidos.visualizar.todos')) {
+            return true;
+        }
+
+        if (self::hasPermissao('pedidos.visualizar') && self::hasPermissao('carrinhos.finalizar')) {
+            return true;
+        }
+
+        return self::isPerfilAdministradorOuVendedor();
+    }
+
+    /**
+     * Regra central para listar consignações de todos os vendedores.
+     */
+    public static function podeVisualizarConsignacoesDeTodos(): bool
+    {
+        if (self::hasPermissao('consignacoes.visualizar.todos')) {
             return true;
         }
 
@@ -236,9 +255,17 @@ class AuthHelper
         $userId = auth()->id();
         $cacheKey = 'permissoes_usuario_' . $userId;
 
-        if (Cache::has($cacheKey)) {
-            $cached = Cache::get($cacheKey, []);
-            return is_array($cached) ? $cached : [];
+        try {
+            if (Cache::has($cacheKey)) {
+                $cached = Cache::get($cacheKey, []);
+                return is_array($cached) ? $cached : [];
+            }
+        } catch (\Throwable $e) {
+            SierraLog::auth('auth.permissions.cache_read_failed', [
+                'user_id' => $userId,
+                'operation' => 'permissions_cache_read',
+                'exception' => $e,
+            ], 'warning');
         }
 
         if (!Schema::hasTable('acesso_usuario_perfil')
@@ -256,7 +283,15 @@ class AuthHelper
             ->values()
             ->all();
 
-        Cache::put($cacheKey, $permissoes, now()->addHours(6));
+        try {
+            Cache::put($cacheKey, $permissoes, now()->addHours(6));
+        } catch (\Throwable $e) {
+            SierraLog::auth('auth.permissions.cache_write_failed', [
+                'user_id' => $userId,
+                'operation' => 'permissions_cache_write',
+                'exception' => $e,
+            ], 'warning');
+        }
 
         return $permissoes;
     }
@@ -273,9 +308,17 @@ class AuthHelper
         $userId = auth()->id();
         $cacheKey = 'perfis_usuario_' . $userId;
 
-        if (Cache::has($cacheKey)) {
-            $cached = Cache::get($cacheKey, []);
-            return is_array($cached) ? $cached : [];
+        try {
+            if (Cache::has($cacheKey)) {
+                $cached = Cache::get($cacheKey, []);
+                return is_array($cached) ? $cached : [];
+            }
+        } catch (\Throwable $e) {
+            SierraLog::auth('auth.profiles.cache_read_failed', [
+                'user_id' => $userId,
+                'operation' => 'profiles_cache_read',
+                'exception' => $e,
+            ], 'warning');
         }
 
         if (!Schema::hasTable('acesso_usuario_perfil') || !Schema::hasTable('acesso_perfis')) {
@@ -290,7 +333,15 @@ class AuthHelper
             ->values()
             ->all();
 
-        Cache::put($cacheKey, $perfis, now()->addHours(6));
+        try {
+            Cache::put($cacheKey, $perfis, now()->addHours(6));
+        } catch (\Throwable $e) {
+            SierraLog::auth('auth.profiles.cache_write_failed', [
+                'user_id' => $userId,
+                'operation' => 'profiles_cache_write',
+                'exception' => $e,
+            ], 'warning');
+        }
 
         return $perfis;
     }
@@ -330,11 +381,19 @@ class AuthHelper
     }
 
     /**
+     * Restringe ajustes manuais auditáveis ao perfil Desenvolvedor.
+     */
+    public static function podeRegistrarAjusteManualEstoque(): bool
+    {
+        return self::hasAnyPerfilNormalizadoAtual(['Desenvolvedor']);
+    }
+
+    /**
      * Libera somente a area de conexao/autenticacao da Conta Azul.
      */
     public static function podeAutenticarContaAzul(): bool
     {
-        return self::hasPerfil(['Desenvolvedor', 'Administrador', 'Financeiro']);
+        return self::hasAnyPerfilNormalizadoAtual(['Desenvolvedor', 'Administrador', 'Financeiro']);
     }
 
     /**
@@ -342,7 +401,7 @@ class AuthHelper
      */
     public static function podeOperarContaAzul(): bool
     {
-        return self::hasPerfil('Desenvolvedor');
+        return self::hasAnyPerfilNormalizadoAtual(['Desenvolvedor']);
     }
 
     /**
@@ -390,5 +449,77 @@ class AuthHelper
 
         return $perfisNormalizados->contains(Str::lower('Administrador'))
             || $perfisNormalizados->contains(Str::lower('Vendedor'));
+    }
+
+    private static function hasAnyPerfilNormalizado(array $perfis): bool
+    {
+        if (!auth()->check()) {
+            return false;
+        }
+
+        $esperados = collect($perfis)
+            ->filter(fn ($nome) => is_string($nome))
+            ->map(fn ($nome) => self::normalizarPerfil($nome))
+            ->values();
+
+        if ($esperados->isEmpty()) {
+            return false;
+        }
+
+        return collect(self::getPerfis())
+            ->filter(fn ($nome) => is_string($nome))
+            ->map(fn ($nome) => self::normalizarPerfil($nome))
+            ->contains(fn ($nome) => $esperados->contains($nome));
+    }
+
+    private static function hasAnyPerfilNormalizadoAtual(array $perfis): bool
+    {
+        if (!auth()->check()) {
+            return false;
+        }
+
+        $esperados = collect($perfis)
+            ->filter(fn ($nome) => is_string($nome))
+            ->map(fn ($nome) => self::normalizarPerfil($nome))
+            ->values();
+
+        if ($esperados->isEmpty()) {
+            return false;
+        }
+
+        $perfisDb = self::getPerfisAtuaisDoBanco();
+
+        if ($perfisDb === null) {
+            return self::hasAnyPerfilNormalizado($perfis);
+        }
+
+        return collect($perfisDb)
+            ->filter(fn ($nome) => is_string($nome))
+            ->map(fn ($nome) => self::normalizarPerfil($nome))
+            ->contains(fn ($nome) => $esperados->contains($nome));
+    }
+
+    private static function getPerfisAtuaisDoBanco(): ?array
+    {
+        if (!auth()->check()) {
+            return null;
+        }
+
+        if (!Schema::hasTable('acesso_usuario_perfil') || !Schema::hasTable('acesso_perfis')) {
+            return null;
+        }
+
+        return DB::table('acesso_usuario_perfil')
+            ->join('acesso_perfis', 'acesso_usuario_perfil.id_perfil', '=', 'acesso_perfis.id')
+            ->where('acesso_usuario_perfil.id_usuario', auth()->id())
+            ->pluck('acesso_perfis.nome')
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    private static function normalizarPerfil(string $nome): string
+    {
+        return Str::lower(trim(Str::ascii($nome)));
     }
 }

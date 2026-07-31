@@ -8,14 +8,11 @@ use App\Http\Requests\StorePedidoRequest;
 use App\Models\Carrinho;
 use App\Models\CarrinhoItem;
 use App\Models\PedidoItem;
-use App\Services\Movimentacao\ReservarEstoqueStrategy;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
-use RuntimeException;
-use Throwable;
 
 /**
  * Caso de uso de finalização de pedido.
@@ -36,16 +33,15 @@ final class FinalizarPedidoService
      * @param PedidoPrazoService           $prazoService          Cálculo/definição de data limite.
      * @param PedidoFinalizacaoValidator   $validator             Regras de validação antes de movimentar.
      * @param DepositoResolver             $resolver              Resolve depósito por item (mapa > item).
-     * @param ReservarEstoqueStrategy      $reservarStrategy      Strategy para criar reservas.
+     * @param EntregaProdutoService        $entregaProdutoService Fluxo central de demanda e reserva.
      */
     public function __construct(
         private readonly PedidoFactory $pedidoFactory,
         private readonly ConsignacaoFactory $consignacaoFactory,
         private readonly PedidoPrazoService $prazoService,
-        private readonly PedidoFinalizacaoValidator $validator,
         private readonly DepositoResolver $resolver,
-        private readonly ReservarEstoqueStrategy $reservarStrategy,
-        private readonly ContaReceberService $contaReceberService,
+        private readonly EstoqueDisponibilidadeService $disponibilidade,
+        private readonly EntregaProdutoService $entregaProdutoService,
         private readonly AuditLogger $auditLogger,
     ) {}
 
@@ -105,7 +101,28 @@ final class FinalizarPedidoService
 
         $emConsignacao = $request->boolean('modo_consignacao');
 
-        $this->validator->validarAntesDeMovimentar($carrinho->itens, $depositosResolvidos);
+        if ($emConsignacao) {
+            $this->validarDepositosConsignacao($carrinho->itens, $depositosResolvidos);
+        }
+
+        if (! $emConsignacao && $request->boolean('registrar_movimentacao')) {
+            $saldoInsuficiente = $this->validarSaldoParaMovimentacao($carrinho->itens, $depositosResolvidos);
+
+            if ($saldoInsuficiente->isNotEmpty()) {
+                $mensagens = $saldoInsuficiente
+                    ->map(fn (array $item) => $this->mensagemSaldoInsuficiente($item))
+                    ->values();
+
+                return response()->json([
+                    'message' => $mensagens->count() === 1
+                        ? $mensagens->first()
+                        : 'Saldo insuficiente em ' . $mensagens->count() . ' produtos: ' . $mensagens->join('; '),
+                    'itens_saldo_insuficiente' => $saldoInsuficiente->values(),
+                    'errors' => ['estoque' => $mensagens->all()],
+                ], 422);
+            }
+        }
+
         $this->validarPrecosEditados($carrinho->itens);
 
         return DB::transaction(function () use ($request, $carrinho, $usuarioId, $idUsuarioFinal, $depositosResolvidos, $emConsignacao) {
@@ -143,25 +160,37 @@ final class FinalizarPedidoService
                 $prazoData  = Carbon::now('America/Belem')->addDays($prazoDias);
 
                 // Usa o mapa resolvido para definir depósito das consignações
-                $this->consignacaoFactory->criarLote($pedido, $carrinho->itens, $depositosResolvidos, $prazoData);
+                $this->consignacaoFactory->criarLote(
+                    $pedido,
+                    $carrinho->itens,
+                    $depositosResolvidos,
+                    $prazoData,
+                    $itensPedido
+                );
                 $this->pedidoFactory->registrarStatus($pedido, PedidoStatus::CONSIGNADO, $idUsuarioFinal);
             }
 
-            $this->reservarStrategy->processar($pedido, $carrinho->itens, $depositosResolvidos, $idUsuarioFinal);
+            $this->entregaProdutoService->criarDemandaPedido($pedido, $idUsuarioFinal, ! $emConsignacao);
+
+            if ($emConsignacao) {
+                $pedido->load('consignacoes');
+                foreach ($pedido->consignacoes as $consignacao) {
+                    $entrega = $this->entregaProdutoService->criarDemandaConsignacao($consignacao, $idUsuarioFinal);
+                    $this->entregaProdutoService->reservarItem(
+                        $entrega,
+                        $consignacao->deposito_id,
+                        null,
+                        $idUsuarioFinal,
+                        "Reserva inicial da consignacao #{$consignacao->id}",
+                        "consignacao:{$consignacao->id}:reserva-inicial"
+                    );
+                }
+            }
+
             $pedido->forceFill(['separacao_status' => 'pendente'])->save();
 
             // Data limite
             $this->prazoService->definirDataLimite($pedido, $prazoUteis);
-
-            // Cria conta a receber (apenas se não for consignado)
-            if (!$emConsignacao) {
-                try {
-                    $this->contaReceberService->gerarPorPedido($pedido);
-                } catch (Throwable $e) {
-                    report($e);
-                    throw new RuntimeException("Falha ao gerar conta a receber: {$e->getMessage()}");
-                }
-            }
 
             // Finaliza carrinho
             $carrinho->itens()->delete();
@@ -221,6 +250,69 @@ final class FinalizarPedidoService
         if ($erros !== []) {
             throw ValidationException::withMessages($erros);
         }
+    }
+
+    private function validarDepositosConsignacao(Collection $itensCarrinho, array $depositosResolvidos): void
+    {
+        $itensSemDeposito = $itensCarrinho
+            ->filter(fn ($item) => empty($depositosResolvidos[$item->id] ?? $item->id_deposito))
+            ->values();
+
+        if ($itensSemDeposito->isEmpty()) {
+            return;
+        }
+
+        throw ValidationException::withMessages([
+            'depositos_por_item' => ['Selecione o deposito de saida para todos os itens da consignacao.'],
+        ]);
+    }
+
+    private function validarSaldoParaMovimentacao(Collection $itensCarrinho, array $depositosResolvidos): Collection
+    {
+        return $itensCarrinho
+            ->filter(fn ($item) => ! empty($depositosResolvidos[$item->id] ?? $item->id_deposito))
+            ->groupBy(fn ($item) => ((int) $item->id_variacao) . ':' . ((int) ($depositosResolvidos[$item->id] ?? $item->id_deposito)))
+            ->flatMap(function (Collection $grupo) use ($depositosResolvidos) {
+                $primeiro = $grupo->first();
+                $depositoId = (int) ($depositosResolvidos[$primeiro->id] ?? $primeiro->id_deposito);
+                $disponivel = $this->disponibilidade->getDisponivel((int) $primeiro->id_variacao, $depositoId);
+                $restante = $disponivel;
+
+                return $grupo
+                    ->filter(function ($item) use (&$restante) {
+                        $solicitado = (int) $item->quantidade;
+                        $temSaldo = $restante >= $solicitado;
+                        $restante = max(0, $restante - $solicitado);
+
+                        return ! $temSaldo;
+                    })
+                    ->map(fn ($item) => [
+                        'id_carrinho_item' => (int) $item->id,
+                        'id_variacao' => (int) $item->id_variacao,
+                        'id_deposito' => $depositoId,
+                        'produto' => $this->nomeProdutoItem($item),
+                        'disponivel' => max(0, $disponivel),
+                        'solicitado' => (int) $item->quantidade,
+                    ]);
+            })
+            ->values();
+    }
+
+    private function nomeProdutoItem(object $item): string
+    {
+        $nomeCompleto = trim((string) ($item->nome_completo ?? $item->variacao?->nome_completo ?? ''));
+        if ($nomeCompleto !== '') {
+            return $nomeCompleto;
+        }
+
+        $produtoNome = trim((string) ($item->variacao?->produto?->nome ?? ''));
+
+        return $produtoNome !== '' ? $produtoNome : "Variação #{$item->id_variacao}";
+    }
+
+    private function mensagemSaldoInsuficiente(array $item): string
+    {
+        return "Saldo insuficiente para {$item['produto']}. Disponível: {$item['disponivel']}, solicitado: {$item['solicitado']}.";
     }
 
     private function calcularTotalItens(Collection $itensCarrinho): float

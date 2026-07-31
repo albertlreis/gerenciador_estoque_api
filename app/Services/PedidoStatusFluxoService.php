@@ -9,7 +9,7 @@ use App\Models\PedidoStatusFluxoItem;
 use BackedEnum;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
-use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\DB;
 
 class PedidoStatusFluxoService
 {
@@ -369,7 +369,10 @@ class PedidoStatusFluxoService
 
     public function tabelasConfiguraveisDisponiveis(): bool
     {
-        return Schema::hasTable('pedido_statuses') && Schema::hasTable('pedido_status_fluxo_itens');
+        $schema = DB::connection()->getSchemaBuilder();
+
+        return $schema->hasTable('pedido_statuses')
+            && $schema->hasTable('pedido_status_fluxo_itens');
     }
 
     private function catalogoCompleto(): Collection

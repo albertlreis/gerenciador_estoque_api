@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\Cliente;
 use App\Models\ContaFinanceira;
 use App\Models\ContaPagar;
 use App\Models\ContaPagarPagamento;
@@ -79,6 +80,11 @@ class FinanceiroParcelamentoCustomizadoTest extends TestCase
 
     public function test_conta_receber_parcelada_com_pagamento_inicial_baixa_entrada(): void
     {
+        $cliente = Cliente::create([
+            'nome' => 'Cliente Parcelamento Custom',
+            'tipo' => 'pf',
+        ]);
+
         $contaFinanceira = ContaFinanceira::create([
             'nome' => 'Conta Recebimento Inicial',
             'tipo' => 'banco',
@@ -89,6 +95,7 @@ class FinanceiroParcelamentoCustomizadoTest extends TestCase
         ]);
 
         $response = $this->postJson('/api/v1/financeiro/contas-receber', [
+            'cliente_id' => $cliente->id,
             'descricao' => 'Receita parcelada com entrada paga',
             'data_emissao' => '2026-06-19',
             'data_vencimento' => '2026-07-10',

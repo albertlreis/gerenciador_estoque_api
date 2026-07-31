@@ -34,7 +34,9 @@ class SlugAutomaticoTest extends TestCase
         ])->assertCreated();
 
         $segunda = $this->postJson('/api/v1/financeiro/categorias-financeiras', [
-            'nome' => 'Receita Recorrente',
+            // Nome distinto que produz o mesmo slug base. Nomes realmente
+            // duplicados são rejeitados pelo catálogo financeiro.
+            'nome' => 'Receita Recorrente!',
             'tipo' => 'receita',
             'slug' => 'nao-deve-ser-usado',
         ])->assertCreated();

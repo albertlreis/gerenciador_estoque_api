@@ -8,10 +8,24 @@ class ContaReceberResource extends JsonResource
 {
     public function toArray($request): array
     {
+        $pedido = $this->relationLoaded('pedido') ? $this->pedido : null;
+        $clienteDireto = $this->relationLoaded('cliente') ? $this->cliente : null;
+        $clientePedido = $pedido?->relationLoaded('cliente') ? $pedido->cliente : null;
+        $cliente = $clienteDireto?->id ? $clienteDireto : $clientePedido;
+
         return [
             'id'                => $this->id,
+            'parcelamento_id'   => $this->parcelamento_id ? (int) $this->parcelamento_id : null,
+            'despesa_recorrente_id' => $this->despesa_recorrente_id ? (int) $this->despesa_recorrente_id : null,
+            'recorrencia_competencia' => optional($this->recorrencia_competencia)->format('Y-m-d'),
+            'origem' => $this->despesa_recorrente_id ? 'recorrente' : 'manual',
+            'parcela_numero'    => $this->parcela_numero !== null ? (int) $this->parcela_numero : null,
+            'parcelas_total'    => $this->parcelas_total !== null ? (int) $this->parcelas_total : null,
+            'is_entrada'        => (bool) $this->is_entrada,
             'pedido_id'         => $this->pedido_id ? (int) $this->pedido_id : null,
-            'cliente_id'        => $this->cliente_id ? (int) $this->cliente_id : null,
+            'pedido_numero'     => $pedido?->numero_externo,
+            'cliente_id'        => $cliente?->id ? (int) $cliente->id : null,
+            'cliente_nome'      => $cliente?->nome,
             'descricao'         => $this->descricao,
             'numero_documento'  => $this->numero_documento,
             'data_emissao'      => optional($this->data_emissao)->format('Y-m-d'),
@@ -36,21 +50,56 @@ class ContaReceberResource extends JsonResource
                 'id' => $this->centroCusto?->id,
                 'nome' => $this->centroCusto?->nome,
             ]),
+            'parcelamento' => $this->whenLoaded('parcelamento', fn() => [
+                'id' => $this->parcelamento?->id,
+                'tipo' => $this->parcelamento?->tipo,
+                'descricao' => $this->parcelamento?->descricao,
+                'valor_total' => (float) ($this->parcelamento?->valor_total ?? 0),
+                'valor_entrada' => (float) ($this->parcelamento?->valor_entrada ?? 0),
+                'quantidade_parcelas' => (int) ($this->parcelamento?->quantidade_parcelas ?? 0),
+            ]),
+            'recorrencia' => $this->whenLoaded('recorrencia', fn() => [
+                'id' => $this->recorrencia?->id,
+                'direcao' => $this->recorrencia?->direcao ?: 'RECEBER',
+                'descricao' => $this->recorrencia?->descricao,
+                'status' => $this->recorrencia?->status,
+                'frequencia' => $this->recorrencia?->frequencia,
+            ]),
+            'observacoes'       => $this->observacoes,
+
+            'cobranca_conta_azul' => $this->whenLoaded('cobrancaContaAzul', fn () => $this->cobrancaContaAzul ? [
+                'id' => $this->cobrancaContaAzul->id,
+                'tipo' => $this->cobrancaContaAzul->tipo,
+                'status' => $this->cobrancaContaAzul->status,
+                'id_externo' => $this->cobrancaContaAzul->id_externo,
+                'url' => $this->cobrancaContaAzul->url,
+                'linha_digitavel' => $this->cobrancaContaAzul->linha_digitavel,
+                'codigo_barras' => $this->cobrancaContaAzul->codigo_barras,
+                'erro_codigo' => $this->cobrancaContaAzul->erro_codigo,
+                'erro_mensagem' => $this->cobrancaContaAzul->erro_mensagem,
+                'emitida_em' => optional($this->cobrancaContaAzul->emitida_em)->format('Y-m-d H:i:s'),
+                'ultima_tentativa_em' => optional($this->cobrancaContaAzul->ultima_tentativa_em)->format('Y-m-d H:i:s'),
+            ] : null),
+
+            'pedido' => $this->whenLoaded('pedido', function () {
+                $cliente = $this->pedido?->relationLoaded('cliente') ? $this->pedido->cliente : null;
+
+                return [
+                    'id' => $this->pedido->id,
+                    'numero' => $this->pedido->numero_externo ?? null,
+                    'numero_externo' => $this->pedido->numero_externo ?? null,
+                    'data' => optional($this->pedido->data)->format('Y-m-d'),
+                    'cliente' => $cliente?->nome,
+                    'cliente_id' => $cliente?->id ? (int) $cliente->id : null,
+                    'cliente_nome' => $cliente?->nome,
+                ];
+            }),
+
             'cliente' => $this->whenLoaded('cliente', fn() => [
                 'id' => $this->cliente?->id,
                 'nome' => $this->cliente?->nome,
                 'documento' => $this->cliente?->documento,
             ]),
-            'observacoes'       => $this->observacoes,
-
-            'pedido' => $this->whenLoaded('pedido', function () {
-                return [
-                    'id' => $this->pedido->id,
-                    'numero' => $this->pedido->numero ?? null,
-                    'data' => optional($this->pedido->data)->format('Y-m-d'),
-                    'cliente' => $this->pedido->cliente->nome ?? null,
-                ];
-            }),
 
             'pagamentos' => $this->whenLoaded('pagamentos', function () {
                 return $this->pagamentos->map(fn($p) => [
@@ -59,6 +108,12 @@ class ContaReceberResource extends JsonResource
                     'valor' => (float) $p->valor,
                     'forma_pagamento' => $p->forma_pagamento,
                     'comprovante_path' => $p->comprovante_path,
+                    'comprovante_url' => $p->comprovante_path ? \Storage::url($p->comprovante_path) : null,
+                    'observacoes' => $p->observacoes,
+                    'conta_financeira' => $p->relationLoaded('contaFinanceira') ? [
+                        'id' => $p->contaFinanceira?->id,
+                        'nome' => $p->contaFinanceira?->nome,
+                    ] : null,
                     'usuario' => $p->relationLoaded('usuario') ? [
                         'id' => $p->usuario?->id,
                         'nome' => $p->usuario?->nome,

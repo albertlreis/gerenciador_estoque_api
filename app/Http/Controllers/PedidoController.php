@@ -6,25 +6,41 @@ use App\Helpers\AuthHelper;
 use App\Http\Requests\StorePedidoRequest;
 use App\Http\Requests\UpdatePedidoRequest;
 use App\Http\Resources\PedidoCompletoResource;
+use App\Enums\EstrategiaVinculoImportacao;
+use App\Enums\PedidoStatus;
 use App\Enums\TipoImportacao;
+use App\Models\Categoria;
 use App\Models\Deposito;
+use App\Models\Estoque;
+use App\Models\EstoqueReserva;
+use App\Models\Fornecedor;
 use App\Models\Pedido;
 use App\Models\PedidoImportacao;
-use App\Models\ProdutoImagem;
-use App\Services\ExtratorPedidoPythonService;
+use App\Models\ProdutoEntregaEvento;
+use App\Models\ProdutoEntregaItem;
+use App\Services\EstoqueDisponibilidadeService;
+use App\Services\EntregaProdutoService;
+use App\Services\FornecedorPedidoXmlParserService;
 use App\Services\ImportacaoPedidoService;
 use App\Services\NfeXmlParserService;
 use App\Services\PedidoService;
+use App\Services\PedidoCancelamentoService;
 use App\Services\PedidoUpdateService;
 use App\Services\EstatisticaPedidoService;
 use App\Services\PedidoExportService;
+use App\Services\PdfImageService;
+use App\Support\Logging\SierraLog;
+use App\Support\Pdf\ClienteEnderecoPdf;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Exception;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
-use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Collection;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 /**
@@ -32,12 +48,17 @@ use Symfony\Component\HttpFoundation\BinaryFileResponse;
  */
 class PedidoController extends Controller
 {
+    private const NS_NFE = 'http://www.portalfiscal.inf.br/nfe';
+    private const FORNECEDOR_AVANTI_TOKEN = 'avanti';
+    private const FORNECEDOR_AVANTI_CNPJS = ['09341891000467'];
+    private const FORNECEDOR_AVANTI_RAZOES_SOCIAIS = ['snl industria e comercio textil'];
+    private const CATEGORIA_SUGERIDA_AVANTI = 'Tapete';
+
     protected PedidoService $pedidoService;
     protected PedidoUpdateService $pedidoUpdateService;
     protected ImportacaoPedidoService $importacaoService;
     protected EstatisticaPedidoService $estatisticaService;
     protected PedidoExportService $exportService;
-    protected ExtratorPedidoPythonService $service;
 
     /**
      * Injeta as dependências necessárias.
@@ -47,14 +68,12 @@ class PedidoController extends Controller
         ImportacaoPedidoService $importacaoService,
         EstatisticaPedidoService $estatisticaService,
         PedidoExportService $exportService,
-        ExtratorPedidoPythonService $service,
         PedidoUpdateService $pedidoUpdateService
     ) {
         $this->pedidoService = $pedidoService;
         $this->importacaoService = $importacaoService;
         $this->estatisticaService = $estatisticaService;
         $this->exportService = $exportService;
-        $this->service = $service;
         $this->pedidoUpdateService = $pedidoUpdateService;
     }
 
@@ -99,11 +118,18 @@ class PedidoController extends Controller
         $pedidoCompleto = $updated->load([
             'cliente:id,nome,email,telefone',
             'parceiro:id,nome',
+            'fornecedor:id,nome,cnpj',
             'usuario:id,nome',
             'statusAtual',
             'itens.variacao.produto.imagens',
             'itens.variacao.atributos',
             'historicoStatus.usuario:id,nome',
+            'entregaItens.variacao.produto',
+            'entregaItens.variacao.atributos',
+            'entregaItens.pedido:id,tipo,origem_abastecimento',
+            'entregaItens.eventos.reserva.deposito:id,nome',
+            'entregaItens.depositoOrigem:id,nome',
+            'entregaItens.depositoDestino:id,nome',
             'devolucoes.itens.pedidoItem.variacao.produto',
             'devolucoes.itens.trocaItens.variacaoNova.produto',
             'devolucoes.credito',
@@ -112,6 +138,27 @@ class PedidoController extends Controller
         return response()->json([
             'message' => 'Pedido atualizado com sucesso.',
             'data' => new PedidoCompletoResource($pedidoCompleto),
+        ]);
+    }
+
+    public function cancelar(Request $request, Pedido $pedido, PedidoCancelamentoService $service): JsonResponse
+    {
+        if (!AuthHelper::hasPermissao('pedidos.editar')) {
+            return response()->json(['message' => 'Sem permissão para cancelar pedidos.'], 403);
+        }
+
+        $dados = $request->validate([
+            'cancelar_reservas' => 'sometimes|boolean',
+            'estornar_estoque' => 'sometimes|boolean',
+            'cancelar_financeiro' => 'sometimes|boolean',
+            'observacoes' => 'nullable|string',
+        ]);
+
+        $resultado = $service->cancelar($pedido, $dados, auth()->id());
+
+        return response()->json([
+            'message' => 'Venda cancelada com sucesso.',
+            'resultado' => $resultado,
         ]);
     }
 
@@ -124,6 +171,82 @@ class PedidoController extends Controller
     public function completo(int $pedidoId): PedidoCompletoResource
     {
         return $this->pedidoService->obterPedidoCompleto($pedidoId);
+    }
+
+    /**
+     * Upload e vincula XML de NF-e ao pedido.
+     */
+    public function uploadXml(Request $request, Pedido $pedido): JsonResponse
+    {
+        if (!AuthHelper::hasPermissao('pedidos.editar')) {
+            return response()->json(['message' => 'Sem permissão para anexar XML.'], 403);
+        }
+
+        $maxKb = (int) config('orders.nfe_xml_max_kb', 2048);
+
+        $request->validate([
+            'arquivo' => "required|file|mimes:xml|max:{$maxKb}",
+        ]);
+
+        $arquivo = $request->file('arquivo');
+        $hash = hash_file('sha256', $arquivo->getRealPath());
+        $nomeOriginal = $arquivo->getClientOriginalName() ?: 'nfe.xml';
+
+        $disk = Storage::disk('local');
+        $dir = "pedidos/{$pedido->id}";
+        $path = "{$dir}/nfe.xml";
+
+        if ($pedido->nfe_xml_path && $pedido->nfe_xml_path !== $path && $disk->exists($pedido->nfe_xml_path)) {
+            $disk->delete($pedido->nfe_xml_path);
+        }
+
+        $disk->putFileAs($dir, $arquivo, 'nfe.xml');
+
+        $pedido->forceFill([
+            'nfe_xml_path' => $path,
+            'nfe_xml_nome' => $nomeOriginal,
+            'nfe_xml_hash' => $hash,
+            'nfe_xml_uploaded_by' => auth()->id(),
+            'nfe_xml_uploaded_at' => now(),
+        ])->save();
+
+        logAuditoria('pedido_xml', 'Upload de XML de NF-e', [
+            'acao' => 'upload_xml',
+            'pedido_id' => $pedido->id,
+            'usuario_id' => auth()->id(),
+            'arquivo_nome' => $nomeOriginal,
+            'arquivo_hash' => $hash,
+        ]);
+
+        return response()->json([
+            'message' => 'XML vinculado com sucesso.',
+            'data' => [
+                'nfe_xml_vinculado' => true,
+                'nfe_xml_nome' => $pedido->nfe_xml_nome,
+                'nfe_xml_uploaded_at' => $pedido->nfe_xml_uploaded_at,
+                'nfe_xml_uploaded_by' => $pedido->nfe_xml_uploaded_by,
+            ],
+        ]);
+    }
+
+    /**
+     * Download do XML de NF-e vinculado ao pedido.
+     */
+    public function downloadXml(Pedido $pedido): BinaryFileResponse|JsonResponse
+    {
+        if (!AuthHelper::hasPermissao('pedidos.visualizar.todos') && $pedido->id_usuario !== auth()->id()) {
+            return response()->json(['message' => 'Sem permissão para acessar este pedido.'], 403);
+        }
+
+        if (!$pedido->nfe_xml_path || !Storage::disk('local')->exists($pedido->nfe_xml_path)) {
+            return response()->json(['message' => 'XML não encontrado para este pedido.'], 404);
+        }
+
+        $nome = $pedido->nfe_xml_nome ?: "pedido_{$pedido->id}_nfe.xml";
+
+        return Storage::disk('local')->download($pedido->nfe_xml_path, $nome, [
+            'Content-Type' => 'application/xml',
+        ]);
     }
 
     /**
@@ -149,11 +272,19 @@ class PedidoController extends Controller
     }
 
     /**
-     * Confirma a importação de um pedido previamente lido do PDF.
+     * Confirma a importação de um pedido previamente lido e armazenado em preview.
      *
      * @param Request $request
      * @return JsonResponse
      * @throws \Illuminate\Validation\ValidationException
+     */
+    public function confirmarImportacaoXml(Request $request): JsonResponse
+    {
+        return $this->importacaoService->confirmarImportacaoXml($request);
+    }
+
+    /**
+     * Confirma a importação de um pedido previamente lido do PDF.
      */
     public function confirmarImportacaoPDF(Request $request): JsonResponse
     {
@@ -161,7 +292,7 @@ class PedidoController extends Controller
     }
 
     /**
-     * Recebe o PDF, envia para a API Python e retorna JSON estruturado.
+     * Recebe o XML, realiza o parse e retorna JSON estruturado.
      */
     public function importar(Request $request): JsonResponse
     {
@@ -169,7 +300,7 @@ class PedidoController extends Controller
         $inicioImportacao = microtime(true);
 
         $tiposPermitidos = TipoImportacao::valores();
-        $tipoImportacao = strtoupper((string) $request->input('tipo_importacao', TipoImportacao::PRODUTOS_PDF_SIERRA->value));
+        $tipoImportacao = strtoupper((string) $request->input('tipo_importacao', TipoImportacao::PRODUTOS_XML_FORNECEDORES->value));
 
         if (!in_array($tipoImportacao, $tiposPermitidos, true)) {
             return response()->json([
@@ -177,18 +308,18 @@ class PedidoController extends Controller
                 'mensagem' => 'Tipo de importação inválido.',
                 'errors' => [
                     'tipo_importacao' => [
-                        'Informe um tipo válido: PRODUTOS_PDF_SIERRA, PRODUTOS_PDF_AVANTI, PRODUTOS_PDF_QUAKER ou ADORNOS_XML_NFE.',
+                        'Informe um tipo válido: PRODUTOS_XML_FORNECEDORES ou ADORNOS_XML_NFE.',
                     ],
                 ],
             ], 422);
         }
 
-        $isXml = $tipoImportacao === 'ADORNOS_XML_NFE';
+        $isXml = true;
 
         $arquivoRules = [
             'required',
             'file',
-            $isXml ? 'mimes:xml' : 'mimes:pdf',
+            'mimes:xml',
             'max:10240',
         ];
         if ($isXml) {
@@ -197,10 +328,9 @@ class PedidoController extends Controller
         $request->validate([
             'arquivo' => $arquivoRules,
             'tipo_importacao' => 'nullable|string',
+            'estrategia_vinculo' => 'nullable|string',
         ], [
-            'arquivo.mimes' => $isXml
-                ? 'Para ADORNOS_XML_NFE, envie um arquivo XML válido.'
-                : 'Para importação de produtos, envie um arquivo PDF válido.',
+            'arquivo.mimes' => 'Envie um arquivo XML válido para a importação.',
         ]);
 
         if ($isXml && str_ends_with(strtolower($request->file('arquivo')->getClientOriginalName()), ':zone.identifier')) {
@@ -212,72 +342,43 @@ class PedidoController extends Controller
 
         try {
             $arquivo = $request->file('arquivo');
-            $hashArquivo = hash_file('sha256', $arquivo->getRealPath());
-            $hash = hash('sha256', $hashArquivo . '|' . $tipoImportacao);
+            $tipoImportacaoSolicitado = $tipoImportacao;
+            $tipoDetectado = $this->detectarTipoImportacaoXml($arquivo->getRealPath());
 
-            Log::info('Importação de pedido - início', [
+            if ($tipoDetectado !== null && $tipoDetectado !== $tipoImportacao) {
+                SierraLog::inventory('inventory.order_import.type_adjusted', [
+                    'request_id' => $requestId,
+                    'usuario_id' => auth()->id(),
+                    'tipo_importacao_solicitado' => $tipoImportacaoSolicitado,
+                    'tipo_importacao_detectado' => $tipoDetectado,
+                    'arquivo_nome' => $arquivo->getClientOriginalName(),
+                ]);
+
+                $tipoImportacao = $tipoDetectado;
+            }
+
+            $hashArquivo = hash_file('sha256', $arquivo->getRealPath());
+            // IMPORTANTE:
+            // - A mesma importação (mesmo arquivo) deve poder ser reprocessada N vezes.
+            // - Mantemos o hash do conteúdo apenas para log/telemetria, mas o identificador da importação
+            //   precisa ser único por tentativa (sem travas por hash/nome).
+            $hash = hash('sha256', $hashArquivo . '|' . $tipoImportacao . '|' . Str::uuid());
+
+            SierraLog::inventory('inventory.order_import.started', [
                 'request_id' => $requestId,
                 'etapa' => 'upload',
                 'usuario_id' => auth()->id(),
                 'tipo_importacao' => $tipoImportacao,
+                'tipo_importacao_solicitado' => $tipoImportacaoSolicitado,
                 'arquivo_nome' => $arquivo->getClientOriginalName(),
                 'arquivo_tamanho' => $arquivo->getSize(),
                 'arquivo_hash' => $hash,
             ]);
 
-            $importExistente = PedidoImportacao::query()
-                ->where('arquivo_hash', $hash)
-                ->first();
-
-            if ($importExistente && $importExistente->status === 'confirmado') {
-                return response()->json([
-                    'sucesso' => false,
-                    'mensagem' => 'Este arquivo já foi importado anteriormente para este tipo de importação.',
-                    'pedido_id' => $importExistente->pedido_id,
-                ], 409);
-            }
-
-            if ($importExistente && $importExistente->status === 'extraido' && $importExistente->dados_json) {
-                $preview = is_array($importExistente->dados_json)
-                    ? $importExistente->dados_json
-                    : (array) $importExistente->dados_json;
-                $itensPreview = data_get($preview, 'itens', []);
-                $previewValido = is_array($itensPreview) && count($itensPreview) > 0;
-
-                if ($previewValido || $this->previewTemDadosMinimos($preview)) {
-                    Log::info('Importação de pedido - preview reutilizado', [
-                        'request_id' => $requestId,
-                        'etapa' => 'staging',
-                        'usuario_id' => auth()->id(),
-                        'importacao_id' => $importExistente->id,
-                        'tipo_importacao' => $tipoImportacao,
-                        'itens_preview' => count($itensPreview),
-                        'tempo_ms' => (int) ((microtime(true) - $inicioImportacao) * 1000),
-                    ]);
-
-                    $dadosCached = $this->garantirContratoPreview($preview);
-                    return response()->json([
-                        'sucesso' => true,
-                        'mensagem' => 'Arquivo já processado. Usando dados existentes.',
-                        'importacao_id' => $importExistente->id,
-                        'dados' => $dadosCached,
-                    ]);
-                }
-
-                Log::warning('Importação de pedido - preview vazio, reprocessando arquivo', [
-                    'request_id' => $requestId,
-                    'etapa' => 'staging',
-                    'usuario_id' => auth()->id(),
-                    'importacao_id' => $importExistente->id,
-                    'tipo_importacao' => $tipoImportacao,
-                    'tempo_ms' => (int) ((microtime(true) - $inicioImportacao) * 1000),
-                ]);
-            }
-
-            if ($tipoImportacao === 'ADORNOS_XML_NFE') {
+            if ($tipoImportacao === TipoImportacao::ADORNOS_XML_NFE->value) {
                 $dados = app(NfeXmlParserService::class)->extrair($arquivo);
             } else {
-                $dados = $this->service->processar($arquivo, $tipoImportacao, $requestId);
+                $dados = app(FornecedorPedidoXmlParserService::class)->extrair($arquivo);
             }
 
             $pedido = $dados['pedido'] ?? [];
@@ -285,17 +386,17 @@ class PedidoController extends Controller
             $totais = $dados['totais'] ?? [];
 
             $temItens = is_array($itens) && count($itens) > 0;
-            $isPdf = $tipoImportacao !== 'ADORNOS_XML_NFE';
+            $permitePreviewSemItens = true;
 
-            if ($isPdf && !$temItens) {
+            if ($permitePreviewSemItens && !$temItens) {
                 $temPedidoMinimo = $this->temPedidoMinimo($pedido, $totais);
                 if (!$temPedidoMinimo) {
                     $nomeArquivo = $arquivo->getClientOriginalName();
-                    Log::warning('Importação de pedido - sem dados mínimos do pedido', [
+                    SierraLog::inventory('inventory.order_import.minimum_data_missing', [
                         'request_id' => $requestId,
                         'tipo_importacao' => $tipoImportacao,
                         'arquivo_nome' => $nomeArquivo,
-                    ]);
+                    ], 'warning');
                     return response()->json([
                         'sucesso' => false,
                         'mensagem' => "Não foi possível extrair os dados mínimos do pedido (cabeçalho/totais). Arquivo: {$nomeArquivo}",
@@ -304,16 +405,38 @@ class PedidoController extends Controller
                 }
                 $nomeArquivo = $arquivo->getClientOriginalName();
                 $debugTexto = $dados['debug_texto_extraido'] ?? null;
-                Log::warning('Importação de pedido - PDF sem itens identificados (preview ok, requer inserção manual)', [
+                SierraLog::inventory('inventory.order_import.items_missing', [
                     'request_id' => $requestId,
                     'tipo_importacao' => $tipoImportacao,
                     'arquivo_nome' => $nomeArquivo,
                     'debug_texto_preview' => $debugTexto ? mb_substr($debugTexto, 0, 2000) : null,
-                ]);
+                ], 'warning');
             }
 
+            $estrategiaVinculo = EstrategiaVinculoImportacao::REF_SELECAO->value;
+            $fornecedorSugerido = is_array($pedido['fornecedor_sugerido'] ?? null)
+                ? $pedido['fornecedor_sugerido']
+                : [];
+            $fornecedorResolvidoXml = $this->resolverFornecedorSugerido($fornecedorSugerido);
+            $fornecedorVinculado = $this->resolverFornecedorImportacao(
+                $fornecedorSugerido,
+                $fornecedorResolvidoXml,
+                $arquivo->getClientOriginalName()
+            );
+            $categoriaSugerida = $this->resolverCategoriaSugeridaImportacao(
+                $fornecedorSugerido,
+                $fornecedorVinculado,
+                $arquivo->getClientOriginalName()
+            );
+            $opcoesMesclagem = $categoriaSugerida
+                ? ['categoria_sugerida' => [
+                    'id' => $categoriaSugerida->id,
+                    'nome' => $categoriaSugerida->nome,
+                ]]
+                : [];
+
             $itens = app(ImportacaoPedidoService::class)
-                ->mesclarItensComVariacoes($itens);
+                ->mesclarItensComVariacoes($itens, $estrategiaVinculo, $opcoesMesclagem);
 
             $cliente = [
                 'nome' => $pedido['cliente'] ?? '',
@@ -323,8 +446,15 @@ class PedidoController extends Controller
                 'endereco' => '',
             ];
 
+            $numeroExtraido = trim((string) ($pedido['numero_pedido'] ?? ''));
+
             $pedidoFormatado = [
-                'numero_externo' => $pedido['numero_pedido'] ?? '',
+                'numero_externo' => '',
+                'id_fornecedor' => $fornecedorVinculado?->id,
+                'fornecedor_sugerido' => [
+                    'nome' => $fornecedorSugerido['nome'] ?? null,
+                    'cnpj' => $this->normalizarDocumentoFornecedor($fornecedorSugerido['cnpj'] ?? null),
+                ],
                 'data_pedido' => $pedido['data_pedido'] ?? null,
                 'data_inclusao' => $pedido['data_inclusao'] ?? null,
                 'data_entrega' => $pedido['data_entrega'] ?? null,
@@ -335,12 +465,13 @@ class PedidoController extends Controller
             $itensExtraidos = $temItens;
             $requerInsercaoManual = !$itensExtraidos;
             $avisos = [];
-            if ($requerInsercaoManual && $isPdf) {
+            if ($requerInsercaoManual && $permitePreviewSemItens) {
                 $avisos[] = 'Itens não puderam ser extraídos automaticamente. Insira manualmente.';
             }
 
             $payload = [
                 'tipo_importacao' => $tipoImportacao,
+                'estrategia_vinculo' => $estrategiaVinculo,
                 'cliente' => $cliente,
                 'pedido' => $pedidoFormatado,
                 'itens' => $itens,
@@ -352,27 +483,27 @@ class PedidoController extends Controller
                 'debug_motivo_itens_zero' => $dados['debug_motivo_itens_zero'] ?? null,
             ];
 
-            $importacao = PedidoImportacao::updateOrCreate(
-                ['arquivo_hash' => $hash],
-                [
-                    'arquivo_nome' => $arquivo->getClientOriginalName(),
-                    'numero_externo' => $pedidoFormatado['numero_externo'] ?: null,
-                    'usuario_id' => auth()->id(),
-                    'status' => 'extraido',
-                    'dados_json' => $payload,
-                    'erro' => null,
-                ]
-            );
+            $importacao = PedidoImportacao::create([
+                'arquivo_hash' => $hash,
+                'arquivo_nome' => $arquivo->getClientOriginalName(),
+                'numero_externo' => null,
+                'usuario_id' => auth()->id(),
+                'status' => 'extraido',
+                'dados_json' => $payload,
+                'erro' => null,
+            ]);
 
-            Log::info('Importação de pedido - extração concluída', [
+            SierraLog::inventory('inventory.order_import.extraction_finished', [
                 'request_id' => $requestId,
                 'etapa' => 'staging',
                 'usuario_id' => auth()->id(),
-                'importacao_id' => $importacao->id,
+                'entity_type' => 'pedido_importacao',
+                'entity_id' => $importacao->id,
                 'tipo_importacao' => $tipoImportacao,
+                'estrategia_vinculo' => $estrategiaVinculo,
                 'itens_total' => count($itens),
-                'numero_externo' => $pedidoFormatado['numero_externo'] ?? null,
-                'tempo_ms' => (int) ((microtime(true) - $inicioImportacao) * 1000),
+                'numero_extraido' => $numeroExtraido ?: null,
+                'duration_ms' => (int) ((microtime(true) - $inicioImportacao) * 1000),
             ]);
 
             return response()->json([
@@ -382,11 +513,11 @@ class PedidoController extends Controller
                 'dados' => $payload,
             ]);
         } catch (\InvalidArgumentException $e) {
-            Log::warning('Importação de pedido - validação/parse', [
+            SierraLog::inventory('inventory.order_import.parse_failed', [
                 'request_id' => $requestId,
                 'tipo_importacao' => $tipoImportacao,
-                'mensagem' => $e->getMessage(),
-            ]);
+                'exception' => $e,
+            ], 'warning');
             return response()->json([
                 'sucesso' => false,
                 'mensagem' => $e->getMessage(),
@@ -395,27 +526,25 @@ class PedidoController extends Controller
         } catch (Exception $e) {
             $hashErro = isset($hash)
                 ? $hash
-                : hash('sha256', ($request->file('arquivo')?->getClientOriginalName() ?? uniqid()) . '|' . $tipoImportacao);
+                : hash('sha256', ($request->file('arquivo')?->getClientOriginalName() ?? uniqid()) . '|' . $tipoImportacao . '|' . Str::uuid());
 
-            PedidoImportacao::updateOrCreate(
-                ['arquivo_hash' => $hashErro],
-                [
-                    'arquivo_nome' => $request->file('arquivo')?->getClientOriginalName(),
-                    'usuario_id' => auth()->id(),
-                    'status' => 'erro',
-                    'erro' => $e->getMessage(),
-                ]
-            );
+            PedidoImportacao::create([
+                'arquivo_hash' => $hashErro,
+                'arquivo_nome' => $request->file('arquivo')?->getClientOriginalName(),
+                'usuario_id' => auth()->id(),
+                'status' => 'erro',
+                'erro' => $e->getMessage(),
+            ]);
 
-            Log::error('Importação de pedido - erro ao processar', [
+            SierraLog::inventory('inventory.order_import.process_failed', [
                 'request_id' => $requestId,
                 'etapa' => 'importar',
                 'usuario_id' => auth()->id(),
                 'tipo_importacao' => $tipoImportacao,
                 'arquivo_hash' => $hashErro,
-                'mensagem' => $e->getMessage(),
-                'tempo_ms' => (int) ((microtime(true) - $inicioImportacao) * 1000),
-            ]);
+                'duration_ms' => (int) ((microtime(true) - $inicioImportacao) * 1000),
+                'exception' => $e,
+            ], 'error');
 
             return response()->json([
                 'sucesso' => false,
@@ -425,51 +554,122 @@ class PedidoController extends Controller
         }
     }
 
+    private function detectarTipoImportacaoXml(?string $path): ?string
+    {
+        if ($path === null || !is_file($path)) {
+            return null;
+        }
+
+        $dom = new \DOMDocument();
+        $dom->preserveWhiteSpace = false;
+        $dom->formatOutput = false;
+
+        libxml_use_internal_errors(true);
+        $loaded = $dom->load($path, LIBXML_NONET);
+        libxml_clear_errors();
+
+        if (!$loaded || !$dom->documentElement) {
+            return null;
+        }
+
+        $root = $dom->documentElement;
+        $localName = $root->localName ?: $root->nodeName;
+
+        if (strtoupper($localName) === 'LISTING') {
+            return TipoImportacao::PRODUTOS_XML_FORNECEDORES->value;
+        }
+
+        if (
+            in_array($localName, ['nfeProc', 'NFe'], true)
+            && $root->namespaceURI === self::NS_NFE
+        ) {
+            return TipoImportacao::ADORNOS_XML_NFE->value;
+        }
+
+        return null;
+    }
+
     /**
      * Gera PDF de roteiro do pedido.
      */
-    public function roteiroPdf(int $pedidoId): Response
+    public function roteiroPdf(int $pedidoId, Request $request): Response
     {
         // 1) Carrega o básico + statusAtual para decidir o tipo sem puxar consignações/itens
         $pedidoBase = Pedido::with([
             'cliente.enderecoPrincipal', // opcional, mas útil p/ PDF (se quiser)
+            'cliente.enderecos',
             'usuario',
             'parceiro',
+            'fornecedor',
             'statusAtual',
         ])->findOrFail($pedidoId);
+        $enderecoEntrega = ClienteEnderecoPdf::resolverParaPedido(
+            $pedidoBase,
+            $request->query('cliente_endereco_id')
+        );
 
         // Regra de negócio:
         // - Pedido consignado = status atual consignado (e/ou existe consignação)
         // Eu priorizo statusAtual por ser determinístico e mais barato.
-        $status = $pedidoBase->statusAtual?->status?->value ?? $pedidoBase->statusAtual?->status;
+        $status = $pedidoBase->statusAtual?->getRawOriginal('status') ?? $pedidoBase->statusAtual?->status;
+        $tipoRoteiro = $this->normalizarTipoRoteiro($request->query('tipo_roteiro'));
         $isConsignado = in_array($status, ['consignado', 'devolucao_consignacao'], true);
+        if (!$isConsignado) {
+            $isConsignado = $pedidoBase->isConsignado();
+        }
 
         // Caso queira ser "à prova de inconsistência" (status divergente),
         // você pode habilitar esse fallback (roda 1 exists()):
         // if (!$isConsignado) $isConsignado = $pedidoBase->isConsignado();
 
-        $baseFsDir = public_path('storage' . DIRECTORY_SEPARATOR . ProdutoImagem::FOLDER);
+        $pdfImageService = app(PdfImageService::class);
         Pdf::setOptions(['isRemoteEnabled' => true]);
 
         // 2) Se for consignado: carrega APENAS consignações e gera o mesmo PDF existente
         if ($isConsignado) {
             $pedido = Pedido::with([
                 'cliente.enderecoPrincipal',
+                'cliente.enderecos',
                 'usuario',
                 'parceiro',
+                'fornecedor',
                 'statusAtual',
 
                 'consignacoes.deposito',
+                'consignacoes.produtoVariacao.imagem',
                 'consignacoes.produtoVariacao.produto.imagemPrincipal',
                 'consignacoes.produtoVariacao.produto',
                 'consignacoes.produtoVariacao.atributos',
 
                 // localização
-                'consignacoes.produtoVariacao.estoquesComLocalizacao.localizacao.area',
+                'consignacoes.produtoVariacao.estoquesComLocalizacao.localizacao',
             ])->findOrFail($pedidoId);
 
-            $grupos = $pedido->consignacoes->groupBy(fn($c) => $c->deposito->nome ?? 'Sem depósito');
-            $isDevolucao = $this->isRoteiroConsignacaoDevolucao($pedido);
+            $consignacaoIds = collect((array) $request->query('consignacao_ids', []))
+                ->merge((array) $request->query('consignacoes', []))
+                ->map(fn ($id) => (int) $id)
+                ->filter(fn ($id) => $id > 0)
+                ->unique()
+                ->values();
+
+            if ($consignacaoIds->isNotEmpty()) {
+                $pedido->setRelation(
+                    'consignacoes',
+                    $pedido->consignacoes->whereIn('id', $consignacaoIds)->values()
+                );
+            }
+
+            $pedido->consignacoes->each(function ($consignacao) use ($pdfImageService) {
+                $consignacao->setAttribute(
+                    'pdf_imagem_data_uri',
+                    $pdfImageService->fromProdutoVariacaoOrPlaceholder($consignacao->produtoVariacao)
+                );
+            });
+
+            $isDevolucao = $tipoRoteiro
+                ? $tipoRoteiro === 'devolucao'
+                : $this->isRoteiroConsignacaoDevolucao($pedido);
+            $grupos = $this->gruposRoteiroConsignacao($pedido, $isDevolucao, $request);
             $tituloRoteiro = $isDevolucao ? 'Roteiro de devolução' : 'Roteiro de consignação';
             $filename = $isDevolucao
                 ? "roteiro-de-devolucao-{$pedidoId}.pdf"
@@ -485,9 +685,9 @@ class PedidoController extends Controller
             $pdf = Pdf::loadView('exports.roteiro-consignacao', [
                 'pedido'     => $pedido,
                 'grupos'     => $grupos,
-                'baseFsDir'  => $baseFsDir,
                 'geradoEm'   => now('America/Belem')->format('d/m/Y H:i'),
                 'tituloRoteiro' => $tituloRoteiro,
+                'enderecoEntrega' => $enderecoEntrega,
             ])->setPaper('a4');
 
             return $pdf->download($filename);
@@ -496,16 +696,40 @@ class PedidoController extends Controller
         // 3) Caso contrário: carrega APENAS itens do pedido e gera o template novo
         $pedido = Pedido::with([
             'cliente.enderecoPrincipal',
+            'cliente.enderecos',
             'usuario',
             'parceiro',
+            'fornecedor',
 
+            'itens.variacao.imagem',
             'itens.variacao.produto.imagemPrincipal',
             'itens.variacao.produto',
             'itens.variacao.atributos',
 
             // localização
-            'itens.variacao.estoquesComLocalizacao.localizacao.area',
+            'itens.variacao.estoquesComLocalizacao.localizacao',
         ])->findOrFail($pedidoId);
+
+        $itemIds = collect((array) $request->query('item_ids', []))
+            ->merge((array) $request->query('itens', []))
+            ->map(fn ($id) => (int) $id)
+            ->filter(fn ($id) => $id > 0)
+            ->unique()
+            ->values();
+
+        if ($itemIds->isNotEmpty()) {
+            $pedido->setRelation(
+                'itens',
+                $pedido->itens->whereIn('id', $itemIds)->values()
+            );
+        }
+
+        $pedido->itens->each(function ($item) use ($pdfImageService) {
+            $item->setAttribute(
+                'pdf_imagem_data_uri',
+                $pdfImageService->fromProdutoVariacaoProdutoFirstOrPlaceholder($item->variacao)
+            );
+        });
 
         // Depósitos: temos id_deposito no item, e model Deposito existe.
         $depositoIds = $pedido->itens
@@ -533,16 +757,1359 @@ class PedidoController extends Controller
         $pdf = Pdf::loadView('exports.roteiro-pedido', [
             'pedido'     => $pedido,
             'grupos'     => $grupos,
-            'baseFsDir'  => $baseFsDir,
             'geradoEm'   => now('America/Belem')->format('d/m/Y H:i'),
+            'enderecoEntrega' => $enderecoEntrega,
         ])->setPaper('a4');
 
         return $pdf->download("roteiro_pedido_{$pedidoId}.pdf");
     }
 
     /**
-     * Verifica se há dados mínimos do pedido (cabeçalho/totais) para aceitar preview sem itens.
+     * Retorna os itens que podem compor uma nota de entrega.
      */
+    public function notaEntregaItens(
+        int $pedidoId,
+        EstoqueDisponibilidadeService $disponibilidade,
+        EntregaProdutoService $entregaService
+    ): JsonResponse
+    {
+        $pedido = Pedido::with('cliente.enderecos')->findOrFail($pedidoId);
+
+        if (
+            $pedido->isVenda()
+            && ! ProdutoEntregaItem::query()->where('pedido_id', $pedido->id)->exists()
+        ) {
+            $usuarioId = auth()->id();
+            $entregaService->criarDemandaPedido($pedido, $usuarioId ? (int) $usuarioId : null, false);
+        }
+
+        $pdfImageService = app(PdfImageService::class);
+
+        $queryBase = fn () => ProdutoEntregaItem::query()
+            ->with([
+                'pedidoItem',
+                'variacao.imagem',
+                'variacao.produto.imagemPrincipal',
+                'variacao.produto',
+                'variacao.atributos',
+                'depositoOrigem:id,nome',
+                'depositoDestino:id,nome',
+            ])
+            ->where('pedido_id', $pedido->id)
+            ->where('tipo_origem', ProdutoEntregaItem::ORIGEM_PEDIDO);
+
+        $itens = $queryBase()
+            ->whereNotIn('status', [
+                ProdutoEntregaItem::STATUS_CANCELADO,
+                ProdutoEntregaItem::STATUS_ENTREGUE,
+            ])
+            ->whereColumn('quantidade_entregue', '<', 'quantidade_total')
+            ->orderBy('id')
+            ->get()
+            ->map(fn (ProdutoEntregaItem $item) => $this->formatarItemNotaEntrega($item, $disponibilidade, 'pendente', $pdfImageService))
+            ->values();
+
+        if ($itens->isEmpty()) {
+            $itens = $queryBase()
+                ->where('status', ProdutoEntregaItem::STATUS_ENTREGUE)
+                ->where('quantidade_entregue', '>', 0)
+                ->orderBy('id')
+                ->get()
+                ->map(fn (ProdutoEntregaItem $item) => $this->formatarItemNotaEntrega($item, $disponibilidade, 'reimpressao', $pdfImageService))
+                ->values();
+        }
+
+        return response()->json([
+            'data' => $itens,
+            'cliente_enderecos' => ClienteEnderecoPdf::paraResposta($pedido->cliente),
+        ]);
+    }
+
+    /**
+     * Gera nota de entrega para o cliente e, opcionalmente, registra expedição e entrega central.
+     */
+    public function notaEntregaPdf(
+        int $pedidoId,
+        Request $request,
+        EntregaProdutoService $entregaService,
+        EstoqueDisponibilidadeService $disponibilidade
+    ): Response|JsonResponse {
+        $data = $request->validate([
+            'acao' => ['nullable', 'in:somente_pdf,registrar_entrega'],
+            'registrar_entrega' => ['sometimes', 'boolean'],
+            'idempotency_key' => ['nullable', 'string', 'max:120', 'regex:/^[A-Za-z0-9._:-]+$/'],
+            'data_entrega' => ['nullable', 'date'],
+            'recebedor' => ['nullable', 'string', 'max:255'],
+            'confirmar_entrega_sem_saldo' => ['sometimes', 'boolean'],
+            'observacao' => ['nullable', 'string', 'max:1000'],
+            'cliente_endereco_id' => ['nullable', 'integer'],
+            'itens' => ['required', 'array', 'min:1'],
+            'itens.*.produto_entrega_item_id' => ['required', 'integer'],
+            'itens.*.quantidade' => ['nullable', 'integer', 'min:1'],
+            'itens.*.entregar_expedido' => ['nullable', 'integer', 'min:0'],
+            'itens.*.alocacoes' => ['nullable', 'array'],
+            'itens.*.alocacoes.*.deposito_id' => ['required', 'integer', 'exists:depositos,id'],
+            'itens.*.alocacoes.*.quantidade' => ['required', 'integer', 'min:1'],
+        ]);
+
+        $acao = $data['acao'] ?? ((bool) ($data['registrar_entrega'] ?? false)
+            ? 'registrar_entrega'
+            : 'somente_pdf');
+        $fluxoV2 = (bool) config('pedidos.fluxo_operacional_v2_enabled');
+        $registrarEntrega = $acao === 'registrar_entrega';
+        $idempotencyKey = trim((string) ($data['idempotency_key'] ?? ''));
+
+        if ($registrarEntrega && $idempotencyKey === '') {
+            throw ValidationException::withMessages([
+                'idempotency_key' => ['Informe a chave de idempotencia para registrar a entrega.'],
+            ]);
+        }
+
+        if ($fluxoV2 && $registrarEntrega && empty($data['data_entrega'])) {
+            throw ValidationException::withMessages([
+                'data_entrega' => ['Informe a data efetiva da entrega ao cliente.'],
+            ]);
+        }
+
+        $pedido = Pedido::with([
+            'cliente.enderecoPrincipal',
+            'cliente.enderecos',
+            'usuario',
+            'parceiro',
+            'fornecedor',
+        ])->findOrFail($pedidoId);
+
+        if ($fluxoV2 && $registrarEntrega && ! AuthHelper::hasPermissao('estoque.movimentar')) {
+            return response()->json([
+                'message' => 'Sem permissao para registrar entrega e movimentar estoque.',
+            ], 403);
+        }
+
+        if ($fluxoV2 && $registrarEntrega) {
+            $statusOperacional = $entregaService->statusOperacionalPedido($pedido->loadMissing(['statusAtual', 'entregaItens']));
+            if ((bool) ($statusOperacional['divergencia'] ?? false)) {
+                return response()->json([
+                    'code' => 'PEDIDO_DIVERGENTE_REQUER_RECONCILIACAO',
+                    'message' => 'O pedido possui divergencia operacional e precisa ser reconciliado antes da entrega.',
+                    'status_operacional' => $statusOperacional,
+                ], 409);
+            }
+        }
+
+        $enderecoEntrega = ClienteEnderecoPdf::resolverParaPedido(
+            $pedido,
+            $data['cliente_endereco_id'] ?? null
+        );
+
+        $selecionados = $this->normalizarItensNotaEntrega($data['itens'], $registrarEntrega);
+
+        if ($selecionados->isEmpty()) {
+            throw ValidationException::withMessages([
+                'itens' => ['Selecione ao menos um item com quantidade para a nota de entrega.'],
+            ]);
+        }
+
+        $entregas = ProdutoEntregaItem::query()
+            ->with([
+                'pedidoItem',
+                'variacao.imagem',
+                'variacao.produto.imagemPrincipal',
+                'variacao.produto',
+                'variacao.atributos',
+            ])
+            ->where('pedido_id', $pedido->id)
+            ->where('tipo_origem', ProdutoEntregaItem::ORIGEM_PEDIDO)
+            ->whereIn('id', $selecionados->pluck('id'))
+            ->get()
+            ->keyBy('id');
+
+        if ($entregas->count() !== $selecionados->count()) {
+            throw ValidationException::withMessages([
+                'itens' => ['Selecione apenas itens de entrega vinculados a este pedido.'],
+            ]);
+        }
+
+        $notaItens = $this->validarItensNotaEntrega(
+            $selecionados,
+            $entregas,
+            $registrarEntrega,
+            $idempotencyKey,
+            $disponibilidade
+        );
+
+        $itensSemSaldo = $notaItens
+            ->filter(fn (ProdutoEntregaItem $item) => (int) $item->getAttribute('nota_entregar_sem_expedicao') > 0)
+            ->map(fn (ProdutoEntregaItem $item) => [
+                'produto_entrega_item_id' => (int) $item->id,
+                'pedido_item_id' => $item->pedido_item_id ? (int) $item->pedido_item_id : null,
+                'id_variacao' => (int) $item->id_variacao,
+                'produto' => $item->variacao?->produto?->nome,
+                'quantidade' => (int) $item->getAttribute('nota_quantidade'),
+                'disponivel' => max(0, (int) $item->getAttribute('nota_quantidade') - (int) $item->getAttribute('nota_entregar_sem_expedicao')),
+                'faltante' => (int) $item->getAttribute('nota_entregar_sem_expedicao'),
+                'quantidade_sem_saldo' => (int) $item->getAttribute('nota_entregar_sem_expedicao'),
+            ])
+            ->values();
+
+        if (
+            $fluxoV2
+            && $registrarEntrega
+            && $itensSemSaldo->isNotEmpty()
+            && ! ($data['confirmar_entrega_sem_saldo'] ?? false)
+        ) {
+            return response()->json([
+                'code' => 'ENTREGA_SEM_SALDO_REQUER_CONFIRMACAO',
+                'message' => 'Ha itens sem saldo disponivel. Confirme para registrar a entrega sem movimento fisico.',
+                'itens' => $itensSemSaldo,
+            ], 409);
+        }
+
+        $pdfImageService = app(PdfImageService::class);
+        $notaItens->each(function (ProdutoEntregaItem $item) use ($pdfImageService) {
+            $item->setAttribute(
+                'pdf_imagem_data_uri',
+                $pdfImageService->fromProdutoVariacaoProdutoFirstOrPlaceholder($item->variacao)
+            );
+        });
+
+        Pdf::setOptions(['isRemoteEnabled' => true]);
+        $pdfOutput = Pdf::loadView('exports.nota-entrega-pedido', [
+            'pedido' => $pedido,
+            'itens' => $notaItens,
+            'geradoEm' => now('America/Belem')->format('d/m/Y H:i'),
+            'observacaoNota' => $data['observacao'] ?? null,
+            'recebedor' => $data['recebedor'] ?? null,
+            'registrarEntrega' => $registrarEntrega,
+            'enderecoEntrega' => $enderecoEntrega,
+        ])->setPaper('a4')->output();
+
+        if ($registrarEntrega) {
+            DB::transaction(function () use ($notaItens, $entregaService, $idempotencyKey, $data, $pedido, $fluxoV2) {
+                $ocorridoEm = ! empty($data['data_entrega'])
+                    ? Carbon::parse($data['data_entrega'], config('app.timezone'))
+                    : now();
+                $metadata = array_filter([
+                    'recebedor' => $data['recebedor'] ?? null,
+                    'confirmado_sem_saldo' => (bool) ($data['confirmar_entrega_sem_saldo'] ?? false),
+                    'origem' => 'nota_entrega',
+                ], fn ($valor) => $valor !== null && $valor !== '');
+
+                $notaItens->each(function (ProdutoEntregaItem $item) use ($entregaService, $idempotencyKey, $data, $ocorridoEm, $metadata) {
+                    $entregarExpedido = (int) $item->getAttribute('nota_entregar_expedido');
+                    $entregarExpedidoRegistrado = (bool) $item->getAttribute('nota_entregar_expedido_registrado');
+
+                    if ($entregarExpedido > 0 && ! $entregarExpedidoRegistrado) {
+                        $entregaService->entregarItem(
+                            $item,
+                            $entregarExpedido,
+                            auth()->id(),
+                            $data['observacao'] ?? 'Entrega registrada via nota de entrega.',
+                            $this->notaEntregaEventoKey($idempotencyKey, (int) $item->id, 'entregar-expedido'),
+                            ocorridoEm: $ocorridoEm,
+                            metadata: $metadata
+                        );
+                    }
+
+                    $entregarSemExpedicao = (int) $item->getAttribute('nota_entregar_sem_expedicao');
+                    $entregarSemExpedicaoRegistrado = (bool) $item->getAttribute('nota_entregar_sem_expedicao_registrado');
+
+                    if ($entregarSemExpedicao > 0 && ! $entregarSemExpedicaoRegistrado) {
+                        $entregaService->entregarItem(
+                            $item,
+                            $entregarSemExpedicao,
+                            auth()->id(),
+                            $data['observacao'] ?? 'Entrega registrada via nota de entrega sem saldo em estoque.',
+                            $this->notaEntregaEventoKey($idempotencyKey, (int) $item->id, 'entregar-sem-saldo'),
+                            true,
+                            $ocorridoEm,
+                            $metadata
+                        );
+                    }
+
+                    foreach ((array) $item->getAttribute('nota_alocacoes') as $alocacao) {
+                        if (! empty($alocacao['entrega_registrada'])) {
+                            continue;
+                        }
+
+                        $depositoId = (int) $alocacao['deposito_id'];
+                        $quantidade = (int) $alocacao['quantidade'];
+
+                        if (empty($alocacao['expedicao_registrada'])) {
+                            $entregaService->expedirItem(
+                                $item,
+                                $depositoId,
+                                $quantidade,
+                                auth()->id(),
+                                $data['observacao'] ?? 'Expedicao registrada via nota de entrega.',
+                                ProdutoEntregaEvento::EXPEDIDO_CLIENTE,
+                                $this->notaEntregaEventoKey($idempotencyKey, (int) $item->id, 'expedir', $depositoId),
+                                ocorridoEm: $ocorridoEm,
+                                metadata: $metadata
+                            );
+                        }
+
+                        $entregaService->entregarItem(
+                            $item,
+                            $quantidade,
+                            auth()->id(),
+                            $data['observacao'] ?? 'Entrega registrada via nota de entrega.',
+                            $this->notaEntregaEventoKey($idempotencyKey, (int) $item->id, 'entregar', $depositoId),
+                            ocorridoEm: $ocorridoEm,
+                            metadata: $metadata
+                        );
+                    }
+                });
+
+                if (! $fluxoV2) {
+                    return;
+                }
+
+                $pedidoAtualizado = $pedido->fresh('entregaItens');
+                $resumo = $entregaService->resumoPedido($pedidoAtualizado);
+                $entregaCompleta = (int) $resumo['quantidade_total'] > 0
+                    && (int) $resumo['quantidade_entregue'] >= (int) $resumo['quantidade_total'];
+                $entregaIniciada = (int) $resumo['quantidade_entregue'] > 0;
+                $possuiStatusTerminal = $pedidoAtualizado->historicoStatus()
+                    ->whereIn('status', [
+                        PedidoStatus::ENTREGA_CLIENTE->value,
+                        PedidoStatus::FINALIZADO->value,
+                        PedidoStatus::CANCELADO->value,
+                    ])
+                    ->exists();
+
+                if ($entregaCompleta && ! $possuiStatusTerminal) {
+                    $pedidoAtualizado->historicoStatus()->create([
+                        'status' => PedidoStatus::ENTREGA_CLIENTE,
+                        'data_status' => $ocorridoEm,
+                        'usuario_id' => auth()->id(),
+                        'observacoes' => 'Entrega ao cliente concluida pela nota de entrega.',
+                    ]);
+                } elseif ($entregaIniciada && ! $possuiStatusTerminal) {
+                    $possuiEnvio = $pedidoAtualizado->historicoStatus()
+                        ->where('status', PedidoStatus::ENVIO_CLIENTE->value)
+                        ->exists();
+
+                    if (! $possuiEnvio) {
+                        $pedidoAtualizado->historicoStatus()->create([
+                            'status' => PedidoStatus::ENVIO_CLIENTE,
+                            'data_status' => $ocorridoEm,
+                            'usuario_id' => auth()->id(),
+                            'observacoes' => 'Entrega parcial ao cliente iniciada pela nota de entrega.',
+                        ]);
+                    }
+                }
+            });
+        }
+
+        logAuditoria('pedido_pdf', 'Geração de PDF (nota de entrega)', [
+            'evento' => 'nota_entrega_pdf',
+            'pedido_id' => $pedido->id,
+            'registrar_entrega' => $registrarEntrega,
+            'acao' => $acao,
+            'data_entrega' => $data['data_entrega'] ?? null,
+            'recebedor' => $data['recebedor'] ?? null,
+            'confirmar_entrega_sem_saldo' => (bool) ($data['confirmar_entrega_sem_saldo'] ?? false),
+            'itens' => $notaItens->map(fn (ProdutoEntregaItem $item) => [
+                'produto_entrega_item_id' => $item->id,
+                'pedido_item_id' => $item->pedido_item_id,
+                'quantidade' => (int) $item->getAttribute('nota_quantidade'),
+                'entregar_expedido' => (int) $item->getAttribute('nota_entregar_expedido'),
+                'entregar_sem_expedicao' => (int) $item->getAttribute('nota_entregar_sem_expedicao'),
+                'alocacoes' => $item->getAttribute('nota_alocacoes') ?? [],
+            ])->values()->all(),
+        ]);
+
+        $filename = "nota-entrega-pedido-{$pedido->id}.pdf";
+
+        return response($pdfOutput, 200, [
+            'Content-Type' => 'application/pdf',
+            'Content-Disposition' => 'attachment; filename="' . $filename . '"',
+        ]);
+    }
+
+    private function formatarItemNotaEntrega(
+        ProdutoEntregaItem $item,
+        EstoqueDisponibilidadeService $disponibilidade,
+        string $modoNota = 'pendente',
+        ?PdfImageService $pdfImageService = null
+    ): array {
+        $pendenteTotal = max(0, (int) $item->quantidade_total - (int) $item->quantidade_entregue);
+        $pendenteExpedido = max(0, (int) $item->quantidade_expedida - (int) $item->quantidade_entregue);
+        $pendenteExpedicao = max(0, (int) $item->quantidade_total - (int) $item->quantidade_expedida);
+        $reimpressao = $modoNota === 'reimpressao';
+        $pdfImageService ??= app(PdfImageService::class);
+
+        return [
+            'id' => $item->id,
+            'modo_nota' => $modoNota,
+            'pode_registrar_entrega' => ! $reimpressao,
+            'tipo_origem' => $item->tipo_origem,
+            'origem_id' => $item->origem_id,
+            'pedido_id' => $item->pedido_id,
+            'pedido_item_id' => $item->pedido_item_id,
+            'id_variacao' => $item->id_variacao,
+            'quantidade_total' => (int) $item->quantidade_total,
+            'quantidade_reservada' => (int) $item->quantidade_reservada,
+            'quantidade_expedida' => (int) $item->quantidade_expedida,
+            'quantidade_entregue' => (int) $item->quantidade_entregue,
+            'quantidade_pendente_total' => $pendenteTotal,
+            'quantidade_pendente_entrega' => $pendenteExpedido,
+            'quantidade_pendente_expedicao_nota' => $pendenteExpedicao,
+            'quantidade_reimpressao' => $reimpressao ? (int) $item->quantidade_entregue : null,
+            'id_deposito_origem' => $item->id_deposito_origem,
+            'id_deposito_destino' => $item->id_deposito_destino,
+            'status' => $item->status,
+            'pedido_item' => $item->pedidoItem,
+            'variacao' => $item->variacao,
+            'imagem_url' => $pdfImageService->publicUrlFromProdutoVariacaoProdutoFirst($item->variacao),
+            'deposito_origem' => $item->depositoOrigem,
+            'deposito_destino' => $item->depositoDestino,
+            'depositos_disponiveis' => $this->depositosDisponiveisNotaEntrega(
+                $item,
+                $disponibilidade,
+                $pendenteExpedicao
+            ),
+        ];
+    }
+
+    private function normalizarItensNotaEntrega(array $itens, bool $registrarEntrega = false): Collection
+    {
+        return collect($itens)
+            ->map(function (array $item) {
+                $alocacoes = collect((array) ($item['alocacoes'] ?? []))
+                    ->map(fn (array $alocacao) => [
+                        'deposito_id' => (int) ($alocacao['deposito_id'] ?? 0),
+                        'quantidade' => (int) ($alocacao['quantidade'] ?? 0),
+                    ])
+                    ->filter(fn (array $alocacao) => $alocacao['deposito_id'] > 0 && $alocacao['quantidade'] > 0)
+                    ->groupBy('deposito_id')
+                    ->map(fn (Collection $grupo, int $depositoId) => [
+                        'deposito_id' => $depositoId,
+                        'quantidade' => (int) $grupo->sum('quantidade'),
+                    ])
+                    ->values();
+
+                $entregarExpedido = array_key_exists('entregar_expedido', $item)
+                    ? (int) ($item['entregar_expedido'] ?? 0)
+                    : 0;
+                $quantidade = array_key_exists('quantidade', $item)
+                    ? max(0, (int) ($item['quantidade'] ?? 0))
+                    : null;
+
+                return [
+                    'id' => (int) ($item['produto_entrega_item_id'] ?? 0),
+                    'quantidade' => $quantidade,
+                    'entregar_expedido' => max(0, $entregarExpedido),
+                    'alocacoes' => $alocacoes,
+                ];
+            })
+            ->filter(fn (array $item) => $item['id'] > 0)
+            ->groupBy('id')
+            ->map(function (Collection $grupo, int $id) {
+                $quantidades = $grupo
+                    ->pluck('quantidade')
+                    ->filter(fn ($quantidade) => $quantidade !== null);
+
+                return [
+                    'id' => $id,
+                    'quantidade' => $quantidades->isEmpty() ? null : (int) $quantidades->sum(),
+                    'entregar_expedido' => (int) $grupo->sum('entregar_expedido'),
+                    'alocacoes' => $grupo
+                        ->flatMap(fn (array $item) => $item['alocacoes'])
+                        ->groupBy('deposito_id')
+                        ->map(fn (Collection $alocacoes, int $depositoId) => [
+                            'deposito_id' => $depositoId,
+                            'quantidade' => (int) $alocacoes->sum('quantidade'),
+                        ])
+                        ->values(),
+                ];
+            })
+            ->values();
+    }
+
+    private function validarItensNotaEntrega(
+        Collection $selecionados,
+        Collection $entregas,
+        bool $registrarEntrega,
+        string $idempotencyKey,
+        EstoqueDisponibilidadeService $disponibilidade
+    ): Collection {
+        $itens = collect();
+
+        foreach ($selecionados as $selecionado) {
+            /** @var ProdutoEntregaItem $item */
+            $item = $entregas->get($selecionado['id']);
+            $selecaoJaRegistrada = $registrarEntrega
+                && $this->notaEntregaSelecaoJaRegistrada($item, $selecionado, $idempotencyKey);
+            $reimpressao = $item
+                ? $this->isReimpressaoNotaEntrega($item, $registrarEntrega, $selecaoJaRegistrada)
+                : false;
+            $bloqueio = $this->validarItemSelecionavelNotaEntrega($item, $selecaoJaRegistrada || $reimpressao);
+
+            if ($bloqueio !== null) {
+                throw ValidationException::withMessages(['itens' => [$bloqueio]]);
+            }
+
+            if ($reimpressao) {
+                $quantidadeReimpressao = (int) ($selecionado['quantidade'] ?? $item->quantidade_entregue);
+                $quantidadeEntregue = (int) $item->quantidade_entregue;
+
+                if ($quantidadeReimpressao <= 0) {
+                    throw ValidationException::withMessages([
+                        'itens' => ["Informe uma quantidade para reimprimir o item de entrega #{$item->id}."],
+                    ]);
+                }
+
+                if ($quantidadeReimpressao > $quantidadeEntregue) {
+                    throw ValidationException::withMessages([
+                        'itens' => ["A quantidade de reimpressao do item de entrega #{$item->id} excede o total entregue ({$quantidadeEntregue})."],
+                    ]);
+                }
+
+                $item->setAttribute('nota_quantidade', $quantidadeReimpressao);
+                $item->setAttribute('nota_entregar_expedido', 0);
+                $item->setAttribute('nota_entregar_expedido_registrado', false);
+                $item->setAttribute('nota_alocacoes', []);
+                $item->setAttribute('nota_modo', 'reimpressao');
+                $itens->push($item);
+
+                continue;
+            }
+
+            $entregarExpedidoSolicitado = (int) ($selecionado['entregar_expedido'] ?? 0);
+            $entregarExpedidoRegistrado = false;
+            $eventoEntregaExpedido = $registrarEntrega && $entregarExpedidoSolicitado > 0
+                ? ProdutoEntregaEvento::query()
+                    ->whereIn('idempotency_key', [
+                        $this->notaEntregaEventoKey($idempotencyKey, (int) $item->id, 'entregar-expedido'),
+                        $this->notaEntregaEventoKey($idempotencyKey, (int) $item->id),
+                    ])
+                    ->first()
+                : null;
+
+            if ($eventoEntregaExpedido) {
+                $entregarExpedido = (int) $eventoEntregaExpedido->quantidade;
+                $entregarExpedidoNovo = 0;
+                $entregarExpedidoRegistrado = true;
+            } else {
+                $entregarExpedido = $entregarExpedidoSolicitado;
+                $entregarExpedidoNovo = $entregarExpedido;
+            }
+
+            $pendenteTotal = max(0, (int) $item->quantidade_total - (int) $item->quantidade_entregue);
+            $pendenteExpedido = max(0, (int) $item->quantidade_expedida - (int) $item->quantidade_entregue);
+            $quantidadeDocumental = $selecionado['quantidade'] ?? null;
+
+            if ($quantidadeDocumental !== null
+                && $entregarExpedidoSolicitado <= 0
+                && collect($selecionado['alocacoes'] ?? [])->isEmpty()) {
+                $prefixoEventoDireto = "nota-entrega:{$idempotencyKey}:item:{$item->id}";
+                $eventosEntregaDireta = $registrarEntrega
+                    ? ProdutoEntregaEvento::query()
+                        ->where('tipo_evento', ProdutoEntregaEvento::ENTREGUE_CLIENTE)
+                        ->where('idempotency_key', 'like', $prefixoEventoDireto . '%')
+                        ->get()
+                    : collect();
+                $entregaDiretaJaRegistrada = $eventosEntregaDireta->isNotEmpty();
+                $quantidadeDocumental = (int) $quantidadeDocumental;
+                $quantidadeNota = $entregaDiretaJaRegistrada
+                    ? (int) $eventosEntregaDireta->sum('quantidade')
+                    : $quantidadeDocumental;
+
+                if ($quantidadeNota <= 0) {
+                    throw ValidationException::withMessages([
+                        'itens' => ["Informe uma quantidade para o item de entrega #{$item->id}."],
+                    ]);
+                }
+
+                if (! $entregaDiretaJaRegistrada && $quantidadeNota > $pendenteTotal) {
+                    throw ValidationException::withMessages([
+                        'itens' => ["A quantidade do item de entrega #{$item->id} excede o pendente total de entrega ({$pendenteTotal})."],
+                    ]);
+                }
+
+                if ($entregaDiretaJaRegistrada) {
+                    $chaveExpedido = $this->notaEntregaEventoKey($idempotencyKey, (int) $item->id, 'entregar-expedido');
+                    $chaveSemSaldo = $this->notaEntregaEventoKey($idempotencyKey, (int) $item->id, 'entregar-sem-saldo');
+                    $chaveLegada = $this->notaEntregaEventoKey($idempotencyKey, (int) $item->id);
+                    $entregarExpedidoDireto = (int) $eventosEntregaDireta
+                        ->whereIn('idempotency_key', [$chaveExpedido, $chaveLegada])
+                        ->sum('quantidade');
+                    $entregarSemExpedicao = (int) $eventosEntregaDireta
+                        ->where('idempotency_key', $chaveSemSaldo)
+                        ->sum('quantidade');
+                    $alocacoesAutomaticas = $eventosEntregaDireta
+                        ->map(function (ProdutoEntregaEvento $evento) use ($idempotencyKey, $item) {
+                            if (! preg_match('/:deposito:(\\d+):entregar$/', (string) $evento->idempotency_key, $matches)) {
+                                return null;
+                            }
+
+                            $depositoId = (int) $matches[1];
+
+                            return [
+                                'deposito_id' => $depositoId,
+                                'quantidade' => (int) $evento->quantidade,
+                                'expedicao_registrada' => ProdutoEntregaEvento::query()
+                                    ->where('idempotency_key', $this->notaEntregaEventoKey($idempotencyKey, (int) $item->id, 'expedir', $depositoId))
+                                    ->exists(),
+                                'entrega_registrada' => true,
+                            ];
+                        })
+                        ->filter()
+                        ->values();
+                } else {
+                    $entregarExpedidoDireto = $registrarEntrega
+                        ? min($quantidadeNota, $pendenteExpedido)
+                        : 0;
+                    $restanteAlocacao = $registrarEntrega
+                        ? max(0, $quantidadeNota - $entregarExpedidoDireto)
+                        : 0;
+                    $alocacoesAutomaticas = collect();
+
+                    foreach ($this->depositosDisponiveisNotaEntrega($item, $disponibilidade, $restanteAlocacao) as $deposito) {
+                        if ($restanteAlocacao <= 0) {
+                            break;
+                        }
+
+                        $quantidadeAlocada = min($restanteAlocacao, (int) $deposito['quantidade_utilizavel']);
+                        if ($quantidadeAlocada <= 0) {
+                            continue;
+                        }
+
+                        $alocacoesAutomaticas->push([
+                            'deposito_id' => (int) $deposito['id'],
+                            'quantidade' => $quantidadeAlocada,
+                            'expedicao_registrada' => false,
+                            'entrega_registrada' => false,
+                        ]);
+                        $restanteAlocacao -= $quantidadeAlocada;
+                    }
+
+                    $entregarSemExpedicao = $registrarEntrega ? $restanteAlocacao : 0;
+                }
+
+                $item->setAttribute('nota_quantidade', $quantidadeNota);
+                $item->setAttribute('nota_entregar_expedido', $entregarExpedidoDireto);
+                $item->setAttribute(
+                    'nota_entregar_expedido_registrado',
+                    $entregaDiretaJaRegistrada && $entregarExpedidoDireto > 0
+                );
+                $item->setAttribute('nota_entregar_sem_expedicao', $entregarSemExpedicao);
+                $item->setAttribute(
+                    'nota_entregar_sem_expedicao_registrado',
+                    $entregaDiretaJaRegistrada && $entregarSemExpedicao > 0
+                );
+                $item->setAttribute('nota_alocacoes', $alocacoesAutomaticas->all());
+                $item->setAttribute('nota_modo', $registrarEntrega && $entregarSemExpedicao > 0 ? 'entrega_sem_saldo' : 'pendente_documental');
+                $itens->push($item);
+
+                continue;
+            }
+
+            if ($entregarExpedidoNovo > $pendenteExpedido) {
+                throw ValidationException::withMessages([
+                    'itens' => ["A quantidade ja expedida do item de entrega #{$item->id} excede o pendente de entrega ({$pendenteExpedido})."],
+                ]);
+            }
+
+            $alocacoesEfetivas = collect();
+            $alocacoesParaValidarSaldo = collect();
+            $quantidadeAindaNaoEntregue = $entregarExpedidoNovo;
+
+            foreach (collect($selecionado['alocacoes'] ?? []) as $alocacao) {
+                $depositoId = (int) ($alocacao['deposito_id'] ?? 0);
+                $quantidade = (int) ($alocacao['quantidade'] ?? 0);
+
+                if ($depositoId <= 0 || $quantidade <= 0) {
+                    continue;
+                }
+
+                $eventoEntrega = $registrarEntrega
+                    ? ProdutoEntregaEvento::query()
+                        ->where('idempotency_key', $this->notaEntregaEventoKey($idempotencyKey, (int) $item->id, 'entregar', $depositoId))
+                        ->first()
+                    : null;
+                $eventoExpedicao = $registrarEntrega
+                    ? ProdutoEntregaEvento::query()
+                        ->where('idempotency_key', $this->notaEntregaEventoKey($idempotencyKey, (int) $item->id, 'expedir', $depositoId))
+                        ->first()
+                    : null;
+
+                $quantidadeEfetiva = $eventoEntrega
+                    ? (int) $eventoEntrega->quantidade
+                    : ($eventoExpedicao ? (int) $eventoExpedicao->quantidade : $quantidade);
+
+                $alocacoesEfetivas->push([
+                    'deposito_id' => $depositoId,
+                    'quantidade' => $quantidadeEfetiva,
+                    'expedicao_registrada' => (bool) $eventoExpedicao,
+                    'entrega_registrada' => (bool) $eventoEntrega,
+                ]);
+
+                if (! $eventoEntrega) {
+                    $quantidadeAindaNaoEntregue += $quantidadeEfetiva;
+                }
+
+                if (! $eventoExpedicao && ! $eventoEntrega) {
+                    $alocacoesParaValidarSaldo->push([
+                        'deposito_id' => $depositoId,
+                        'quantidade' => $quantidadeEfetiva,
+                    ]);
+                }
+            }
+
+            if ($quantidadeAindaNaoEntregue > $pendenteTotal) {
+                throw ValidationException::withMessages([
+                    'itens' => ["A quantidade do item de entrega #{$item->id} excede o pendente total de entrega ({$pendenteTotal})."],
+                ]);
+            }
+
+            if ($alocacoesParaValidarSaldo->isNotEmpty()) {
+                $alocacoesOrdenadas = $this->validarAlocacoesNotaEntrega(
+                    $item,
+                    $alocacoesParaValidarSaldo,
+                    $disponibilidade
+                );
+                $ordem = $alocacoesOrdenadas->pluck('deposito_id')->values()->all();
+
+                $alocacoesEfetivas = $alocacoesEfetivas
+                    ->sortBy(fn (array $alocacao) => array_search($alocacao['deposito_id'], $ordem, true) === false
+                        ? PHP_INT_MAX
+                        : array_search($alocacao['deposito_id'], $ordem, true))
+                    ->values();
+            }
+
+            $quantidadeTotalNota = $entregarExpedido + (int) $alocacoesEfetivas->sum('quantidade');
+
+            if ($quantidadeTotalNota <= 0) {
+                throw ValidationException::withMessages([
+                    'itens' => ["Informe uma quantidade para o item de entrega #{$item->id}."],
+                ]);
+            }
+
+            $item->setAttribute('nota_quantidade', $quantidadeTotalNota);
+            $item->setAttribute('nota_entregar_expedido', $entregarExpedido);
+            $item->setAttribute('nota_entregar_expedido_registrado', $entregarExpedidoRegistrado);
+            $item->setAttribute('nota_entregar_sem_expedicao', 0);
+            $item->setAttribute('nota_entregar_sem_expedicao_registrado', false);
+            $item->setAttribute('nota_alocacoes', $alocacoesEfetivas->values()->all());
+            $itens->push($item);
+        }
+
+        return $itens;
+    }
+
+    private function isReimpressaoNotaEntrega(
+        ProdutoEntregaItem $item,
+        bool $registrarEntrega,
+        bool $selecaoJaRegistrada
+    ): bool {
+        return ! $registrarEntrega
+            && ! $selecaoJaRegistrada
+            && $item->status === ProdutoEntregaItem::STATUS_ENTREGUE
+            && (int) $item->quantidade_entregue > 0;
+    }
+
+    private function notaEntregaSelecaoJaRegistrada(
+        ?ProdutoEntregaItem $item,
+        array $selecionado,
+        string $idempotencyKey
+    ): bool {
+        if (! $item || $idempotencyKey === '') {
+            return false;
+        }
+
+        $temQuantidade = false;
+        $entregarExpedido = (int) ($selecionado['entregar_expedido'] ?? 0);
+        $quantidadeDireta = (int) ($selecionado['quantidade'] ?? 0);
+
+        if ($entregarExpedido > 0) {
+            $temQuantidade = true;
+
+            if (! ProdutoEntregaEvento::query()
+                ->whereIn('idempotency_key', [
+                    $this->notaEntregaEventoKey($idempotencyKey, (int) $item->id, 'entregar-expedido'),
+                    $this->notaEntregaEventoKey($idempotencyKey, (int) $item->id),
+                ])
+                ->exists()) {
+                return false;
+            }
+        }
+
+        if ($quantidadeDireta > 0 && $entregarExpedido <= 0 && collect($selecionado['alocacoes'] ?? [])->isEmpty()) {
+            $temQuantidade = true;
+
+            $quantidadeRegistrada = (int) ProdutoEntregaEvento::query()
+                ->where('tipo_evento', ProdutoEntregaEvento::ENTREGUE_CLIENTE)
+                ->where('idempotency_key', 'like', "nota-entrega:{$idempotencyKey}:item:{$item->id}%")
+                ->sum('quantidade');
+
+            if ($quantidadeRegistrada < $quantidadeDireta) {
+                return false;
+            }
+        }
+
+        foreach (collect($selecionado['alocacoes'] ?? []) as $alocacao) {
+            $depositoId = (int) ($alocacao['deposito_id'] ?? 0);
+            $quantidade = (int) ($alocacao['quantidade'] ?? 0);
+
+            if ($depositoId <= 0 || $quantidade <= 0) {
+                continue;
+            }
+
+            $temQuantidade = true;
+
+            if (! ProdutoEntregaEvento::query()
+                ->where('idempotency_key', $this->notaEntregaEventoKey($idempotencyKey, (int) $item->id, 'entregar', $depositoId))
+                ->exists()) {
+                return false;
+            }
+        }
+
+        return $temQuantidade;
+    }
+
+    private function validarItemSelecionavelNotaEntrega(
+        ?ProdutoEntregaItem $item,
+        bool $permitirEntregueRegistrado = false
+    ): ?string
+    {
+        if (! $item) {
+            return 'Item de entrega nao encontrado.';
+        }
+
+        if ($item->status === ProdutoEntregaItem::STATUS_CANCELADO) {
+            return "O item de entrega #{$item->id} nao pode compor nota de entrega.";
+        }
+
+        if ($item->status === ProdutoEntregaItem::STATUS_ENTREGUE && ! $permitirEntregueRegistrado) {
+            return "O item de entrega #{$item->id} nao pode compor nota de entrega.";
+        }
+
+        $pendente = max(0, (int) $item->quantidade_total - (int) $item->quantidade_entregue);
+        if ($pendente <= 0 && ! $permitirEntregueRegistrado) {
+            return "O item de entrega #{$item->id} nao possui quantidade pendente de entrega.";
+        }
+
+        return null;
+    }
+
+    private function validarAlocacoesNotaEntrega(
+        ProdutoEntregaItem $item,
+        Collection $alocacoes,
+        EstoqueDisponibilidadeService $disponibilidade
+    ): Collection {
+        $pendenteExpedicao = max(0, (int) $item->quantidade_total - (int) $item->quantidade_expedida);
+        $depositos = collect($this->depositosDisponiveisNotaEntrega($item, $disponibilidade, $pendenteExpedicao))
+            ->keyBy('id');
+
+        foreach ($alocacoes as $alocacao) {
+            $depositoId = (int) $alocacao['deposito_id'];
+            $quantidade = (int) $alocacao['quantidade'];
+            $deposito = $depositos->get($depositoId);
+
+            if (! $deposito) {
+                throw ValidationException::withMessages([
+                    'itens' => ["O deposito #{$depositoId} nao possui saldo utilizavel para o item de entrega #{$item->id}."],
+                ]);
+            }
+
+            $maximo = (int) ($deposito['quantidade_utilizavel'] ?? 0);
+            if ($quantidade > $maximo) {
+                throw ValidationException::withMessages([
+                    'itens' => ["A quantidade do deposito {$deposito['nome']} excede o saldo utilizavel ({$maximo})."],
+                ]);
+            }
+        }
+
+        $reservasPorDeposito = $this->reservasAtivasNotaEntrega($item)
+            ->groupBy('id_deposito')
+            ->map(fn (Collection $reservas) => (int) $reservas->sum(fn (EstoqueReserva $reserva) => $reserva->pendente()));
+        $reservaTotal = (int) $reservasPorDeposito->sum();
+        $totalAlocado = (int) $alocacoes->sum('quantidade');
+        $reservadoAlocado = (int) $alocacoes
+            ->filter(fn (array $alocacao) => $reservasPorDeposito->has($alocacao['deposito_id']))
+            ->sum('quantidade');
+        $foraReserva = (int) $alocacoes
+            ->reject(fn (array $alocacao) => $reservasPorDeposito->has($alocacao['deposito_id']))
+            ->sum('quantidade');
+
+        if ($reservaTotal > 0 && $foraReserva > 0 && $reservadoAlocado < min($reservaTotal, $totalAlocado)) {
+            throw ValidationException::withMessages([
+                'itens' => ["Use primeiro a reserva existente do item de entrega #{$item->id} antes de expedir por outro deposito."],
+            ]);
+        }
+
+        return $alocacoes
+            ->sortBy(fn (array $alocacao) => $reservasPorDeposito->has($alocacao['deposito_id']) ? 0 : 1)
+            ->values();
+    }
+
+    private function depositosDisponiveisNotaEntrega(
+        ProdutoEntregaItem $item,
+        EstoqueDisponibilidadeService $disponibilidade,
+        int $pendenteExpedicao
+    ): array {
+        if ($pendenteExpedicao <= 0 || ! $item->id_variacao) {
+            return [];
+        }
+
+        $reservasPorDeposito = $this->reservasAtivasNotaEntrega($item)
+            ->filter(fn (EstoqueReserva $reserva) => (int) $reserva->id_deposito > 0)
+            ->groupBy('id_deposito')
+            ->map(fn (Collection $reservas) => (int) $reservas->sum(fn (EstoqueReserva $reserva) => $reserva->pendente()));
+
+        $depositoIds = Estoque::query()
+            ->where('id_variacao', $item->id_variacao)
+            ->where('quantidade', '>', 0)
+            ->pluck('id_deposito')
+            ->merge($reservasPorDeposito->keys())
+            ->filter(fn ($id) => (int) $id > 0)
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values();
+
+        if ($depositoIds->isEmpty()) {
+            return [];
+        }
+
+        $nomes = Deposito::query()
+            ->whereIn('id', $depositoIds)
+            ->pluck('nome', 'id');
+
+        return $depositoIds
+            ->map(function (int $depositoId) use ($item, $disponibilidade, $pendenteExpedicao, $reservasPorDeposito, $nomes) {
+                $disponivel = max(0, $disponibilidade->getDisponivel((int) $item->id_variacao, $depositoId));
+                $reservado = (int) ($reservasPorDeposito[$depositoId] ?? 0);
+                $utilizavel = max(0, $disponivel + $reservado);
+
+                if ($utilizavel <= 0) {
+                    return null;
+                }
+
+                return [
+                    'id' => $depositoId,
+                    'nome' => $nomes[$depositoId] ?? "Deposito #{$depositoId}",
+                    'disponivel' => $disponivel,
+                    'reservado' => $reservado,
+                    'quantidade_utilizavel' => min($utilizavel, $pendenteExpedicao),
+                    'is_reserva' => $reservado > 0,
+                ];
+            })
+            ->filter()
+            ->sortBy(fn (array $deposito) => ($deposito['is_reserva'] ? '0' : '1') . '|' . $deposito['nome'])
+            ->values()
+            ->all();
+    }
+
+    private function reservasAtivasNotaEntrega(ProdutoEntregaItem $item): Collection
+    {
+        return EstoqueReserva::query()
+            ->where('id_variacao', $item->id_variacao)
+            ->where('status', 'ativa')
+            ->where(function ($q) {
+                $q->whereNull('data_expira')
+                    ->orWhere('data_expira', '>', now());
+            })
+            ->when($item->pedido_id, fn ($q) => $q->where('pedido_id', $item->pedido_id))
+            ->when($item->pedido_item_id, fn ($q) => $q->where('pedido_item_id', $item->pedido_item_id))
+            ->get();
+    }
+
+    private function notaEntregaEventoKey(
+        string $idempotencyKey,
+        int $itemId,
+        string $acao = 'entregar',
+        ?int $depositoId = null
+    ): string {
+        $base = "nota-entrega:{$idempotencyKey}:item:{$itemId}";
+
+        if ($depositoId) {
+            $base .= ":deposito:{$depositoId}";
+        }
+
+        return "{$base}:{$acao}";
+    }
+
+    private function resolverCategoriaSugeridaImportacao(
+        array $fornecedorSugerido,
+        ?Fornecedor $fornecedorVinculado,
+        ?string $nomeArquivo
+    ): ?Categoria {
+        if (!$this->isContextoFornecedorAvanti($fornecedorSugerido, $fornecedorVinculado, $nomeArquivo)) {
+            return null;
+        }
+
+        $categoria = Categoria::query()
+            ->where('nome', self::CATEGORIA_SUGERIDA_AVANTI)
+            ->first();
+
+        if (!$categoria) {
+            SierraLog::inventory('inventory.order_import.suggested_category_unavailable', [
+                'categoria_sugerida' => self::CATEGORIA_SUGERIDA_AVANTI,
+                'fornecedor_sugerido' => $fornecedorSugerido['nome'] ?? null,
+                'fornecedor_vinculado_id' => $fornecedorVinculado?->id,
+                'arquivo_nome' => $nomeArquivo,
+            ]);
+        }
+
+        return $categoria;
+    }
+
+    private function isContextoFornecedorAvanti(
+        array $fornecedorSugerido,
+        ?Fornecedor $fornecedorVinculado,
+        ?string $nomeArquivo
+    ): bool {
+        $documentos = [
+            $fornecedorSugerido['cnpj'] ?? null,
+            $fornecedorVinculado?->cnpj,
+        ];
+
+        foreach ($documentos as $documento) {
+            $normalizado = $this->normalizarDocumentoFornecedor($documento);
+            if ($normalizado && in_array($normalizado, self::FORNECEDOR_AVANTI_CNPJS, true)) {
+                return true;
+            }
+        }
+
+        $nomes = [
+            $fornecedorSugerido['nome'] ?? null,
+            $fornecedorVinculado?->nome,
+            $nomeArquivo,
+        ];
+
+        foreach ($nomes as $nome) {
+            $normalizado = $this->normalizarNomeFornecedor($nome);
+            if (
+                $normalizado
+                && (
+                    str_contains(" {$normalizado} ", ' ' . self::FORNECEDOR_AVANTI_TOKEN . ' ')
+                    || $this->isRazaoSocialAvanti($normalizado)
+                )
+            ) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function isRazaoSocialAvanti(string $nomeNormalizado): bool
+    {
+        foreach (self::FORNECEDOR_AVANTI_RAZOES_SOCIAIS as $razaoSocial) {
+            if (str_contains(" {$nomeNormalizado} ", " {$razaoSocial} ")) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function resolverFornecedorImportacao(
+        array $fornecedorSugerido,
+        ?Fornecedor $fornecedorResolvidoXml,
+        ?string $nomeArquivo
+    ): ?Fornecedor {
+        if ($this->isContextoFornecedorAvanti($fornecedorSugerido, $fornecedorResolvidoXml, $nomeArquivo)) {
+            return $this->resolverFornecedorAvantiExistente($fornecedorSugerido, $fornecedorResolvidoXml, $nomeArquivo);
+        }
+
+        if ($fornecedorResolvidoXml) {
+            return $fornecedorResolvidoXml;
+        }
+
+        return $this->resolverFornecedorPorNomeArquivo($fornecedorSugerido, $nomeArquivo);
+    }
+
+    private function resolverFornecedorAvantiExistente(
+        array $fornecedorSugerido,
+        ?Fornecedor $fornecedorResolvidoXml,
+        ?string $nomeArquivo
+    ): ?Fornecedor {
+        $fornecedoresAtivos = Fornecedor::query()
+            ->where('status', 1)
+            ->get();
+
+        $matchesExatos = $fornecedoresAtivos
+            ->filter(fn (Fornecedor $fornecedor) => $this->normalizarNomeFornecedor($fornecedor->nome) === self::FORNECEDOR_AVANTI_TOKEN)
+            ->values();
+
+        if ($matchesExatos->count() === 1) {
+            return $matchesExatos->first();
+        }
+
+        if ($matchesExatos->count() > 1) {
+            $this->logFornecedorAvantiNaoSelecionado(
+                'multiplos_matches_exatos',
+                $fornecedorSugerido,
+                $fornecedorResolvidoXml,
+                $nomeArquivo,
+                $matchesExatos->pluck('id')->all()
+            );
+
+            return null;
+        }
+
+        $matchesPorToken = $fornecedoresAtivos
+            ->filter(function (Fornecedor $fornecedor) {
+                $normalizado = $this->normalizarNomeFornecedor($fornecedor->nome);
+                return $normalizado && str_contains(" {$normalizado} ", ' ' . self::FORNECEDOR_AVANTI_TOKEN . ' ');
+            })
+            ->values();
+
+        if ($matchesPorToken->count() === 1) {
+            return $matchesPorToken->first();
+        }
+
+        $this->logFornecedorAvantiNaoSelecionado(
+            $matchesPorToken->isEmpty() ? 'nao_encontrado' : 'multiplos_matches_por_token',
+            $fornecedorSugerido,
+            $fornecedorResolvidoXml,
+            $nomeArquivo,
+            $matchesPorToken->pluck('id')->all()
+        );
+
+        return null;
+    }
+
+    private function logFornecedorAvantiNaoSelecionado(
+        string $motivo,
+        array $fornecedorSugerido,
+        ?Fornecedor $fornecedorResolvidoXml,
+        ?string $nomeArquivo,
+        array $fornecedorIds
+    ): void {
+        SierraLog::inventory('inventory.order_import.avanti_supplier_not_selected', [
+            'motivo' => $motivo,
+            'fornecedor_sugerido' => $fornecedorSugerido['nome'] ?? null,
+            'fornecedor_resolvido_xml_id' => $fornecedorResolvidoXml?->id,
+            'arquivo_nome' => $nomeArquivo,
+            'fornecedor_ids_candidatos' => $fornecedorIds,
+        ]);
+    }
+
+    private function resolverFornecedorSugerido(array $fornecedorSugerido): ?Fornecedor
+    {
+        $cnpj = $this->normalizarDocumentoFornecedor($fornecedorSugerido['cnpj'] ?? null);
+        if ($cnpj) {
+            $porCnpj = Fornecedor::query()
+                ->where('status', 1)
+                ->where('cnpj', $cnpj)
+                ->get();
+
+            if ($porCnpj->count() === 1) {
+                return $porCnpj->first();
+            }
+
+            if ($porCnpj->count() > 1) {
+                $this->logFornecedorNaoSelecionado(
+                    'cnpj_ambiguo',
+                    $fornecedorSugerido,
+                    null,
+                    $porCnpj->pluck('id')->all()
+                );
+
+                return null;
+            }
+        }
+
+        $nomeNormalizado = $this->normalizarNomeFornecedor($fornecedorSugerido['nome'] ?? null);
+        if (!$nomeNormalizado) {
+            return null;
+        }
+
+        $fornecedoresAtivos = Fornecedor::query()
+            ->where('status', 1)
+            ->get();
+
+        $matchesExatos = $fornecedoresAtivos
+            ->filter(fn (Fornecedor $fornecedor) => $this->normalizarNomeFornecedor($fornecedor->nome) === $nomeNormalizado)
+            ->values();
+
+        if ($matchesExatos->count() === 1) {
+            return $matchesExatos->first();
+        }
+
+        if ($matchesExatos->count() > 1) {
+            $this->logFornecedorNaoSelecionado(
+                'nome_estruturado_exato_ambiguo',
+                $fornecedorSugerido,
+                null,
+                $matchesExatos->pluck('id')->all()
+            );
+
+            return null;
+        }
+
+        $matchesPorNome = $this->filtrarFornecedoresPorTexto($fornecedoresAtivos, $nomeNormalizado);
+        if ($matchesPorNome->count() === 1) {
+            return $matchesPorNome->first();
+        }
+
+        if ($matchesPorNome->count() > 1) {
+            $this->logFornecedorNaoSelecionado(
+                'nome_estruturado_ambiguo',
+                $fornecedorSugerido,
+                null,
+                $matchesPorNome->pluck('id')->all()
+            );
+        }
+
+        $matchesPorToken = $this->filtrarFornecedoresPorPrimeiroToken($fornecedoresAtivos, $nomeNormalizado);
+        if ($matchesPorToken->count() === 1) {
+            return $matchesPorToken->first();
+        }
+
+        if ($matchesPorToken->count() > 1) {
+            $this->logFornecedorNaoSelecionado(
+                'nome_estruturado_token_ambiguo',
+                $fornecedorSugerido,
+                null,
+                $matchesPorToken->pluck('id')->all()
+            );
+        }
+
+        return null;
+    }
+
+    private function resolverFornecedorPorNomeArquivo(array $fornecedorSugerido, ?string $nomeArquivo): ?Fornecedor
+    {
+        $nomeArquivoNormalizado = $this->normalizarNomeFornecedor($nomeArquivo);
+        if (!$nomeArquivoNormalizado) {
+            return null;
+        }
+
+        $fornecedoresAtivos = Fornecedor::query()
+            ->where('status', 1)
+            ->get();
+
+        $matchesPorNomeCompleto = $fornecedoresAtivos
+            ->filter(function (Fornecedor $fornecedor) use ($nomeArquivoNormalizado) {
+                $fornecedorNormalizado = $this->normalizarNomeFornecedor($fornecedor->nome);
+                if (!$fornecedorNormalizado) {
+                    return false;
+                }
+
+                return str_contains(" {$nomeArquivoNormalizado} ", " {$fornecedorNormalizado} ");
+            })
+            ->values();
+
+        if ($matchesPorNomeCompleto->count() === 1) {
+            return $matchesPorNomeCompleto->first();
+        }
+
+        if ($matchesPorNomeCompleto->count() > 1) {
+            $this->logFornecedorNaoSelecionado(
+                'nome_arquivo_ambiguo',
+                $fornecedorSugerido,
+                $nomeArquivo,
+                $matchesPorNomeCompleto->pluck('id')->all()
+            );
+
+            return null;
+        }
+
+        $matchesPorToken = $fornecedoresAtivos
+            ->filter(function (Fornecedor $fornecedor) use ($nomeArquivoNormalizado) {
+                $fornecedorNormalizado = $this->normalizarNomeFornecedor($fornecedor->nome);
+                if (!$fornecedorNormalizado) {
+                    return false;
+                }
+
+                return str_contains(" {$nomeArquivoNormalizado} ", ' ' . $this->primeiroTokenFornecedor($fornecedorNormalizado) . ' ');
+            })
+            ->values();
+
+        if ($matchesPorToken->count() === 1) {
+            return $matchesPorToken->first();
+        }
+
+        $this->logFornecedorNaoSelecionado(
+            $matchesPorToken->isEmpty() ? 'nome_arquivo_nao_encontrado' : 'nome_arquivo_token_ambiguo',
+            $fornecedorSugerido,
+            $nomeArquivo,
+            $matchesPorToken->pluck('id')->all()
+        );
+
+        return null;
+    }
+
+    private function filtrarFornecedoresPorTexto(Collection $fornecedores, string $textoNormalizado): Collection
+    {
+        return $fornecedores
+            ->filter(function (Fornecedor $fornecedor) use ($textoNormalizado) {
+                $fornecedorNormalizado = $this->normalizarNomeFornecedor($fornecedor->nome);
+                if (!$fornecedorNormalizado) {
+                    return false;
+                }
+
+                return str_contains(" {$fornecedorNormalizado} ", " {$textoNormalizado} ")
+                    || str_contains(" {$textoNormalizado} ", " {$fornecedorNormalizado} ");
+            })
+            ->values();
+    }
+
+    private function filtrarFornecedoresPorPrimeiroToken(Collection $fornecedores, string $textoNormalizado): Collection
+    {
+        $token = $this->primeiroTokenFornecedor($textoNormalizado);
+
+        return $fornecedores
+            ->filter(function (Fornecedor $fornecedor) use ($token) {
+                $fornecedorNormalizado = $this->normalizarNomeFornecedor($fornecedor->nome);
+                if (!$fornecedorNormalizado) {
+                    return false;
+                }
+
+                return str_contains(" {$fornecedorNormalizado} ", " {$token} ");
+            })
+            ->values();
+    }
+
+    private function primeiroTokenFornecedor(string $nomeNormalizado): string
+    {
+        $tokens = preg_split('/\s+/', trim($nomeNormalizado)) ?: [];
+        $primeiro = $tokens[0] ?? '';
+
+        return mb_strlen($primeiro) >= 3 ? $primeiro : $nomeNormalizado;
+    }
+
+    private function logFornecedorNaoSelecionado(
+        string $motivo,
+        array $fornecedorSugerido,
+        ?string $nomeArquivo,
+        array $fornecedorIds
+    ): void {
+        SierraLog::inventory('inventory.order_import.supplier_not_selected', [
+            'motivo' => $motivo,
+            'fornecedor_sugerido' => $fornecedorSugerido['nome'] ?? null,
+            'fornecedor_sugerido_cnpj' => $this->normalizarDocumentoFornecedor($fornecedorSugerido['cnpj'] ?? null),
+            'arquivo_nome' => $nomeArquivo,
+            'fornecedor_ids_candidatos' => $fornecedorIds,
+        ]);
+    }
+
+    private function normalizarDocumentoFornecedor(mixed $value): ?string
+    {
+        $documento = preg_replace('/\D+/', '', (string) ($value ?? ''));
+        return $documento !== '' ? $documento : null;
+    }
+
+    private function normalizarNomeFornecedor(mixed $value): ?string
+    {
+        $nome = trim((string) ($value ?? ''));
+        if ($nome === '') {
+            return null;
+        }
+
+        $ascii = iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $nome);
+        $normalized = strtolower($ascii !== false ? $ascii : $nome);
+        $normalized = preg_replace('/[^a-z0-9]+/', ' ', $normalized);
+        $normalized = trim(preg_replace('/\s+/', ' ', (string) $normalized));
+
+        return $normalized !== '' ? $normalized : null;
+    }
+
     private function temPedidoMinimo(array $pedido, array $totais): bool
     {
         $temNumero = !empty(trim((string) ($pedido['numero_pedido'] ?? '')));
@@ -583,7 +2150,7 @@ class PedidoController extends Controller
 
     private function isRoteiroConsignacaoDevolucao(Pedido $pedido): bool
     {
-        $statusAtual = $pedido->statusAtual?->status?->value ?? $pedido->statusAtual?->status;
+        $statusAtual = $pedido->statusAtual?->getRawOriginal('status') ?? $pedido->statusAtual?->status;
         if ($statusAtual === 'devolucao_consignacao') {
             return true;
         }
@@ -596,5 +2163,71 @@ class PedidoController extends Controller
             $status = strtolower((string) ($item->status ?? ''));
             return in_array($status, ['devolvido', 'comprado', 'finalizado'], true);
         });
+    }
+
+    private function gruposRoteiroConsignacao(Pedido $pedido, bool $isDevolucao, Request $request)
+    {
+        if (!$isDevolucao) {
+            return $pedido->consignacoes->groupBy(fn ($item) => $item->deposito->nome ?? 'Sem depósito');
+        }
+
+        $destinos = collect((array) $request->query('destinos_devolucao', []))
+            ->mapWithKeys(fn ($depositoId, $consignacaoId) => [(int) $consignacaoId => (int) $depositoId])
+            ->filter(fn ($depositoId, $consignacaoId) => $consignacaoId > 0 && $depositoId > 0);
+
+        // Roteiros legados e reimpressões podem não informar um novo destino.
+        // Nesses casos, o depósito original continua sendo a referência visual;
+        // nenhum movimento de estoque é executado durante a geração do PDF.
+        if ($destinos->isEmpty()) {
+            return $pedido->consignacoes->groupBy(fn ($item) => $item->deposito->nome ?? 'Sem depósito');
+        }
+
+        $consignacaoIds = $pedido->consignacoes
+            ->pluck('id')
+            ->map(fn ($id) => (int) $id)
+            ->values();
+
+        $faltando = $consignacaoIds
+            ->filter(fn ($consignacaoId) => !$destinos->has($consignacaoId))
+            ->values();
+
+        if ($faltando->isNotEmpty()) {
+            throw ValidationException::withMessages([
+                'destinos_devolucao' => ['Informe o depósito de destino para todos os produtos selecionados no roteiro de devolução.'],
+            ]);
+        }
+
+        $depositos = Deposito::query()
+            ->whereIn('id', $destinos->values()->unique()->all())
+            ->get()
+            ->keyBy('id');
+
+        $invalidos = $consignacaoIds
+            ->filter(fn ($consignacaoId) => !$depositos->has((int) $destinos->get($consignacaoId)))
+            ->values();
+
+        if ($invalidos->isNotEmpty()) {
+            throw ValidationException::withMessages([
+                'destinos_devolucao' => ['O depósito de destino informado para o roteiro de devolução é inválido.'],
+            ]);
+        }
+
+        return $pedido->consignacoes->groupBy(function ($item) use ($destinos, $depositos) {
+            $depositoId = (int) $destinos->get((int) $item->id);
+
+            return $depositos->get($depositoId)?->nome ?? 'Sem depósito';
+        });
+    }
+
+    private function normalizarTipoRoteiro(mixed $tipo): ?string
+    {
+        if ($tipo === null || $tipo === '') {
+            return null;
+        }
+
+        $tipo = strtolower((string) $tipo);
+        abort_unless(in_array($tipo, ['consignacao', 'devolucao'], true), 422, 'Tipo de roteiro invalido.');
+
+        return $tipo;
     }
 }

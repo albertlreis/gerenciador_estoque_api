@@ -8,6 +8,7 @@ use App\Http\Requests\AvisoStoreRequest;
 use App\Http\Requests\AvisoUpdateRequest;
 use App\Http\Resources\AvisoResource;
 use App\Models\Aviso;
+use App\Models\AvisoLeitura;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
 
@@ -20,6 +21,18 @@ class AvisoController extends Controller
         }
 
         $query = Aviso::query()->orderByDesc('created_at');
+
+        if (
+            AuthHelper::hasPermissao('avisos.view')
+            && !AuthHelper::hasPermissao('avisos.visualizar')
+            && $request->input('ativo') === null
+            && $request->input('vigente') === null
+            && trim((string) $request->input('q', '')) === ''
+        ) {
+            return response()->json([
+                'data' => AvisoResource::collection($query->ativos()->get()),
+            ]);
+        }
 
         if ($q = trim((string) $request->input('q', ''))) {
             $query->where(function ($builder) use ($q) {
@@ -114,6 +127,22 @@ class AvisoController extends Controller
 
         return response()->json([
             'message' => 'Aviso inativado com sucesso.',
+        ]);
+    }
+
+    public function marcarComoLido(Aviso $aviso): JsonResponse
+    {
+        $leitura = AvisoLeitura::updateOrCreate(
+            [
+                'aviso_id' => $aviso->id,
+                'usuario_id' => (int) auth()->id(),
+            ],
+            ['lido_em' => now()]
+        );
+
+        return response()->json([
+            'message' => 'Aviso marcado como lido.',
+            'leitura' => $leitura,
         ]);
     }
 

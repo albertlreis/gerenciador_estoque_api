@@ -60,6 +60,10 @@ class AuditLogTest extends TestCase
             'referencia' => 'AUD-002',
             'preco' => 125,
             'custo' => 55,
+            'audit' => [
+                'motivo' => 'Correção auditada de preço',
+                'origin' => 'cadastro',
+            ],
         ]);
 
         $response->assertOk();

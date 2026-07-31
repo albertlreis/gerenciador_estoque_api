@@ -256,25 +256,35 @@ class ContaAzulPermissionsTest extends TestCase
             DB::table('acesso_usuario_perfil')->updateOrInsert([
                 'id_usuario' => $usuario->id,
                 'id_perfil' => $perfilId,
-            ], [
-                'updated_at' => now(),
             ]);
 
             foreach ($permissoes as $slug) {
-                DB::table('acesso_permissoes')->updateOrInsert(['slug' => $slug], [
-                    'nome' => $slug,
-                    'descricao' => null,
-                    'updated_at' => now(),
-                ]);
+                $permissaoValues = [];
+                if (Schema::hasColumn('acesso_permissoes', 'nome')) {
+                    $permissaoValues['nome'] = $slug;
+                }
+                if (Schema::hasColumn('acesso_permissoes', 'descricao')) {
+                    $permissaoValues['descricao'] = null;
+                }
+                if (Schema::hasColumn('acesso_permissoes', 'updated_at')) {
+                    $permissaoValues['updated_at'] = now();
+                }
+
+                DB::table('acesso_permissoes')->updateOrInsert(
+                    ['slug' => $slug],
+                    $permissaoValues
+                );
 
                 $permissaoId = DB::table('acesso_permissoes')->where('slug', $slug)->value('id');
+
+                $pivotValues = Schema::hasColumn('acesso_perfil_permissao', 'updated_at')
+                    ? ['updated_at' => now()]
+                    : [];
 
                 DB::table('acesso_perfil_permissao')->updateOrInsert([
                     'id_perfil' => $perfilId,
                     'id_permissao' => $permissaoId,
-                ], [
-                    'updated_at' => now(),
-                ]);
+                ], $pivotValues);
             }
         }
 

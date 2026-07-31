@@ -3,6 +3,8 @@
 namespace Tests;
 
 use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Foundation\Testing\RefreshDatabaseState;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -26,10 +28,29 @@ abstract class TestCase extends BaseTestCase
         $this->ensureTestDatabaseExists();
         $this->runSharedMigrations();
         self::$migrationsReady = true;
+        RefreshDatabaseState::$migrated = true;
+    }
+
+    protected function setUpTraits()
+    {
+        $uses = class_uses_recursive(static::class);
+
+        if (in_array(RefreshDatabase::class, $uses, true) && !self::$migrationsReady) {
+            // Toda DDL precisa terminar antes de RefreshDatabase abrir a
+            // transação. No MySQL, DDL confirma a transação implicitamente.
+            $this->ensureTestDatabaseExists();
+            $this->runSharedMigrations();
+            self::$migrationsReady = true;
+            RefreshDatabaseState::$migrated = true;
+        }
+
+        return parent::setUpTraits();
     }
 
     protected function runSharedMigrations(): void
     {
+        $this->assertIsolatedTestDatabase();
+
         if (!config('activitylog.table_name')) {
             config([
                 'activitylog.table_name' => 'activity_log',
@@ -37,7 +58,7 @@ abstract class TestCase extends BaseTestCase
             ]);
         }
 
-        Artisan::call('migrate', [
+        Artisan::call('migrate:fresh', [
             '--env' => 'testing',
             '--force' => true,
         ]);
@@ -45,6 +66,18 @@ abstract class TestCase extends BaseTestCase
         $externalPath = base_path('..' . DIRECTORY_SEPARATOR . 'autenticacao_api' . DIRECTORY_SEPARATOR . 'database' . DIRECTORY_SEPARATOR . 'migrations');
         $relativePrefix = '..' . DIRECTORY_SEPARATOR . 'autenticacao_api' . DIRECTORY_SEPARATOR . 'database' . DIRECTORY_SEPARATOR . 'migrations';
         $this->runExternalMigrations($externalPath, $relativePrefix);
+    }
+
+    protected function assertIsolatedTestDatabase(): void
+    {
+        $connection = (string) config('database.default');
+        $database = (string) config("database.connections.{$connection}.database");
+
+        if ($database === '' || !str_ends_with($database, '_test')) {
+            throw new \LogicException(
+                "A suíte só pode recriar bancos dedicados com sufixo _test; recebido: '{$database}'."
+            );
+        }
     }
 
     protected function runExternalMigrations(string $path, string $relativePrefix): void

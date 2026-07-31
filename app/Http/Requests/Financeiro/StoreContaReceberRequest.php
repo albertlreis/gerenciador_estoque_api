@@ -3,6 +3,7 @@
 namespace App\Http\Requests\Financeiro;
 
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class StoreContaReceberRequest extends FormRequest
 {
@@ -40,6 +41,29 @@ class StoreContaReceberRequest extends FormRequest
             'centro_custo_id' => ['nullable','integer','exists:centros_custo,id'],
             'observacoes' => ['nullable','string'],
             'status' => ['nullable','in:ABERTA,PARCIAL,PAGA,CANCELADA'],
+            'recorrencia' => ['nullable','array'],
+            'recorrencia.frequencia' => ['required_with:recorrencia', Rule::in(['DIARIA','SEMANAL','MENSAL','ANUAL'])],
+            'recorrencia.intervalo' => ['nullable','integer','min:1','max:365'],
+            'recorrencia.termino_tipo' => ['nullable', Rule::in(['OCORRENCIAS','DATA'])],
+            'recorrencia.ocorrencias' => ['nullable','integer','min:1','max:366'],
+            'recorrencia.data_fim' => ['nullable','date'],
+            'parcelamento' => ['nullable','array'],
+            'parcelamento.quantidade_parcelas' => ['nullable','integer','min:1','max:120'],
+            'parcelamento.valor_entrada' => ['nullable','numeric','min:0'],
+            'parcelamento.intervalo_meses' => ['nullable','integer','min:1','max:24'],
+            'parcelamento.primeiro_vencimento' => ['nullable','date'],
+            'parcelamento.data_entrada' => ['nullable','date'],
+            'parcelamento.parcelas' => ['nullable','array','max:121'],
+            'parcelamento.parcelas.*.parcela_numero' => ['required_with:parcelamento.parcelas','integer','min:0','max:120'],
+            'parcelamento.parcelas.*.vencimento' => ['required_with:parcelamento.parcelas','date'],
+            'parcelamento.parcelas.*.valor' => ['required_with:parcelamento.parcelas','numeric','gt:0'],
+            'parcelamento.parcelas.*.is_entrada' => ['nullable','boolean'],
+            'pagamento_inicial' => ['nullable','array'],
+            'pagamento_inicial.valor' => ['required_with:pagamento_inicial','numeric','gt:0'],
+            'pagamento_inicial.data_pagamento' => ['required_with:pagamento_inicial','date'],
+            'pagamento_inicial.forma_pagamento' => ['required_with:pagamento_inicial','string','max:50'],
+            'pagamento_inicial.conta_financeira_id' => ['required_with:pagamento_inicial','integer','exists:contas_financeiras,id'],
+            'pagamento_inicial.observacoes' => ['nullable','string'],
         ];
     }
 
@@ -60,6 +84,10 @@ class StoreContaReceberRequest extends FormRequest
 
             if (!$this->filled('pedido_id') && !$this->filled('cliente_id')) {
                 $v->errors()->add('cliente_id', 'Cliente é obrigatório quando nenhum pedido for informado.');
+            }
+
+            if ($this->filled('recorrencia') && $this->filled('parcelamento')) {
+                $v->errors()->add('recorrencia', 'Recorrência e parcelamento não podem ser usados no mesmo lançamento.');
             }
         });
     }

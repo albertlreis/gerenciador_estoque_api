@@ -8,23 +8,21 @@ return new class extends Migration
 {
     public function up(): void
     {
-        Schema::table('clientes', function (Blueprint $table) {
-            $table->date('data_nascimento')->nullable()->after('whatsapp');
-        });
+        if (! Schema::hasColumn('clientes', 'data_nascimento')) {
+            Schema::table('clientes', function (Blueprint $table) {
+                $table->date('data_nascimento')->nullable()->after('whatsapp');
+            });
+        }
 
-        Schema::table('parceiros', function (Blueprint $table) {
-            $table->date('data_nascimento')->nullable()->after('telefone');
-        });
+        if (! Schema::hasColumn('parceiros', 'data_nascimento')) {
+            Schema::table('parceiros', function (Blueprint $table) {
+                $table->date('data_nascimento')->nullable()->after('telefone');
+            });
+        }
     }
 
     public function down(): void
     {
-        Schema::table('clientes', function (Blueprint $table) {
-            $table->dropColumn('data_nascimento');
-        });
-
-        Schema::table('parceiros', function (Blueprint $table) {
-            $table->dropColumn('data_nascimento');
-        });
+        // Columns are owned by the canonical 2026_03_05 migration.
     }
 };

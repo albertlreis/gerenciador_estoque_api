@@ -17,7 +17,9 @@ return new class extends Migration
             'preco_original' => DB::raw('preco_unitario'),
         ]);
 
-        DB::statement('ALTER TABLE pedido_itens MODIFY preco_original DECIMAL(10,2) NOT NULL');
+        // Mantém compatibilidade com importações e rotinas legadas que ainda
+        // inserem itens sem informar o preço original. O fluxo de pedidos atual
+        // preenche o campo explicitamente.
     }
 
     public function down(): void

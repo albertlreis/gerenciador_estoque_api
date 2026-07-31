@@ -1,7 +1,6 @@
 <?php
 
 use Illuminate\Database\Migrations\Migration;
-use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
@@ -9,11 +8,12 @@ return new class extends Migration
 {
     public function up(): void
     {
-        Schema::table('contas_receber', function (Blueprint $table) {
-            $table->unsignedInteger('cliente_id')->nullable()->after('pedido_id');
-            $table->foreign('cliente_id')->references('id')->on('clientes')->nullOnDelete();
-            $table->index(['cliente_id', 'data_vencimento'], 'contas_receber_cliente_vencimento_idx');
-        });
+        // The canonical schema change is the later 2026_06_19 migration.
+        // This older migration remains as a safe backfill for environments
+        // where the later migration was already recorded.
+        if (! Schema::hasTable('contas_receber') || ! Schema::hasColumn('contas_receber', 'cliente_id')) {
+            return;
+        }
 
         DB::table('contas_receber')
             ->join('pedidos', 'pedidos.id', '=', 'contas_receber.pedido_id')
@@ -23,10 +23,6 @@ return new class extends Migration
 
     public function down(): void
     {
-        Schema::table('contas_receber', function (Blueprint $table) {
-            $table->dropForeign(['cliente_id']);
-            $table->dropIndex('contas_receber_cliente_vencimento_idx');
-            $table->dropColumn('cliente_id');
-        });
+        // This migration only backfills an existing column.
     }
 };

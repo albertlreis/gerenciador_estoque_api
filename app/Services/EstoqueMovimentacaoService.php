@@ -29,6 +29,10 @@ use RuntimeException;
  */
 class EstoqueMovimentacaoService
 {
+    public function __construct(private readonly AuditoriaEventoService $auditoria)
+    {
+    }
+
     /**
      * Busca movimentações de estoque com base nos filtros fornecidos.
      *
@@ -323,6 +327,28 @@ class EstoqueMovimentacaoService
                 'pedido_item_id' => $dados['pedido_item_id'] ?? null,
                 'reserva_id'     => $dados['reserva_id'] ?? null,
             ]);
+
+            if ($tipo !== EstoqueMovimentacaoTipo::ESTORNO->value) {
+                $this->auditoria->registrar(
+                    module: 'estoque',
+                    action: 'CREATE',
+                    label: "Movimentacao de estoque: {$tipo}",
+                    auditable: $mov,
+                    mudancas: [
+                        ['campo' => 'tipo', 'old' => null, 'new' => $tipo],
+                        ['campo' => 'quantidade', 'old' => null, 'new' => $qtd],
+                        ['campo' => 'id_deposito_origem', 'old' => null, 'new' => $origem],
+                        ['campo' => 'id_deposito_destino', 'old' => null, 'new' => $destino],
+                    ],
+                    metadata: [
+                        'id_variacao' => $variacaoId,
+                        'ref_type' => $dados['ref_type'] ?? null,
+                        'ref_id' => $dados['ref_id'] ?? null,
+                        'pedido_id' => $dados['pedido_id'] ?? null,
+                        'pedido_item_id' => $dados['pedido_item_id'] ?? null,
+                    ]
+                );
+            }
 
             return $mov->fresh(['variacao.produto', 'usuario', 'depositoOrigem', 'depositoDestino']);
         });

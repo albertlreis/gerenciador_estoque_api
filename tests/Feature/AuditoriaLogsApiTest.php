@@ -7,6 +7,7 @@ use App\Models\ContaPagar;
 use App\Services\AuditoriaLogService;
 use App\Services\FinanceiroAuditoriaService;
 use App\Support\Auditoria\LaravelLogFileParser;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -18,6 +19,8 @@ use Tests\TestCase;
 
 class AuditoriaLogsApiTest extends TestCase
 {
+    use RefreshDatabase;
+
     private function autenticar(array $permissoes = ['auditoria.logs.visualizar'], array $perfis = []): Usuario
     {
         $usuario = Usuario::create([
@@ -63,9 +66,17 @@ class AuditoriaLogsApiTest extends TestCase
 
         $perfilId = DB::table('acesso_perfis')->where('nome', $perfil)->value('id');
 
+        $pivotValues = [];
+        if (Schema::hasColumn('acesso_usuario_perfil', 'created_at')) {
+            $pivotValues['created_at'] = now();
+        }
+        if (Schema::hasColumn('acesso_usuario_perfil', 'updated_at')) {
+            $pivotValues['updated_at'] = now();
+        }
+
         DB::table('acesso_usuario_perfil')->updateOrInsert(
             ['id_usuario' => $usuario->id, 'id_perfil' => $perfilId],
-            ['created_at' => now(), 'updated_at' => now()]
+            $pivotValues
         );
     }
 
@@ -171,6 +182,12 @@ class AuditoriaLogsApiTest extends TestCase
             'source_kind' => 'test',
             'source_table' => 'financeiro_auditorias',
             'source_id' => '10',
+        ]);
+
+        $this->assertDatabaseHas('auditoria_logs', [
+            'source_table' => 'financeiro_auditorias',
+            'source_id' => '10',
+            'actor_id' => $usuario->id,
         ]);
 
         app(AuditoriaLogService::class)->registrar([

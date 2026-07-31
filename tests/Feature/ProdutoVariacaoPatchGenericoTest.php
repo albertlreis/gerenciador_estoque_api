@@ -48,24 +48,23 @@ class ProdutoVariacaoPatchGenericoTest extends TestCase
             ],
         ])->assertOk();
 
-        $this->assertDatabaseHas('auditoria_eventos', [
-            'module' => 'produto_variacoes',
-            'action' => 'UPDATE',
-            'auditable_type' => 'ProdutoVariacao',
-            'auditable_id' => $variacao->id,
+        $this->assertDatabaseHas('auditoria_logs', [
+            'modulo' => 'produto_variacoes',
+            'acao' => 'update',
+            'entity_id' => (string) $variacao->id,
             'actor_id' => $usuario->id,
             'label' => 'Alteração de preço no checkout',
         ]);
 
-        $eventoId = \DB::table('auditoria_eventos')
-            ->where('module', 'produto_variacoes')
-            ->where('auditable_id', $variacao->id)
+        $eventoId = \DB::table('auditoria_logs')
+            ->where('modulo', 'produto_variacoes')
+            ->where('entity_id', (string) $variacao->id)
             ->latest('id')
             ->value('id');
 
-        $this->assertDatabaseHas('auditoria_mudancas', [
-            'evento_id' => $eventoId,
-            'field' => 'preco',
+        $this->assertDatabaseHas('auditoria_log_mudancas', [
+            'auditoria_log_id' => $eventoId,
+            'campo' => 'preco',
         ]);
     }
 

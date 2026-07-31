@@ -28,31 +28,31 @@ class AuditoriaEventosCriticosTest extends TestCase
 
         $response = $this->putJson("/api/v1/produtos/{$produto->id}/variacoes/{$variacao->id}", [
             'preco' => 199.90,
+            'audit' => [
+                'motivo' => 'Correção auditada de preço',
+                'origin' => 'cadastro',
+            ],
         ]);
 
         $response->assertOk();
 
-        $this->assertDatabaseHas('auditoria_eventos', [
-            'module' => 'catalogo',
-            'action' => 'UPDATE',
-            'auditable_type' => 'ProdutoVariacao',
+        $this->assertDatabaseHas('audit_logs', [
+            'action' => 'updated',
+            'auditable_type' => ProdutoVariacao::class,
             'auditable_id' => $variacao->id,
-            'actor_id' => $usuario->id,
+            'user_id' => $usuario->id,
         ]);
 
-        $eventoId = \DB::table('auditoria_eventos')
-            ->where('module', 'catalogo')
-            ->where('action', 'UPDATE')
-            ->where('auditable_type', 'ProdutoVariacao')
+        $evento = \DB::table('audit_logs')
+            ->where('action', 'updated')
+            ->where('auditable_type', ProdutoVariacao::class)
             ->where('auditable_id', $variacao->id)
             ->orderByDesc('id')
-            ->value('id');
+            ->first(['old_values', 'new_values']);
 
-        $this->assertNotNull($eventoId);
-        $this->assertDatabaseHas('auditoria_mudancas', [
-            'evento_id' => $eventoId,
-            'field' => 'preco',
-        ]);
+        $this->assertNotNull($evento);
+        $this->assertSame(100.0, (float) data_get(json_decode($evento->old_values, true), 'preco'));
+        $this->assertSame(199.9, (float) data_get(json_decode($evento->new_values, true), 'preco'));
     }
 
     public function test_cancelar_status_de_pedido_gera_evento_cancel(): void
@@ -87,11 +87,11 @@ class AuditoriaEventosCriticosTest extends TestCase
 
         $response->assertOk();
 
-        $this->assertDatabaseHas('auditoria_eventos', [
-            'module' => 'pedidos',
-            'action' => 'CANCEL',
-            'auditable_type' => 'Pedido',
-            'auditable_id' => $pedido->id,
+        $this->assertDatabaseHas('auditoria_logs', [
+            'modulo' => 'pedido_status',
+            'acao' => 'cancelamento',
+            'entity_type' => Pedido::class,
+            'entity_id' => $pedido->id,
             'actor_id' => $usuario->id,
         ]);
     }
@@ -115,11 +115,11 @@ class AuditoriaEventosCriticosTest extends TestCase
         $movimentacaoId = \DB::table('estoque_movimentacoes')->max('id');
         $this->assertNotNull($movimentacaoId);
 
-        $this->assertDatabaseHas('auditoria_eventos', [
-            'module' => 'estoque',
-            'action' => 'CREATE',
-            'auditable_type' => 'EstoqueMovimentacao',
-            'auditable_id' => $movimentacaoId,
+        $this->assertDatabaseHas('auditoria_logs', [
+            'modulo' => 'estoque',
+            'acao' => 'CREATE',
+            'entity_type' => \App\Models\EstoqueMovimentacao::class,
+            'entity_id' => $movimentacaoId,
             'actor_id' => $usuario->id,
         ]);
     }
@@ -127,6 +127,10 @@ class AuditoriaEventosCriticosTest extends TestCase
     public function test_baixa_e_estorno_financeiro_geram_eventos(): void
     {
         $usuario = $this->autenticarUsuario();
+        $cliente = Cliente::create([
+            'nome' => 'Cliente Financeiro Auditoria',
+            'documento' => '98765432100',
+        ]);
 
         $contaFinanceira = ContaFinanceira::create([
             'nome' => 'Conta Auditoria',
@@ -138,6 +142,7 @@ class AuditoriaEventosCriticosTest extends TestCase
         ]);
 
         $create = $this->postJson('/api/v1/financeiro/contas-receber', [
+            'cliente_id' => $cliente->id,
             'descricao' => 'Conta teste auditoria',
             'data_vencimento' => now()->addDays(5)->toDateString(),
             'valor_bruto' => 150.00,
@@ -164,19 +169,19 @@ class AuditoriaEventosCriticosTest extends TestCase
         $estorno = $this->deleteJson("/api/v1/financeiro/contas-receber/{$contaId}/pagamentos/{$pagamentoId}");
         $estorno->assertOk();
 
-        $this->assertDatabaseHas('auditoria_eventos', [
-            'module' => 'financeiro',
-            'action' => 'STATUS_CHANGE',
-            'auditable_type' => 'ContaReceber',
-            'auditable_id' => $contaId,
+        $this->assertDatabaseHas('auditoria_logs', [
+            'modulo' => 'financeiro',
+            'acao' => 'received',
+            'entity_type' => \App\Models\ContaReceber::class,
+            'entity_id' => $contaId,
             'actor_id' => $usuario->id,
         ]);
 
-        $this->assertDatabaseHas('auditoria_eventos', [
-            'module' => 'financeiro',
-            'action' => 'REVERSAL',
-            'auditable_type' => 'ContaReceber',
-            'auditable_id' => $contaId,
+        $this->assertDatabaseHas('auditoria_logs', [
+            'modulo' => 'financeiro',
+            'acao' => 'reversed',
+            'entity_type' => \App\Models\ContaReceber::class,
+            'entity_id' => $contaId,
             'actor_id' => $usuario->id,
         ]);
     }

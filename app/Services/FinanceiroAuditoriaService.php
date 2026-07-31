@@ -2,12 +2,21 @@
 
 namespace App\Services;
 
-use App\Models\FinanceiroAuditoria;
+use App\Support\Auditoria\AuditoriaDiff;
 use Illuminate\Database\Eloquent\Model;
 
 class FinanceiroAuditoriaService
 {
-    public function __construct(private readonly AuditLogger $auditLogger) {}
+    private const FINANCEIRO_AUDIT_FIELDS = [
+        'descricao', 'numero_documento', 'data_emissao', 'data_vencimento',
+        'data_pagamento', 'valor', 'valor_bruto', 'desconto', 'juros', 'multa',
+        'valor_liquido', 'valor_recebido', 'saldo_aberto', 'status',
+        'forma_pagamento', 'forma_recebimento', 'conta_financeira_id',
+        'categoria_id', 'centro_custo_id', 'fornecedor_id', 'pedido_id',
+        'parcelamento_id', 'parcela_numero', 'parcelas_total', 'is_entrada',
+        'tipo', 'quantidade_parcelas', 'intervalo_meses', 'valor_total',
+        'valor_entrada', 'primeiro_vencimento', 'observacoes',
+    ];
 
     public function log(string $acao, Model $entidade, ?array $antes = null, ?array $depois = null): void
     {
@@ -22,18 +31,27 @@ class FinanceiroAuditoriaService
             $ua = $req?->userAgent();
         }
 
-        FinanceiroAuditoria::create([
-            'acao'          => $acao,
-            'entidade_type' => get_class($entidade),
-            'entidade_id'   => (int) $entidade->getKey(),
-            'antes_json'    => $this->truncateJson($antes),
-            'depois_json'   => $this->truncateJson($depois),
-            'usuario_id'    => $usuarioId,
-            'ip'            => $ip,
-            'user_agent'    => $ua ? substr($ua, 0, 2000) : null,
-        ]);
-
-        $this->auditLogger->logModel($acao, $entidade, $antes, $depois, $usuarioId);
+        app(AuditoriaLogService::class)->registrar([
+            'occurred_at' => now(),
+            'tipo' => 'auditoria',
+            'categoria' => 'negocio',
+            'modulo' => 'financeiro',
+            'acao' => $acao,
+            'label' => 'Auditoria financeira',
+            'message' => "Financeiro: {$acao}",
+            'actor_id' => $usuarioId,
+            'entity_type' => get_class($entidade),
+            'entity_id' => (int) $entidade->getKey(),
+            'ip' => $ip,
+            'user_agent' => $ua,
+            'context_json' => [
+                'antes' => $this->truncateJson($antes),
+                'depois' => $this->truncateJson($depois),
+            ],
+            'source_system' => 'estoque',
+            'source_kind' => 'business_event',
+            'retention_days' => 365,
+        ], $this->mudancasFinanceiras($antes, $depois));
     }
 
     private function truncateJson(?array $data, int $max = 20000): ?array
@@ -49,5 +67,43 @@ class FinanceiroAuditoriaService
             '__truncated' => true,
             '__size' => strlen($json),
         ];
+    }
+
+    /**
+     * @return array<int,array{campo:string,old:mixed,new:mixed,value_type?:string}>
+     */
+    private function mudancasFinanceiras(?array $antes, ?array $depois): array
+    {
+        $antes = $this->normalizarOrigem($antes);
+        $depois = $this->normalizarOrigem($depois);
+
+        $old = [];
+        $new = [];
+        foreach (self::FINANCEIRO_AUDIT_FIELDS as $field) {
+            if (array_key_exists($field, $antes)) {
+                $old[$field] = $antes[$field];
+            }
+            if (array_key_exists($field, $depois)) {
+                $new[$field] = $depois[$field];
+            }
+        }
+
+        return AuditoriaDiff::changes($old, $new);
+    }
+
+    /**
+     * @return array<string,mixed>
+     */
+    private function normalizarOrigem(?array $data): array
+    {
+        if ($data === null) {
+            return [];
+        }
+
+        if (isset($data['parcelamento']) && is_array($data['parcelamento'])) {
+            return $data['parcelamento'];
+        }
+
+        return $data;
     }
 }

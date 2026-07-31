@@ -3,12 +3,15 @@
 namespace App\Http\Controllers;
 
 use App\Enums\ContaStatus;
+use App\Integrations\ContaAzul\Exceptions\ContaAzulException;
+use App\Integrations\ContaAzul\Services\ContaAzulCobrancaService;
 use App\Http\Requests\Financeiro\BaixaContaReceberRequest;
 use App\Http\Requests\Financeiro\StoreContaReceberRequest;
 use App\Http\Requests\Financeiro\UpdateContaReceberRequest;
 use App\Http\Resources\ContaReceberResource;
 use App\Models\ContaReceber;
 use App\Services\ContaReceberCommandService;
+use App\Support\FinanceiroTituloSearch;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -17,6 +20,7 @@ class ContaReceberController extends Controller
 {
     public function __construct(
         private readonly ContaReceberCommandService $cmd,
+        private readonly ContaAzulCobrancaService $contaAzulCobrancas,
     ) {}
 
     /**
@@ -35,10 +39,12 @@ class ContaReceberController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        if ($request->has('vencidas')) {
-            $request->merge([
-                'vencidas' => filter_var($request->input('vencidas'), FILTER_VALIDATE_BOOLEAN),
-            ]);
+        foreach (['vencidas', 'em_aberto'] as $booleanFilter) {
+            if ($request->has($booleanFilter)) {
+                $request->merge([
+                    $booleanFilter => filter_var($request->input($booleanFilter), FILTER_VALIDATE_BOOLEAN),
+                ]);
+            }
         }
 
         $request->validate([
@@ -47,25 +53,34 @@ class ContaReceberController extends Controller
             'busca'     => 'nullable|string|max:255',
             'status'    => 'nullable|in:ABERTA,PARCIAL,PAGA,CANCELADA',
             'cliente'   => 'nullable|string|max:255',
+            'cliente_id' => 'nullable|integer|exists:clientes,id',
             'numero_pedido' => 'nullable|string|max:80',
+            'forma_recebimento' => 'nullable|string|max:50',
+            'centro_custo_id' => 'nullable|integer|exists:centros_custo,id',
+            'categoria_id' => 'nullable|integer|exists:categorias_financeiras,id',
+            'conta_financeira_id' => 'nullable|integer|exists:contas_financeiras,id',
             'data_ini'  => 'nullable|date',
             'data_fim'  => 'nullable|date',
             'vencidas'  => 'nullable|boolean',
+            'em_aberto' => 'nullable|boolean',
+            'origem' => 'nullable|in:recorrente',
         ]);
 
         $page = $request->integer('page', 1);
         $perPage = $request->integer('per_page', 20);
 
         $q = ContaReceber::query()
-            ->with(['cliente', 'pedido.cliente', 'pagamentos.usuario']);
+            ->with([
+                'cliente',
+                'pedido.cliente',
+                'parcelamento',
+                'recorrencia',
+                'pagamentos.usuario',
+                'pagamentos.contaFinanceira',
+                'cobrancaContaAzul',
+            ]);
 
-        if ($request->filled('busca')) {
-            $busca = '%' . $request->string('busca')->toString() . '%';
-            $q->where(fn ($w) => $w
-                ->where('descricao', 'like', $busca)
-                ->orWhere('numero_documento', 'like', $busca)
-            );
-        }
+        FinanceiroTituloSearch::applyContaReceber($q, $request->string('busca')->toString() ?: null);
 
         if ($request->filled('status')) {
             $q->where('status', $request->string('status')->toString());
@@ -79,11 +94,43 @@ class ContaReceberController extends Controller
             });
         }
 
+        if ($request->filled('cliente_id')) {
+            $clienteId = $request->integer('cliente_id');
+            $q->where(fn ($w) => $w
+                ->where('cliente_id', $clienteId)
+                ->orWhereHas('pedido', fn ($p) => $p->where('id_cliente', $clienteId))
+            );
+        }
+
         if ($request->filled('numero_pedido')) {
             $np = '%' . $request->string('numero_pedido')->toString() . '%';
             $q->whereHas('pedido', fn ($p) =>
             $p->where('numero_externo', 'like', $np)
             );
+        }
+
+        if ($request->filled('forma_recebimento')) {
+            $q->where('forma_recebimento', $request->string('forma_recebimento')->toString());
+        }
+
+        if ($request->filled('centro_custo_id')) {
+            $q->where('centro_custo_id', $request->integer('centro_custo_id'));
+        }
+
+        if ($request->filled('categoria_id')) {
+            $q->where('categoria_id', $request->integer('categoria_id'));
+        }
+
+        if ($request->filled('conta_financeira_id')) {
+            $contaFinanceiraId = $request->integer('conta_financeira_id');
+            $q->whereHas(
+                'pagamentos',
+                fn ($pagamento) => $pagamento->where('conta_financeira_id', $contaFinanceiraId)
+            );
+        }
+
+        if ($request->string('origem')->toString() === 'recorrente') {
+            $q->whereNotNull('despesa_recorrente_id');
         }
 
         if ($request->filled('data_ini')) {
@@ -96,7 +143,11 @@ class ContaReceberController extends Controller
 
         if ($request->boolean('vencidas', false)) {
             $q->whereDate('data_vencimento', '<', now()->toDateString())
-                ->where('status', '!=', ContaStatus::PAGA->value);
+                ->whereNotIn('status', [ContaStatus::PAGA->value, ContaStatus::CANCELADA->value]);
+        }
+
+        if ($request->boolean('em_aberto', false)) {
+            $q->whereNotIn('status', [ContaStatus::PAGA->value, ContaStatus::CANCELADA->value]);
         }
 
         $q->orderBy('data_vencimento')->orderBy('id');
@@ -113,7 +164,17 @@ class ContaReceberController extends Controller
      */
     public function show(ContaReceber $conta): JsonResponse
     {
-        $conta->load(['cliente', 'pedido.cliente', 'pagamentos.usuario']);
+        $conta->load([
+            'cliente',
+            'pedido.cliente',
+            'categoria',
+            'centroCusto',
+            'parcelamento',
+            'recorrencia',
+            'pagamentos.usuario',
+            'pagamentos.contaFinanceira',
+            'cobrancaContaAzul',
+        ]);
 
         return response()->json([
             'data' => new ContaReceberResource($conta),
@@ -126,7 +187,7 @@ class ContaReceberController extends Controller
     public function store(StoreContaReceberRequest $request): JsonResponse
     {
         $conta = $this->cmd->criar($request->validated());
-        $conta->load(['cliente', 'pedido.cliente']);
+        $conta->load(['cliente', 'pedido.cliente', 'recorrencia']);
 
         return response()->json([
             'data' => new ContaReceberResource($conta),
@@ -172,7 +233,35 @@ class ContaReceberController extends Controller
         $pagamento = $this->cmd->registrarPagamento($conta, $dados);
 
         // retorna a conta atualizada (padrão similar ao contas a pagar)
-        $conta->refresh()->load(['cliente', 'pedido.cliente', 'pagamentos.usuario']);
+        $conta->refresh()->load(['cliente', 'pedido.cliente', 'pagamentos.usuario', 'pagamentos.contaFinanceira']);
+
+        return response()->json([
+            'data' => new ContaReceberResource($conta),
+        ], Response::HTTP_OK);
+    }
+
+    public function gerarBoletoContaAzul(ContaReceber $conta): JsonResponse
+    {
+        try {
+            $this->contaAzulCobrancas->gerarBoleto($conta);
+        } catch (ContaAzulException $e) {
+            return response()->json([
+                'message' => $e->getMessage(),
+                'reason' => $e->reason,
+            ], Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        $conta->refresh()->load([
+            'cliente',
+            'pedido.cliente',
+            'categoria',
+            'centroCusto',
+            'parcelamento',
+            'recorrencia',
+            'pagamentos.usuario',
+            'pagamentos.contaFinanceira',
+            'cobrancaContaAzul',
+        ]);
 
         return response()->json([
             'data' => new ContaReceberResource($conta),
@@ -186,6 +275,7 @@ class ContaReceberController extends Controller
     public function estornarPagamento(ContaReceber $conta, int $pagamento): JsonResponse
     {
         $contaAtualizada = $this->cmd->estornarPagamento($conta, $pagamento);
+        $contaAtualizada->load(['cliente', 'pedido.cliente', 'pagamentos.usuario', 'pagamentos.contaFinanceira']);
 
         return response()->json([
             'data' => new ContaReceberResource($contaAtualizada),

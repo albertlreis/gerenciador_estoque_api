@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\EstoqueReserva;
 use Illuminate\Support\Facades\DB;
+use InvalidArgumentException;
 
 class ReservaEstoqueService
 {
@@ -20,23 +21,29 @@ class ReservaEstoqueService
         return DB::transaction(function () use (
             $variacaoId, $depositoId, $quantidade, $pedidoId, $pedidoItemId, $usuarioId, $motivo
         ) {
-            $reserva = EstoqueReserva::query()
-                ->where('id_variacao', $variacaoId)
-                ->where('id_deposito', $depositoId)
-                ->where('pedido_id', $pedidoId)
-                ->where('pedido_item_id', $pedidoItemId)
-                ->where('status', 'ativa')
-                ->lockForUpdate()
-                ->first();
+            if ($quantidade <= 0) {
+                throw new InvalidArgumentException('Quantidade da reserva deve ser positiva.');
+            }
 
-            if ($reserva) {
-                $reserva->fill([
-                    'id_usuario' => $usuarioId,
-                    'quantidade' => $quantidade,
-                    'motivo' => $motivo ?? $reserva->motivo ?? 'pedido_sem_movimentacao',
-                ])->save();
+            if ($depositoId !== null) {
+                $saldo = DB::table('estoque')
+                    ->where('id_variacao', $variacaoId)
+                    ->where('id_deposito', $depositoId)
+                    ->lockForUpdate()
+                    ->first();
 
-                return $reserva->fresh();
+                if (!$saldo) {
+                    throw new InvalidArgumentException('Saldo inexistente no depósito para reserva.');
+                }
+
+                $reservado = $this->reservasEmAbertoPorDeposito($variacaoId, $depositoId);
+                $disponivel = (int) $saldo->quantidade - (int) $reservado;
+
+                if ($disponivel < $quantidade) {
+                    throw new InvalidArgumentException(
+                        "Estoque insuficiente para reserva. Disponivel: {$disponivel}, solicitado: {$quantidade}."
+                    );
+                }
             }
 
             return EstoqueReserva::create([
@@ -73,6 +80,18 @@ class ReservaEstoqueService
             ->update([
                 'status' => 'cancelada',
                 'motivo' => $motivo ?? 'pedido_cancelado',
+                'updated_at' => now(),
+            ]);
+    }
+
+    public function cancelarPorPedidoItem(int $pedidoItemId, ?int $usuarioId = null, ?string $motivo = null): void
+    {
+        EstoqueReserva::query()
+            ->where('pedido_item_id', $pedidoItemId)
+            ->where('status', 'ativa')
+            ->update([
+                'status' => 'cancelada',
+                'motivo' => $motivo ?? 'pedido_item_cancelado',
                 'updated_at' => now(),
             ]);
     }

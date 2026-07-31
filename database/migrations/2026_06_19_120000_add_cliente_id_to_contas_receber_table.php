@@ -8,6 +8,10 @@ return new class extends Migration
 {
     public function up(): void
     {
+        if (Schema::hasColumn('contas_receber', 'cliente_id')) {
+            return;
+        }
+
         Schema::table('contas_receber', function (Blueprint $table) {
             $table->unsignedInteger('cliente_id')->nullable()->after('pedido_id');
             $table->foreign('cliente_id', 'contas_receber_cliente_fk')
@@ -20,6 +24,10 @@ return new class extends Migration
 
     public function down(): void
     {
+        if (! Schema::hasColumn('contas_receber', 'cliente_id')) {
+            return;
+        }
+
         Schema::table('contas_receber', function (Blueprint $table) {
             $table->dropForeign('contas_receber_cliente_fk');
             $table->dropIndex('contas_receber_cliente_idx');

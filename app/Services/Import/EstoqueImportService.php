@@ -20,6 +20,7 @@ use Carbon\Carbon;
 use DateTimeInterface;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use PhpOffice\PhpSpreadsheet\Shared\Date as SpreadsheetDate;
 use Throwable;
@@ -725,6 +726,13 @@ final class EstoqueImportService
             ];
         } catch (Throwable $e) {
             DB::rollBack();
+
+            Log::error('Falha ao processar importação de estoque.', [
+                'importacao_id' => $import->id,
+                'dry_run' => $dryRun,
+                'exception' => $e::class,
+                'erro' => $e->getMessage(),
+            ]);
 
             $import->update([
                 'status' => 'com_erro',

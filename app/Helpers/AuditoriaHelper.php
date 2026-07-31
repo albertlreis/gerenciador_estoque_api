@@ -1,9 +1,9 @@
 <?php
 
-use Spatie\Activitylog\Models\Activity;
+use App\Models\AuditoriaLog;
+use App\Services\AuditoriaLogService;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Auth;
-use App\Services\AuditLogger;
 
 if (!function_exists('logAuditoria')) {
     /**
@@ -13,35 +13,31 @@ if (!function_exists('logAuditoria')) {
      * @param string $descricao Texto descritivo (ex: "Pedido criado com sucesso").
      * @param array $properties Propriedades adicionais (ex: ['acao' => 'criação', 'nivel' => 'info']).
      * @param Model|null $model (Opcional) Modelo relacionado à ação.
-     * @return Activity|null
+     * @return AuditoriaLog|null
      */
-    function logAuditoria(string $logName, string $descricao, array $properties = [], ?Model $model = null): ?Activity
+    function logAuditoria(string $logName, string $descricao, array $properties = [], ?Model $model = null): ?AuditoriaLog
     {
         $usuario = Auth::user();
 
-        app(AuditLogger::class)->log(
-            action: (string) ($properties['acao'] ?? 'custom'),
-            auditable: $model ?? $logName,
-            auditableId: $model?->getKey(),
-            oldValues: null,
-            newValues: [
-                'descricao' => $descricao,
-                'log_name' => $logName,
-                'properties' => $properties,
-            ],
-            userId: $usuario?->id,
-        );
-
-        $activity = activity($logName)
-            ->causedBy($usuario)
-            ->withProperties(array_merge([
+        return app(AuditoriaLogService::class)->registrar([
+            'occurred_at' => now(),
+            'tipo' => 'auditoria',
+            'categoria' => 'negocio',
+            'modulo' => $logName,
+            'acao' => $properties['acao'] ?? 'activity',
+            'label' => $descricao,
+            'message' => $descricao,
+            'actor_type' => $usuario ? get_class($usuario) : null,
+            'actor_id' => $usuario?->id,
+            'actor_name' => $usuario?->nome ?? $usuario?->name ?? $usuario?->email,
+            'entity_type' => $model ? get_class($model) : null,
+            'entity_id' => $model?->getKey(),
+            'metadata_json' => array_merge([
                 'usuario' => $usuario?->email,
-            ], $properties));
-
-        if ($model) {
-            $activity->performedOn($model);
-        }
-
-        return $activity->log($descricao);
+            ], $properties),
+            'source_system' => 'estoque',
+            'source_kind' => 'business_event',
+            'retention_days' => 365,
+        ]);
     }
 }

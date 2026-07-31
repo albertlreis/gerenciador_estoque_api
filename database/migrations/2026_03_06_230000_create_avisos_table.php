@@ -8,15 +8,11 @@ return new class extends Migration
 {
     public function up(): void
     {
-        Schema::create('avisos', function (Blueprint $table) {
-            $table->id();
-            $table->string('titulo');
-            $table->text('conteudo');
+        Schema::table('avisos', function (Blueprint $table) {
             $table->boolean('ativo')->default(true);
             $table->dateTime('data_inicio')->nullable();
             $table->dateTime('data_fim')->nullable();
             $table->unsignedInteger('criado_por')->nullable();
-            $table->timestamps();
 
             $table->index(['ativo', 'data_inicio', 'data_fim'], 'idx_avisos_vigencia');
         });
@@ -24,6 +20,9 @@ return new class extends Migration
 
     public function down(): void
     {
-        Schema::dropIfExists('avisos');
+        Schema::table('avisos', function (Blueprint $table) {
+            $table->dropIndex('idx_avisos_vigencia');
+            $table->dropColumn(['ativo', 'data_inicio', 'data_fim', 'criado_por']);
+        });
     }
 };

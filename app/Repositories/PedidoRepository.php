@@ -12,6 +12,10 @@ use Illuminate\Http\Request;
  */
 class PedidoRepository
 {
+    private const STATUS_OPERACIONAIS_PERMITIDOS = [
+        'aguardando_fabrica', 'recebimento_pendente', 'recebimento_parcial',
+        'recebido_estoque', 'aguardando_entrega_cliente', 'entregue_cliente', 'divergencia',
+    ];
     /**
      * Retorna um builder de pedidos com filtros aplicados.
      *
@@ -41,8 +45,15 @@ class PedidoRepository
             $query->where('tipo', $request->input('tipo'));
         }
 
-        if ($request->filled('status_operacional')) {
-            $this->aplicarFiltroOperacional($query, (string) $request->input('status_operacional'));
+        $statusOperacionais = $this->normalizarStatusOperacionais($request);
+        if ($statusOperacionais !== []) {
+            $query->where(function (Builder $filtros) use ($statusOperacionais) {
+                foreach ($statusOperacionais as $status) {
+                    $filtros->orWhere(function (Builder $pedido) use ($status) {
+                        $this->aplicarFiltroOperacional($pedido, $status);
+                    });
+                }
+            });
         }
 
         if ($request->filled('data_inicio')) {
@@ -74,6 +85,20 @@ class PedidoRepository
         }
 
         return $query;
+    }
+
+    /** @return list<string> */
+    private function normalizarStatusOperacionais(Request $request): array
+    {
+        $valores = $request->input('status_operacionais');
+        if (!is_array($valores)) {
+            $valores = $request->filled('status_operacional') ? [$request->input('status_operacional')] : [];
+        }
+
+        return array_values(array_unique(array_filter(
+            array_map(static fn ($status) => is_string($status) ? trim($status) : '', $valores),
+            static fn (string $status) => in_array($status, self::STATUS_OPERACIONAIS_PERMITIDOS, true)
+        )));
     }
 
     private function aplicarFiltroOperacional(Builder $query, string $status): void

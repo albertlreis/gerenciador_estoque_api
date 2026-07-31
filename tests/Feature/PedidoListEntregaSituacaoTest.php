@@ -161,4 +161,29 @@ class PedidoListEntregaSituacaoTest extends TestCase
         $this->assertNotContains($pedidoVenda->id, $idsReposicao);
         $this->assertContains($pedidoReposicao->id, $idsReposicao);
     }
+
+    public function test_ordena_pedidos_por_campos_permitidos_e_ignora_direcao_invalida(): void
+    {
+        $usuario = $this->autenticar();
+        $primeiro = $this->criarPedido($usuario, [
+            'numero_externo' => 'PED-Z',
+            'data_pedido' => '2026-02-01 10:00:00',
+            'valor_total' => 10,
+        ]);
+        $segundo = $this->criarPedido($usuario, [
+            'numero_externo' => 'PED-A',
+            'data_pedido' => '2026-02-02 10:00:00',
+            'valor_total' => 20,
+        ]);
+
+        $porNumero = $this->getJson('/api/v1/pedidos?per_page=50&ordenarPor=numero&ordem=asc')
+            ->assertOk()
+            ->json('data');
+        $this->assertSame([$segundo->id, $primeiro->id], collect($porNumero)->pluck('id')->map(fn ($id) => (int) $id)->all());
+
+        $direcaoInvalida = $this->getJson('/api/v1/pedidos?per_page=50&ordenarPor=valor_total&ordem=invalida')
+            ->assertOk()
+            ->json('data');
+        $this->assertSame([$segundo->id, $primeiro->id], collect($direcaoInvalida)->pluck('id')->map(fn ($id) => (int) $id)->all());
+    }
 }

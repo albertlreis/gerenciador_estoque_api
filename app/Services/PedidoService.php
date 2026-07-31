@@ -6,6 +6,9 @@ use App\Http\Requests\StorePedidoRequest;
 use App\Http\Resources\PedidoCompletoResource;
 use App\Http\Resources\PedidoListCollection;
 use App\Models\Pedido;
+use App\Models\Cliente;
+use App\Models\Parceiro;
+use App\Models\Usuario;
 use App\Repositories\PedidoRepository;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -82,15 +85,51 @@ class PedidoService
          */
         $query = $this->pedidoRepository->comFiltros($request);
 
-        $ordenarPor = $request->get('ordenarPor', 'data_pedido');
-        $ordem = $request->get('ordem', 'desc');
+        $ordenarPor = (string) $request->get('ordenarPor', 'data');
+        $ordem = strtolower((string) $request->get('ordem', 'desc')) === 'asc' ? 'asc' : 'desc';
         $perPage = (int) $request->get('per_page', 10);
 
-        $paginado = $query->orderBy($ordenarPor, $ordem)
+        $this->aplicarOrdenacao($query, $ordenarPor, $ordem);
+
+        $paginado = $query->orderByDesc('pedidos.id')
             ->paginate($perPage)
             ->appends($request->query());
 
         return response()->json(new PedidoListCollection($paginado));
+    }
+
+    private function aplicarOrdenacao($query, string $campo, string $ordem): void
+    {
+        $camposDiretos = [
+            'numero' => 'numero_externo',
+            'data' => 'data_pedido',
+            'data_pedido' => 'data_pedido',
+            'valor_total' => 'valor_total',
+            'prazo_dias_uteis' => 'prazo_dias_uteis',
+            'entrega_prevista' => 'data_limite_entrega',
+        ];
+
+        if (isset($camposDiretos[$campo])) {
+            $query->orderBy($camposDiretos[$campo], $ordem);
+            return;
+        }
+
+        if ($campo === 'cliente') {
+            $query->orderBy(Cliente::select('nome')->whereColumn('clientes.id', 'pedidos.id_cliente'), $ordem);
+            return;
+        }
+
+        if ($campo === 'parceiro') {
+            $query->orderBy(Parceiro::select('nome')->whereColumn('parceiros.id', 'pedidos.id_parceiro'), $ordem);
+            return;
+        }
+
+        if ($campo === 'vendedor') {
+            $query->orderBy(Usuario::select('nome')->whereColumn('acesso_usuarios.id', 'pedidos.id_usuario'), $ordem);
+            return;
+        }
+
+        $query->orderBy('data_pedido', 'desc');
     }
 
     /**

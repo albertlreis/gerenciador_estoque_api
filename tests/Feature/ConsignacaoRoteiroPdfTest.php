@@ -6,12 +6,17 @@ use App\Enums\PedidoStatus;
 use App\Models\Categoria;
 use App\Models\Cliente;
 use App\Models\Consignacao;
+use App\Models\ConsignacaoDevolucao;
 use App\Models\Deposito;
 use App\Models\Pedido;
 use App\Models\PedidoStatusHistorico;
 use App\Models\Produto;
+use App\Models\ProdutoEntregaItem;
 use App\Models\ProdutoVariacao;
 use App\Models\Usuario;
+use App\Http\Controllers\ConsignacaoController;
+use App\Http\Controllers\PedidoController;
+use Illuminate\Http\Request;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
@@ -46,7 +51,113 @@ class ConsignacaoRoteiroPdfTest extends TestCase
         );
     }
 
-    private function criarPedidoConsignado(string $statusConsignacao, PedidoStatus $statusPedido): array
+    public function test_roteiro_de_devolucao_mostra_apenas_o_saldo_ainda_com_o_cliente_nos_dois_endpoints(): void
+    {
+        [$pedidoId, $consignacao, $deposito] = $this->criarPedidoConsignado(
+            'parcial',
+            PedidoStatus::DEVOLUCAO_CONSIGNACAO,
+            2
+        );
+
+        ProdutoEntregaItem::create([
+            'tipo_origem' => ProdutoEntregaItem::ORIGEM_CONSIGNACAO,
+            'origem_id' => $consignacao->id,
+            'pedido_id' => $pedidoId,
+            'consignacao_id' => $consignacao->id,
+            'id_variacao' => $consignacao->produto_variacao_id,
+            'quantidade_total' => 2,
+            'quantidade_expedida' => 2,
+            'id_deposito_origem' => $deposito->id,
+            'status' => ProdutoEntregaItem::STATUS_RESERVADO,
+        ]);
+
+        ConsignacaoDevolucao::create([
+            'consignacao_id' => $consignacao->id,
+            'usuario_id' => auth()->id(),
+            'deposito_id' => $deposito->id,
+            'quantidade' => 1,
+        ]);
+
+        $pedido = Pedido::with(['consignacoes.deposito', 'consignacoes.devolucoes', 'consignacoes.entregaItem'])
+            ->findOrFail($pedidoId);
+        $request = Request::create('/', 'GET', [
+            'destinos_devolucao' => [$consignacao->id => $deposito->id],
+        ]);
+
+        foreach ([ConsignacaoController::class, PedidoController::class] as $controller) {
+            $method = new \ReflectionMethod($controller, 'gruposRoteiroConsignacao');
+            $method->setAccessible(true);
+            $grupos = $method->invoke(app($controller), $pedido, true, $request);
+
+            $item = $grupos->flatten(1)->sole();
+            $this->assertSame(1, (int) $item->quantidade_roteiro);
+        }
+    }
+
+    public function test_template_usa_data_uri_da_imagem_e_placeholder_quando_necessario(): void
+    {
+        [, $consignacao, $deposito] = $this->criarPedidoConsignado('pendente', PedidoStatus::CONSIGNADO);
+        $consignacao->load(['produtoVariacao.produto', 'produtoVariacao.estoquesComLocalizacao']);
+        $consignacao->setAttribute('pdf_imagem_data_uri', 'data:image/png;base64,aGVsbG8=');
+
+        $html = view('exports.roteiro-consignacao', [
+            'pedido' => $consignacao->pedido()->with(['cliente', 'usuario', 'parceiro'])->firstOrFail(),
+            'grupos' => collect([$deposito->nome => collect([$consignacao])]),
+            'tituloRoteiro' => 'Roteiro de consignação',
+        ])->render();
+
+        $this->assertStringContainsString('src="data:image/png;base64,aGVsbG8="', $html);
+    }
+
+    public function test_roteiro_de_devolucao_omite_item_totalmente_devolvido_e_consignacao_normal_mantem_quantidade_original(): void
+    {
+        [$pedidoId, $consignacao, $deposito] = $this->criarPedidoConsignado(
+            'devolvido',
+            PedidoStatus::DEVOLUCAO_CONSIGNACAO,
+            2
+        );
+
+        ProdutoEntregaItem::create([
+            'tipo_origem' => ProdutoEntregaItem::ORIGEM_CONSIGNACAO,
+            'origem_id' => $consignacao->id,
+            'pedido_id' => $pedidoId,
+            'consignacao_id' => $consignacao->id,
+            'id_variacao' => $consignacao->produto_variacao_id,
+            'quantidade_total' => 2,
+            'quantidade_expedida' => 2,
+            'id_deposito_origem' => $deposito->id,
+            'status' => ProdutoEntregaItem::STATUS_RESERVADO,
+        ]);
+        ConsignacaoDevolucao::create([
+            'consignacao_id' => $consignacao->id,
+            'usuario_id' => auth()->id(),
+            'deposito_id' => $deposito->id,
+            'quantidade' => 2,
+        ]);
+
+        $pedido = Pedido::with(['consignacoes.deposito', 'consignacoes.devolucoes', 'consignacoes.entregaItem'])
+            ->findOrFail($pedidoId);
+        $method = new \ReflectionMethod(ConsignacaoController::class, 'gruposRoteiroConsignacao');
+        $method->setAccessible(true);
+
+        $devolucao = $method->invoke(
+            app(ConsignacaoController::class),
+            $pedido,
+            true,
+            Request::create('/', 'GET', ['destinos_devolucao' => [$consignacao->id => $deposito->id]])
+        );
+        $consignacaoNormal = $method->invoke(
+            app(ConsignacaoController::class),
+            $pedido,
+            false,
+            Request::create('/', 'GET')
+        );
+
+        $this->assertTrue($devolucao->isEmpty());
+        $this->assertSame(2, (int) $consignacaoNormal->flatten(1)->sole()->quantidade);
+    }
+
+    private function criarPedidoConsignado(string $statusConsignacao, PedidoStatus $statusPedido, int $quantidade = 1): array
     {
         $usuario = Usuario::create([
             'nome' => 'Usuario PDF',
@@ -106,12 +217,12 @@ class ConsignacaoRoteiroPdfTest extends TestCase
             'pedido_id' => $pedido->id,
             'produto_variacao_id' => $variacao->id,
             'deposito_id' => $deposito->id,
-            'quantidade' => 1,
+            'quantidade' => $quantidade,
             'data_envio' => now()->toDateString(),
             'prazo_resposta' => now()->addDays(15),
             'status' => $statusConsignacao,
         ]);
 
-        return [$pedido->id];
+        return [$pedido->id, $consignacao, $deposito];
     }
 }

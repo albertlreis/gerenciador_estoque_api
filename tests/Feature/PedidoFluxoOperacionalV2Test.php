@@ -9,6 +9,7 @@ use App\Models\Deposito;
 use App\Models\Estoque;
 use App\Models\EstoqueMovimentacao;
 use App\Models\Pedido;
+use App\Models\PedidoStatusPrevisao;
 use App\Models\PedidoItem;
 use App\Models\PedidoStatusHistorico;
 use App\Models\Produto;
@@ -17,6 +18,7 @@ use App\Models\ProdutoEntregaItem;
 use App\Models\ProdutoVariacao;
 use App\Models\Usuario;
 use App\Services\EntregaProdutoService;
+use App\Http\Resources\PedidoListResource;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Validation\ValidationException;
@@ -26,6 +28,31 @@ use Tests\TestCase;
 class PedidoFluxoOperacionalV2Test extends TestCase
 {
     use RefreshDatabase;
+
+    public function test_listagem_expoe_campos_de_envio_e_previsao_de_embarque_sem_substituir_campos_legados(): void
+    {
+        [, $pedido] = $this->criarPedido(2, Pedido::ORIGEM_ABASTECIMENTO_FABRICA);
+        app(EntregaProdutoService::class)->criarDemandaPedido($pedido, null, false);
+        PedidoStatusPrevisao::create([
+            'pedido_id' => $pedido->id,
+            'status' => PedidoStatus::EMBARQUE_FABRICA,
+            'data_prevista' => '2026-08-15',
+        ]);
+
+        $pedido = $pedido->fresh([
+            'cliente', 'parceiro', 'usuario', 'statusAtual', 'statusPrevisoes',
+            'historicoStatus', 'devolucoes', 'entregaItens',
+        ]);
+        $data = (new PedidoListResource($pedido))->resolve();
+
+        $this->assertSame('2026-08-15', $data['previsao_embarque']);
+        $this->assertArrayHasKey('status_envio', $data);
+        $this->assertArrayHasKey('envio_produtos', $data);
+        $this->assertSame($data['status_operacional'], $data['status_envio']);
+        $this->assertSame($data['entrega_produtos'], $data['envio_produtos']);
+        $this->assertArrayHasKey('status_acompanhamento', $data);
+        $this->assertArrayHasKey('previsao', $data);
+    }
 
     public function test_recebimento_parcial_e_idempotente_reserva_venda_e_aplica_entrega_estoque_ao_concluir(): void
     {

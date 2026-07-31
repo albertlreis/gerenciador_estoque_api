@@ -56,6 +56,7 @@ use App\Http\Controllers\{AreaEstoqueController,
     PedidoFabricaController,
     PedidoItemController,
     PedidoRecebimentoController,
+    PedidoReconciliacaoController,
     PedidoReconciliacaoPreviewController,
     PedidosRelatorioController,
     PedidoStatusConfiguracaoController,
@@ -404,6 +405,8 @@ Route::middleware(['auth:sanctum', 'senha.nao_obrigatoria'])
             Route::get('detalhado', [PedidoController::class, 'completo']);
             Route::get('nota-entrega/itens', [PedidoController::class, 'notaEntregaItens']);
             Route::get('reconciliacao-preview', [PedidoReconciliacaoPreviewController::class, 'show']);
+            Route::post('reconciliacoes', [PedidoReconciliacaoController::class, 'aprovar']);
+            Route::post('reconciliacoes/{reconciliacao}/aplicar', [PedidoReconciliacaoController::class, 'aplicar'])->whereNumber('reconciliacao');
             Route::get('pdf/roteiro', [PedidoController::class, 'roteiroPdf']);
             Route::post('pdf/nota-entrega', [PedidoController::class, 'notaEntregaPdf']);
             Route::post('recebimentos', [PedidoRecebimentoController::class, 'store']);

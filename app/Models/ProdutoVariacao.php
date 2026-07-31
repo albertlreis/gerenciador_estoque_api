@@ -169,6 +169,13 @@ class ProdutoVariacao extends Model
         // Se não tiver atributos:
         // - Se produto existe e variação tem nome, usa "Produto - Variação"
         if ($produtoNome !== '' && $nomeVar !== '') {
+            $produtoNomeComparavel = mb_strtolower((string) preg_replace('/\s+/u', ' ', $produtoNome));
+            $nomeVarComparavel = mb_strtolower((string) preg_replace('/\s+/u', ' ', $nomeVar));
+
+            if ($produtoNomeComparavel === $nomeVarComparavel) {
+                return $produtoNome;
+            }
+
             return trim("{$produtoNome} - {$nomeVar}");
         }
 

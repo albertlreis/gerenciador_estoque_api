@@ -1037,6 +1037,8 @@ class ConsignacaoController extends Controller
             'parceiro',
             'statusAtual',
             'consignacoes.deposito',
+            'consignacoes.devolucoes',
+            'consignacoes.entregaItem',
             'consignacoes.produtoVariacao.imagem',
             'consignacoes.produtoVariacao.produto.imagemPrincipal',
             'consignacoes.produtoVariacao.produto',
@@ -1183,11 +1185,22 @@ class ConsignacaoController extends Controller
             return $pedido->consignacoes->groupBy(fn ($item) => $item->deposito->nome ?? 'Sem depósito');
         }
 
+        // Um roteiro de devolução é uma nova coleta: só deve listar o saldo
+        // físico que ainda está com o cliente, nunca a quantidade original.
+        $itensDevolviveis = $pedido->consignacoes
+            ->map(function (Consignacao $item) {
+                $item->setAttribute('quantidade_roteiro', $item->quantidadeDisponivelCliente());
+
+                return $item;
+            })
+            ->filter(fn (Consignacao $item) => (int) $item->quantidade_roteiro > 0)
+            ->values();
+
         $destinos = collect((array) $request->query('destinos_devolucao', []))
             ->mapWithKeys(fn ($depositoId, $consignacaoId) => [(int) $consignacaoId => (int) $depositoId])
             ->filter(fn ($depositoId, $consignacaoId) => $consignacaoId > 0 && $depositoId > 0);
 
-        $consignacaoIds = $pedido->consignacoes
+        $consignacaoIds = $itensDevolviveis
             ->pluck('id')
             ->map(fn ($id) => (int) $id)
             ->values();
@@ -1217,7 +1230,7 @@ class ConsignacaoController extends Controller
             ]);
         }
 
-        return $pedido->consignacoes->groupBy(function ($item) use ($destinos, $depositos) {
+        return $itensDevolviveis->groupBy(function ($item) use ($destinos, $depositos) {
             $depositoId = (int) $destinos->get((int) $item->id);
 
             return $depositos->get($depositoId)?->nome ?? 'Sem depósito';

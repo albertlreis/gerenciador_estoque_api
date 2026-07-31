@@ -10,6 +10,7 @@ use App\Enums\EstrategiaVinculoImportacao;
 use App\Enums\PedidoStatus;
 use App\Enums\TipoImportacao;
 use App\Models\Categoria;
+use App\Models\Consignacao;
 use App\Models\Deposito;
 use App\Models\Estoque;
 use App\Models\EstoqueReserva;
@@ -636,6 +637,8 @@ class PedidoController extends Controller
                 'statusAtual',
 
                 'consignacoes.deposito',
+                'consignacoes.devolucoes',
+                'consignacoes.entregaItem',
                 'consignacoes.produtoVariacao.imagem',
                 'consignacoes.produtoVariacao.produto.imagemPrincipal',
                 'consignacoes.produtoVariacao.produto',
@@ -2171,6 +2174,17 @@ class PedidoController extends Controller
             return $pedido->consignacoes->groupBy(fn ($item) => $item->deposito->nome ?? 'Sem depósito');
         }
 
+        // Uma reimpressão de devolução representa apenas o que ainda está com
+        // o cliente; devoluções anteriores não podem voltar a sair no roteiro.
+        $itensDevolviveis = $pedido->consignacoes
+            ->map(function (Consignacao $item) {
+                $item->setAttribute('quantidade_roteiro', $item->quantidadeDisponivelCliente());
+
+                return $item;
+            })
+            ->filter(fn (Consignacao $item) => (int) $item->quantidade_roteiro > 0)
+            ->values();
+
         $destinos = collect((array) $request->query('destinos_devolucao', []))
             ->mapWithKeys(fn ($depositoId, $consignacaoId) => [(int) $consignacaoId => (int) $depositoId])
             ->filter(fn ($depositoId, $consignacaoId) => $consignacaoId > 0 && $depositoId > 0);
@@ -2179,10 +2193,10 @@ class PedidoController extends Controller
         // Nesses casos, o depósito original continua sendo a referência visual;
         // nenhum movimento de estoque é executado durante a geração do PDF.
         if ($destinos->isEmpty()) {
-            return $pedido->consignacoes->groupBy(fn ($item) => $item->deposito->nome ?? 'Sem depósito');
+            return $itensDevolviveis->groupBy(fn ($item) => $item->deposito->nome ?? 'Sem depósito');
         }
 
-        $consignacaoIds = $pedido->consignacoes
+        $consignacaoIds = $itensDevolviveis
             ->pluck('id')
             ->map(fn ($id) => (int) $id)
             ->values();
@@ -2212,7 +2226,7 @@ class PedidoController extends Controller
             ]);
         }
 
-        return $pedido->consignacoes->groupBy(function ($item) use ($destinos, $depositos) {
+        return $itensDevolviveis->groupBy(function ($item) use ($destinos, $depositos) {
             $depositoId = (int) $destinos->get((int) $item->id);
 
             return $depositos->get($depositoId)?->nome ?? 'Sem depósito';

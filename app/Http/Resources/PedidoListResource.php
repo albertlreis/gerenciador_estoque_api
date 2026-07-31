@@ -35,6 +35,7 @@ class PedidoListResource extends JsonResource
      */
     public function toArray($request): array
     {
+        $entregaService = app(\App\Services\EntregaProdutoService::class);
         $statusAtualEnum  = $this->getStatusAtualEnum($this->resource);
         $statusAtualRaw   = $this->statusAtual?->getRawOriginal('status');
         $statusAtualValue = $statusAtualEnum?->value ?? (is_string($statusAtualRaw) ? $statusAtualRaw : null);
@@ -43,6 +44,9 @@ class PedidoListResource extends JsonResource
         $proximoStatus    = $this->getProximoStatus($this->resource);
         $previsao         = $this->getPrevisaoProximoStatus($this->resource);
         $atrasadoFluxo    = $this->isAtrasado($this->resource);
+        $statusEnvio      = $entregaService->statusOperacionalPedido($this->resource);
+        $envioProdutos    = $entregaService->resumoPedido($this->resource);
+        $previsaoEmbarque = $this->resolvePrevisaoEmbarque();
 
         $timezone = config('app.timezone', 'America/Belem');
         $hoje = CarbonImmutable::now($timezone)->startOfDay();
@@ -76,6 +80,14 @@ class PedidoListResource extends JsonResource
 
             'status'                 => $statusAtualValue,
             'status_label'           => $statusAtualEnum?->label(),
+            'status_acompanhamento'  => $statusAtualValue,
+            'status_operacional'     => $statusEnvio,
+            'status_envio'           => $statusEnvio,
+            'entrega_produtos'       => $envioProdutos,
+            'envio_produtos'         => $envioProdutos,
+            'previsao_embarque'      => $previsaoEmbarque?->toDateString(),
+            'tipo'                   => $this->tipo,
+            'origem_abastecimento'   => $this->origem_abastecimento,
             'separacao_status'       => $this->separacao_status,
             'proximo_status'         => $proximoStatus['codigo'] ?? null,
             'proximo_status_label'   => $proximoStatus['label'] ?? null,
@@ -94,6 +106,20 @@ class PedidoListResource extends JsonResource
             'observacoes'            => $this->observacoes,
             'tem_devolucao'          => $this->devolucoes->isNotEmpty(),
         ];
+    }
+
+    private function resolvePrevisaoEmbarque(): ?CarbonImmutable
+    {
+        $previsao = $this->statusPrevisoes
+            ->where('status', PedidoStatus::EMBARQUE_FABRICA->value)
+            ->sortByDesc('updated_at')
+            ->first();
+
+        if (! $previsao?->data_prevista) {
+            return null;
+        }
+
+        return CarbonImmutable::instance($previsao->data_prevista);
     }
 
     private function resolveEntregaPrevista(string $timezone): ?CarbonImmutable

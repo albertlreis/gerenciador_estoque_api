@@ -88,10 +88,11 @@
                         $referencia = $variacao?->referencia ?? '-';
                         $descricao  = $variacao?->nome_completo ?? '-';
 
-                        $imgRel = optional($produto?->imagemPrincipal)->url ?? '';
-                        $imgAbs = ($imgRel && !empty($baseFsDir ?? null))
-                            ? ($baseFsDir . DIRECTORY_SEPARATOR . $imgRel)
-                            : '';
+                        // Dompdf não consegue resolver com segurança os caminhos legados do
+                        // storage. O controller já prepara uma data URI (ou placeholder).
+                        $imgDataUri = trim((string)($item->pdf_imagem_data_uri ?? ''))
+                            ?: app(\App\Services\PdfImageService::class)->placeholderDataUri();
+                        $quantidadeRoteiro = (int)($item->quantidade_roteiro ?? $item->quantidade ?? 0);
 
                         // LOCALIZAÇÃO: Estoque.id_deposito (corrigido!) x item->deposito_id (Consignacao)
                         $locTexto = '—';
@@ -121,11 +122,9 @@
                     @endphp
                     <tr>
                         <td style="text-align:center;">
-                            @if($imgAbs)
-                                <img src="{{ $imgAbs }}" width="80" style="max-height:64px;" alt="Imagem produto"/>
-                            @endif
+                            <img src="{{ $imgDataUri }}" width="80" height="64" style="object-fit:cover;" alt="Imagem produto"/>
                         </td>
-                        <td class="nowrap">{{ (int)($item->quantidade ?? 0) }}</td>
+                        <td class="nowrap">{{ $quantidadeRoteiro }}</td>
                         <td class="nowrap">{{ $referencia }}</td>
                         <td class="wrap">{{ $descricao }}</td>
                         <td class="wrap">{{ $locTexto }}</td>

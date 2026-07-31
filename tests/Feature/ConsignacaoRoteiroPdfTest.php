@@ -213,7 +213,7 @@ class ConsignacaoRoteiroPdfTest extends TestCase
             'usuario_id' => $usuario->id,
         ]);
 
-        Consignacao::create([
+        $consignacao = Consignacao::create([
             'pedido_id' => $pedido->id,
             'produto_variacao_id' => $variacao->id,
             'deposito_id' => $deposito->id,

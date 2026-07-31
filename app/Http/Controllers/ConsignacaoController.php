@@ -784,6 +784,86 @@ class ConsignacaoController extends Controller
         ]);
     }
 
+    public function registrarDevolucoesEGerarRoteiro(int $pedidoId, Request $request): Response
+    {
+        $validated = $request->validate([
+            'cliente_endereco_id' => 'nullable|integer',
+            'itens' => 'required|array|min:1',
+            'itens.*.consignacao_id' => 'required|integer|min:1|distinct',
+            'itens.*.quantidade' => 'required|integer|min:1',
+            'itens.*.deposito_id' => 'required|exists:depositos,id',
+        ]);
+
+        $pedido = Pedido::with(['cliente.enderecoPrincipal', 'cliente.enderecos', 'usuario', 'parceiro'])
+            ->findOrFail($pedidoId);
+        $itensPayload = collect($validated['itens'])->keyBy('consignacao_id');
+
+        $itensRoteiro = DB::transaction(function () use ($pedidoId, $itensPayload) {
+            $consignacoes = Consignacao::with([
+                'devolucoes', 'compras', 'entregaItem', 'deposito',
+                'produtoVariacao.imagem', 'produtoVariacao.produto.imagemPrincipal',
+                'produtoVariacao.produto', 'produtoVariacao.atributos',
+                'produtoVariacao.estoquesComLocalizacao',
+            ])
+                ->where('pedido_id', $pedidoId)
+                ->whereIn('id', $itensPayload->keys())
+                ->lockForUpdate()
+                ->get()
+                ->keyBy('id');
+
+            if ($consignacoes->count() !== $itensPayload->count()) {
+                throw ValidationException::withMessages(['itens' => ['Um ou mais produtos não pertencem a este pedido.']]);
+            }
+
+            $usuarioId = AuthHelper::getUsuarioId();
+            $resultado = collect();
+
+            foreach ($itensPayload as $consignacaoId => $payload) {
+                $consignacao = $consignacoes->get((int) $consignacaoId);
+                $quantidade = (int) $payload['quantidade'];
+                $depositoId = (int) $payload['deposito_id'];
+                $saldo = $this->quantidadeAcionavelConsignacao($consignacao);
+
+                if (!in_array($consignacao->status, ['pendente', 'parcial'], true) || $quantidade > $saldo) {
+                    throw ValidationException::withMessages(['itens' => ["Quantidade inválida para {$this->nomeConsignacao($consignacao)}."]]);
+                }
+
+                $devolucao = $consignacao->devolucoes()->create([
+                    'quantidade' => $quantidade,
+                    'usuario_id' => $usuarioId,
+                    'estoque_movimentacao_id' => null,
+                    'deposito_id' => $depositoId,
+                ]);
+                $movimentacaoId = $this->registrarDevolucaoCentralConsignacao(
+                    $consignacao, $quantidade, $depositoId, $usuarioId ? (int) $usuarioId : null, null, (int) $devolucao->id
+                );
+                $devolucao->update(['estoque_movimentacao_id' => $movimentacaoId]);
+                $this->recalcularStatusConsignacao($consignacao->fresh(['devolucoes', 'compras']));
+
+                $consignacao->setAttribute('quantidade_roteiro', $quantidade);
+                $consignacao->setAttribute('deposito_roteiro_nome', Deposito::find($depositoId)?->nome ?? 'Sem depósito');
+                $resultado->push($consignacao);
+            }
+
+            return $resultado;
+        });
+
+        $pdfImageService = app(PdfImageService::class);
+        $itensRoteiro->each(fn ($item) => $item->setAttribute(
+            'pdf_imagem_data_uri', $pdfImageService->fromProdutoVariacaoOrPlaceholder($item->produtoVariacao)
+        ));
+
+        $pdf = Pdf::loadView('exports.roteiro-consignacao', [
+            'pedido' => $pedido,
+            'grupos' => $itensRoteiro->groupBy(fn ($item) => $item->deposito_roteiro_nome),
+            'geradoEm' => now('America/Belem')->format('d/m/Y H:i'),
+            'tituloRoteiro' => 'Roteiro de devolução',
+            'enderecoEntrega' => ClienteEnderecoPdf::resolverParaPedido($pedido, $validated['cliente_endereco_id'] ?? null),
+        ])->setPaper('a4');
+
+        return $pdf->download("roteiro-de-devolucao-{$pedidoId}.pdf");
+    }
+
     public function confirmarComprasEmMassa(int $pedidoId, Request $request): JsonResponse
     {
         $validated = $request->validate([

@@ -8,6 +8,7 @@ use App\Models\Cliente;
 use App\Models\Consignacao;
 use App\Models\ConsignacaoDevolucao;
 use App\Models\Deposito;
+use App\Models\EstoqueMovimentacao;
 use App\Models\Pedido;
 use App\Models\PedidoStatusHistorico;
 use App\Models\Produto;
@@ -155,6 +156,88 @@ class ConsignacaoRoteiroPdfTest extends TestCase
 
         $this->assertTrue($devolucao->isEmpty());
         $this->assertSame(2, (int) $consignacaoNormal->flatten(1)->sole()->quantidade);
+    }
+
+    public function test_post_devolucao_com_roteiro_persiste_devolucao_e_movimentacao_antes_do_pdf(): void
+    {
+        [$pedidoId, $consignacao, $deposito] = $this->criarPedidoConsignado('pendente', PedidoStatus::CONSIGNADO, 2);
+        ProdutoEntregaItem::create([
+            'tipo_origem' => ProdutoEntregaItem::ORIGEM_CONSIGNACAO,
+            'origem_id' => $consignacao->id,
+            'pedido_id' => $pedidoId,
+            'consignacao_id' => $consignacao->id,
+            'id_variacao' => $consignacao->produto_variacao_id,
+            'quantidade_total' => 2,
+            'quantidade_expedida' => 2,
+            'id_deposito_origem' => $deposito->id,
+            'status' => ProdutoEntregaItem::STATUS_RESERVADO,
+        ]);
+
+        $response = $this->post("/api/v1/consignacoes/pedidos/{$pedidoId}/devolucoes/roteiro", [
+            'itens' => [[
+                'consignacao_id' => $consignacao->id,
+                'quantidade' => 2,
+                'deposito_id' => $deposito->id,
+            ]],
+        ]);
+
+        $response->assertOk();
+        $this->assertStringContainsString("roteiro-de-devolucao-{$pedidoId}.pdf", (string) $response->headers->get('content-disposition'));
+        $this->assertDatabaseHas('consignacao_devolucoes', [
+            'consignacao_id' => $consignacao->id,
+            'deposito_id' => $deposito->id,
+            'quantidade' => 2,
+        ]);
+        $this->assertNotNull(ConsignacaoDevolucao::query()->where('consignacao_id', $consignacao->id)->value('estoque_movimentacao_id'));
+        $this->assertSame(1, EstoqueMovimentacao::query()->where('pedido_id', $pedidoId)->count());
+    }
+
+    public function test_post_devolucao_com_roteiro_rejeita_item_de_outro_pedido_sem_persistir(): void
+    {
+        [$pedidoId] = $this->criarPedidoConsignado('pendente', PedidoStatus::CONSIGNADO);
+        [, $consignacaoDeOutroPedido, $deposito] = $this->criarPedidoConsignado('pendente', PedidoStatus::CONSIGNADO);
+
+        $response = $this->postJson("/api/v1/consignacoes/pedidos/{$pedidoId}/devolucoes/roteiro", [
+            'itens' => [[
+                'consignacao_id' => $consignacaoDeOutroPedido->id,
+                'quantidade' => 1,
+                'deposito_id' => $deposito->id,
+            ]],
+        ]);
+
+        $response->assertUnprocessable()->assertJsonValidationErrors('itens');
+        $this->assertDatabaseCount('consignacao_devolucoes', 0);
+    }
+
+    public function test_post_devolucao_com_roteiro_rejeita_saldo_excedido_item_finalizado_e_deposito_invalido(): void
+    {
+        [$pedidoId, $consignacao, $deposito] = $this->criarPedidoConsignado('pendente', PedidoStatus::CONSIGNADO);
+
+        $this->postJson("/api/v1/consignacoes/pedidos/{$pedidoId}/devolucoes/roteiro", [
+            'itens' => [[
+                'consignacao_id' => $consignacao->id,
+                'quantidade' => 2,
+                'deposito_id' => $deposito->id,
+            ]],
+        ])->assertUnprocessable()->assertJsonValidationErrors('itens');
+
+        $consignacao->update(['status' => 'devolvido']);
+        $this->postJson("/api/v1/consignacoes/pedidos/{$pedidoId}/devolucoes/roteiro", [
+            'itens' => [[
+                'consignacao_id' => $consignacao->id,
+                'quantidade' => 1,
+                'deposito_id' => $deposito->id,
+            ]],
+        ])->assertUnprocessable()->assertJsonValidationErrors('itens');
+
+        $this->postJson("/api/v1/consignacoes/pedidos/{$pedidoId}/devolucoes/roteiro", [
+            'itens' => [[
+                'consignacao_id' => $consignacao->id,
+                'quantidade' => 1,
+                'deposito_id' => 999999,
+            ]],
+        ])->assertUnprocessable()->assertJsonValidationErrors('itens.0.deposito_id');
+        $this->assertDatabaseCount('consignacao_devolucoes', 0);
     }
 
     private function criarPedidoConsignado(string $statusConsignacao, PedidoStatus $statusPedido, int $quantidade = 1): array

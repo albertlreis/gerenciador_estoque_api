@@ -480,6 +480,8 @@ Route::middleware(['auth:sanctum', 'senha.nao_obrigatoria'])
             Route::post('pedidos/{pedido}/desfazer', [ConsignacaoController::class, 'desfazerPedido'])->whereNumber('pedido');
             Route::post('pedidos/{pedido}/devolucoes-em-massa', [ConsignacaoController::class, 'registrarDevolucoesEmMassa'])
                 ->whereNumber('pedido');
+            Route::post('pedidos/{pedido}/devolucoes/roteiro', [ConsignacaoController::class, 'registrarDevolucoesEGerarRoteiro'])
+                ->whereNumber('pedido');
             Route::post('pedidos/{pedido}/envios-em-massa', [ConsignacaoController::class, 'registrarEnviosEmMassa'])
                 ->whereNumber('pedido');
             Route::patch('pedidos/{pedido}/compras-em-massa', [ConsignacaoController::class, 'confirmarComprasEmMassa'])

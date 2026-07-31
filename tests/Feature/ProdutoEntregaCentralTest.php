@@ -21,8 +21,10 @@ use App\Models\ProdutoEntregaItem;
 use App\Models\ProdutoImagem;
 use App\Models\ProdutoVariacao;
 use App\Models\Usuario;
+use App\Repositories\PedidoRepository;
 use App\Services\EntregaProdutoService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Storage;
 use Laravel\Sanctum\Sanctum;
@@ -923,6 +925,93 @@ class ProdutoEntregaCentralTest extends TestCase
         $this->assertSame(2, (int) $bloqueada->quantidade_reservada);
         $this->assertSame(ProdutoEntregaItem::STATUS_AGUARDANDO_ESTOQUE, $bloqueada->status);
         $this->assertStringContainsString('Estoque insuficiente', (string) $bloqueada->bloqueio_motivo);
+    }
+
+    public function test_filtros_de_situacao_representam_apenas_a_etapa_atual_do_pedido(): void
+    {
+        [$usuario, $pedido, $variacao, $deposito] = $this->criarPedidoComItem(3);
+        Sanctum::actingAs($usuario);
+
+        Estoque::updateOrCreate(
+            ['id_variacao' => $variacao->id, 'id_deposito' => $deposito->id],
+            ['quantidade' => 3]
+        );
+
+        $service = app(EntregaProdutoService::class);
+        $service->criarDemandaPedido($pedido, $usuario->id, true);
+
+        $this->assertFiltroSituacaoContem('aguardando_entrega_cliente', $pedido->id);
+        $this->assertFiltroSituacaoNaoContem('em_entrega', $pedido->id);
+
+        $service->expedirPedido($pedido, $usuario->id);
+        $this->assertFiltroSituacaoContem('em_entrega', $pedido->id);
+        $this->assertFiltroSituacaoNaoContem('aguardando_entrega_cliente', $pedido->id);
+
+        $entrega = ProdutoEntregaItem::query()->where('pedido_id', $pedido->id)->firstOrFail();
+        $service->entregarItem($entrega, 1, $usuario->id, 'Entrega parcial', 'filtro-entrega-parcial');
+        $this->assertFiltroSituacaoContem('entrega_parcial', $pedido->id);
+        $this->assertFiltroSituacaoNaoContem('em_entrega', $pedido->id);
+
+        $service->entregarItem($entrega, 2, $usuario->id, 'Entrega integral', 'filtro-entrega-integral');
+        $this->assertFiltroSituacaoContem('entregue_cliente', $pedido->id);
+
+        PedidoStatusHistorico::create([
+            'pedido_id' => $pedido->id,
+            'status' => PedidoStatus::FINALIZADO,
+            'data_status' => now()->addSecond(),
+            'usuario_id' => $usuario->id,
+        ]);
+        $this->assertFiltroSituacaoContem('finalizado', $pedido->id);
+        $this->assertFiltroSituacaoNaoContem('entregue_cliente', $pedido->id);
+
+        $cancelado = Pedido::create([
+            'tipo' => Pedido::TIPO_VENDA,
+            'id_cliente' => $pedido->id_cliente,
+            'id_usuario' => $usuario->id,
+            'data_pedido' => now(),
+            'valor_total' => 0,
+        ]);
+        PedidoStatusHistorico::create([
+            'pedido_id' => $cancelado->id,
+            'status' => PedidoStatus::CANCELADO,
+            'data_status' => now(),
+            'usuario_id' => $usuario->id,
+        ]);
+        $this->assertFiltroSituacaoContem('cancelado', $cancelado->id);
+
+        [$usuarioReposicao, $reposicao, , $depositoReposicao] = $this->criarPedidoComItem(3, Pedido::TIPO_REPOSICAO);
+        Sanctum::actingAs($usuarioReposicao);
+        $entregaReposicao = $service->criarDemandaPedido($reposicao, $usuarioReposicao->id, false)->firstOrFail();
+        $this->assertFiltroSituacaoContem('aguardando_fabrica', $reposicao->id);
+
+        $service->receberItem($entregaReposicao, $depositoReposicao->id, 1, $usuarioReposicao->id, 'Recebimento parcial', 'filtro-recebimento-parcial');
+        $this->assertFiltroSituacaoContem('recebimento_parcial', $reposicao->id);
+        $this->assertFiltroSituacaoNaoContem('aguardando_fabrica', $reposicao->id);
+
+        $service->receberItem($entregaReposicao, $depositoReposicao->id, 2, $usuarioReposicao->id, 'Recebimento integral', 'filtro-recebimento-integral');
+        $this->assertFiltroSituacaoContem('finalizado', $reposicao->id);
+    }
+
+    private function assertFiltroSituacaoContem(string $situacao, int $pedidoId): void
+    {
+        $ids = app(PedidoRepository::class)
+            ->comFiltros(Request::create('/pedidos', 'GET', ['status_operacionais' => [$situacao]]))
+            ->pluck('pedidos.id')
+            ->map(fn ($id) => (int) $id)
+            ->all();
+
+        $this->assertContains($pedidoId, $ids, "O filtro {$situacao} deveria conter o pedido.");
+    }
+
+    private function assertFiltroSituacaoNaoContem(string $situacao, int $pedidoId): void
+    {
+        $ids = app(PedidoRepository::class)
+            ->comFiltros(Request::create('/pedidos', 'GET', ['status_operacionais' => [$situacao]]))
+            ->pluck('pedidos.id')
+            ->map(fn ($id) => (int) $id)
+            ->all();
+
+        $this->assertNotContains($pedidoId, $ids, "O filtro {$situacao} nao deveria conter o pedido.");
     }
 
     private function criarPedidoComItem(int $quantidade, string $tipo = Pedido::TIPO_VENDA): array

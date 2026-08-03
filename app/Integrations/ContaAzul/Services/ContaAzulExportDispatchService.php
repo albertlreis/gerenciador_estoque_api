@@ -256,9 +256,12 @@ class ContaAzulExportDispatchService
             return;
         }
 
-        $conexao = $this->connections->latestForLoja($lojaId);
-        if (!$conexao) {
-            $this->log($tipoEntidade, $idLocal, $lojaId, $acao, 'ignorado', 'Nenhuma conexao Conta Azul encontrada.', $contexto);
+        try {
+            $conexao = $this->connections->operationalForLoja($lojaId);
+        } catch (\App\Integrations\ContaAzul\Exceptions\ContaAzulException $exception) {
+            $this->log($tipoEntidade, $idLocal, $lojaId, $acao, 'ignorado', $exception->getMessage(), $contexto + [
+                'roteamento_reason' => $exception->reason,
+            ]);
             return;
         }
 

@@ -7,6 +7,7 @@ use App\Integrations\ContaAzul\Models\ContaAzulToken;
 use App\Integrations\ContaAzul\Services\ContaAzulExportDispatchService;
 use App\Integrations\ContaAzul\Support\ContaAzulRuntimeState;
 use App\Jobs\ContaAzul\ExportClienteContaAzulJob;
+use App\Models\Loja;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -39,8 +40,10 @@ class ContaAzulExportDispatchServiceTest extends TestCase
     public function test_nao_enfileira_job_quando_conexao_nao_esta_ativa(): void
     {
         Queue::fake();
+        $loja = Loja::create(['codigo' => 'export-inativa', 'nome' => 'Export inativa']);
 
         $conexao = ContaAzulConexao::create([
+            'loja_id' => $loja->id,
             'status' => 'erro',
             'ambiente' => 'homologacao',
         ]);
@@ -53,7 +56,7 @@ class ContaAzulExportDispatchServiceTest extends TestCase
         ]);
 
         $service = app(ContaAzulExportDispatchService::class);
-        $service->cliente(11, null, ['evento' => 'teste_conexao_inativa']);
+        $service->cliente(11, $loja->id, ['evento' => 'teste_conexao_inativa']);
 
         Queue::assertNothingPushed();
         $this->assertDatabaseHas('auditoria_logs', [
@@ -69,8 +72,10 @@ class ContaAzulExportDispatchServiceTest extends TestCase
     public function test_enfileira_job_e_registra_log_quando_conexao_tem_token(): void
     {
         Queue::fake();
+        $loja = Loja::create(['codigo' => 'export-ativa', 'nome' => 'Export ativa']);
 
         $conexao = ContaAzulConexao::create([
+            'loja_id' => $loja->id,
             'status' => 'ativa',
             'ambiente' => 'homologacao',
         ]);
@@ -83,7 +88,7 @@ class ContaAzulExportDispatchServiceTest extends TestCase
         ]);
 
         $service = app(ContaAzulExportDispatchService::class);
-        $service->cliente(22, null, ['evento' => 'cliente_criado']);
+        $service->cliente(22, $loja->id, ['evento' => 'cliente_criado']);
 
         Queue::assertPushed(ExportClienteContaAzulJob::class, function (ExportClienteContaAzulJob $job) {
             return $job->clienteId === 22;

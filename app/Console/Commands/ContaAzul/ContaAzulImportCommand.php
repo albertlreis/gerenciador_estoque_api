@@ -49,7 +49,7 @@ class ContaAzulImportCommand extends Command
             return self::FAILURE;
         }
 
-        $conexao = $connections->latestForLoja($lojaId);
+        $conexao = $connections->operationalForLoja($lojaId);
         if (!$conexao) {
             $this->error('Nenhuma conexao encontrada');
 

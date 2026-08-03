@@ -39,7 +39,7 @@ class ContaAzulCobrancaService
             ]);
         }
 
-        $conexao = $this->connections->latestForLoja($lojaId);
+        $conexao = $this->connections->operationalForLoja($lojaId);
         if (!$conexao || $conexao->status !== 'ativa') {
             throw new ContaAzulException(
                 'Conexao Conta Azul inativa ou em erro. Reconecte a Conta Azul antes de emitir boletos.',

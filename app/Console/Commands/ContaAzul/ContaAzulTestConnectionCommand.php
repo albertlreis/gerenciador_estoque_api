@@ -16,7 +16,7 @@ class ContaAzulTestConnectionCommand extends Command
         $loja = $this->option('loja');
         $lojaId = $loja !== null && $loja !== '' ? (int) $loja : null;
 
-        $conexao = $connections->latestForLoja($lojaId);
+        $conexao = $connections->operationalForLoja($lojaId);
         if (!$conexao) {
             $this->error('Nenhuma conexão encontrada.');
 

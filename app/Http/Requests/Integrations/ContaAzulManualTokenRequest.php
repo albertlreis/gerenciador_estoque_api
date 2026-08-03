@@ -28,7 +28,7 @@ class ContaAzulManualTokenRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'loja_id' => ['nullable', 'integer', 'min:1'],
+            'loja_id' => ['required', 'integer', 'min:1', 'exists:lojas,id'],
             'ambiente' => ['required', 'in:homologacao,producao'],
             'access_token' => ['required', 'string', 'min:10'],
             'refresh_token' => ['nullable', 'string', 'min:10', 'required_if:ambiente,producao'],

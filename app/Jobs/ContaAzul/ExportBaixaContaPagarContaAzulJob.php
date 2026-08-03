@@ -31,7 +31,7 @@ class ExportBaixaContaPagarContaAzulJob implements ShouldQueue
     ): void
     {
         try {
-            $conexao = $connections->latestForLoja($this->lojaId);
+            $conexao = $connections->operationalForLoja($this->lojaId);
             if (!$conexao) {
                 return;
             }

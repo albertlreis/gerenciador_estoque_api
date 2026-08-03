@@ -23,7 +23,7 @@ class ReconciliarContaAzulJob implements ShouldQueue
 
     public function handle(ContaAzulConnectionService $connections, ReconciliacaoContaAzulService $reconciliacao): void
     {
-        $conexao = $connections->latestForLoja($this->lojaId);
+        $conexao = $connections->operationalForLoja($this->lojaId);
         if (!$conexao) {
             return;
         }

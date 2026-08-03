@@ -14,7 +14,12 @@ class ContaAzulRefreshTokensCommand extends Command
 
     public function handle(ContaAzulConnectionService $connections): int
     {
-        $conexoes = ContaAzulConexao::query()->where('status', 'ativa')->orderBy('id')->get();
+        $conexoes = ContaAzulConexao::query()
+            ->where('status', 'ativa')
+            ->whereNotNull('loja_id')
+            ->whereHas('loja', fn ($query) => $query->where('ativo', true))
+            ->orderBy('id')
+            ->get();
 
         foreach ($conexoes as $c) {
             try {

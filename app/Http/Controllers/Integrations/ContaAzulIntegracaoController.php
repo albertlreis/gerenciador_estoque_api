@@ -116,15 +116,12 @@ class ContaAzulIntegracaoController extends Controller
 
     public function testarConexao(Request $request): JsonResponse
     {
-        if ($response = $this->autorizar('auth')) {
+        if ($response = $this->autorizar('config')) {
             return $response;
         }
 
         $lojaId = $this->lojaId($request);
-        $conexao = $this->connections->latestForLoja($lojaId);
-        if (!$conexao) {
-            return response()->json(['ok' => false, 'mensagem' => 'Nenhuma conexão encontrada'], 404);
-        }
+        $conexao = $this->connections->operationalForLoja($lojaId);
 
         try {
             $ok = $this->connections->healthcheck($conexao);
@@ -283,7 +280,7 @@ class ContaAzulIntegracaoController extends Controller
 
     public function registrarTokenManual(ContaAzulManualTokenRequest $request): JsonResponse
     {
-        if ($response = $this->autorizar('auth')) {
+        if ($response = $this->autorizar('config')) {
             return $response;
         }
 
@@ -313,10 +310,7 @@ class ContaAzulIntegracaoController extends Controller
         }
 
         $lojaId = $this->lojaId($request);
-        $conexao = $this->connections->latestForLoja($lojaId);
-        if (!$conexao) {
-            return response()->json(['ok' => false, 'mensagem' => 'Nenhuma conexão'], 404);
-        }
+        $conexao = $this->connections->operationalForLoja($lojaId);
 
         try {
             $tipo = $this->mapEntidade($entidade);
@@ -500,10 +494,7 @@ class ContaAzulIntegracaoController extends Controller
         }
 
         $lojaId = $this->lojaId($request);
-        $conexao = $this->connections->latestForLoja($lojaId);
-        if (!$conexao) {
-            return response()->json(['ok' => false, 'mensagem' => 'Nenhuma conexão'], 404);
-        }
+        $conexao = $this->connections->operationalForLoja($lojaId);
 
         $recurso = (string) $request->input('recurso', 'pessoas');
         $this->reconciliacao->reconciliarRecurso($conexao, $recurso, $lojaId);
@@ -518,10 +509,7 @@ class ContaAzulIntegracaoController extends Controller
         }
 
         $lojaId = $this->lojaId($request);
-        $conexao = $this->connections->latestForLoja($lojaId);
-        if (!$conexao) {
-            return response()->json(['ok' => false, 'mensagem' => 'Nenhuma conexão'], 404);
-        }
+        $conexao = $this->connections->operationalForLoja($lojaId);
 
         $this->reconciliacao->reconciliarTodos($conexao, $lojaId);
 
@@ -532,6 +520,7 @@ class ContaAzulIntegracaoController extends Controller
     {
         $permitido = match ($escopo) {
             'auth' => AuthHelper::podeAutenticarContaAzul(),
+            'config' => AuthHelper::podeConfigurarContaAzul(),
             'operacao' => AuthHelper::podeOperarContaAzul(),
             'financeiro' => AuthHelper::podeVisualizarSaudeContaAzulNoFinanceiro(),
             default => false,
@@ -545,14 +534,15 @@ class ContaAzulIntegracaoController extends Controller
     }
 
     /**
-     * @return array{auth: bool, operacao: bool, auditoria: bool}
+     * @return array{auth: bool, config: bool, operacao: bool, auditoria: bool}
      */
     private function permissoesContaAzul(): array
     {
         $podeOperar = AuthHelper::podeOperarContaAzul();
 
         return [
-            'auth' => AuthHelper::podeAutenticarContaAzul(),
+            'auth' => AuthHelper::podeConfigurarContaAzul(),
+            'config' => AuthHelper::podeConfigurarContaAzul(),
             'operacao' => $podeOperar,
             'auditoria' => $podeOperar,
         ];

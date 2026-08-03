@@ -139,7 +139,7 @@ class ContaAzulFinanceiroAutoImportCommand extends Command
 
     private function connection(ContaAzulConnectionService $connections, ?int $lojaId): ContaAzulConexao
     {
-        $conexao = $connections->latestForLoja($lojaId);
+        $conexao = $connections->operationalForLoja($lojaId);
         if (!$conexao) {
             throw new \RuntimeException('Nenhuma conexao Conta Azul encontrada.');
         }

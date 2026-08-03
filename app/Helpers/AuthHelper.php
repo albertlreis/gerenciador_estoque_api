@@ -397,6 +397,20 @@ class AuthHelper
     }
 
     /**
+     * Restringe alterações de configuração ao Desenvolvedor ou a perfis
+     * administrativos/financeiros com permissão explícita.
+     */
+    public static function podeConfigurarContaAzul(): bool
+    {
+        if (self::hasAnyPerfilNormalizadoAtual(['Desenvolvedor'])) {
+            return true;
+        }
+
+        return self::hasAnyPerfilNormalizadoAtual(['Administrador', 'Financeiro'])
+            && self::hasPermissao('conta_azul.configurar');
+    }
+
+    /**
      * Libera fluxos operacionais da Conta Azul.
      */
     public static function podeOperarContaAzul(): bool

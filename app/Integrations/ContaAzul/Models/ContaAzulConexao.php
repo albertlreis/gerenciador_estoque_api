@@ -2,7 +2,9 @@
 
 namespace App\Integrations\ContaAzul\Models;
 
+use App\Models\Loja;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class ContaAzulConexao extends Model
@@ -26,5 +28,10 @@ class ContaAzulConexao extends Model
     public function token(): HasOne
     {
         return $this->hasOne(ContaAzulToken::class, 'conexao_id');
+    }
+
+    public function loja(): BelongsTo
+    {
+        return $this->belongsTo(Loja::class, 'loja_id');
     }
 }

@@ -5,6 +5,7 @@ namespace Tests\Feature\Integrations;
 use App\Integrations\ContaAzul\Auth\ContaAzulOAuthService;
 use App\Helpers\AuthHelper;
 use App\Models\Usuario;
+use App\Models\Loja;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Cache;
@@ -82,16 +83,19 @@ class ContaAzulPermissionsTest extends TestCase
      */
     public function test_perfis_autorizados_acessam_autenticacao(string $perfil): void
     {
-        $this->actingWithAcessoDb([$perfil]);
+        $this->actingWithAcessoDb([$perfil], ['conta_azul.configurar']);
+        $loja = Loja::create(['codigo' => 'loja-' . strtolower($perfil), 'nome' => 'Loja ' . $perfil]);
 
-        $this->getJson('/api/v1/integrations/conta-azul/status?loja_id=999999')
+        $this->getJson('/api/v1/integrations/conta-azul/status?loja_id=' . $loja->id)
             ->assertOk()
             ->assertJsonPath('conectado', false);
 
-        $this->postJson('/api/v1/integrations/conta-azul/test-connection')
-            ->assertStatus(404);
+        $this->postJson('/api/v1/integrations/conta-azul/test-connection?loja_id=' . $loja->id)
+            ->assertStatus(422)
+            ->assertJsonPath('reason', 'conexao_nao_configurada');
 
         $this->postJson('/api/v1/integrations/conta-azul/manual-token', [
+            'loja_id' => $loja->id,
             'ambiente' => 'sandbox',
             'access_token' => 'curto',
         ])->assertStatus(422);
@@ -103,7 +107,7 @@ class ContaAzulPermissionsTest extends TestCase
             ->andReturn('https://auth.contaazul.test/oauth');
         $this->app->instance(ContaAzulOAuthService::class, $oauth);
 
-        $this->getJson('/api/v1/integrations/conta-azul/oauth/authorize')
+        $this->getJson('/api/v1/integrations/conta-azul/oauth/authorize?loja_id=' . $loja->id)
             ->assertOk()
             ->assertJsonPath('url', 'https://auth.contaazul.test/oauth');
     }
@@ -140,7 +144,7 @@ class ContaAzulPermissionsTest extends TestCase
      */
     public function test_status_retorna_capacidades_conta_azul_por_perfil(string $perfil): void
     {
-        $this->actingWithAcessoDb([$perfil]);
+        $this->actingWithAcessoDb([$perfil], ['conta_azul.configurar']);
 
         $podeOperar = $perfil === 'Desenvolvedor';
 

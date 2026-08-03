@@ -6,6 +6,7 @@ use App\Integrations\ContaAzul\Exceptions\ContaAzulException;
 use App\Integrations\ContaAzul\Models\ContaAzulConexao;
 use App\Integrations\ContaAzul\Services\ContaAzulConnectionService;
 use App\Models\Usuario;
+use App\Models\Loja;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -17,6 +18,8 @@ use Tests\TestCase;
 class ContaAzulManualTokenEndpointTest extends TestCase
 {
     use DatabaseTransactions;
+
+    private int $lojaId;
 
     protected function setUp(): void
     {
@@ -52,6 +55,11 @@ class ContaAzulManualTokenEndpointTest extends TestCase
             'conta_azul.conciliar',
             'conta_azul.auditar',
         ], now()->addHour());
+
+        $this->lojaId = Loja::create([
+            'codigo' => 'manual-token-' . $usuario->id,
+            'nome' => 'Loja token manual',
+        ])->id;
     }
 
     public function test_registra_token_manual_com_sucesso(): void
@@ -70,6 +78,7 @@ class ContaAzulManualTokenEndpointTest extends TestCase
         $this->app->instance(ContaAzulConnectionService::class, $service);
 
         $response = $this->postJson('/api/v1/integrations/conta-azul/manual-token', [
+            'loja_id' => $this->lojaId,
             'ambiente' => 'homologacao',
             'access_token' => 'manual-access-token-1234567890',
             'refresh_token' => 'manual-refresh-token-1234567890',
@@ -88,7 +97,7 @@ class ContaAzulManualTokenEndpointTest extends TestCase
         $service = Mockery::mock(ContaAzulConnectionService::class);
         $service->shouldReceive('persistManualTokens')
             ->once()
-            ->with(null, Mockery::on(function (array $payload) {
+            ->with($this->lojaId, Mockery::on(function (array $payload) {
                 return ($payload['ambiente'] ?? null) === 'homologacao'
                     && ($payload['access_token'] ?? null) === 'manual-access-token-1234567890'
                     && array_key_exists('refresh_token', $payload)
@@ -105,6 +114,7 @@ class ContaAzulManualTokenEndpointTest extends TestCase
         $this->app->instance(ContaAzulConnectionService::class, $service);
 
         $response = $this->postJson('/api/v1/integrations/conta-azul/manual-token', [
+            'loja_id' => $this->lojaId,
             'ambiente' => 'homologacao',
             'access_token' => 'manual-access-token-1234567890',
             'expires_in' => 900,
@@ -120,6 +130,7 @@ class ContaAzulManualTokenEndpointTest extends TestCase
     public function test_valida_payload_do_token_manual(): void
     {
         $response = $this->postJson('/api/v1/integrations/conta-azul/manual-token', [
+            'loja_id' => $this->lojaId,
             'ambiente' => 'sandbox',
             'access_token' => 'curto',
         ]);
@@ -152,6 +163,7 @@ class ContaAzulManualTokenEndpointTest extends TestCase
         $this->app->instance(ContaAzulConnectionService::class, $service);
 
         $response = $this->postJson('/api/v1/integrations/conta-azul/manual-token', [
+            'loja_id' => $this->lojaId,
             'ambiente' => 'producao',
             'access_token' => 'manual-access-token-1234567890',
             'refresh_token' => 'manual-refresh-token-1234567890',
@@ -172,12 +184,12 @@ class ContaAzulManualTokenEndpointTest extends TestCase
         ]);
 
         $service = Mockery::mock(ContaAzulConnectionService::class);
-        $service->shouldReceive('latestForLoja')->once()->with(null)->andReturn($conexao);
+        $service->shouldReceive('operationalForLoja')->once()->with($this->lojaId)->andReturn($conexao);
         $service->shouldReceive('healthcheck')->once()->with($conexao)->andReturn(true);
 
         $this->app->instance(ContaAzulConnectionService::class, $service);
 
-        $response = $this->postJson('/api/v1/integrations/conta-azul/test-connection');
+        $response = $this->postJson('/api/v1/integrations/conta-azul/test-connection?loja_id=' . $this->lojaId);
 
         $response->assertOk()
             ->assertJsonPath('ok', true)
@@ -193,7 +205,7 @@ class ContaAzulManualTokenEndpointTest extends TestCase
         ]);
 
         $service = Mockery::mock(ContaAzulConnectionService::class);
-        $service->shouldReceive('latestForLoja')->once()->with(null)->andReturn($conexao);
+        $service->shouldReceive('operationalForLoja')->once()->with($this->lojaId)->andReturn($conexao);
         $service->shouldReceive('healthcheck')
             ->once()
             ->with($conexao)
@@ -206,7 +218,7 @@ class ContaAzulManualTokenEndpointTest extends TestCase
 
         $this->app->instance(ContaAzulConnectionService::class, $service);
 
-        $response = $this->postJson('/api/v1/integrations/conta-azul/test-connection');
+        $response = $this->postJson('/api/v1/integrations/conta-azul/test-connection?loja_id=' . $this->lojaId);
 
         $response->assertStatus(422)
             ->assertJsonPath('ok', false)

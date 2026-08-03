@@ -8,6 +8,7 @@ use App\Integrations\ContaAzul\Exceptions\ContaAzulException;
 use App\Integrations\ContaAzul\Models\ContaAzulConexao;
 use App\Integrations\ContaAzul\Models\ContaAzulToken;
 use App\Integrations\ContaAzul\Support\StructuredLog;
+use App\Models\Loja;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -25,19 +26,42 @@ class ContaAzulConnectionService
 
     public function latestForLoja(?int $lojaId = null): ?ContaAzulConexao
     {
-        $q = ContaAzulConexao::query()->orderByDesc('id');
         if ($lojaId === null) {
-            $q->whereNull('loja_id');
-        } else {
-            $q->where('loja_id', $lojaId);
+            $ids = Loja::query()
+                ->where('ativo', true)
+                ->whereHas('conexoesContaAzul', fn ($query) => $query->where('status', 'ativa'))
+                ->limit(2)
+                ->pluck('id');
+
+            if ($ids->count() !== 1) {
+                return null;
+            }
+
+            $lojaId = (int) $ids->first();
         }
 
-        return $q->first();
+        return ContaAzulConexao::query()
+            ->where('loja_id', $lojaId)
+            ->whereHas('loja', fn ($query) => $query->where('ativo', true))
+            ->orderByDesc('id')
+            ->first();
     }
 
     public function findOrCreateConexao(?int $lojaId = null): ContaAzulConexao
     {
-        $existing = $this->latestForLoja($lojaId);
+        if ($lojaId === null) {
+            throw new ContaAzulException(
+                'Selecione uma loja ativa antes de configurar a Conta Azul.',
+                'loja_nao_informada'
+            );
+        }
+
+        $this->activeLoja($lojaId);
+
+        $existing = ContaAzulConexao::query()
+            ->where('loja_id', $lojaId)
+            ->orderByDesc('id')
+            ->first();
         if ($existing) {
             return $existing;
         }
@@ -47,6 +71,46 @@ class ContaAzulConnectionService
             'status' => 'inativa',
             'ambiente' => 'producao',
         ]);
+    }
+
+    public function operationalForLoja(?int $lojaId = null): ContaAzulConexao
+    {
+        if ($lojaId === null) {
+            $lojas = Loja::query()
+                ->where('ativo', true)
+                ->whereHas('conexoesContaAzul', fn ($query) => $query->where('status', 'ativa'))
+                ->limit(2)
+                ->pluck('id');
+
+            if ($lojas->count() === 0) {
+                throw new ContaAzulException(
+                    'Selecione a loja de origem antes de executar a operação.',
+                    'loja_nao_informada'
+                );
+            }
+
+            if ($lojas->count() > 1) {
+                throw new ContaAzulException(
+                    'Há mais de uma loja conectada. Informe a loja de origem da operação.',
+                    'loja_ambigua'
+                );
+            }
+
+            $lojaId = (int) $lojas->first();
+        }
+
+        $this->activeLoja($lojaId);
+        $conexao = $this->latestForLoja($lojaId);
+
+        if (! $conexao || $conexao->status !== 'ativa' || ! $conexao->token) {
+            throw new ContaAzulException(
+                'A loja selecionada não possui uma conexão ativa com a Conta Azul.',
+                'conexao_nao_configurada',
+                ['loja_id' => $lojaId]
+            );
+        }
+
+        return $conexao;
     }
 
     /**
@@ -69,6 +133,20 @@ class ContaAzulConnectionService
         $expiresAt = CarbonImmutable::now()->addSeconds(max(60, $expiresIn));
 
         $token = DB::transaction(function () use ($conexao, $access, $refresh, $expiresAt, $scope) {
+            if ($conexao->loja_id === null) {
+                throw new ContaAzulException(
+                    'Conexões legadas sem loja permanecem isoladas.',
+                    'conexao_legada_isolada'
+                );
+            }
+
+            $this->activeLoja((int) $conexao->loja_id);
+            ContaAzulConexao::query()
+                ->where('loja_id', $conexao->loja_id)
+                ->whereKeyNot($conexao->id)
+                ->where('status', 'ativa')
+                ->update(['status' => 'inativa']);
+
             $conexao->update([
                 'status' => 'ativa',
                 'ultimo_erro' => null,
@@ -90,6 +168,21 @@ class ContaAzulConnectionService
         $this->forgetHealthCache($conexao);
 
         return $token;
+    }
+
+    private function activeLoja(int $lojaId): Loja
+    {
+        $loja = Loja::query()->find($lojaId);
+
+        if (! $loja) {
+            throw new ContaAzulException('Loja não encontrada.', 'loja_nao_encontrada', ['loja_id' => $lojaId]);
+        }
+
+        if (! $loja->ativo) {
+            throw new ContaAzulException('A loja selecionada está inativa.', 'loja_inativa', ['loja_id' => $lojaId]);
+        }
+
+        return $loja;
     }
 
     /**

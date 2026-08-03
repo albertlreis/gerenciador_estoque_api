@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\V1\UsuarioPreferenciaController;
 use App\Http\Controllers\Api\V1\DashboardHomePreferenceController;
 use App\Http\Controllers\Integrations\BancoDoBrasilExtratosController;
 use App\Http\Controllers\Integrations\ContaAzulIntegracaoController;
+use App\Http\Controllers\Integrations\ContaAzulLojaController;
 
 use App\Http\Controllers\{AreaEstoqueController,
     AniversarioController,
@@ -713,6 +714,10 @@ Route::middleware(['auth:sanctum', 'senha.nao_obrigatoria'])
          * COMUNICAÇÃO
          * ============================================================ */
         Route::prefix('integrations/conta-azul')->group(function () {
+            Route::get('lojas', [ContaAzulLojaController::class, 'index']);
+            Route::post('lojas', [ContaAzulLojaController::class, 'store']);
+            Route::put('lojas/{loja}', [ContaAzulLojaController::class, 'update'])->whereNumber('loja');
+            Route::delete('lojas/{loja}', [ContaAzulLojaController::class, 'destroy'])->whereNumber('loja');
             Route::get('oauth/authorize', [ContaAzulOAuthController::class, 'redirect']);
             Route::get('status', [ContaAzulIntegracaoController::class, 'status']);
             Route::get('local-lookup', [ContaAzulIntegracaoController::class, 'localLookup']);

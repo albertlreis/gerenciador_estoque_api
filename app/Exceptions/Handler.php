@@ -2,6 +2,7 @@
 
 namespace App\Exceptions;
 
+use App\Integrations\ContaAzul\Exceptions\ContaAzulException;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Foundation\Exceptions\Handler as ExceptionHandler;
 use Illuminate\Http\JsonResponse;
@@ -25,7 +26,7 @@ class Handler extends ExceptionHandler
      * @var array<int, class-string<\Throwable>>
      */
     protected $dontReport = [
-        //
+        ContaAzulException::class,
     ];
 
     /**
@@ -46,6 +47,18 @@ class Handler extends ExceptionHandler
      */
     public function register()
     {
+        $this->renderable(function (ContaAzulException $exception, $request): ?JsonResponse {
+            if (! $request->is('api/v1/integrations/conta-azul/*')) {
+                return null;
+            }
+
+            return response()->json([
+                'ok' => false,
+                'mensagem' => $exception->getMessage(),
+                'reason' => $exception->reason,
+            ], 422);
+        });
+
         $this->reportable(function (Throwable $e) {
             //
         });

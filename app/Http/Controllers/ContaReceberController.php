@@ -11,9 +11,12 @@ use App\Http\Requests\Financeiro\UpdateContaReceberRequest;
 use App\Http\Resources\ContaReceberResource;
 use App\Models\ContaReceber;
 use App\Services\ContaReceberCommandService;
+use App\Services\UsuarioPreferenciaService;
+use App\Support\ContaReceberOrdenacao;
 use App\Support\FinanceiroTituloSearch;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 use Symfony\Component\HttpFoundation\Response;
 
 class ContaReceberController extends Controller
@@ -21,6 +24,7 @@ class ContaReceberController extends Controller
     public function __construct(
         private readonly ContaReceberCommandService $cmd,
         private readonly ContaAzulCobrancaService $contaAzulCobrancas,
+        private readonly UsuarioPreferenciaService $preferencias,
     ) {}
 
     /**
@@ -64,6 +68,8 @@ class ContaReceberController extends Controller
             'vencidas'  => 'nullable|boolean',
             'em_aberto' => 'nullable|boolean',
             'origem' => 'nullable|in:recorrente',
+            'sort_field' => ['nullable', 'required_with:sort_direction', Rule::in(ContaReceberOrdenacao::CAMPOS)],
+            'sort_direction' => ['nullable', 'required_with:sort_field', Rule::in(ContaReceberOrdenacao::DIRECOES)],
         ]);
 
         $page = $request->integer('page', 1);
@@ -150,12 +156,30 @@ class ContaReceberController extends Controller
             $q->whereNotIn('status', [ContaStatus::PAGA->value, ContaStatus::CANCELADA->value]);
         }
 
-        $q->orderBy('data_vencimento')->orderBy('id');
+        $ordenacaoExplicita = $request->filled('sort_field') && $request->filled('sort_direction');
+        $ordenacao = $ordenacaoExplicita
+            ? [
+                'sort_field' => $request->string('sort_field')->toString(),
+                'sort_direction' => $request->string('sort_direction')->toString(),
+            ]
+            : ($this->preferencias->obterOrdenacaoContasReceber((int) auth()->id())
+                ?? ContaReceberOrdenacao::padrao());
+
+        if ($ordenacaoExplicita) {
+            $this->preferencias->atualizarOrdenacaoContasReceber((int) auth()->id(), $ordenacao);
+        }
+
+        ContaReceberOrdenacao::aplicar($q, $ordenacao);
 
         $paginator = $q->paginate($perPage, ['*'], 'page', $page);
 
-        return ContaReceberResource::collection($paginator)
-            ->response()
+        $response = ContaReceberResource::collection($paginator)->response();
+        $payload = $response->getData(true);
+        $payload['meta']['sort_field'] = $ordenacao['sort_field'];
+        $payload['meta']['sort_direction'] = $ordenacao['sort_direction'];
+
+        return $response
+            ->setData($payload)
             ->setStatusCode(Response::HTTP_OK);
     }
 

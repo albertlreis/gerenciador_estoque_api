@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Support\ContaReceberOrdenacao;
 use App\Support\Logging\SierraLog;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Support\Facades\DB;
@@ -10,6 +11,7 @@ use Illuminate\Support\Facades\Schema;
 class UsuarioPreferenciaService
 {
     private const SCREEN_PREFIX = 'screen:';
+    private const CONTAS_RECEBER_ORDENACAO_KEY = 'financeiro.contas_receber.ordenacao';
     private const VERSION = 1;
 
     public function obterTela(int $usuarioId, string $screenKey): array
@@ -32,6 +34,47 @@ class UsuarioPreferenciaService
         return is_array($decoded)
             ? $this->normalizarPreferencia($decoded)
             : $this->preferenciaPadrao();
+    }
+
+    public function obterOrdenacaoContasReceber(int $usuarioId): ?array
+    {
+        if (! $this->tabelaDisponivel()) {
+            return null;
+        }
+
+        $valor = DB::table('usuario_preferencias')
+            ->where('usuario_id', $usuarioId)
+            ->where('chave', self::CONTAS_RECEBER_ORDENACAO_KEY)
+            ->value('valor');
+
+        if ($valor === null || $valor === '') {
+            return null;
+        }
+
+        $decoded = is_array($valor) ? $valor : json_decode((string) $valor, true);
+
+        return is_array($decoded) ? ContaReceberOrdenacao::normalizar($decoded) : null;
+    }
+
+    public function atualizarOrdenacaoContasReceber(int $usuarioId, array $ordenacao): array
+    {
+        $this->garantirTabelaDisponivel();
+        $ordenacao = ContaReceberOrdenacao::normalizar($ordenacao) ?? ContaReceberOrdenacao::padrao();
+        $now = now();
+
+        DB::table('usuario_preferencias')->upsert(
+            [[
+                'usuario_id' => $usuarioId,
+                'chave' => self::CONTAS_RECEBER_ORDENACAO_KEY,
+                'valor' => json_encode($ordenacao),
+                'created_at' => $now,
+                'updated_at' => $now,
+            ]],
+            ['usuario_id', 'chave'],
+            ['valor', 'updated_at']
+        );
+
+        return $ordenacao;
     }
 
     public function atualizarTela(int $usuarioId, string $screenKey, array $payload): array

@@ -3,20 +3,27 @@
 namespace App\Http\Controllers;
 
 use App\Exports\ContasReceberExport;
+use App\Services\UsuarioPreferenciaService;
+use App\Support\ContaReceberOrdenacao;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Illuminate\Validation\Rule;
 use Maatwebsite\Excel\Facades\Excel;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 class ContaReceberExportController extends Controller
 {
+    public function __construct(
+        private readonly UsuarioPreferenciaService $preferencias,
+    ) {}
+
     /**
      * Exporta os resultados filtrados em Excel.
      */
     public function exportarExcel(Request $request): BinaryFileResponse
     {
-        return Excel::download(new ContasReceberExport($request->all()), 'contas_receber.xlsx');
+        return Excel::download(new ContasReceberExport($this->parametrosOrdenados($request)), 'contas_receber.xlsx');
     }
 
     /**
@@ -24,7 +31,7 @@ class ContaReceberExportController extends Controller
      */
     public function exportarPdf(Request $request): Response
     {
-        $contas = ContasReceberExport::queryFromRequest($request)->get();
+        $contas = ContasReceberExport::query($this->parametrosOrdenados($request))->get();
 
         $pdf = Pdf::loadView('pdf.contas-receber', [
             'contas' => $contas,
@@ -108,5 +115,24 @@ class ContaReceberExportController extends Controller
             'contas_recebidas' => $titulosRecebidos->count(),
             'percentual_recebido' => $porcentagemRecebido,
         ]);
+    }
+
+    private function parametrosOrdenados(Request $request): array
+    {
+        $request->validate([
+            'sort_field' => ['nullable', 'required_with:sort_direction', Rule::in(ContaReceberOrdenacao::CAMPOS)],
+            'sort_direction' => ['nullable', 'required_with:sort_field', Rule::in(ContaReceberOrdenacao::DIRECOES)],
+        ]);
+
+        $params = $request->all();
+        $ordenacao = $request->filled('sort_field') && $request->filled('sort_direction')
+            ? [
+                'sort_field' => $request->string('sort_field')->toString(),
+                'sort_direction' => $request->string('sort_direction')->toString(),
+            ]
+            : ($this->preferencias->obterOrdenacaoContasReceber((int) auth()->id())
+                ?? ContaReceberOrdenacao::padrao());
+
+        return [...$params, ...$ordenacao];
     }
 }

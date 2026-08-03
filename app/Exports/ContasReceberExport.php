@@ -4,6 +4,7 @@ namespace App\Exports;
 
 use App\Models\ContaReceber;
 use App\Support\FinanceiroTituloSearch;
+use App\Support\ContaReceberOrdenacao;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
@@ -108,7 +109,12 @@ class ContasReceberExport implements FromCollection, ShouldAutoSize, WithColumnF
             $q->whereNotNull('despesa_recorrente_id');
         }
 
-        return $q->orderBy('data_vencimento')->orderBy('id');
+        ContaReceberOrdenacao::aplicar($q, [
+            'sort_field' => $params['sort_field'] ?? ContaReceberOrdenacao::padrao()['sort_field'],
+            'sort_direction' => $params['sort_direction'] ?? ContaReceberOrdenacao::padrao()['sort_direction'],
+        ]);
+
+        return $q;
     }
 
     public function headings(): array

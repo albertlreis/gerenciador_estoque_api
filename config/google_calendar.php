@@ -15,7 +15,7 @@ return [
         'GOOGLE_CALENDAR_SCOPE',
         'https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.calendarlist.readonly'
     ),
-    'timezone' => env('GOOGLE_CALENDAR_TIMEZONE', 'America/Sao_Paulo'),
+    'timezone' => env('GOOGLE_CALENDAR_TIMEZONE', 'America/Belem'),
     'cache_ttl_seconds' => (int) env('GOOGLE_CALENDAR_CACHE_TTL_SECONDS', 90),
     'timeout' => (int) env('GOOGLE_CALENDAR_TIMEOUT', 30),
     'connect_timeout' => (int) env('GOOGLE_CALENDAR_CONNECT_TIMEOUT', 10),

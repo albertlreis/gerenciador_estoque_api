@@ -89,6 +89,51 @@ class GoogleCalendarEventServiceTest extends TestCase
         $this->assertFalse($calendar->isWritableForMutations());
     }
 
+    public function test_event_listing_expands_recurrence_keeps_all_day_and_removes_cancelled(): void
+    {
+        $config = ['timezone' => 'America/Belem', 'paths' => ['events' => '/calendars/{calendar_id}/events']];
+        $client = $this->createMock(GoogleCalendarClient::class);
+        $connections = $this->createMock(GoogleCalendarConnectionService::class);
+        $client->expects($this->once())
+            ->method('get')
+            ->with(
+                '/calendars/primary/events',
+                'token',
+                $this->callback(fn (array $query) => $query['singleEvents'] === 'true'
+                    && $query['orderBy'] === 'startTime'
+                    && $query['timeMin'] === '2026-08-02T09:00:00-03:00'
+                    && $query['timeMax'] === '2026-08-09T09:00:00-03:00')
+            )
+            ->willReturn([
+                'status' => 200,
+                'body' => null,
+                'json' => ['items' => [
+                    ['id' => 'cancelled', 'status' => 'cancelled', 'summary' => 'Cancelado', 'start' => ['dateTime' => '2026-08-03T09:00:00-03:00'], 'end' => ['dateTime' => '2026-08-03T10:00:00-03:00']],
+                    ['id' => 'recurring', 'status' => 'confirmed', 'recurringEventId' => 'series-1', 'summary' => 'Recorrente', 'start' => ['dateTime' => '2026-08-04T09:00:00-03:00'], 'end' => ['dateTime' => '2026-08-04T10:00:00-03:00']],
+                    ['id' => 'all-day', 'status' => 'confirmed', 'summary' => 'Dia inteiro', 'start' => ['date' => '2026-08-05'], 'end' => ['date' => '2026-08-06']],
+                ]],
+            ]);
+
+        $service = new GoogleCalendarEventService($config, $connections, $client);
+        $method = (new ReflectionClass($service))->getMethod('listCalendarEvents');
+        $method->setAccessible(true);
+        $calendar = new GoogleCalendarCalendar([
+            'calendar_id' => 'primary',
+            'summary' => 'Sierra',
+            'enabled' => true,
+            'access_role' => 'writer',
+        ]);
+
+        $events = $method->invoke($service, 'token', $calendar, [
+            'start' => '2026-08-02T09:00:00-03:00',
+            'end' => '2026-08-09T09:00:00-03:00',
+        ]);
+
+        $this->assertSame(['recurring', 'all-day'], array_column($events, 'id'));
+        $this->assertFalse($events[0]['all_day']);
+        $this->assertTrue($events[1]['all_day']);
+    }
+
     private function service(): GoogleCalendarEventService
     {
         $config = ['timezone' => 'America/Sao_Paulo'];

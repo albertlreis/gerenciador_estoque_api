@@ -22,19 +22,19 @@ class GoogleCalendarOAuthService
 
     public function buildAuthorizationUrl(string $state): string
     {
-        $clientId = (string) ($this->config['client_id'] ?? '');
-        $redirectUri = (string) ($this->config['redirect_uri'] ?? '');
+        $missing = $this->missingOAuthConfigKeys();
 
-        if ($clientId === '' || $redirectUri === '') {
+        if ($missing !== []) {
             throw new GoogleCalendarException(
                 'A integracao Google Agenda nao esta configurada corretamente.',
-                'config_invalida'
+                'config_invalida',
+                ['missing_config' => $missing]
             );
         }
 
         $query = http_build_query([
-            'client_id' => $clientId,
-            'redirect_uri' => $redirectUri,
+            'client_id' => (string) $this->config['client_id'],
+            'redirect_uri' => (string) $this->config['redirect_uri'],
             'response_type' => 'code',
             'scope' => (string) ($this->config['scope'] ?? ''),
             'state' => $state,
@@ -106,5 +106,26 @@ class GoogleCalendarOAuthService
         }
 
         return $json;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function missingOAuthConfigKeys(): array
+    {
+        $required = [
+            'client_id' => 'GOOGLE_CALENDAR_CLIENT_ID',
+            'client_secret' => 'GOOGLE_CALENDAR_CLIENT_SECRET',
+            'redirect_uri' => 'GOOGLE_CALENDAR_REDIRECT_URI',
+        ];
+
+        $missing = [];
+        foreach ($required as $configKey => $envKey) {
+            if (trim((string) ($this->config[$configKey] ?? '')) === '') {
+                $missing[] = $envKey;
+            }
+        }
+
+        return $missing;
     }
 }

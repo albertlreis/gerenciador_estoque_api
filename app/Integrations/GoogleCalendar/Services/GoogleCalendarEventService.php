@@ -231,7 +231,7 @@ class GoogleCalendarEventService
             $this->assertSuccess($res, 'list_failed');
             $json = is_array($res['json']) ? $res['json'] : [];
             foreach (($json['items'] ?? []) as $event) {
-                if (is_array($event)) {
+                if (is_array($event) && ($event['status'] ?? null) !== 'cancelled') {
                     $events[] = $this->formatEvent($event, $calendar);
                 }
             }

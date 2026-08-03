@@ -14,6 +14,27 @@ class GoogleCalendarEndpointsTest extends TestCase
 {
     use DatabaseTransactions;
 
+    public function test_oauth_authorize_reports_missing_configuration_fields(): void
+    {
+        $this->actingUser(['google_calendar.configurar']);
+        config()->set('google_calendar.client_id', '');
+        config()->set('google_calendar.client_secret', '');
+        config()->set('google_calendar.redirect_uri', '');
+
+        $response = $this->getJson('/api/v1/integrations/google-calendar/oauth/authorize');
+
+        $response->assertStatus(422);
+        $response->assertJson([
+            'ok' => false,
+            'reason' => 'config_invalida',
+            'missing_config' => [
+                'GOOGLE_CALENDAR_CLIENT_ID',
+                'GOOGLE_CALENDAR_CLIENT_SECRET',
+                'GOOGLE_CALENDAR_REDIRECT_URI',
+            ],
+        ]);
+    }
+
     public function test_update_event_requires_start_and_end_together(): void
     {
         $this->actingUser(['google_calendar.editar']);
@@ -25,6 +46,16 @@ class GoogleCalendarEndpointsTest extends TestCase
 
         $response->assertStatus(422);
         $response->assertJsonValidationErrors(['end']);
+    }
+
+    public function test_events_endpoint_rejects_user_without_view_permission(): void
+    {
+        $this->actingUser([]);
+
+        $response = $this->getJson('/api/v1/integrations/google-calendar/events?start=2026-08-02T09:00:00-03:00&end=2026-08-09T09:00:00-03:00');
+
+        $response->assertForbidden();
+        $response->assertJson(['message' => 'Sem permissao para acessar a integracao Google Agenda.']);
     }
 
     public function test_logs_endpoint_returns_new_and_legacy_google_calendar_logs(): void

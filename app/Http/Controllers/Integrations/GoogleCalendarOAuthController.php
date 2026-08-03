@@ -35,7 +35,12 @@ class GoogleCalendarOAuthController extends Controller
 
             $url = $this->oauth->buildAuthorizationUrl($state);
         } catch (GoogleCalendarException $e) {
-            return response()->json(['ok' => false, 'mensagem' => $e->getMessage(), 'reason' => $e->reason], 422);
+            return response()->json([
+                'ok' => false,
+                'mensagem' => $e->getMessage(),
+                'reason' => $e->reason,
+                'missing_config' => $e->context['missing_config'] ?? [],
+            ], 422);
         }
 
         if ($request->wantsJson()) {

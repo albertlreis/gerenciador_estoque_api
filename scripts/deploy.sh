@@ -9,6 +9,7 @@ APP_DIR="${APP_DIR:-/home/docker/acadsoft/sierra-estoque}"
 HTML_DIR="${HTML_DIR:-$APP_DIR/html}"
 COMPOSE_FILE="${COMPOSE_FILE:-$APP_DIR/docker-compose.yml}"
 SERVICE="${SERVICE:-app}"
+APP_NETWORK="${APP_NETWORK:-web}"
 
 DO_GIT=true
 DO_MAINTENANCE=true
@@ -38,7 +39,7 @@ compose() {
 log() { printf "\n[%s] %s\n" "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
 
 artisan() {
-  compose exec -T "$SERVICE" bash -lc "php artisan $*"
+  compose exec -T -u www-data "$SERVICE" bash -lc "php artisan $*"
 }
 
 wait_for_php() {
@@ -97,7 +98,7 @@ clear_runtime_caches() {
 
 verify_file_cache() {
   log "Validando escrita/leitura do cache de arquivo…"
-  compose exec -T "$SERVICE" bash -lc "
+  compose exec -T -u www-data "$SERVICE" bash -lc "
     cat >/tmp/cache-smoke.php <<'PHP'
 <?php
 require '/var/www/html/vendor/autoload.php';
@@ -113,6 +114,44 @@ PHP
     php /tmp/cache-smoke.php
     rm -f /tmp/cache-smoke.php
   "
+}
+
+verify_log_write() {
+  log "Validando escrita dos logs como www-data…"
+  compose exec -T -u www-data "$SERVICE" php -r '
+    $path = "/var/www/html/storage/logs/.deploy-write-smoke";
+    if (file_put_contents($path, "ok\n", FILE_APPEND | LOCK_EX) === false) {
+        fwrite(STDERR, "log write smoke test failed\n");
+        exit(1);
+    }
+    unlink($path);
+  '
+
+  compose exec -T "$SERVICE" bash -lc '
+    invalid="$(find /var/www/html/storage/logs -maxdepth 1 -type f ! -user www-data -print -quit)"
+    if [[ -n "$invalid" ]]; then
+      echo "Arquivo de log fora do proprietário www-data: $invalid" >&2
+      exit 1
+    fi
+  '
+}
+
+verify_candidate_database() {
+  log "Validando conexão do candidato com o banco antes da troca…"
+  [[ -f "$HTML_DIR/.env" ]] || { echo ".env não encontrado: $HTML_DIR/.env"; return 1; }
+
+  docker run --rm \
+    --network "$APP_NETWORK" \
+    --env-file "$HTML_DIR/.env" \
+    --entrypoint php \
+    sierra-estoque-app \
+    artisan migrate:status >/dev/null
+}
+
+verify_database_connection() {
+  log "Validando conexão real da aplicação com o banco…"
+  compose exec -T -u www-data "$SERVICE" \
+    php artisan migrate:status >/dev/null
 }
 
 [[ -d "$APP_DIR" ]] || { echo "APP_DIR não encontrado: $APP_DIR"; exit 1; }
@@ -147,6 +186,20 @@ else
   log "Pulando git pull"
 fi
 
+log "Fazendo pull da imagem…"
+compose pull "$SERVICE" || true
+
+if $DO_BUILD; then
+  log "Buildando imagem…"
+  docker build \
+    --file "$HTML_DIR/Dockerfile.prod" \
+    --tag sierra-estoque-app \
+    "$HTML_DIR"
+  verify_candidate_database
+else
+  log "Pulando build"
+fi
+
 if $DO_MAINTENANCE; then
   log "Entrando em maintenance mode…"
   if ! compose ps --services --status running | grep -qx "$SERVICE"; then
@@ -157,16 +210,6 @@ if $DO_MAINTENANCE; then
   DID_SET_MAINTENANCE=true
 else
   log "Pulando maintenance mode…"
-fi
-
-log "Fazendo pull da imagem…"
-compose pull "$SERVICE" || true
-
-if $DO_BUILD; then
-  log "Buildando imagem…"
-  compose build "$SERVICE"
-else
-  log "Pulando build"
 fi
 
 log "Subindo serviço…"
@@ -196,6 +239,8 @@ log "Gerando view cache…"
 artisan view:cache
 
 verify_file_cache
+verify_log_write
+verify_database_connection
 
 if $DO_MIGRATE; then
   log "Executando migrations…"

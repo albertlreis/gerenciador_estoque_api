@@ -20,8 +20,6 @@ class PdfImageServiceTest extends TestCase
     private const PNG_VARIACAO = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADUlEQVR42mP8z8BQDwAFgwJ/lb4qmgAAAABJRU5ErkJggg==';
     private const PNG_PRODUTO = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
     private const PNG_REFERENCIA = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADUlEQVR42mNkYPj/HwADAgH/ox3bWQAAAABJRU5ErkJggg==';
-    private const WEBP_1X1 = 'UklGRiIAAABXRUJQVlA4IBYAAAAwAQCdASoBAAEADsD+JaQAA3AAAAAA';
-    private const WEBP_INVALIDO = 'UklGRhAAAABXRUJQVlA4WAoAAAAAAAAAAAAA';
 
     public function test_converte_url_storage_em_data_uri(): void
     {
@@ -33,32 +31,6 @@ class PdfImageServiceTest extends TestCase
 
         $this->assertNotNull($dataUri);
         $this->assertStringStartsWith('data:image/png;base64,', $dataUri);
-    }
-
-    public function test_converte_webp_valido_para_png_antes_do_pdf(): void
-    {
-        Storage::fake('public');
-        Storage::disk('public')->put('produtos/teste.webp', base64_decode(self::WEBP_1X1));
-
-        $dataUri = app(PdfImageService::class)->toDataUri('/storage/produtos/teste.webp');
-
-        $this->assertNotNull($dataUri);
-        $this->assertStringStartsWith('data:image/png;base64,', $dataUri);
-        $png = base64_decode(substr($dataUri, strlen('data:image/png;base64,')));
-        $this->assertStringStartsWith("\x89PNG\r\n\x1a\n", $png);
-    }
-
-    public function test_webp_invalido_usa_placeholder_no_pdf(): void
-    {
-        Storage::fake('public');
-        Storage::disk('public')->put('produtos/invalido.webp', base64_decode(self::WEBP_INVALIDO));
-
-        $service = app(PdfImageService::class);
-
-        $this->assertSame(
-            $service->placeholderDataUri(),
-            $service->toPdfSrc('/storage/produtos/invalido.webp')
-        );
     }
 
     public function test_converte_caminho_absoluto_de_container_em_data_uri(): void

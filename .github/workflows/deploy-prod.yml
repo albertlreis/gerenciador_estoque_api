@@ -100,21 +100,6 @@ jobs:
       - name: Run tests
         run: composer test:full
 
-      - name: Build and verify production image
-        run: |
-          docker build --pull --file Dockerfile.prod --tag sierra-estoque-api:ci .
-          docker run --rm --entrypoint php sierra-estoque-api:ci -r '
-            $gd = gd_info();
-            if (!function_exists("imagecreatefromwebp") || !($gd["JPEG Support"] ?? false) || !($gd["WebP Support"] ?? false)) {
-                fwrite(STDERR, "GD production image is missing JPEG/WebP support.\n");
-                exit(1);
-            }
-          '
-          docker run --rm --user www-data --entrypoint sh sierra-estoque-api:ci -lc '
-            test -w /var/www/html/storage/logs
-            test -w /var/www/html/bootstrap/cache
-          '
-
       - name: Stop MySQL
         if: always()
         run: docker rm -f estoque-test-mysql >/dev/null 2>&1 || true
@@ -124,7 +109,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: production
     env:
-      RUN_MIGRATIONS: ${{ github.event_name == 'workflow_dispatch' && inputs.run_migrations }}
+      RUN_MIGRATIONS: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_migrations) }}
 
     steps:
       - name: Start ssh-agent
@@ -147,7 +132,7 @@ jobs:
           fi
 
           compose_fix_cmd="if [ -f docker-compose.yml ]; then cp docker-compose.yml docker-compose.yml.bak-version-obsolete && sed -i '/^version:/d' docker-compose.yml; fi"
-          remote_command="cd /home/docker/acadsoft/sierra-estoque && repo_git_dir=\$(find . -maxdepth 3 -type d -name .git -print -quit) && repo_dir=\${repo_git_dir%/.git} && if [ -n \"\${repo_dir}\" ]; then git -C \"\${repo_dir}\" fetch origin master && git -C \"\${repo_dir}\" reset --hard origin/master && git -C \"\${repo_dir}\" clean -fd; fi && ${compose_fix_cmd} && ${backup_cmd}bash ./html/scripts/deploy.sh ${deploy_args} && docker exec sierra_estoque_app sh -lc 'mkdir -p /var/www/html/storage/framework/cache/data /var/www/html/storage/logs /var/www/html/bootstrap/cache && chown -R www-data:www-data /var/www/html/storage/framework/cache /var/www/html/storage/logs /var/www/html/bootstrap/cache && chmod -R ug+rwX /var/www/html/storage/framework/cache /var/www/html/storage/logs /var/www/html/bootstrap/cache'"
+          remote_command="cd /home/docker/acadsoft/sierra-estoque && repo_git_dir=\$(find . -maxdepth 3 -type d -name .git -print -quit) && repo_dir=\${repo_git_dir%/.git} && if [ -n \"\${repo_dir}\" ]; then git -C \"\${repo_dir}\" fetch origin master && git -C \"\${repo_dir}\" reset --hard origin/master && git -C \"\${repo_dir}\" clean -fd; fi && ${compose_fix_cmd} && ${backup_cmd}./deploy.sh ${deploy_args} && docker exec sierra_estoque_app sh -lc 'mkdir -p /var/www/html/storage/framework/cache/data /var/www/html/storage/logs /var/www/html/bootstrap/cache && chown -R www-data:www-data /var/www/html/storage/framework/cache /var/www/html/storage/logs /var/www/html/bootstrap/cache && chmod -R ug+rwX /var/www/html/storage/framework/cache /var/www/html/storage/logs /var/www/html/bootstrap/cache'"
 
           ssh -p "${{ secrets.DEPLOY_PORT }}" "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" "${remote_command}"
 

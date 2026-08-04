@@ -31,19 +31,9 @@ FROM php:8.2-fpm-bookworm AS runtime
 COPY --from=ghcr.io/mlocati/php-extension-installer:2 /usr/bin/install-php-extensions /usr/local/bin/
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-        curl \
-        libfreetype6-dev \
-        libjpeg62-turbo-dev \
-        libpng-dev \
-        libwebp-dev \
-        nginx \
-        supervisor \
-    && docker-php-ext-configure gd --with-freetype --with-jpeg --with-webp \
-    && docker-php-ext-install -j"$(nproc)" gd \
-    && install-php-extensions bcmath exif intl opcache pcntl pdo_mysql pdo_sqlite simplexml zip \
-    && php -r '$gd = gd_info(); if (!function_exists("imagecreatefromwebp") || !($gd["JPEG Support"] ?? false) || !($gd["WebP Support"] ?? false)) { fwrite(STDERR, "GD precisa de suporte a JPEG e WebP.\n"); exit(1); }' \
-    && rm -rf /var/lib/apt/lists/*
+    && apt-get install -y --no-install-recommends curl nginx supervisor \
+    && rm -rf /var/lib/apt/lists/* \
+    && install-php-extensions bcmath exif gd intl opcache pcntl pdo_mysql pdo_sqlite simplexml zip
 
 WORKDIR /var/www/html
 

@@ -17,7 +17,8 @@ class ReconciliarConsignacoesEstoqueCommand extends Command
 {
     protected $signature = 'consignacoes:reconciliar-estoque
         {--execute : Persiste as correcoes seguras}
-        {--dry-run : Forca simulacao, mesmo com --execute}';
+        {--dry-run : Forca simulacao, mesmo com --execute}
+        {--consignacao=* : Limita a reconciliacao aos IDs de consignacao informados}';
 
     protected $description = 'Reconcilia demandas, reservas e movimentacoes centrais de consignacoes sem heuristicas agressivas.';
 
@@ -30,21 +31,38 @@ class ReconciliarConsignacoesEstoqueCommand extends Command
         'reservas_criadas' => 0,
         'sem_saldo_para_reserva' => 0,
         'reservas_canceladas' => 0,
+        'reservas_duplicadas_detectadas' => 0,
+        'reservas_duplicadas_corrigidas' => 0,
+        'reservas_duplicadas_ambiguas' => 0,
         'devolucoes_orfas' => 0,
     ];
+
+    /** @var array<int,array{consignacao_id:int,pedido_item_id:int,status:string,detalhe:string}> */
+    private array $duplicidades = [];
 
     public function handle(EntregaProdutoService $entregas): int
     {
         $execute = (bool) $this->option('execute') && ! (bool) $this->option('dry-run');
+        $consignacaoIds = $this->consignacaoIds();
+
+        if ($consignacaoIds === null) {
+            return self::FAILURE;
+        }
+
+        if ($consignacaoIds !== [] && Consignacao::query()->whereIn('id', $consignacaoIds)->count() !== count($consignacaoIds)) {
+            $this->error('Uma ou mais consignacoes informadas nao existem. Nenhuma correcao foi executada.');
+
+            return self::FAILURE;
+        }
 
         $this->info($execute
             ? 'Reconciliação de consignações com persistência.'
             : 'Reconciliação de consignações em dry-run.');
 
         if ($execute) {
-            DB::transaction(fn () => $this->reconciliarConsignacoes($entregas, true));
+            DB::transaction(fn () => $this->reconciliarConsignacoes($entregas, true, $consignacaoIds));
         } else {
-            $this->reconciliarConsignacoes($entregas, false);
+            $this->reconciliarConsignacoes($entregas, false, $consignacaoIds);
         }
 
         $this->contadores['devolucoes_orfas'] = $this->contarDevolucoesOrfas();
@@ -54,6 +72,20 @@ class ReconciliarConsignacoesEstoqueCommand extends Command
             collect($this->contadores)->map(fn (int $total, string $nome) => [$nome, $total])->values()->all()
         );
 
+        if ($this->duplicidades !== []) {
+            $this->table(
+                ['Consignacao', 'Pedido item', 'Status', 'Detalhe'],
+                collect($this->duplicidades)
+                    ->map(fn (array $item) => [
+                        $item['consignacao_id'],
+                        $item['pedido_item_id'],
+                        $item['status'],
+                        $item['detalhe'],
+                    ])
+                    ->all()
+            );
+        }
+
         if ($this->contadores['devolucoes_orfas'] > 0) {
             $this->warn("{$this->contadores['devolucoes_orfas']} movimentacoes de devolucao de consignacao sem vinculo foram apenas reportadas.");
         }
@@ -61,11 +93,15 @@ class ReconciliarConsignacoesEstoqueCommand extends Command
         return self::SUCCESS;
     }
 
-    private function reconciliarConsignacoes(EntregaProdutoService $entregas, bool $execute): void
+    /** @param array<int,int> $consignacaoIds */
+    private function reconciliarConsignacoes(EntregaProdutoService $entregas, bool $execute, array $consignacaoIds): void
     {
-        Consignacao::query()
+        $query = Consignacao::query()
             ->with(['entregaItem'])
-            ->orderBy('id')
+            ->when($consignacaoIds !== [], fn (Builder $query) => $query->whereIn('id', $consignacaoIds))
+            ->orderBy('id');
+
+        $query
             ->chunkById(100, function ($consignacoes) use ($entregas, $execute) {
                 foreach ($consignacoes as $consignacao) {
                     $this->contadores['consignacoes_analisadas']++;
@@ -81,12 +117,16 @@ class ReconciliarConsignacoesEstoqueCommand extends Command
                     $enviado = $this->quantidadeMovimentada($consignacao->id, EstoqueMovimentacaoTipo::CONSIGNACAO_ENVIO->value);
 
                     if ($consignacao->status === 'pendente') {
+                        $this->reconciliarReservaDuplicada($consignacao, $entrega, $execute);
+
                         if ($enviado > 0) {
                             $this->alinharEnvioPendente($entrega, $enviado, $execute);
+
                             continue;
                         }
 
                         $this->garantirReservaPendente($consignacao, $entrega, $entregas, $execute);
+
                         continue;
                     }
 
@@ -95,6 +135,170 @@ class ReconciliarConsignacoesEstoqueCommand extends Command
                     }
                 }
             });
+    }
+
+    private function reconciliarReservaDuplicada(
+        Consignacao $consignacao,
+        ?ProdutoEntregaItem $entregaConsignacao,
+        bool $execute
+    ): void {
+        if (! $entregaConsignacao || ! $consignacao->pedido_item_id) {
+            return;
+        }
+
+        $entregaPedido = ProdutoEntregaItem::query()
+            ->where('tipo_origem', ProdutoEntregaItem::ORIGEM_PEDIDO)
+            ->where('pedido_id', $consignacao->pedido_id)
+            ->where('pedido_item_id', $consignacao->pedido_item_id)
+            ->where('id_variacao', $consignacao->produto_variacao_id)
+            ->where('status', '!=', ProdutoEntregaItem::STATUS_CANCELADO)
+            ->when($execute, fn ($query) => $query->lockForUpdate())
+            ->first();
+
+        if (! $entregaPedido) {
+            return;
+        }
+
+        if ($execute) {
+            $entregaConsignacao = ProdutoEntregaItem::query()
+                ->lockForUpdate()
+                ->findOrFail($entregaConsignacao->id);
+        }
+
+        $reservasPedido = $this->reservasAbertasVinculadasEntrega($entregaPedido, $consignacao, $execute);
+        $reservasConsignacao = $this->reservasAbertasVinculadasEntrega($entregaConsignacao, $consignacao, $execute);
+
+        if ($reservasPedido->isEmpty() || $reservasConsignacao->isEmpty()) {
+            return;
+        }
+
+        $this->contadores['reservas_duplicadas_detectadas']++;
+
+        $idsCompartilhados = $reservasPedido->pluck('id')->intersect($reservasConsignacao->pluck('id'));
+        $quantidadePedido = (int) $reservasPedido->sum(fn (EstoqueReserva $reserva) => $this->quantidadeAberta($reserva));
+        $quantidadeConsignacao = (int) $reservasConsignacao->sum(fn (EstoqueReserva $reserva) => $this->quantidadeAberta($reserva));
+        $quantidadeEsperada = (int) $consignacao->quantidade;
+        $estadoSemMovimento = (int) $entregaPedido->quantidade_recebida === 0
+            && (int) $entregaPedido->quantidade_expedida === 0
+            && (int) $entregaPedido->quantidade_entregue === 0
+            && (int) $entregaConsignacao->quantidade_recebida === 0
+            && (int) $entregaConsignacao->quantidade_expedida === 0
+            && (int) $entregaConsignacao->quantidade_entregue === 0
+            && $this->quantidadeMovimentada((int) $consignacao->id, EstoqueMovimentacaoTipo::CONSIGNACAO_ENVIO->value) === 0;
+        $espelhoExato = $idsCompartilhados->isEmpty()
+            && $quantidadePedido === $quantidadeEsperada
+            && $quantidadeConsignacao === $quantidadeEsperada
+            && (int) $entregaPedido->quantidade_total === $quantidadeEsperada
+            && (int) $entregaPedido->quantidade_reservada === $quantidadePedido
+            && (int) $entregaConsignacao->quantidade_total === $quantidadeEsperada
+            && (int) $entregaConsignacao->quantidade_reservada === $quantidadeConsignacao
+            && $reservasPedido->every(fn (EstoqueReserva $reserva) => (int) $reserva->quantidade_consumida === 0)
+            && $reservasConsignacao->every(fn (EstoqueReserva $reserva) => (int) $reserva->quantidade_consumida === 0)
+            && $estadoSemMovimento;
+
+        if (! $espelhoExato) {
+            $this->contadores['reservas_duplicadas_ambiguas']++;
+            $this->duplicidades[] = [
+                'consignacao_id' => (int) $consignacao->id,
+                'pedido_item_id' => (int) $consignacao->pedido_item_id,
+                'status' => 'ambigua',
+                'detalhe' => "pedido={$quantidadePedido}; consignacao={$quantidadeConsignacao}; esperado={$quantidadeEsperada}",
+            ];
+
+            return;
+        }
+
+        $this->duplicidades[] = [
+            'consignacao_id' => (int) $consignacao->id,
+            'pedido_item_id' => (int) $consignacao->pedido_item_id,
+            'status' => $execute ? 'corrigida' : 'detectada',
+            'detalhe' => "cancelar reserva do pedido={$quantidadePedido}; preservar consignacao={$quantidadeConsignacao}",
+        ];
+
+        if (! $execute) {
+            return;
+        }
+
+        foreach ($reservasPedido as $reserva) {
+            $quantidade = $this->quantidadeAberta($reserva);
+            $reserva->forceFill([
+                'status' => 'cancelada',
+                'motivo' => 'reconciliacao_reserva_duplicada_consignacao',
+            ])->save();
+
+            ProdutoEntregaEvento::query()->firstOrCreate(
+                ['idempotency_key' => "consignacao:{$consignacao->id}:cancelar-reserva-duplicada:{$reserva->id}"],
+                [
+                    'produto_entrega_item_id' => $entregaPedido->id,
+                    'tipo_evento' => ProdutoEntregaEvento::RESERVA_CANCELADA,
+                    'quantidade' => $quantidade,
+                    'id_deposito_origem' => $reserva->id_deposito,
+                    'estoque_reserva_id' => $reserva->id,
+                    'observacao' => 'Reserva duplicada da demanda comum cancelada; reserva canonica da consignacao preservada.',
+                    'metadata_json' => [
+                        'consignacao_id' => (int) $consignacao->id,
+                        'motivo' => 'reserva_espelhada_pedido_consignacao',
+                    ],
+                ]
+            );
+        }
+
+        $entregaPedido->forceFill([
+            'quantidade_reservada' => 0,
+            'status' => ProdutoEntregaItem::STATUS_AGUARDANDO_ESTOQUE,
+            'em_revisao' => false,
+            'bloqueio_motivo' => null,
+        ])->save();
+
+        $this->contadores['reservas_duplicadas_corrigidas']++;
+    }
+
+    private function reservasAbertasVinculadasEntrega(
+        ProdutoEntregaItem $entrega,
+        Consignacao $consignacao,
+        bool $lock
+    ) {
+        return EstoqueReserva::query()
+            ->where('estoque_reservas.id_variacao', $consignacao->produto_variacao_id)
+            ->where('estoque_reservas.id_deposito', $consignacao->deposito_id)
+            ->where('estoque_reservas.pedido_id', $consignacao->pedido_id)
+            ->where('estoque_reservas.pedido_item_id', $consignacao->pedido_item_id)
+            ->where('estoque_reservas.status', 'ativa')
+            ->where(function ($query) {
+                $query->whereNull('estoque_reservas.data_expira')
+                    ->orWhere('estoque_reservas.data_expira', '>', now());
+            })
+            ->whereRaw('estoque_reservas.quantidade > estoque_reservas.quantidade_consumida')
+            ->whereExists(function ($query) use ($entrega) {
+                $query->selectRaw('1')
+                    ->from('produto_entrega_eventos as evento_reserva')
+                    ->whereColumn('evento_reserva.estoque_reserva_id', 'estoque_reservas.id')
+                    ->where('evento_reserva.produto_entrega_item_id', $entrega->id)
+                    ->where('evento_reserva.tipo_evento', ProdutoEntregaEvento::RESERVA_CRIADA);
+            })
+            ->when($lock, fn ($query) => $query->lockForUpdate())
+            ->orderBy('estoque_reservas.id')
+            ->get();
+    }
+
+    private function quantidadeAberta(EstoqueReserva $reserva): int
+    {
+        return max(0, (int) $reserva->quantidade - (int) $reserva->quantidade_consumida);
+    }
+
+    /** @return array<int,int>|null */
+    private function consignacaoIds(): ?array
+    {
+        $opcoes = collect((array) $this->option('consignacao'));
+        $invalidas = $opcoes->filter(fn ($id) => ! is_scalar($id) || ! ctype_digit((string) $id) || (int) $id <= 0);
+
+        if ($invalidas->isNotEmpty()) {
+            $this->error('Informe apenas IDs numericos e positivos em --consignacao.');
+
+            return null;
+        }
+
+        return $opcoes->map(fn ($id) => (int) $id)->unique()->values()->all();
     }
 
     private function alinharEnvioPendente(?ProdutoEntregaItem $entrega, int $enviado, bool $execute): void

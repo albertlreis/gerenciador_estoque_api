@@ -62,7 +62,10 @@ class EntregaProdutoService
 
             $reservarAutomaticamente = ! (
                 $pedido->isVenda()
-                && $pedido->origem_abastecimento === Pedido::ORIGEM_ABASTECIMENTO_FABRICA
+                && (
+                    $pedido->origem_abastecimento === Pedido::ORIGEM_ABASTECIMENTO_FABRICA
+                    || $pedido->isConsignado()
+                )
             );
 
             return $this->criarDemandaPedido($pedido, $usuarioId, $reservarAutomaticamente);

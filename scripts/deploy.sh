@@ -38,7 +38,7 @@ compose() {
 log() { printf "\n[%s] %s\n" "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
 
 artisan() {
-  compose exec -T "$SERVICE" bash -lc "php artisan $*"
+  compose exec -T -u www-data "$SERVICE" bash -lc "php artisan $*"
 }
 
 wait_for_php() {
@@ -97,7 +97,7 @@ clear_runtime_caches() {
 
 verify_file_cache() {
   log "Validando escrita/leitura do cache de arquivo…"
-  compose exec -T "$SERVICE" bash -lc "
+  compose exec -T -u www-data "$SERVICE" bash -lc "
     cat >/tmp/cache-smoke.php <<'PHP'
 <?php
 require '/var/www/html/vendor/autoload.php';
@@ -113,6 +113,26 @@ PHP
     php /tmp/cache-smoke.php
     rm -f /tmp/cache-smoke.php
   "
+}
+
+verify_log_write() {
+  log "Validando escrita dos logs como www-data…"
+  compose exec -T -u www-data "$SERVICE" php -r '
+    $path = "/var/www/html/storage/logs/.deploy-write-smoke";
+    if (file_put_contents($path, "ok\n", FILE_APPEND | LOCK_EX) === false) {
+        fwrite(STDERR, "log write smoke test failed\n");
+        exit(1);
+    }
+    unlink($path);
+  '
+
+  compose exec -T "$SERVICE" bash -lc '
+    invalid="$(find /var/www/html/storage/logs -maxdepth 1 -type f ! -user www-data -print -quit)"
+    if [[ -n "$invalid" ]]; then
+      echo "Arquivo de log fora do proprietário www-data: $invalid" >&2
+      exit 1
+    fi
+  '
 }
 
 [[ -d "$APP_DIR" ]] || { echo "APP_DIR não encontrado: $APP_DIR"; exit 1; }
@@ -164,7 +184,10 @@ compose pull "$SERVICE" || true
 
 if $DO_BUILD; then
   log "Buildando imagem…"
-  compose build "$SERVICE"
+  docker build \
+    --file "$HTML_DIR/Dockerfile.prod" \
+    --tag sierra-estoque-app \
+    "$HTML_DIR"
 else
   log "Pulando build"
 fi
@@ -196,6 +219,7 @@ log "Gerando view cache…"
 artisan view:cache
 
 verify_file_cache
+verify_log_write
 
 if $DO_MIGRATE; then
   log "Executando migrations…"

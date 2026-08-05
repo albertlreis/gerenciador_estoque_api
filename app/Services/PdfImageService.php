@@ -53,7 +53,40 @@ class PdfImageService
         }
 
         $mime = File::mimeType($absolutePath) ?: 'application/octet-stream';
+
+        if ($mime === 'image/webp') {
+            $raw = $this->convertWebpToPng($absolutePath);
+            if ($raw === null) {
+                return null;
+            }
+
+            $mime = 'image/png';
+        }
+
         return sprintf('data:%s;base64,%s', $mime, base64_encode($raw));
+    }
+
+    private function convertWebpToPng(string $absolutePath): ?string
+    {
+        if (!function_exists('imagecreatefromwebp')) {
+            return null;
+        }
+
+        $image = @imagecreatefromwebp($absolutePath);
+        if ($image === false) {
+            return null;
+        }
+
+        ob_start();
+        $encoded = @imagepng($image);
+        $png = ob_get_clean();
+        imagedestroy($image);
+
+        if (!$encoded || !is_string($png) || $png === '') {
+            return null;
+        }
+
+        return $png;
     }
 
     public function toPdfSrc(?string $path): string

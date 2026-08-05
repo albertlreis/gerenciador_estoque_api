@@ -14,17 +14,21 @@ use App\Models\PedidoStatusHistorico;
 use App\Models\Produto;
 use App\Models\ProdutoEntregaItem;
 use App\Models\ProdutoVariacao;
+use App\Models\ProdutoVariacaoImagem;
 use App\Models\Usuario;
 use App\Http\Controllers\ConsignacaoController;
 use App\Http\Controllers\PedidoController;
 use Illuminate\Http\Request;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Storage;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
 class ConsignacaoRoteiroPdfTest extends TestCase
 {
     use RefreshDatabase;
+
+    private const WEBP_1X1 = 'UklGRiIAAABXRUJQVlA4IBYAAAAwAQCdASoBAAEADsD+JaQAA3AAAAAA';
 
     public function test_endpoint_de_consignacao_baixa_com_nome_de_roteiro_de_consignacao(): void
     {
@@ -37,6 +41,24 @@ class ConsignacaoRoteiroPdfTest extends TestCase
             "roteiro-de-consignacao-{$pedidoId}.pdf",
             (string) $response->headers->get('content-disposition')
         );
+    }
+
+    public function test_endpoint_de_consignacao_gera_pdf_com_imagem_webp(): void
+    {
+        Storage::fake('public');
+        [$pedidoId, $consignacao] = $this->criarPedidoConsignado('pendente', PedidoStatus::CONSIGNADO);
+        Storage::disk('public')->put('produtos/variacoes/roteiro.webp', base64_decode(self::WEBP_1X1));
+        ProdutoVariacaoImagem::create([
+            'id_variacao' => $consignacao->produto_variacao_id,
+            'url' => '/storage/produtos/variacoes/roteiro.webp',
+            'principal' => true,
+            'ordem' => 0,
+        ]);
+
+        $response = $this->get("/api/v1/consignacoes/{$pedidoId}/pdf");
+
+        $response->assertOk()->assertHeader('content-type', 'application/pdf');
+        $this->assertStringStartsWith('%PDF', (string) $response->getContent());
     }
 
     public function test_roteiro_do_pedido_usa_nome_de_devolucao_quando_status_finalizado(): void

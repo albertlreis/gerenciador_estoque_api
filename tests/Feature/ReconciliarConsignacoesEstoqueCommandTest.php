@@ -17,6 +17,7 @@ use App\Models\ProdutoEntregaEvento;
 use App\Models\ProdutoEntregaItem;
 use App\Models\ProdutoVariacao;
 use App\Models\Usuario;
+use App\Services\EntregaProdutoService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
 use Tests\TestCase;
@@ -182,11 +183,173 @@ class ReconciliarConsignacoesEstoqueCommandTest extends TestCase
         ]);
     }
 
+    public function test_reconciliar_pedido_consignado_nao_cria_reserva_na_demanda_comum(): void
+    {
+        $consignacao = $this->criarConsignacao(quantidade: 2, estoque: 2);
+        $pedido = Pedido::query()->with('itens')->findOrFail($consignacao->pedido_id);
+
+        app(EntregaProdutoService::class)->reconciliarPedidoEditado($pedido);
+
+        $this->assertDatabaseHas('produto_entrega_itens', [
+            'tipo_origem' => ProdutoEntregaItem::ORIGEM_PEDIDO,
+            'pedido_item_id' => $consignacao->pedido_item_id,
+            'quantidade_reservada' => 0,
+            'status' => ProdutoEntregaItem::STATUS_AGUARDANDO_ESTOQUE,
+        ]);
+        $this->assertSame(0, EstoqueReserva::query()->count());
+    }
+
+    public function test_dry_run_relata_reserva_duplicada_sem_persistir(): void
+    {
+        $duplicidade = $this->criarDuplicidadeExata();
+
+        Artisan::call('consignacoes:reconciliar-estoque', [
+            '--consignacao' => [$duplicidade['consignacao']->id],
+        ]);
+        $output = Artisan::output();
+
+        $this->assertStringContainsString('reservas_duplicadas_detectadas', $output);
+        $this->assertStringContainsString('detectada', $output);
+        $this->assertDatabaseHas('estoque_reservas', [
+            'id' => $duplicidade['reserva_pedido']->id,
+            'status' => 'ativa',
+        ]);
+        $this->assertSame(2, (int) $duplicidade['entrega_pedido']->fresh()->quantidade_reservada);
+    }
+
+    public function test_execute_corrige_somente_reserva_espelhada_e_e_idempotente(): void
+    {
+        $duplicidade = $this->criarDuplicidadeExata();
+        $argumentos = [
+            '--execute' => true,
+            '--consignacao' => [$duplicidade['consignacao']->id],
+        ];
+
+        $primeiraExecucao = Artisan::call('consignacoes:reconciliar-estoque', $argumentos);
+
+        $this->assertSame(0, $primeiraExecucao);
+        $this->assertDatabaseHas('estoque_reservas', [
+            'id' => $duplicidade['reserva_pedido']->id,
+            'status' => 'cancelada',
+            'motivo' => 'reconciliacao_reserva_duplicada_consignacao',
+        ]);
+        $this->assertDatabaseHas('estoque_reservas', [
+            'id' => $duplicidade['reserva_consignacao']->id,
+            'status' => 'ativa',
+        ]);
+        $this->assertDatabaseHas('produto_entrega_itens', [
+            'id' => $duplicidade['entrega_pedido']->id,
+            'quantidade_reservada' => 0,
+            'status' => ProdutoEntregaItem::STATUS_AGUARDANDO_ESTOQUE,
+        ]);
+        $this->assertDatabaseHas('produto_entrega_eventos', [
+            'produto_entrega_item_id' => $duplicidade['entrega_pedido']->id,
+            'tipo_evento' => ProdutoEntregaEvento::RESERVA_CANCELADA,
+            'estoque_reserva_id' => $duplicidade['reserva_pedido']->id,
+        ]);
+
+        $segundaExecucao = Artisan::call('consignacoes:reconciliar-estoque', $argumentos);
+
+        $this->assertSame(0, $segundaExecucao);
+        $this->assertSame(1, ProdutoEntregaEvento::query()
+            ->where('idempotency_key', "consignacao:{$duplicidade['consignacao']->id}:cancelar-reserva-duplicada:{$duplicidade['reserva_pedido']->id}")
+            ->count());
+        $this->assertSame(1, EstoqueReserva::query()->where('status', 'ativa')->count());
+    }
+
+    public function test_execute_nao_altera_duplicidade_ambigua(): void
+    {
+        $duplicidade = $this->criarDuplicidadeExata();
+        $duplicidade['reserva_pedido']->update(['quantidade' => 1]);
+        $duplicidade['entrega_pedido']->update(['quantidade_reservada' => 1]);
+
+        Artisan::call('consignacoes:reconciliar-estoque', [
+            '--execute' => true,
+            '--consignacao' => [$duplicidade['consignacao']->id],
+        ]);
+
+        $this->assertStringContainsString('ambigua', Artisan::output());
+        $this->assertDatabaseHas('estoque_reservas', [
+            'id' => $duplicidade['reserva_pedido']->id,
+            'quantidade' => 1,
+            'status' => 'ativa',
+        ]);
+        $this->assertDatabaseMissing('produto_entrega_eventos', [
+            'tipo_evento' => ProdutoEntregaEvento::RESERVA_CANCELADA,
+            'estoque_reserva_id' => $duplicidade['reserva_pedido']->id,
+        ]);
+    }
+
+    /**
+     * @return array{
+     *   consignacao:Consignacao,
+     *   entrega_pedido:ProdutoEntregaItem,
+     *   entrega_consignacao:ProdutoEntregaItem,
+     *   reserva_pedido:EstoqueReserva,
+     *   reserva_consignacao:EstoqueReserva
+     * }
+     */
+    private function criarDuplicidadeExata(): array
+    {
+        $consignacao = $this->criarConsignacao(quantidade: 2, estoque: 4);
+        $dadosEntrega = [
+            'pedido_id' => $consignacao->pedido_id,
+            'pedido_item_id' => $consignacao->pedido_item_id,
+            'id_variacao' => $consignacao->produto_variacao_id,
+            'quantidade_total' => 2,
+            'quantidade_reservada' => 2,
+            'id_deposito_origem' => $consignacao->deposito_id,
+            'status' => ProdutoEntregaItem::STATUS_RESERVADO,
+        ];
+        $entregaPedido = ProdutoEntregaItem::query()->create([
+            ...$dadosEntrega,
+            'tipo_origem' => ProdutoEntregaItem::ORIGEM_PEDIDO,
+            'origem_id' => $consignacao->pedido_id,
+        ]);
+        $entregaConsignacao = ProdutoEntregaItem::query()->create([
+            ...$dadosEntrega,
+            'tipo_origem' => ProdutoEntregaItem::ORIGEM_CONSIGNACAO,
+            'origem_id' => $consignacao->id,
+            'consignacao_id' => $consignacao->id,
+        ]);
+        $dadosReserva = [
+            'id_variacao' => $consignacao->produto_variacao_id,
+            'id_deposito' => $consignacao->deposito_id,
+            'pedido_id' => $consignacao->pedido_id,
+            'pedido_item_id' => $consignacao->pedido_item_id,
+            'quantidade' => 2,
+            'quantidade_consumida' => 0,
+            'status' => 'ativa',
+            'motivo' => 'produto_entrega',
+        ];
+        $reservaPedido = EstoqueReserva::query()->create($dadosReserva);
+        $reservaConsignacao = EstoqueReserva::query()->create($dadosReserva);
+
+        foreach ([[$entregaPedido, $reservaPedido], [$entregaConsignacao, $reservaConsignacao]] as [$entrega, $reserva]) {
+            ProdutoEntregaEvento::query()->create([
+                'produto_entrega_item_id' => $entrega->id,
+                'tipo_evento' => ProdutoEntregaEvento::RESERVA_CRIADA,
+                'quantidade' => 2,
+                'id_deposito_origem' => $consignacao->deposito_id,
+                'estoque_reserva_id' => $reserva->id,
+                'idempotency_key' => "teste:entrega:{$entrega->id}:reserva:{$reserva->id}",
+            ]);
+        }
+
+        return [
+            'consignacao' => $consignacao,
+            'entrega_pedido' => $entregaPedido,
+            'entrega_consignacao' => $entregaConsignacao,
+            'reserva_pedido' => $reservaPedido,
+            'reserva_consignacao' => $reservaConsignacao,
+        ];
+    }
+
     private function criarConsignacao(string $status = 'pendente', int $quantidade = 1, int $estoque = 0): Consignacao
     {
         $usuario = Usuario::query()->create([
             'nome' => 'Usuario Reconciliacao',
-            'email' => uniqid('reconciliacao-', true) . '@test.com',
+            'email' => uniqid('reconciliacao-', true).'@test.com',
             'senha' => 'senha',
             'ativo' => true,
         ]);
@@ -194,7 +357,7 @@ class ReconciliarConsignacoesEstoqueCommandTest extends TestCase
             'nome' => 'Cliente Reconciliacao',
             'documento' => (string) random_int(10000000000, 99999999999),
         ]);
-        $categoria = Categoria::query()->create(['nome' => 'Categoria Reconciliacao ' . uniqid()]);
+        $categoria = Categoria::query()->create(['nome' => 'Categoria Reconciliacao '.uniqid()]);
         $produto = Produto::query()->create([
             'nome' => 'Produto Reconciliacao',
             'descricao' => 'Desc',
@@ -203,12 +366,12 @@ class ReconciliarConsignacoesEstoqueCommandTest extends TestCase
         ]);
         $variacao = ProdutoVariacao::query()->create([
             'produto_id' => $produto->id,
-            'referencia' => 'REC-' . uniqid(),
+            'referencia' => 'REC-'.uniqid(),
             'nome' => 'Variacao Reconciliacao',
             'preco' => 100,
             'custo' => 60,
         ]);
-        $deposito = Deposito::query()->create(['nome' => 'Deposito Reconciliacao ' . uniqid()]);
+        $deposito = Deposito::query()->create(['nome' => 'Deposito Reconciliacao '.uniqid()]);
         Estoque::query()->updateOrCreate(
             ['id_variacao' => $variacao->id, 'id_deposito' => $deposito->id],
             ['quantidade' => $estoque]

@@ -888,17 +888,6 @@ class PedidoController extends Controller
             ], 403);
         }
 
-        if ($fluxoV2 && $registrarEntrega) {
-            $statusOperacional = $entregaService->statusOperacionalPedido($pedido->loadMissing(['statusAtual', 'entregaItens']));
-            if ((bool) ($statusOperacional['divergencia'] ?? false)) {
-                return response()->json([
-                    'code' => 'PEDIDO_DIVERGENTE_REQUER_RECONCILIACAO',
-                    'message' => 'O pedido possui divergencia operacional e precisa ser reconciliado antes da entrega.',
-                    'status_operacional' => $statusOperacional,
-                ], 409);
-            }
-        }
-
         $enderecoEntrega = ClienteEnderecoPdf::resolverParaPedido(
             $pedido,
             $data['cliente_endereco_id'] ?? null

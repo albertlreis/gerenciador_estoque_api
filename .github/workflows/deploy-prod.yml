@@ -132,7 +132,7 @@ jobs:
           fi
 
           compose_fix_cmd="if [ -f docker-compose.yml ]; then cp docker-compose.yml docker-compose.yml.bak-version-obsolete && sed -i '/^version:/d' docker-compose.yml; fi"
-          remote_command="cd /home/docker/acadsoft/sierra-estoque && repo_git_dir=\$(find . -maxdepth 3 -type d -name .git -print -quit) && repo_dir=\${repo_git_dir%/.git} && if [ -n \"\${repo_dir}\" ]; then git -C \"\${repo_dir}\" fetch origin master && git -C \"\${repo_dir}\" reset --hard origin/master && git -C \"\${repo_dir}\" clean -fd; fi && ${compose_fix_cmd} && ${backup_cmd}./deploy.sh ${deploy_args} && docker exec sierra_estoque_app sh -lc 'mkdir -p /var/www/html/storage/framework/cache/data /var/www/html/storage/logs /var/www/html/bootstrap/cache && chown -R www-data:www-data /var/www/html/storage/framework/cache /var/www/html/storage/logs /var/www/html/bootstrap/cache && chmod -R ug+rwX /var/www/html/storage/framework/cache /var/www/html/storage/logs /var/www/html/bootstrap/cache'"
+          remote_command="cd /home/docker/acadsoft/sierra-estoque && repo_git_dir=\$(find . -maxdepth 3 -type d -name .git -print -quit) && repo_dir=\${repo_git_dir%/.git} && if [ -n \"\${repo_dir}\" ]; then git -C \"\${repo_dir}\" fetch origin master && git -C \"\${repo_dir}\" reset --hard origin/master && git -C \"\${repo_dir}\" clean -fd; fi && ${compose_fix_cmd} && ${backup_cmd}./deploy.sh ${deploy_args} && docker-compose -f docker-compose.yml up -d --no-deps nginx && docker update --restart always sierra_estoque_nginx >/dev/null && docker exec sierra_estoque_app sh -lc 'mkdir -p /var/www/html/storage/framework/cache/data /var/www/html/storage/logs /var/www/html/bootstrap/cache && chown -R www-data:www-data /var/www/html/storage/framework/cache /var/www/html/storage/logs /var/www/html/bootstrap/cache && chmod -R ug+rwX /var/www/html/storage/framework/cache /var/www/html/storage/logs /var/www/html/bootstrap/cache'"
 
           ssh -p "${{ secrets.DEPLOY_PORT }}" "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" "${remote_command}"
 
@@ -155,3 +155,18 @@ jobs:
 
           echo "Production API did not become healthy at ${health_url}."
           exit 1
+
+      - name: Verify shared production services
+        run: |
+          curl --fail --show-error --silent --location \
+            --connect-timeout 10 --max-time 20 \
+            https://sierra.acadsoft.com.br/ >/dev/null
+
+          auth_health="$(curl --fail --show-error --silent --location \
+            --connect-timeout 10 --max-time 20 \
+            https://auth.sierra.acadsoft.com.br/api/v1/health)"
+
+          printf '%s' "${auth_health}" | grep -Eq \
+            '"status"[[:space:]]*:[[:space:]]*"ok"'
+          printf '%s' "${auth_health}" | grep -Eq \
+            '"service"[[:space:]]*:[[:space:]]*"autenticacao-api"'

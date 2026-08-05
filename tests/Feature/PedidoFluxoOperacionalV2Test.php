@@ -350,9 +350,9 @@ class PedidoFluxoOperacionalV2Test extends TestCase
         $this->assertSame(1, EstoqueMovimentacao::query()->where('pedido_id', $pedido->id)->count());
     }
 
-    public function test_registro_de_entrega_exige_permissao_e_bloqueia_pedido_divergente(): void
+    public function test_registro_de_entrega_exige_permissao_e_permite_pedido_divergente(): void
     {
-        [$usuario, $pedido] = $this->criarPedido(1, Pedido::ORIGEM_ABASTECIMENTO_FABRICA);
+        [$usuario, $pedido, $variacao, $deposito] = $this->criarPedido(1, Pedido::ORIGEM_ABASTECIMENTO_FABRICA);
         Sanctum::actingAs($usuario);
         $entrega = app(EntregaProdutoService::class)->criarDemandaPedido($pedido, $usuario->id, false)->firstOrFail();
         $payload = [
@@ -369,11 +369,10 @@ class PedidoFluxoOperacionalV2Test extends TestCase
         $this->postJson("/api/v1/pedidos/{$pedido->id}/pdf/nota-entrega", $payload)->assertForbidden();
 
         Cache::put('permissoes_usuario_'.$usuario->id, ['estoque.movimentar'], now()->addHour());
-        $entrega->update([
-            'quantidade_expedida' => 1,
-            'quantidade_entregue' => 1,
-            'status' => ProdutoEntregaItem::STATUS_ENTREGUE,
-        ]);
+        Estoque::updateOrCreate(
+            ['id_variacao' => $variacao->id, 'id_deposito' => $deposito->id],
+            ['quantidade' => 1]
+        );
         PedidoStatusHistorico::create([
             'pedido_id' => $pedido->id,
             'status' => PedidoStatus::ENTREGA_ESTOQUE,
@@ -382,8 +381,13 @@ class PedidoFluxoOperacionalV2Test extends TestCase
         ]);
 
         $this->postJson("/api/v1/pedidos/{$pedido->id}/pdf/nota-entrega", $payload)
-            ->assertStatus(409)
-            ->assertJsonPath('code', 'PEDIDO_DIVERGENTE_REQUER_RECONCILIACAO');
+            ->assertOk();
+
+        $this->assertSame(1, (int) $entrega->fresh()->quantidade_entregue);
+        $this->assertSame(1, ProdutoEntregaEvento::query()
+            ->where('produto_entrega_item_id', $entrega->id)
+            ->where('tipo_evento', ProdutoEntregaEvento::ENTREGUE_CLIENTE)
+            ->count());
     }
 
     private function criarPedido(int $quantidade, string $origem, ?string $numero = null): array

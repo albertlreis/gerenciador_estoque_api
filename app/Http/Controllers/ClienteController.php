@@ -78,7 +78,7 @@ class ClienteController extends Controller
 
     public function show(Cliente $cliente): JsonResponse
     {
-        return response()->json($cliente->load(['enderecos']));
+        return response()->json($cliente->load(['enderecos', 'consentimentosComunicacao']));
     }
 
     public function destroy(Cliente $cliente): JsonResponse

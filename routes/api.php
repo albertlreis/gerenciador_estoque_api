@@ -71,6 +71,7 @@ use App\Http\Controllers\{AreaEstoqueController,
     ProdutoVariacaoOutletController,
     ProdutoAtributoController,
     CommsProxyController,
+    ComunicacaoJornadaController,
     TransferenciaFinanceiraController};
 
 use App\Http\Controllers\Assistencia\{
@@ -758,6 +759,13 @@ Route::middleware(['auth:sanctum', 'senha.nao_obrigatoria'])
         });
 
         Route::prefix('comunicacao')->group(function () {
+            Route::get('jornadas', [ComunicacaoJornadaController::class, 'index']);
+            Route::post('jornadas', [ComunicacaoJornadaController::class, 'store']);
+            Route::get('jornadas/{jornada}', [ComunicacaoJornadaController::class, 'show'])->whereNumber('jornada');
+            Route::put('jornadas/{jornada}', [ComunicacaoJornadaController::class, 'update'])->whereNumber('jornada');
+            Route::patch('jornadas/{jornada}/ativacao', [ComunicacaoJornadaController::class, 'activation'])->whereNumber('jornada');
+            Route::get('historico', [CommsProxyController::class, 'historico']);
+
             Route::get('templates', [CommsProxyController::class, 'templatesIndex']);
             Route::get('templates/{id}', [CommsProxyController::class, 'templatesShow']);
             Route::post('templates', [CommsProxyController::class, 'templatesStore']);

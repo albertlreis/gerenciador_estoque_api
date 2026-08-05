@@ -37,6 +37,15 @@ class Kernel extends ConsoleKernel
             ->timezone('America/Belem')
             ->withoutOverlapping();
         $schedule->command('auditoria:prune')->dailyAt('02:20')->timezone('America/Belem');
+        $schedule->command('comunicacao:agendar-cobrancas')
+            ->dailyAt('09:00')
+            ->timezone('America/Belem')
+            ->withoutOverlapping()
+            ->when(fn () => (bool) config('comunicacao.processing_enabled', false));
+        $schedule->command('comunicacao:processar-outbox')
+            ->everyMinute()
+            ->withoutOverlapping()
+            ->when(fn () => (bool) config('comunicacao.processing_enabled', false));
     }
 
     /**

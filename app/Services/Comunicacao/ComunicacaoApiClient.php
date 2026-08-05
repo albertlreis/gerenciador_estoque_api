@@ -2,8 +2,6 @@
 
 namespace App\Services\Comunicacao;
 
-use App\Models\ContaReceber;
-use App\Models\Pedido;
 use App\Support\Logging\SierraLog;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
@@ -20,10 +18,12 @@ class ComunicacaoApiClient
      *   template_code: string,
      *   variaveis?: array<string,mixed>,
      *   correlation_id?: string,
-     *   store_only?: bool
+     *   store_only?: bool,
+     *   external_id?: string,
+     *   client_reference?: string
      * } $payload
      */
-    public function enviar(array $payload): void
+    public function enviar(array $payload): array
     {
         $base = rtrim((string) config('services.comms.base_url'), '/');
         $apiKey = (string) config('services.comms.api_key');
@@ -51,6 +51,7 @@ class ComunicacaoApiClient
             'channel' => $channel,
             'template_code' => $templateCode,
             'variables' => $variables,
+            'client_reference' => trim((string) ($payload['client_reference'] ?? '')) ?: null,
         ];
 
         if ($channel === 'email') {
@@ -61,7 +62,7 @@ class ComunicacaoApiClient
 
         $body = [
             'source' => 'sierra',
-            'external_id' => null,
+            'external_id' => trim((string) ($payload['external_id'] ?? '')) ?: null,
             'store_only' => $storeOnly,
             'correlation_id' => $correlationId,
             'meta' => [
@@ -90,95 +91,13 @@ class ComunicacaoApiClient
                 'status' => $resp->status(),
                 'url' => $url,
                 'channel' => $channel,
-                'destination' => $destination,
                 'correlation_id' => $correlationId,
-                'response' => $resp->json(),
             ]);
-        }
-    }
 
-    public function enviarStatusPedido(Pedido $pedido, string $status): void
-    {
-        $cliente = $pedido->cliente;
-        if (!$cliente || !$cliente->email) {
-            return;
+            throw new RuntimeException('Serviço de comunicação recusou a solicitação com HTTP '.$resp->status().'.');
         }
 
-        $template = (string) config('comunicacao.templates.pedido_status_email');
-        if ($template === '') {
-            return;
-        }
-
-        $this->enviar([
-            'canal' => 'email',
-            'para' => (string) $cliente->email,
-            'template_code' => $template,
-            'variaveis' => [
-                'pedido' => [
-                    'id' => $pedido->id,
-                    'numero' => $pedido->numero_externo ?? $pedido->id,
-                    'status' => $status,
-                ],
-                'cliente' => [
-                    'nome' => $cliente->nome ?? '',
-                ],
-            ],
-            'correlation_id' => "pedido:{$pedido->id}",
-        ]);
-    }
-
-    public function enviarCobranca(ContaReceber $conta): void
-    {
-        $pedido = $conta->pedido;
-        $cliente = $pedido?->cliente;
-        if (!$cliente) {
-            return;
-        }
-
-        $phone = (string) ($cliente->whatsapp ?? $cliente->telefone ?? '');
-        if ($phone === '') {
-            return;
-        }
-
-        $templateSms = (string) config('comunicacao.templates.cobranca_sms');
-        $templateWpp = (string) config('comunicacao.templates.cobranca_whatsapp');
-
-        $variaveis = [
-            'cliente' => [
-                'nome' => $cliente->nome ?? '',
-            ],
-            'conta' => [
-                'id' => $conta->id,
-                'descricao' => $conta->descricao,
-                'numero_documento' => $conta->numero_documento,
-                'data_vencimento' => $conta->data_vencimento,
-                'valor' => $conta->valor_liquido,
-            ],
-            'pedido' => $pedido ? [
-                'id' => $pedido->id,
-                'numero' => $pedido->numero_externo ?? $pedido->id,
-            ] : null,
-        ];
-
-        if ($templateSms !== '') {
-            $this->enviar([
-                'canal' => 'sms',
-                'para' => $phone,
-                'template_code' => $templateSms,
-                'variaveis' => $variaveis,
-                'correlation_id' => "cobranca:{$conta->id}",
-            ]);
-        }
-
-        if ($templateWpp !== '') {
-            $this->enviar([
-                'canal' => 'whatsapp',
-                'para' => $phone,
-                'template_code' => $templateWpp,
-                'variaveis' => $variaveis,
-                'correlation_id' => "cobranca:{$conta->id}",
-            ]);
-        }
+        return (array) ($resp->json() ?? []);
     }
 
     private function requestsUrl(string $base): string

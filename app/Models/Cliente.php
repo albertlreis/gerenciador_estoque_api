@@ -14,6 +14,7 @@ class Cliente extends Model
         'documento',
         'inscricao_estadual',
         'email',
+        'bloqueia_email',
         'telefone',
         'tipo',
         'whatsapp',
@@ -22,6 +23,7 @@ class Cliente extends Model
 
     protected $casts = [
         'data_nascimento' => 'date:Y-m-d',
+        'bloqueia_email' => 'boolean',
     ];
 
     public function enderecos(): HasMany
@@ -37,5 +39,10 @@ class Cliente extends Model
     public function pedidos(): HasMany
     {
         return $this->hasMany(Pedido::class, 'id_cliente');
+    }
+
+    public function consentimentosComunicacao(): HasMany
+    {
+        return $this->hasMany(ClienteComunicacaoConsentimento::class, 'cliente_id');
     }
 }

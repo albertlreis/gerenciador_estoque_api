@@ -1,0 +1,40 @@
+name: Monitor Production
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: monitor-production-sierra
+  cancel-in-progress: true
+
+jobs:
+  dashboard-health:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify API health and dashboard preflight
+        run: bash scripts/check-production-dashboard.sh
+
+      - name: Verify frontend and authentication
+        run: |
+          curl --fail --show-error --silent --location \
+            --connect-timeout 10 --max-time 20 \
+            https://sierra.acadsoft.com.br/ >/dev/null
+
+          auth_health="$(curl --fail --show-error --silent --location \
+            --connect-timeout 10 --max-time 20 \
+            https://auth.sierra.acadsoft.com.br/api/v1/health)"
+
+          printf '%s' "${auth_health}" | grep -Eq \
+            '"status"[[:space:]]*:[[:space:]]*"ok"'
+          printf '%s' "${auth_health}" | grep -Eq \
+            '"service"[[:space:]]*:[[:space:]]*"autenticacao-api"'

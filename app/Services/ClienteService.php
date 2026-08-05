@@ -13,6 +13,7 @@ use App\Repositories\ClienteEnderecoRepository;
 use App\Validators\DocumentoValidator;
 use Throwable;
 use Illuminate\Support\Facades\Log;
+use App\Services\Comunicacao\ClienteConsentimentoService;
 
 class ClienteService
 {
@@ -22,6 +23,7 @@ class ClienteService
         'documento',
         'inscricao_estadual',
         'email',
+        'bloqueia_email',
         'telefone',
         'tipo',
         'whatsapp',
@@ -33,11 +35,12 @@ class ClienteService
         protected ClienteEnderecoRepository $enderecosRepo,
         protected ContaAzulExportDispatchService $contaAzulExports,
         protected AuditoriaEventoService $auditoria,
+        protected ClienteConsentimentoService $consentimentos,
     ) {}
 
     public function listarClientes(array $filtros = []): Collection
     {
-        return $this->clientes->listar($filtros);
+        return $this->clientes->listar($filtros)->load('consentimentosComunicacao');
     }
 
     public function validarDocumento(string $documento, string $tipo): bool
@@ -151,7 +154,8 @@ class ClienteService
             $data = $this->normalizeClienteData($data);
 
             $enderecos = $data['enderecos'] ?? [];
-            unset($data['enderecos']);
+            $consentimentos = $data['consentimentos'] ?? [];
+            unset($data['enderecos'], $data['consentimentos']);
 
             $cliente = Cliente::create($data);
 
@@ -159,7 +163,11 @@ class ClienteService
                 $this->syncEnderecos($cliente, $enderecos);
             }
 
-            $cliente = $cliente->load(['enderecos']);
+            if (is_array($consentimentos) && count($consentimentos) > 0) {
+                $this->consentimentos->sincronizar($cliente, $consentimentos);
+            }
+
+            $cliente = $cliente->load(['enderecos', 'consentimentosComunicacao']);
 
             return $cliente;
         });
@@ -188,7 +196,8 @@ class ClienteService
             $data = $this->normalizeClienteData($data);
 
             $enderecos = $data['enderecos'] ?? null;
-            unset($data['enderecos']);
+            $consentimentos = $data['consentimentos'] ?? null;
+            unset($data['enderecos'], $data['consentimentos']);
 
             $cliente->update($data);
 
@@ -196,7 +205,11 @@ class ClienteService
                 $this->syncEnderecos($cliente, $enderecos);
             }
 
-            $cliente = $cliente->load(['enderecos']);
+            if (is_array($consentimentos)) {
+                $this->consentimentos->sincronizar($cliente, $consentimentos);
+            }
+
+            $cliente = $cliente->load(['enderecos', 'consentimentosComunicacao']);
 
             return $cliente;
         });

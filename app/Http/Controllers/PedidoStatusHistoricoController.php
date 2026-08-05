@@ -5,10 +5,9 @@ namespace App\Http\Controllers;
 use App\Enums\PedidoStatus;
 use App\Models\Pedido;
 use App\Models\PedidoStatusHistorico;
-use App\Services\Comunicacao\ComunicacaoApiClient;
+use App\Services\Comunicacao\ComunicacaoOutboxService;
 use App\Services\EntregaProdutoService;
 use App\Services\PedidoStatusFluxoService;
-use App\Support\Logging\SierraLog;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -216,7 +215,7 @@ class PedidoStatusHistoricoController extends Controller
         ]);
     }
 
-    public function atualizarStatus(Request $request, Pedido $pedido, ComunicacaoApiClient $comms): JsonResponse
+    public function atualizarStatus(Request $request, Pedido $pedido, ComunicacaoOutboxService $comms): JsonResponse
     {
         $dados = $request->validate([
             'status' => ['required', 'string', 'max:50'],
@@ -303,7 +302,7 @@ class PedidoStatusHistoricoController extends Controller
 
         $previsaoSalva = null;
 
-        DB::transaction(function () use ($pedido, $novoStatus, $dados, $exigePrevisao, $dataStatusEfetiva, &$previsaoSalva) {
+        DB::transaction(function () use ($pedido, $novoStatus, $dados, $exigePrevisao, $dataStatusEfetiva, &$previsaoSalva, $comms) {
             $pedido->historicoStatus()->create([
                 'status' => $novoStatus,
                 'observacoes' => $dados['observacoes'] ?? null,
@@ -328,19 +327,9 @@ class PedidoStatusHistoricoController extends Controller
                 'data_status' => $dataStatusEfetiva->toDateTimeString(),
                 'data_prevista' => $exigePrevisao ? $dados['data_prevista'] : null,
             ], $pedido);
-        });
 
-        try {
-            $comms->enviarStatusPedido($pedido->fresh(['cliente']), $novoStatus);
-        } catch (\Throwable $e) {
-            SierraLog::warning('communication.order_status.send_failed', [
-                'entity_type' => 'pedido',
-                'entity_id' => $pedido->id,
-                'status' => $novoStatus,
-                'operation' => 'send_order_status',
-                'exception' => $e,
-            ]);
-        }
+            $comms->registrarPedidoStatus($pedido->fresh(['cliente.consentimentosComunicacao']), $novoStatus);
+        });
 
         return response()->json([
             'message' => 'Status atualizado com sucesso.',

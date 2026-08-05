@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Helpers\AuthHelper;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\Response as HttpResponse;
@@ -47,7 +48,6 @@ class CommsProxyController
             $body = [
                 'message' => 'Resposta inválida do serviço de comunicação.',
                 'status' => $res->status(),
-                'raw' => $res->body(),
             ];
         }
 
@@ -67,16 +67,19 @@ class CommsProxyController
 
     public function templatesStore(Request $request): JsonResponse
     {
+        $this->authorizeManage();
         return $this->pass($this->comm()->post('/templates', $request->all()));
     }
 
     public function templatesUpdate(Request $request, string $id): JsonResponse
     {
+        $this->authorizeManage();
         return $this->pass($this->comm()->put("/templates/$id", $request->all()));
     }
 
     public function templatesPreview(Request $request, string $id): JsonResponse
     {
+        $this->authorizeManage();
         return $this->pass($this->comm()->post("/templates/$id/preview", $request->all()));
     }
 
@@ -109,6 +112,35 @@ class CommsProxyController
 
     public function messagesRetry(string $id): JsonResponse
     {
+        abort_unless(
+            AuthHelper::hasPermissao('comunicacao.reprocessar') || AuthHelper::hasPermissao('comunicacao.messages.retry'),
+            403,
+            'Sem permissão para reprocessar comunicação.'
+        );
         return $this->pass($this->comm()->post("/messages/$id/retry"));
+    }
+
+    public function historico(Request $request): JsonResponse
+    {
+        abort_unless(
+            AuthHelper::hasPermissao('comunicacao.visualizar') || AuthHelper::hasPermissao('comunicacao.templates'),
+            403,
+            'Sem permissão para visualizar comunicação.'
+        );
+        $dados = $request->validate([
+            'tipo' => ['required', 'in:pedido,conta_receber'],
+            'id' => ['required', 'integer', 'min:1'],
+            'per_page' => ['sometimes', 'integer', 'min:1', 'max:100'],
+        ]);
+
+        return $this->pass($this->comm()->get('/messages', [
+            'client_reference' => $dados['tipo'].':'.$dados['id'],
+            'per_page' => $dados['per_page'] ?? 50,
+        ]));
+    }
+
+    private function authorizeManage(): void
+    {
+        abort_unless(AuthHelper::hasPermissao('comunicacao.templates'), 403, 'Sem permissão para configurar comunicação.');
     }
 }

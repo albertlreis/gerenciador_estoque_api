@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class PedidoReconciliacao extends Model
 {
@@ -13,5 +14,13 @@ class PedidoReconciliacao extends Model
 
     protected $casts = ['snapshot_json' => 'array', 'aplicada_em' => 'datetime'];
 
-    public function pedido(): BelongsTo { return $this->belongsTo(Pedido::class); }
+    public function pedido(): BelongsTo
+    {
+        return $this->belongsTo(Pedido::class);
+    }
+
+    public function itens(): HasMany
+    {
+        return $this->hasMany(PedidoReconciliacaoItem::class, 'pedido_reconciliacao_id');
+    }
 }

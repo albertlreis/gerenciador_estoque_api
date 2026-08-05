@@ -5,12 +5,15 @@ namespace Tests\Feature;
 use App\Enums\ContaStatus;
 use App\Models\Categoria;
 use App\Models\Cliente;
+use App\Models\ClienteComunicacaoConsentimento;
+use App\Models\ComunicacaoJornada;
 use App\Models\Fornecedor;
 use App\Models\Pedido;
 use App\Models\AcessoUsuario;
 use App\Models\Produto;
 use App\Models\ProdutoEntregaItem;
 use App\Models\ProdutoVariacao;
+use App\Services\Comunicacao\ComunicacaoOutboxService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
@@ -20,7 +23,7 @@ class ComunicacaoSierraTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_atualizar_status_pedido_dispara_chamada_para_api_comunicacao(): void
+    public function test_atualizar_status_pedido_registra_outbox_sem_chamada_externa_na_transacao(): void
     {
         Http::fake();
 
@@ -39,6 +42,19 @@ class ComunicacaoSierraTest extends TestCase
             'data_pedido' => now(),
             'valor_total' => 100.0,
             'prazo_dias_uteis' => 10,
+        ]);
+        $jornada = ComunicacaoJornada::query()->create([
+            'codigo' => 'pedido_status_email',
+            'nome' => 'Status do pedido por email',
+            'tipo' => 'pedido',
+            'ativo' => true,
+            'timezone' => 'America/Belem',
+        ]);
+        $jornada->eventos()->create(['evento_codigo' => 'envio_cliente']);
+        $jornada->canais()->create([
+            'canal' => 'email',
+            'template_codigo' => 'sierra_pedido_status_email',
+            'ativo' => true,
         ]);
         $categoria = Categoria::create(['nome' => 'Categoria Comunicacao']);
         $fornecedor = Fornecedor::create(['nome' => 'Fornecedor Comunicacao', 'status' => 1]);
@@ -69,13 +85,6 @@ class ComunicacaoSierraTest extends TestCase
 
         $this->actingAs($user, 'sanctum');
 
-        config([
-            'services.comms.base_url' => 'http://api-comunicacao:8002/api',
-            'services.comms.api_key' => 'key-test',
-            'services.comms.api_secret' => 'secret-test',
-            'comunicacao.templates.pedido_status_email' => 'sierra_pedido_status_email',
-        ]);
-
         $response = $this->patchJson("/api/v1/pedidos/{$pedido->id}/status", [
             'status' => 'envio_cliente',
             'observacoes' => 'Teste',
@@ -83,20 +92,17 @@ class ComunicacaoSierraTest extends TestCase
 
         $response->assertStatus(200);
 
-        Http::assertSent(function ($request): bool {
-            $data = $request->data();
-
-            return $request->url() === 'http://api-comunicacao:8002/api/requests'
-                && $request->hasHeader('X-API-KEY', 'key-test')
-                && $request->hasHeader('X-API-SECRET', 'secret-test')
-                && data_get($data, 'source') === 'sierra'
-                && data_get($data, 'payload.messages.0.channel') === 'email'
-                && data_get($data, 'payload.messages.0.to_email') === 'cliente@example.test'
-                && data_get($data, 'payload.messages.0.template_code') === 'sierra_pedido_status_email';
-        });
+        $this->assertDatabaseHas('comunicacao_eventos_saida', [
+            'origem_tipo' => 'pedido',
+            'origem_id' => $pedido->id,
+            'evento_codigo' => 'envio_cliente',
+            'canal' => 'email',
+            'status' => 'pendente',
+        ]);
+        Http::assertNothingSent();
     }
 
-    public function test_criacao_conta_receber_dispara_cobranca_sms_ou_whatsapp(): void
+    public function test_cobranca_so_entra_no_outbox_no_marco_agendado_e_com_opt_in(): void
     {
         Http::fake();
 
@@ -105,6 +111,13 @@ class ComunicacaoSierraTest extends TestCase
         $cliente = Cliente::create([
             'nome' => 'Cliente Cobranca',
             'whatsapp' => '91989413333',
+        ]);
+        ClienteComunicacaoConsentimento::query()->create([
+            'cliente_id' => $cliente->id,
+            'canal' => 'whatsapp',
+            'situacao' => 'concedido',
+            'origem' => 'teste_automatizado',
+            'decidido_em' => now(),
         ]);
 
         $pedido = Pedido::create([
@@ -118,20 +131,25 @@ class ComunicacaoSierraTest extends TestCase
         ]);
 
         $this->actingAs($user, 'sanctum');
-
-        config([
-            'services.comms.base_url' => 'http://api-comunicacao:8002/api',
-            'services.comms.api_key' => 'key-test',
-            'services.comms.api_secret' => 'secret-test',
-            'comunicacao.templates.cobranca_sms' => 'sierra_cobranca_sms',
-            'comunicacao.templates.cobranca_whatsapp' => 'sierra_cobranca_whatsapp',
+        $jornada = ComunicacaoJornada::query()->create([
+            'codigo' => 'cobranca_whatsapp',
+            'nome' => 'Cobrança por WhatsApp',
+            'tipo' => 'cobranca',
+            'ativo' => true,
+            'timezone' => 'America/Belem',
+            'agenda' => ['marcos' => [0], 'hora' => '09:00'],
+        ]);
+        $jornada->canais()->create([
+            'canal' => 'whatsapp',
+            'template_codigo' => 'sierra_cobranca_whatsapp',
+            'ativo' => true,
         ]);
 
-        $this->postJson('/api/v1/financeiro/contas-receber', [
+        $response = $this->postJson('/api/v1/financeiro/contas-receber', [
             'descricao' => 'Teste',
             'numero_documento' => 'DOC-1',
             'data_emissao' => now()->toDateString(),
-            'data_vencimento' => now()->addDays(10)->toDateString(),
+            'data_vencimento' => now('America/Belem')->toDateString(),
             'valor_bruto' => 100,
             'desconto' => 0,
             'juros' => 0,
@@ -141,20 +159,16 @@ class ComunicacaoSierraTest extends TestCase
             'pedido_id' => $pedido->id,
         ])->assertCreated();
 
-        Http::assertSent(function ($request): bool {
-            if ($request->url() !== 'http://api-comunicacao:8002/api/requests') {
-                return false;
-            }
+        $this->assertDatabaseCount('comunicacao_eventos_saida', 0);
+        app(ComunicacaoOutboxService::class)->agendarCobrancasHoje(now('America/Belem'));
 
-            $data = $request->data();
-            $messages = (array) data_get($data, 'payload.messages', []);
-            if (count($messages) === 0) {
-                return false;
-            }
-
-            $channels = array_map(fn ($m) => $m['channel'] ?? null, $messages);
-
-            return in_array('sms', $channels, true) || in_array('whatsapp', $channels, true);
-        });
+        $this->assertDatabaseHas('comunicacao_eventos_saida', [
+            'origem_tipo' => 'conta_receber',
+            'origem_id' => $response->json('data.id'),
+            'evento_codigo' => 'lembrete:0',
+            'canal' => 'whatsapp',
+            'status' => 'pendente',
+        ]);
+        Http::assertNothingSent();
     }
 }

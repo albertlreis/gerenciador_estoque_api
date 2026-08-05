@@ -17,7 +17,6 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Validation\ValidationException;
-use App\Services\Comunicacao\ComunicacaoApiClient;
 use Throwable;
 
 class ContaReceberCommandService
@@ -26,7 +25,6 @@ class ContaReceberCommandService
         private readonly ContaStatusService $statusSvc,
         private readonly FinanceiroLedgerService $ledger,
         private readonly FinanceiroAuditoriaService $audit,
-        private readonly ComunicacaoApiClient $comms,
         private readonly ContaAzulExportDispatchService $contaAzulExports,
         private readonly RecorrenciaFinanceiraService $recorrencias,
     ) {}
@@ -65,15 +63,6 @@ class ContaReceberCommandService
 
             $fresh = $conta->fresh(['pedido.cliente']);
             $this->audit->log('created', $conta, null, $fresh->toArray());
-
-            try {
-                $this->comms->enviarCobranca($fresh);
-            } catch (\Throwable $e) {
-                logger()->warning('[Comunicacao] Falha ao enfileirar cobrança', [
-                    'conta_id' => $fresh->id,
-                    'error' => $e->getMessage(),
-                ]);
-            }
 
             if (! is_array($pagamentoInicial)) {
                 $this->exportarTituloContaAzulBestEffort((int) $fresh->id, 'conta_receber_criada');
@@ -535,15 +524,6 @@ class ContaReceberCommandService
                 'recorrencia' => $serie->fresh()->toArray(),
                 'contas' => collect($contas)->pluck('id')->values()->all(),
             ]);
-
-            try {
-                $this->comms->enviarCobranca($fresh);
-            } catch (Throwable $e) {
-                logger()->warning('[Comunicacao] Falha ao enfileirar cobrança recorrente', [
-                    'conta_id' => $fresh->id,
-                    'error' => $e->getMessage(),
-                ]);
-            }
 
             foreach ($contas as $idx => $conta) {
                 if (is_array($pagamentoInicial) && $idx === 0) {

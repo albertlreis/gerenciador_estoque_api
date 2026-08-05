@@ -6,24 +6,25 @@
     <title>{{ $tituloRoteiro ?? 'Roteiro de consignação' }}</title>
     <style>
         body { font-family: Arial, sans-serif; font-size: 11px; color: #000; }
-        .header, .footer { text-align: center; margin-bottom: 10px; }
+        .header { text-align: center; margin-bottom: 10px; }
         .section { border: 1px solid #000; margin-bottom: 8px; }
         .section-title { background-color: #f3c000; font-weight: bold; padding: 4px; text-transform: uppercase; }
         .section-content table { width: 100%; border-collapse: collapse; }
         .section-content th, .section-content td { border: 1px solid #ccc; padding: 4px; font-size: 10px; vertical-align: top; }
-        .obs { border: 1px solid #000; padding: 5px; min-height: 50px; }
+        .observations-block, .closing-block { page-break-inside: avoid; }
+        .observations-block { margin-top: 10px; }
+        .observations-title { margin-bottom: 2px; }
+        .obs { border: 1px solid #000; padding: 5px; min-height: 32px; }
+        .closing-block { margin-top: 6px; }
         .recebido {
-            margin-top: 10px;
             border: 1px solid #000;
             font-weight: bold;
             text-align: center;
             color: red;
-            min-height: 110px;
-            display: flex;
-            justify-content: center;
-            align-items: flex-end;
-            padding-bottom: 10px;
+            padding: 12px 10px 8px;
         }
+        .recebido-mensagem { margin-bottom: 16px; }
+        .footer { text-align: center; margin-top: 4px; line-height: 1.2; }
         .section-content img { display: block; margin: auto; border: 1px solid #ccc; }
         .muted { color: #666; }
         .nowrap { white-space: nowrap; }
@@ -136,19 +137,21 @@
     </div>
 @endforeach
 
-<div style="margin-top: 10px;"><strong>OBS:</strong></div>
-<div class="obs">{{ $pedido->observacoes ?? '' }}</div>
-
-<div class="recebido">
-    <div>
-        <br><br>RECEBIDO EM PERFEITO ESTADO NO ATO DA ENTREGA.<br><br><br><br>
-        ASS: ________________________________________
-    </div>
+<div class="observations-block">
+    <div class="observations-title"><strong>OBS:</strong></div>
+    <div class="obs">{{ $pedido->observacoes ?? '' }}</div>
 </div>
 
-<div class="footer">
-    Clemente Salheb / Joseane Cunha<br>
-    <strong>Sierra Belém</strong>
+<div class="closing-block">
+    <div class="recebido">
+        <div class="recebido-mensagem">RECEBIDO EM PERFEITO ESTADO NO ATO DA ENTREGA.</div>
+        <div class="assinatura">ASS: ________________________________________</div>
+    </div>
+
+    <div class="footer">
+        Clemente Salheb / Joseane Cunha<br>
+        <strong>Sierra Belém</strong>
+    </div>
 </div>
 </body>
 </html>

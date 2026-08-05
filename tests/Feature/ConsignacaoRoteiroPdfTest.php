@@ -10,6 +10,7 @@ use App\Models\ConsignacaoDevolucao;
 use App\Models\Deposito;
 use App\Models\EstoqueMovimentacao;
 use App\Models\Pedido;
+use App\Models\PedidoItem;
 use App\Models\PedidoStatusHistorico;
 use App\Models\Produto;
 use App\Models\ProdutoEntregaItem;
@@ -18,6 +19,7 @@ use App\Models\ProdutoVariacaoImagem;
 use App\Models\Usuario;
 use App\Http\Controllers\ConsignacaoController;
 use App\Http\Controllers\PedidoController;
+use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\Request;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Storage;
@@ -29,6 +31,7 @@ class ConsignacaoRoteiroPdfTest extends TestCase
     use RefreshDatabase;
 
     private const WEBP_1X1 = 'UklGRiIAAABXRUJQVlA4IBYAAAAwAQCdASoBAAEADsD+JaQAA3AAAAAA';
+    private const PNG_1X1 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
 
     public function test_endpoint_de_consignacao_baixa_com_nome_de_roteiro_de_consignacao(): void
     {
@@ -130,6 +133,56 @@ class ConsignacaoRoteiroPdfTest extends TestCase
         ])->render();
 
         $this->assertStringContainsString('src="data:image/png;base64,aGVsbG8="', $html);
+    }
+
+    public function test_roteiros_com_sete_itens_mantem_encerramento_e_rodape_na_primeira_pagina(): void
+    {
+        [$pedido, $gruposConsignacao, $gruposPedido] = $this->criarCenarioPaginacaoRoteiros(7);
+
+        foreach ([
+            ['exports.roteiro-consignacao', $gruposConsignacao, ['tituloRoteiro' => 'Roteiro de consignação']],
+            ['exports.roteiro-pedido', $gruposPedido, ['geradoEm' => '04/08/2026 14:00']],
+        ] as [$template, $grupos, $dadosAdicionais]) {
+            $dados = array_merge(['pedido' => $pedido, 'grupos' => $grupos], $dadosAdicionais);
+            $html = view($template, $dados)->render();
+
+            $this->assertEncerramentoIndivisivel($html);
+
+            $pdf = Pdf::loadHTML($html)->setPaper('a4');
+            $pdf->render();
+
+            $this->assertSame(
+                1,
+                $pdf->getDomPDF()->getCanvas()->get_page_count(),
+                "O template {$template} criou uma página extra para o cenário equivalente ao pedido 205."
+            );
+        }
+    }
+
+    public function test_roteiros_com_varias_paginas_preservam_encerramento_completo(): void
+    {
+        [$pedido, $gruposConsignacao, $gruposPedido] = $this->criarCenarioPaginacaoRoteiros(24);
+
+        foreach ([
+            ['exports.roteiro-consignacao', $gruposConsignacao, ['tituloRoteiro' => 'Roteiro de devolução']],
+            ['exports.roteiro-pedido', $gruposPedido, ['geradoEm' => '04/08/2026 14:00']],
+        ] as [$template, $grupos, $dadosAdicionais]) {
+            $html = view($template, array_merge([
+                'pedido' => $pedido,
+                'grupos' => $grupos,
+            ], $dadosAdicionais))->render();
+
+            $this->assertEncerramentoIndivisivel($html);
+
+            $pdf = Pdf::loadHTML($html)->setPaper('a4');
+            $pdf->render();
+
+            $this->assertGreaterThan(
+                1,
+                $pdf->getDomPDF()->getCanvas()->get_page_count(),
+                "O cenário de regressão do template {$template} deveria ocupar várias páginas."
+            );
+        }
     }
 
     public function test_roteiro_de_devolucao_omite_item_totalmente_devolvido_e_consignacao_normal_mantem_quantidade_original(): void
@@ -373,6 +426,117 @@ class ConsignacaoRoteiroPdfTest extends TestCase
         );
         $this->assertSame($quantidadeDevolucoesAntes, ConsignacaoDevolucao::query()->count());
         $this->assertSame($quantidadeMovimentacoesAntes, EstoqueMovimentacao::query()->count());
+    }
+
+    private function assertEncerramentoIndivisivel(string $html): void
+    {
+        $this->assertSame(1, substr_count($html, 'Clemente Salheb / Joseane Cunha'));
+        $this->assertStringNotContainsString('position: fixed', $html);
+        $this->assertStringContainsString(
+            '.observations-block, .closing-block { page-break-inside: avoid; }',
+            $html
+        );
+        $this->assertMatchesRegularExpression(
+            '/<div class="closing-block">\s*<div class="recebido">.*?RECEBIDO EM PERFEITO ESTADO.*?<div class="footer">.*?Clemente Salheb \/ Joseane Cunha.*?<strong>Sierra Belém<\/strong>.*?<\/div>\s*<\/div>\s*<\/body>/s',
+            $html
+        );
+    }
+
+    private function criarCenarioPaginacaoRoteiros(int $quantidadeItens): array
+    {
+        [$pedidoId, $primeiraConsignacao, $primeiroDeposito] = $this->criarPedidoConsignado(
+            'pendente',
+            PedidoStatus::CONSIGNADO
+        );
+
+        $pedido = Pedido::findOrFail($pedidoId);
+        $pedido->update([
+            'observacoes' => 'Conferir todas as peças, manter as embalagens identificadas e coletar a assinatura no recebimento.',
+        ]);
+
+        $segundaDeposito = Deposito::create(['nome' => 'Depósito PDF Secundário']);
+        $categoriaId = $primeiraConsignacao->produtoVariacao()->firstOrFail()->produto()->firstOrFail()->id_categoria;
+        $variacoes = collect([$primeiraConsignacao->produtoVariacao()->firstOrFail()]);
+
+        $variacoes->first()->produto()->update([
+            'nome' => 'Mesa lateral decorativa com acabamento artesanal e detalhes naturais',
+            'descricao' => 'Descrição longa para validar a quebra de texto no roteiro de entrega.',
+        ]);
+        $variacoes->first()->update([
+            'referencia' => 'PDF-001-LONGA',
+            'nome' => 'Variação especial para ambiente interno',
+        ]);
+
+        for ($indice = 2; $indice <= $quantidadeItens; $indice++) {
+            $produto = Produto::create([
+                'nome' => "Peça decorativa {$indice} com acabamento artesanal e detalhes naturais",
+                'descricao' => 'Descrição longa para validar a quebra de texto no roteiro de entrega.',
+                'id_categoria' => $categoriaId,
+                'ativo' => true,
+            ]);
+            $variacao = ProdutoVariacao::create([
+                'produto_id' => $produto->id,
+                'referencia' => sprintf('PDF-%03d-LONGA', $indice),
+                'nome' => 'Variação especial para ambiente interno',
+                'preco' => 150 + $indice,
+                'custo' => 90 + $indice,
+            ]);
+            $deposito = $indice <= (int) ceil($quantidadeItens / 2)
+                ? $primeiroDeposito
+                : $segundaDeposito;
+
+            Consignacao::create([
+                'pedido_id' => $pedidoId,
+                'produto_variacao_id' => $variacao->id,
+                'deposito_id' => $deposito->id,
+                'quantidade' => 1,
+                'data_envio' => now()->toDateString(),
+                'prazo_resposta' => now()->addDays(15),
+                'status' => 'pendente',
+            ]);
+            $variacoes->push($variacao);
+        }
+
+        foreach ($variacoes as $indice => $variacao) {
+            $deposito = $indice < (int) ceil($quantidadeItens / 2)
+                ? $primeiroDeposito
+                : $segundaDeposito;
+
+            PedidoItem::create([
+                'id_pedido' => $pedidoId,
+                'id_variacao' => $variacao->id,
+                'id_deposito' => $deposito->id,
+                'quantidade' => 1,
+                'preco_unitario' => 150,
+                'custo_unitario' => 90,
+                'subtotal' => 150,
+                'observacoes' => 'Frágil.',
+            ]);
+        }
+
+        $dataUri = 'data:image/png;base64,' . self::PNG_1X1;
+        $consignacoes = Consignacao::query()
+            ->where('pedido_id', $pedidoId)
+            ->with(['deposito', 'produtoVariacao.produto', 'produtoVariacao.estoquesComLocalizacao.localizacao'])
+            ->get()
+            ->each(fn (Consignacao $item) => $item->setAttribute('pdf_imagem_data_uri', $dataUri));
+        $itensPedido = PedidoItem::query()
+            ->where('id_pedido', $pedidoId)
+            ->with(['variacao.produto', 'variacao.estoquesComLocalizacao.localizacao'])
+            ->get()
+            ->each(fn (PedidoItem $item) => $item->setAttribute('pdf_imagem_data_uri', $dataUri));
+
+        $pedido->load(['cliente.enderecoPrincipal', 'usuario', 'parceiro']);
+
+        return [
+            $pedido,
+            $consignacoes->groupBy(fn (Consignacao $item) => $item->deposito->nome),
+            $itensPedido->groupBy(function (PedidoItem $item) use ($primeiroDeposito, $segundaDeposito) {
+                return (int) $item->id_deposito === (int) $primeiroDeposito->id
+                    ? $primeiroDeposito->nome
+                    : $segundaDeposito->nome;
+            }),
+        ];
     }
 
     private function criarPedidoConsignado(string $statusConsignacao, PedidoStatus $statusPedido, int $quantidade = 1): array

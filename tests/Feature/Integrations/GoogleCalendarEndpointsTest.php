@@ -4,10 +4,13 @@ namespace Tests\Feature\Integrations;
 
 use App\Models\AuditoriaLog;
 use App\Models\Usuario;
+use App\Integrations\GoogleCalendar\Auth\GoogleCalendarOAuthService;
+use App\Integrations\GoogleCalendar\Exceptions\GoogleCalendarException;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Hash;
 use Laravel\Sanctum\Sanctum;
+use Mockery;
 use Tests\TestCase;
 
 class GoogleCalendarEndpointsTest extends TestCase
@@ -33,6 +36,35 @@ class GoogleCalendarEndpointsTest extends TestCase
                 'GOOGLE_CALENDAR_REDIRECT_URI',
             ],
         ]);
+    }
+
+    public function test_oauth_callback_preserves_safe_token_error_reason_without_exposing_details(): void
+    {
+        config()->set('google_calendar.oauth_front_redirect', 'http://front.test/integracoes/google-agenda');
+        $this->app->instance(GoogleCalendarOAuthService::class, Mockery::mock(GoogleCalendarOAuthService::class, function ($mock) {
+            $mock->shouldReceive('exchangeCodeForToken')
+                ->once()
+                ->andThrow(new GoogleCalendarException('invalid_grant: secret details', 'oauth_token_error'));
+        }));
+
+        Cache::put('google_calendar_oauth:state-token-error', ['user_id' => null], now()->addMinutes(10));
+
+        $response = $this->get('/api/v1/integrations/google-calendar/callback?state=state-token-error&code=code');
+
+        $response->assertRedirect();
+        $this->assertStringContainsString('gc=erro', (string) $response->headers->get('Location'));
+        $this->assertStringContainsString('reason=oauth_token_error', (string) $response->headers->get('Location'));
+        $this->assertStringNotContainsString('secret', (string) $response->headers->get('Location'));
+    }
+
+    public function test_oauth_callback_rejects_invalid_state_with_safe_reason(): void
+    {
+        config()->set('google_calendar.oauth_front_redirect', 'http://front.test/integracoes/google-agenda');
+
+        $response = $this->get('/api/v1/integrations/google-calendar/callback?state=unknown&code=code');
+
+        $response->assertRedirect();
+        $this->assertStringContainsString('reason=state_invalido', (string) $response->headers->get('Location'));
     }
 
     public function test_update_event_requires_start_and_end_together(): void

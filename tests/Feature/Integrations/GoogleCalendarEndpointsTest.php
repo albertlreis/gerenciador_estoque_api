@@ -5,7 +5,13 @@ namespace Tests\Feature\Integrations;
 use App\Models\AuditoriaLog;
 use App\Models\Usuario;
 use App\Integrations\GoogleCalendar\Auth\GoogleCalendarOAuthService;
+use App\Integrations\GoogleCalendar\Clients\GoogleCalendarClient;
 use App\Integrations\GoogleCalendar\Exceptions\GoogleCalendarException;
+use App\Integrations\GoogleCalendar\Models\GoogleCalendarCalendar;
+use App\Integrations\GoogleCalendar\Models\GoogleCalendarConexao;
+use App\Integrations\GoogleCalendar\Models\GoogleCalendarToken;
+use App\Integrations\GoogleCalendar\Services\GoogleCalendarConnectionService;
+use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Hash;
@@ -65,6 +71,97 @@ class GoogleCalendarEndpointsTest extends TestCase
 
         $response->assertRedirect();
         $this->assertStringContainsString('reason=state_invalido', (string) $response->headers->get('Location'));
+    }
+
+    public function test_calendar_visibility_is_persisted_and_returned(): void
+    {
+        $this->actingUser(['google_calendar.configurar']);
+        $conexao = GoogleCalendarConexao::create(['status' => 'ativa']);
+        GoogleCalendarCalendar::create([
+            'conexao_id' => $conexao->id,
+            'calendar_id' => 'agenda-privada',
+            'summary' => 'Agenda Privada',
+            'enabled' => true,
+            'access_role' => 'owner',
+        ]);
+
+        $response = $this->patchJson('/api/v1/integrations/google-calendar/calendars/agenda-privada/visibility', [
+            'visibility' => 'private',
+        ]);
+
+        $response->assertOk()->assertJsonPath('data.visibility', 'private');
+        $this->assertDatabaseHas('google_calendar_calendars', [
+            'conexao_id' => $conexao->id,
+            'calendar_id' => 'agenda-privada',
+            'visibility' => 'private',
+        ]);
+    }
+
+    public function test_calendar_visibility_rejects_invalid_values(): void
+    {
+        $this->actingUser(['google_calendar.configurar']);
+
+        $response = $this->patchJson('/api/v1/integrations/google-calendar/calendars/agenda/visibility', [
+            'visibility' => 'google',
+        ]);
+
+        $response->assertStatus(422)->assertJsonValidationErrors(['visibility']);
+    }
+
+    public function test_calendar_visibility_requires_configuration_permission(): void
+    {
+        $this->actingUser([]);
+
+        $response = $this->patchJson('/api/v1/integrations/google-calendar/calendars/agenda/visibility', [
+            'visibility' => 'public',
+        ]);
+
+        $response->assertForbidden();
+    }
+
+    public function test_calendar_sync_defaults_new_calendars_to_private_and_preserves_public_calendars(): void
+    {
+        $conexao = GoogleCalendarConexao::create(['status' => 'ativa']);
+        GoogleCalendarToken::create([
+            'conexao_id' => $conexao->id,
+            'access_token' => 'access-token',
+            'expires_at' => CarbonImmutable::now()->addHour(),
+        ]);
+        GoogleCalendarCalendar::create([
+            'conexao_id' => $conexao->id,
+            'calendar_id' => 'agenda-publica',
+            'summary' => 'Agenda Pública',
+            'enabled' => true,
+            'visibility' => 'public',
+        ]);
+
+        $client = Mockery::mock(GoogleCalendarClient::class);
+        $client->shouldReceive('get')->once()->andReturn([
+            'status' => 200,
+            'body' => null,
+            'json' => ['items' => [
+                ['id' => 'agenda-publica', 'summary' => 'Agenda Pública', 'accessRole' => 'owner'],
+                ['id' => 'agenda-nova', 'summary' => 'Agenda Nova', 'accessRole' => 'reader'],
+            ]],
+        ]);
+
+        $service = new GoogleCalendarConnectionService(
+            config('google_calendar'),
+            Mockery::mock(GoogleCalendarOAuthService::class),
+            $client
+        );
+        $service->syncCalendars($conexao);
+
+        $this->assertDatabaseHas('google_calendar_calendars', [
+            'conexao_id' => $conexao->id,
+            'calendar_id' => 'agenda-publica',
+            'visibility' => 'public',
+        ]);
+        $this->assertDatabaseHas('google_calendar_calendars', [
+            'conexao_id' => $conexao->id,
+            'calendar_id' => 'agenda-nova',
+            'visibility' => 'private',
+        ]);
     }
 
     public function test_update_event_requires_start_and_end_together(): void

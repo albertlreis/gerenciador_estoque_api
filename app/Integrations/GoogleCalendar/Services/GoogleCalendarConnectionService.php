@@ -199,6 +199,10 @@ class GoogleCalendarConnectionService
             'metadata_json' => $item,
         ]);
 
+        if (!$calendar->visibility) {
+            $calendar->visibility = 'private';
+        }
+
         if (!$calendar->exists && (bool) ($item['primary'] ?? false)) {
             $calendar->enabled = true;
         }

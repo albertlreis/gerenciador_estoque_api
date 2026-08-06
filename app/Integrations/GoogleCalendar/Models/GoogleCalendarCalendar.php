@@ -18,6 +18,7 @@ class GoogleCalendarCalendar extends Model
         'access_role',
         'primary',
         'enabled',
+        'visibility',
         'background_color',
         'foreground_color',
         'synced_at',

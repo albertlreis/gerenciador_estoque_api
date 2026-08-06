@@ -77,6 +77,35 @@ class GoogleCalendarController extends Controller
         return $this->setCalendarEnabled($calendarId, false);
     }
 
+    public function updateCalendarVisibility(Request $request, string $calendarId): JsonResponse
+    {
+        if ($response = $this->autorizar('google_calendar.configurar')) {
+            return $response;
+        }
+
+        $payload = $request->validate([
+            'visibility' => ['required', 'string', 'in:public,private'],
+        ]);
+
+        $conexao = $this->connections->latest();
+        if (!$conexao) {
+            return response()->json(['ok' => false, 'mensagem' => 'Conexao Google Agenda nao encontrada.'], 404);
+        }
+
+        $calendar = GoogleCalendarCalendar::query()
+            ->where('conexao_id', $conexao->id)
+            ->where('calendar_id', $calendarId)
+            ->first();
+
+        if (!$calendar) {
+            return response()->json(['ok' => false, 'mensagem' => 'Agenda Google nao encontrada.', 'reason' => 'calendar_not_found'], 404);
+        }
+
+        $calendar->update(['visibility' => $payload['visibility']]);
+
+        return response()->json(['data' => $this->formatCalendar($calendar->fresh())]);
+    }
+
     public function events(Request $request): JsonResponse
     {
         if ($response = $this->autorizar('google_calendar.visualizar')) {
@@ -303,6 +332,7 @@ class GoogleCalendarController extends Controller
             'access_role' => $calendar->access_role,
             'primary' => $calendar->primary,
             'enabled' => $calendar->enabled,
+            'visibility' => $calendar->visibility ?: 'private',
             'writable' => $calendar->isWritable(),
             'background_color' => $calendar->background_color,
             'foreground_color' => $calendar->foreground_color,

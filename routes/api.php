@@ -748,6 +748,8 @@ Route::middleware(['auth:sanctum', 'senha.nao_obrigatoria'])
                 ->where('calendarId', '[^/]+');
             Route::post('calendars/{calendarId}/disable', [GoogleCalendarController::class, 'disableCalendar'])
                 ->where('calendarId', '[^/]+');
+            Route::patch('calendars/{calendarId}/visibility', [GoogleCalendarController::class, 'updateCalendarVisibility'])
+                ->where('calendarId', '[^/]+');
             Route::get('events', [GoogleCalendarController::class, 'events']);
             Route::post('events', [GoogleCalendarController::class, 'store']);
             Route::match(['put', 'patch'], 'events/{eventId}', [GoogleCalendarController::class, 'update'])

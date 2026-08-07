@@ -48,7 +48,7 @@ class GoogleCalendarConnectionService
         $scope = isset($tokenResponse['scope']) ? (string) $tokenResponse['scope'] : null;
         $expiresAt = CarbonImmutable::now()->addSeconds(max(60, $expiresIn));
 
-        return DB::transaction(function () use ($conexao, $access, $refresh, $expiresAt, $scope) {
+        $token = DB::transaction(function () use ($conexao, $access, $refresh, $expiresAt, $scope) {
             $conexao->update([
                 'status' => 'ativa',
                 'ultimo_erro' => null,
@@ -66,6 +66,13 @@ class GoogleCalendarConnectionService
 
             return $token;
         });
+
+        // `latest()` loads the token relation. After reconnecting, that relation
+        // still points to the previous access token unless it is invalidated.
+        // The OAuth callback healthcheck must read the token just persisted.
+        $conexao->unsetRelation('token');
+
+        return $token;
     }
 
     public function getValidAccessToken(GoogleCalendarConexao $conexao): string

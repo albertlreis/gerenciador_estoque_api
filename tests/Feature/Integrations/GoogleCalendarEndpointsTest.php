@@ -119,6 +119,26 @@ class GoogleCalendarEndpointsTest extends TestCase
         $response->assertForbidden();
     }
 
+    public function test_destroy_event_requires_cancel_permission(): void
+    {
+        $this->actingUser([]);
+
+        $response = $this->deleteJson('/api/v1/integrations/google-calendar/events/event-1', [
+            'calendar_id' => 'agenda-1',
+        ]);
+
+        $response->assertForbidden();
+    }
+
+    public function test_destroy_event_requires_calendar_id(): void
+    {
+        $this->actingUser(['google_calendar.cancelar']);
+
+        $response = $this->deleteJson('/api/v1/integrations/google-calendar/events/event-1');
+
+        $response->assertStatus(422)->assertJsonValidationErrors(['calendar_id']);
+    }
+
     public function test_calendar_sync_defaults_new_calendars_to_private_and_preserves_public_calendars(): void
     {
         $conexao = GoogleCalendarConexao::create(['status' => 'ativa']);

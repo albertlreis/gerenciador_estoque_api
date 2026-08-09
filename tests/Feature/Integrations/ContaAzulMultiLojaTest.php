@@ -17,7 +17,18 @@ class ContaAzulMultiLojaTest extends TestCase
 {
     use DatabaseTransactions;
 
-    public function test_crud_inicia_vazio_normaliza_codigo_e_protege_loja_referenciada(): void
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        // Este cenário começa vazio mesmo quando outro teste deixou dados no
+        // banco compartilhado de testes após uma execução interrompida.
+        DB::table('conta_azul_tokens')->delete();
+        DB::table('conta_azul_conexoes')->delete();
+        DB::table('lojas')->delete();
+    }
+
+    public function test_crud_gera_codigo_uuid_sem_hifens_e_protege_loja_referenciada(): void
     {
         $this->actingAsAdministrador();
 
@@ -27,17 +38,19 @@ class ContaAzulMultiLojaTest extends TestCase
             ->assertJsonPath('legacy.isolado', true);
 
         $loja = $this->postJson('/api/v1/integrations/conta-azul/lojas', [
-            'codigo' => 'Loja Centro',
             'nome' => 'Loja Centro',
             'ativo' => true,
         ])->assertCreated()
-            ->assertJsonPath('data.codigo', 'loja-centro')
             ->json('data');
 
-        $this->postJson('/api/v1/integrations/conta-azul/lojas', [
-            'codigo' => 'loja centro',
+        $this->assertMatchesRegularExpression('/^[0-9a-f]{32}$/', $loja['codigo']);
+
+        $segundaLoja = $this->postJson('/api/v1/integrations/conta-azul/lojas', [
             'nome' => 'Duplicada',
-        ])->assertUnprocessable();
+        ])->assertCreated()->json('data');
+
+        $this->assertMatchesRegularExpression('/^[0-9a-f]{32}$/', $segundaLoja['codigo']);
+        $this->assertNotSame($loja['codigo'], $segundaLoja['codigo']);
 
         ContaAzulConexao::create([
             'loja_id' => $loja['id'],
@@ -52,10 +65,12 @@ class ContaAzulMultiLojaTest extends TestCase
             ->assertJsonMissingPath('token');
 
         $this->putJson('/api/v1/integrations/conta-azul/lojas/' . $loja['id'], [
-            'codigo' => 'loja-centro',
-            'nome' => 'Loja Centro',
+            'nome' => 'Loja Centro Renomeada',
             'ativo' => false,
-        ])->assertOk()->assertJsonPath('data.ativo', false);
+        ])->assertOk()
+            ->assertJsonPath('data.ativo', false)
+            ->assertJsonPath('data.codigo', $loja['codigo'])
+            ->assertJsonPath('data.nome', 'Loja Centro Renomeada');
 
         $this->getJson('/api/v1/integrations/conta-azul/oauth/authorize?loja_id=' . $loja['id'])
             ->assertUnprocessable()
@@ -105,6 +120,73 @@ class ContaAzulMultiLojaTest extends TestCase
             ->assertJsonPath('conexao.loja_id', $lojaA->id)
             ->assertJsonMissingPath('access_token')
             ->assertJsonMissingPath('refresh_token');
+    }
+
+    public function test_reconexao_na_mesma_loja_inativa_a_conexao_anterior(): void
+    {
+        $loja = Loja::create(['codigo' => 'loja-reconexao', 'nome' => 'Loja Reconexão']);
+        $service = app(ContaAzulConnectionService::class);
+
+        $primeira = $service->findOrCreateConexao($loja->id);
+        $service->persistTokensFromOAuth($primeira, [
+            'access_token' => 'access-token-primeiro-' . uniqid(),
+            'refresh_token' => 'refresh-token-primeiro-' . uniqid(),
+            'expires_in' => 3600,
+        ]);
+
+        $segunda = ContaAzulConexao::create([
+            'loja_id' => $loja->id,
+            'status' => 'inativa',
+            'ambiente' => 'producao',
+        ]);
+        $service->persistTokensFromOAuth($segunda, [
+            'access_token' => 'access-token-segundo-' . uniqid(),
+            'refresh_token' => 'refresh-token-segundo-' . uniqid(),
+            'expires_in' => 3600,
+        ]);
+
+        $this->assertDatabaseHas('conta_azul_conexoes', [
+            'id' => $primeira->id,
+            'status' => 'inativa',
+        ]);
+        $this->assertDatabaseHas('conta_azul_conexoes', [
+            'id' => $segunda->id,
+            'status' => 'ativa',
+        ]);
+        $this->assertSame($segunda->id, $service->operationalForLoja($loja->id)->id);
+    }
+
+    public function test_staging_financeiro_isolado_por_loja_com_mesmo_identificador_externo(): void
+    {
+        $lojaA = Loja::create(['codigo' => 'loja-staging-a', 'nome' => 'Loja Staging A']);
+        $lojaB = Loja::create(['codigo' => 'loja-staging-b', 'nome' => 'Loja Staging B']);
+        $payload = json_encode(['nome' => 'Conta financeira compartilhada'], JSON_THROW_ON_ERROR);
+
+        foreach ([$lojaA, $lojaB] as $loja) {
+            DB::table('stg_conta_azul_contas_financeiras')->insert([
+                'loja_id' => $loja->id,
+                'identificador_externo' => 'conta-financeira-mesma-id',
+                'payload_json' => $payload,
+                'hash_payload' => hash('sha256', $payload . $loja->id),
+                'status_conciliacao' => 'novo',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+        }
+
+        $this->assertSame(
+            2,
+            DB::table('stg_conta_azul_contas_financeiras')
+                ->where('identificador_externo', 'conta-financeira-mesma-id')
+                ->count()
+        );
+        $this->assertSame(
+            1,
+            DB::table('stg_conta_azul_contas_financeiras')
+                ->where('loja_id', $lojaA->id)
+                ->where('identificador_externo', 'conta-financeira-mesma-id')
+                ->count()
+        );
     }
 
     public function test_conexao_legada_sem_loja_permanece_isolada(): void

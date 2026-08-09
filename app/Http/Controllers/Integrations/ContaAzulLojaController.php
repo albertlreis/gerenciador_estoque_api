@@ -11,7 +11,6 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
-use Illuminate\Validation\Rule;
 
 class ContaAzulLojaController extends Controller
 {
@@ -64,6 +63,7 @@ class ContaAzulLojaController extends Controller
         }
 
         $data = $this->validated($request);
+        $data['codigo'] = $this->generateCodigo();
         $loja = Loja::create($data);
 
         return response()->json(['data' => $this->formatLoja($loja)], 201);
@@ -75,7 +75,7 @@ class ContaAzulLojaController extends Controller
             return $this->forbidden();
         }
 
-        $loja->update($this->validated($request, $loja));
+        $loja->update($this->validated($request));
 
         return response()->json(['data' => $this->formatLoja($loja->fresh())]);
     }
@@ -102,24 +102,23 @@ class ContaAzulLojaController extends Controller
     }
 
     /**
-     * @return array{codigo:string,nome:string,ativo:bool}
+     * @return array{nome:string,ativo:bool}
      */
-    private function validated(Request $request, ?Loja $loja = null): array
+    private function validated(Request $request): array
     {
-        $request->merge([
-            'codigo' => Str::slug((string) $request->input('codigo', '')),
-        ]);
-
         return $request->validate([
-            'codigo' => [
-                'required',
-                'string',
-                'max:80',
-                Rule::unique('lojas', 'codigo')->ignore($loja?->id),
-            ],
             'nome' => ['required', 'string', 'max:190'],
             'ativo' => ['sometimes', 'boolean'],
         ]);
+    }
+
+    private function generateCodigo(): string
+    {
+        do {
+            $codigo = str_replace('-', '', (string) Str::uuid());
+        } while (Loja::query()->where('codigo', $codigo)->exists());
+
+        return $codigo;
     }
 
     /**

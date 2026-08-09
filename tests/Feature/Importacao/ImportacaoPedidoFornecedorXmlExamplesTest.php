@@ -95,6 +95,61 @@ class ImportacaoPedidoFornecedorXmlExamplesTest extends TestCase
         $response->assertJsonPath('dados.itens.0.valor_total_linha', '2469.12');
     }
 
+    public function test_importa_model_como_atributos_tipados_sem_alterar_o_raw(): void
+    {
+        $usuario = Usuario::create([
+            'nome' => 'Usuario XML Acabamentos',
+            'email' => 'xml-acabamentos@example.com',
+            'senha' => 'teste',
+            'ativo' => 1,
+        ]);
+        $modelo = 'AC25#E-13233 - OFF WHITE#MESMA COR DO TECIDO#I-24604';
+        $path = $this->tempXmlPath(<<<XML
+<?xml version="1.0" encoding="utf-8"?>
+<LISTING>
+  <NUMERO_PEDIDO>ACAB-001</NUMERO_PEDIDO>
+  <ITEMS>
+    <ITEM DESCRIPTION="CAMA DAMIANI KING" QUANTITY="1" PRICE="13913.62">
+      <REFERENCES>
+        <CODE REFERENCE="3545K"/>
+        <MODEL REFERENCE="{$modelo}"/>
+      </REFERENCES>
+    </ITEM>
+  </ITEMS>
+</LISTING>
+XML);
+        $file = new UploadedFile($path, 'acabamentos.xml', 'application/xml', null, true);
+
+        try {
+            $response = $this->actingAs($usuario, 'sanctum')
+                ->post('/api/v1/pedidos/import', [
+                    'tipo_importacao' => 'PRODUTOS_XML_FORNECEDORES',
+                    'arquivo' => $file,
+                ]);
+        } finally {
+            @unlink($path);
+        }
+
+        $response->assertStatus(200);
+        foreach (['atributos', 'atributos_detectados'] as $campo) {
+            $response->assertJsonMissingPath("dados.itens.0.{$campo}.acabamentos");
+            $response->assertJsonPath("dados.itens.0.{$campo}.madeira", 'AC25');
+            $response->assertJsonPath("dados.itens.0.{$campo}.tecido_1", 'E-13233 - OFF WHITE');
+            $response->assertJsonPath("dados.itens.0.{$campo}.tecido_2", 'I-24604');
+        }
+        $esperados = [
+            ['atributo' => 'madeira', 'valor' => 'AC25'],
+            ['atributo' => 'tecido_1', 'valor' => 'E-13233 - OFF WHITE'],
+            ['atributo' => 'tecido_2', 'valor' => 'MESMA COR DO TECIDO'],
+            ['atributo' => 'tecido_2', 'valor' => 'I-24604'],
+        ];
+        foreach (['atributos_lista', 'atributos_detectados_lista'] as $campo) {
+            $response->assertJsonPath("dados.itens.0.{$campo}", $esperados);
+        }
+        $response->assertJsonPath('dados.itens.0.atributos_raw.0.nome', 'modelo_referencia');
+        $response->assertJsonPath('dados.itens.0.atributos_raw.0.valor', $modelo);
+    }
+
     public function test_rejeita_tipo_de_importacao_nao_suportado(): void
     {
         $usuario = Usuario::create([

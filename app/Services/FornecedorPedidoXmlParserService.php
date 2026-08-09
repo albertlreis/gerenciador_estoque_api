@@ -13,6 +13,11 @@ use InvalidArgumentException;
  */
 class FornecedorPedidoXmlParserService
 {
+    public function __construct(
+        private readonly FornecedorModeloAtributosService $modeloAtributos
+    ) {
+    }
+
     /**
      * Extrai dados do XML LISTING no contrato esperado pelo preview de pedidos.
      *
@@ -101,10 +106,8 @@ class FornecedorPedidoXmlParserService
             $modelo = $this->texto($xpath, './REFERENCES/MODEL/@REFERENCE', $item);
             $valorTotal = $quantidade * $preco;
 
-            $atributos = [];
-            if ($modelo) {
-                $atributos['modelo_referencia'] = $modelo;
-            }
+            $atributosLista = $this->modeloAtributos->classificar($modelo);
+            $atributos = $this->modeloAtributos->comoMapa($atributosLista);
 
             $resultado[] = [
                 'linha' => $index + 1,
@@ -121,6 +124,9 @@ class FornecedorPedidoXmlParserService
                 'valor_total' => (string) $valorTotal,
                 'valor_total_linha' => (string) $valorTotal,
                 'atributos' => $atributos,
+                'atributos_lista' => $atributosLista,
+                'atributos_detectados' => $atributos,
+                'atributos_detectados_lista' => $atributosLista,
                 'atributos_raw' => $modelo ? [['nome' => 'modelo_referencia', 'valor' => $modelo]] : [],
             ];
         }

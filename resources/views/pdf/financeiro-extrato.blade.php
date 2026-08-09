@@ -40,6 +40,7 @@
 </head>
 <body>
 @php($contaDados = $conta_dados ?? [])
+@php($saldoFinal = $resumo['saldo_apos_periodo'] ?? $resumo['saldo_realizado'])
 <div class="header">
     <span class="title">Relatório de extrato</span>
     <span class="period">{{ $periodo['inicio'] }} a {{ $periodo['fim'] }}</span>
@@ -62,7 +63,7 @@
                     <div class="summary-row"><span>Despesas Em Aberto (R$)</span><strong>{{ number_format($resumo['despesas_abertas'], 2, ',', '.') }}</strong></div>
                     <div class="summary-row"><span>Despesas Realizadas (R$)</span><strong>{{ number_format($resumo['despesas_realizadas'], 2, ',', '.') }}</strong></div>
                     <div class="summary-row"><span>Totais do Período (R$)</span><strong>{{ number_format($resumo['total_periodo'], 2, ',', '.') }}</strong></div>
-                    <div class="summary-row"><span>Saldo Final (R$)</span><strong>{{ number_format($resumo['saldo_realizado'], 2, ',', '.') }}</strong></div>
+                    <div class="summary-row"><span>Saldo Final (R$)</span><strong>{{ number_format($saldoFinal, 2, ',', '.') }}</strong></div>
                 </div>
             </td>
         </tr>
@@ -118,7 +119,7 @@
         </td>
         <td class="right">Desconsiderados<br><strong>R$ {{ number_format($resumo['desconsiderados'], 2, ',', '.') }}</strong></td>
         <td class="right">Perdidos<br><strong>R$ {{ number_format($resumo['perdidos'], 2, ',', '.') }}</strong></td>
-        <td class="right">Saldo Realizado<br><strong>R$ {{ number_format($resumo['saldo_realizado'], 2, ',', '.') }}</strong></td>
+        <td class="right">Saldo Final<br><strong>R$ {{ number_format($saldoFinal, 2, ',', '.') }}</strong></td>
     </tr>
 </table>
 

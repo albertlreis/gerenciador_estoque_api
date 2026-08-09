@@ -20,6 +20,8 @@ class FinanceiroExtratoExport implements FromArray, WithTitle
         $contaDados = $this->dados['conta_dados'] ?? [];
         $periodo = $this->dados['periodo'];
         $resumo = $this->dados['resumo'];
+        $saldoInicial = $resumo['saldo_antes_periodo'] ?? $resumo['saldo_inicial'];
+        $saldoFinal = $resumo['saldo_apos_periodo'] ?? $resumo['saldo_realizado'];
 
         $rows = [
             ['Relatorio de extrato'],
@@ -31,12 +33,12 @@ class FinanceiroExtratoExport implements FromArray, WithTitle
             ['Periodo', "{$periodo['inicio']} a {$periodo['fim']}"],
             [],
             ['Resumo'],
-            ['Saldo inicial', $resumo['saldo_inicial']],
+            ['Saldo inicial', $saldoInicial],
             ['Receitas realizadas', $resumo['receitas_realizadas']],
             ['Despesas realizadas', $resumo['despesas_realizadas']],
             ['Total do periodo', $resumo['total_periodo']],
             ['Cancelados', $resumo['perdidos']],
-            ['Saldo final do periodo', $resumo['saldo_realizado']],
+            ['Saldo final do periodo', $saldoFinal],
             [],
             ['Data', 'Descricao', 'Cliente/Fornecedor', 'Situacao', 'Categoria', 'Valor', 'Saldo'],
         ];

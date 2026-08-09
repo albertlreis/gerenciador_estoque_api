@@ -49,12 +49,8 @@ class FinanceiroExtratoService
             ContaReceberPagamento::class => ['conta.pedido.cliente'],
         ]);
 
-        $saldo = $saldoInicial;
-        $linhas = $lancamentos->map(function (LancamentoFinanceiro $l) use (&$saldo) {
+        $linhas = $lancamentos->map(function (LancamentoFinanceiro $l) {
             $valor = $this->signedValue($l);
-            if (($l->status?->value ?? $l->status) === LancamentoStatus::CONFIRMADO->value) {
-                $saldo += $valor;
-            }
 
             return [
                 'data' => optional($l->data_movimento)->format('d/m/Y'),
@@ -63,7 +59,6 @@ class FinanceiroExtratoService
                 'situacao' => $this->statusLabel($l),
                 'categoria' => $l->categoria?->nome ?: $this->categoriaFallback($l),
                 'valor' => $valor,
-                'saldo' => $saldo,
                 'cancelado' => ($l->status?->value ?? $l->status) === LancamentoStatus::CANCELADO->value,
             ];
         });
@@ -72,14 +67,26 @@ class FinanceiroExtratoService
         $despesasRealizadas = abs($linhas->where('valor', '<', 0)->where('cancelado', false)->sum('valor'));
         $totalPeriodo = $receitasRealizadas - $despesasRealizadas;
         $cancelados = abs($linhas->where('cancelado', true)->sum('valor'));
+        $saldoFinalLivro = $saldoInicial + $totalPeriodo;
         $saldosPeriodo = $this->saldosPeriodo(
             conta: $conta,
             inicio: $inicio,
             fim: $fim,
             totalPeriodo: $totalPeriodo,
             saldoInicialLivro: $saldoInicial,
-            saldoFinalLivro: $saldo
+            saldoFinalLivro: $saldoFinalLivro
         );
+        $saldoPeriodo = (float) $saldosPeriodo['saldo_antes_periodo'];
+        $linhas = $linhas->map(function (array $linha) use (&$saldoPeriodo) {
+            if (! $linha['cancelado']) {
+                $saldoPeriodo += $linha['valor'];
+            }
+
+            return [
+                ...$linha,
+                'saldo' => $saldoPeriodo,
+            ];
+        });
 
         return [
             'empresa' => [
@@ -103,7 +110,7 @@ class FinanceiroExtratoService
                 'total_periodo' => $totalPeriodo,
                 'desconsiderados' => 0,
                 'perdidos' => $cancelados,
-                'saldo_realizado' => $saldo,
+                'saldo_realizado' => $saldoFinalLivro,
                 'saldo_inicial' => $saldoInicial,
                 ...$saldosPeriodo,
             ],

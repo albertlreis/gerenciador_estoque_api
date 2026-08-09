@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\DTOs\FiltroLancamentoFinanceiroDTO;
 use App\Exports\ContasPagarExport;
 use App\Exports\ContasReceberExport;
+use App\Exports\FinanceiroExtratoExport;
 use App\Models\Cliente;
 use App\Models\ContaFinanceira;
 use App\Models\ContaPagar;
@@ -16,6 +17,7 @@ use App\Models\LancamentoFinanceiro;
 use App\Models\Pedido;
 use App\Models\Usuario;
 use App\Services\LancamentoFinanceiroService;
+use App\Services\FinanceiroExtratoService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 use Maatwebsite\Excel\Concerns\ShouldAutoSize;
@@ -699,6 +701,90 @@ class FinanceiroExportsTest extends TestCase
             ->assertHeader('content-disposition');
     }
 
+    public function test_extrato_pdf_e_excel_usam_saldo_projetado_da_conta_como_saldo_final(): void
+    {
+        $conta = ContaFinanceira::create([
+            'nome' => 'Banco do Brasil',
+            'tipo' => 'banco',
+            'moeda' => 'BRL',
+            'ativo' => true,
+            'padrao' => false,
+            'saldo_inicial' => 6347178.90,
+            'saldo_atual' => 1234.56,
+            'saldo_atual_em' => '2026-08-07 12:00:00',
+        ]);
+
+        $dados = app(FinanceiroExtratoService::class)->montar([
+            'conta_id' => $conta->id,
+            'data_inicio' => '2026-08-01',
+            'data_fim' => '2026-08-07',
+        ]);
+
+        $this->assertSame(6347178.90, $dados['resumo']['saldo_realizado']);
+        $this->assertSame(1234.56, $dados['resumo']['saldo_apos_periodo']);
+
+        $html = view('pdf.financeiro-extrato', $dados)->render();
+
+        $this->assertSame(2, substr_count($html, '1.234,56'));
+        $this->assertStringNotContainsString('6.347.178,90', $html);
+
+        $linhasExcel = collect((new FinanceiroExtratoExport($dados))->array());
+        $saldoInicialExcel = $linhasExcel->first(fn (array $linha) => ($linha[0] ?? null) === 'Saldo inicial');
+        $saldoFinalExcel = $linhasExcel->first(fn (array $linha) => ($linha[0] ?? null) === 'Saldo final do periodo');
+
+        $this->assertSame(['Saldo inicial', 1234.56], $saldoInicialExcel);
+        $this->assertSame(['Saldo final do periodo', 1234.56], $saldoFinalExcel);
+    }
+
+    public function test_extrato_recalcula_saldos_das_linhas_a_partir_do_saldo_antes_do_periodo(): void
+    {
+        $conta = ContaFinanceira::create([
+            'nome' => 'Conta com saldo conciliado',
+            'tipo' => 'banco',
+            'moeda' => 'BRL',
+            'ativo' => true,
+            'padrao' => false,
+            'saldo_inicial' => 999999,
+            'saldo_atual' => 1000,
+            'saldo_atual_em' => '2026-06-19 23:59:59',
+        ]);
+
+        LancamentoFinanceiro::create([
+            'descricao' => 'Receita no periodo',
+            'tipo' => 'receita',
+            'status' => 'confirmado',
+            'conta_id' => $conta->id,
+            'valor' => 100,
+            'data_movimento' => '2026-06-17 10:00:00',
+        ]);
+        LancamentoFinanceiro::create([
+            'descricao' => 'Despesa no periodo',
+            'tipo' => 'despesa',
+            'status' => 'confirmado',
+            'conta_id' => $conta->id,
+            'valor' => 40,
+            'data_movimento' => '2026-06-18 10:00:00',
+        ]);
+        LancamentoFinanceiro::create([
+            'descricao' => 'Despesa cancelada',
+            'tipo' => 'despesa',
+            'status' => 'cancelado',
+            'conta_id' => $conta->id,
+            'valor' => 500,
+            'data_movimento' => '2026-06-19 10:00:00',
+        ]);
+
+        $dados = app(FinanceiroExtratoService::class)->montar([
+            'conta_id' => $conta->id,
+            'data_inicio' => '2026-06-17',
+            'data_fim' => '2026-06-19',
+        ]);
+
+        $this->assertSame(940.0, $dados['resumo']['saldo_antes_periodo']);
+        $this->assertSame(1000.0, $dados['resumo']['saldo_apos_periodo']);
+        $this->assertSame([1040.0, 1000.0, 1000.0], $dados['linhas']->pluck('saldo')->all());
+    }
+
     public function test_extrato_json_retorna_conta_periodo_resumo_e_linhas(): void
     {
         $conta = ContaFinanceira::create([
@@ -969,4 +1055,3 @@ class FinanceiroExportsTest extends TestCase
             ->assertHeader('content-disposition');
     }
 }
-

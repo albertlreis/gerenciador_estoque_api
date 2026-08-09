@@ -21,6 +21,7 @@ use App\Models\ContaFinanceira;
 use App\Models\ContaReceber;
 use App\Models\ContaReceberPagamento;
 use App\Models\LancamentoFinanceiro;
+use App\Models\Loja;
 use App\Services\AuditoriaLogService;
 use App\Services\ContaReceberCommandService;
 use Illuminate\Http\Exceptions\HttpResponseException;
@@ -47,6 +48,9 @@ class ContaReceberContaAzulExportTest extends TestCase
 
     /** @var array<int, int> */
     private array $conexaoIds = [];
+
+    /** @var array<int, int> */
+    private array $lojaIds = [];
 
     protected function tearDown(): void
     {
@@ -111,6 +115,10 @@ class ContaReceberContaAzulExportTest extends TestCase
             ContaAzulConexao::query()
                 ->whereIn('id', $this->conexaoIds)
                 ->delete();
+        }
+
+        if ($this->lojaIds !== []) {
+            Loja::query()->whereIn('id', $this->lojaIds)->delete();
         }
 
         Mockery::close();
@@ -526,7 +534,7 @@ class ContaReceberContaAzulExportTest extends TestCase
         ]);
 
         $connections = Mockery::mock(ContaAzulConnectionService::class);
-        $connections->shouldReceive('latestForLoja')
+        $connections->shouldReceive('operationalForLoja')
             ->once()
             ->with(null)
             ->andReturn($conexao);
@@ -597,7 +605,14 @@ class ContaReceberContaAzulExportTest extends TestCase
 
     private function criarConexaoContaAzul(): ContaAzulConexao
     {
+        $loja = Loja::create([
+            'codigo' => 'receber-' . uniqid(),
+            'nome' => 'Loja Conta Receber',
+        ]);
+        $this->lojaIds[] = (int) $loja->id;
+
         $conexao = ContaAzulConexao::create([
+            'loja_id' => $loja->id,
             'status' => 'ativa',
             'ambiente' => 'homologacao',
         ]);

@@ -8,6 +8,7 @@ use App\Integrations\ContaAzul\Exceptions\ContaAzulException;
 use App\Integrations\ContaAzul\Models\ContaAzulConexao;
 use App\Integrations\ContaAzul\Models\ContaAzulToken;
 use App\Integrations\ContaAzul\Services\ContaAzulConnectionService;
+use App\Models\Loja;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -30,8 +31,9 @@ class ContaAzulConnectionServiceManualTokenTest extends TestCase
             ]);
 
         $service = new ContaAzulConnectionService(config('conta_azul'), $oauth, $client);
+        $loja = Loja::create(['codigo' => 'manual-1', 'nome' => 'Loja Manual 1']);
 
-        $conexao = $service->persistManualTokens(null, [
+        $conexao = $service->persistManualTokens($loja->id, [
             'ambiente' => 'homologacao',
             'access_token' => 'manual-access-token-1234567890',
             'refresh_token' => 'manual-refresh-token-1234567890',
@@ -66,8 +68,10 @@ class ContaAzulConnectionServiceManualTokenTest extends TestCase
             ]);
 
         $service = new ContaAzulConnectionService(config('conta_azul'), $oauth, $client);
+        $loja = Loja::create(['codigo' => 'manual-2', 'nome' => 'Loja Manual 2']);
 
         $conexao = ContaAzulConexao::create([
+            'loja_id' => $loja->id,
             'status' => 'erro',
             'ambiente' => 'producao',
             'nome_externo' => 'Conexão antiga',
@@ -80,7 +84,7 @@ class ContaAzulConnectionServiceManualTokenTest extends TestCase
             'expires_at' => CarbonImmutable::now()->addHour(),
         ]);
 
-        $atualizada = $service->persistManualTokens(null, [
+        $atualizada = $service->persistManualTokens($loja->id, [
             'ambiente' => 'producao',
             'access_token' => 'token-novo-1234567890',
             'refresh_token' => 'refresh-novo-1234567890',
@@ -107,9 +111,10 @@ class ContaAzulConnectionServiceManualTokenTest extends TestCase
             ]);
 
         $service = new ContaAzulConnectionService(config('conta_azul'), $oauth, $client);
+        $loja = Loja::create(['codigo' => 'manual-3', 'nome' => 'Loja Manual 3']);
 
-        $conexao = $service->persistManualTokens(999, [
-            'loja_id' => 999,
+        $conexao = $service->persistManualTokens($loja->id, [
+            'loja_id' => $loja->id,
             'ambiente' => 'homologacao',
             'access_token' => 'manual-access-token-1234567890',
             'expires_in' => 900,
@@ -137,9 +142,10 @@ class ContaAzulConnectionServiceManualTokenTest extends TestCase
             ]);
 
         $service = new ContaAzulConnectionService(config('conta_azul'), $oauth, $client);
+        $loja = Loja::create(['codigo' => 'manual-4', 'nome' => 'Loja Manual 4']);
 
         try {
-            $service->persistManualTokens(null, [
+            $service->persistManualTokens($loja->id, [
                 'ambiente' => 'homologacao',
                 'access_token' => 'manual-access-token-1234567890',
                 'refresh_token' => 'manual-refresh-token-1234567890',

@@ -13,6 +13,7 @@ use App\Integrations\ContaAzul\Services\ContaAzulConnectionService;
 use App\Integrations\ContaAzul\Services\ExportacaoContaAzulService;
 use App\Models\Cliente;
 use App\Models\ContaReceber;
+use App\Models\Loja;
 use App\Models\Usuario;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
@@ -249,7 +250,12 @@ class ContaAzulCobrancaBoletoTest extends TestCase
 
     private function criarConexaoAtiva(): ContaAzulConexao
     {
+        $loja = Loja::create([
+            'codigo' => 'boleto-' . uniqid(),
+            'nome' => 'Loja Boleto Conta Azul',
+        ]);
         $conexao = ContaAzulConexao::create([
+            'loja_id' => $loja->id,
             'status' => 'ativa',
             'ambiente' => 'producao',
         ]);

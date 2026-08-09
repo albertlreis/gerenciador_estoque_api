@@ -21,7 +21,7 @@ class ContaAzulFinanceiroAutoImportCommandTest extends TestCase
         config(['conta_azul.auto_finance_import.enabled' => false]);
 
         $this->mock(ContaAzulConnectionService::class)
-            ->shouldNotReceive('latestForLoja');
+            ->shouldNotReceive('operationalForLoja');
         $this->mock(ImportacaoContaAzulService::class)
             ->shouldNotReceive('importarParaStaging');
 
@@ -49,7 +49,7 @@ class ContaAzulFinanceiroAutoImportCommandTest extends TestCase
         ]);
 
         $connections = $this->mock(ContaAzulConnectionService::class);
-        $connections->shouldReceive('latestForLoja')
+        $connections->shouldReceive('operationalForLoja')
             ->once()
             ->with(null)
             ->andReturn($conexao);

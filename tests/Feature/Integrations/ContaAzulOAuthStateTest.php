@@ -9,6 +9,8 @@ use App\Models\Loja;
 use App\Models\Usuario;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Laravel\Sanctum\Sanctum;
 use Mockery;
 use Tests\TestCase;
@@ -102,9 +104,58 @@ class ContaAzulOAuthStateTest extends TestCase
         ]);
 
         Sanctum::actingAs($usuario);
+        $this->grantAcesso($usuario, 'Administrador', 'conta_azul.configurar');
         Cache::put('perfis_usuario_' . $usuario->id, ['Administrador'], now()->addHour());
         Cache::put('permissoes_usuario_' . $usuario->id, ['conta_azul.configurar'], now()->addHour());
 
         return [$loja, $usuario];
+    }
+
+    private function grantAcesso(Usuario $usuario, string $perfilNome, string $permissaoSlug): void
+    {
+        if (! Schema::hasTable('acesso_perfis')
+            || ! Schema::hasTable('acesso_permissoes')
+            || ! Schema::hasTable('acesso_usuario_perfil')
+            || ! Schema::hasTable('acesso_perfil_permissao')) {
+            return;
+        }
+
+        DB::table('acesso_perfis')->updateOrInsert(
+            ['nome' => $perfilNome],
+            ['descricao' => null, 'updated_at' => now()]
+        );
+        $perfilId = DB::table('acesso_perfis')->where('nome', $perfilNome)->value('id');
+
+        $permissaoValues = [];
+        if (Schema::hasColumn('acesso_permissoes', 'nome')) {
+            $permissaoValues['nome'] = $permissaoSlug;
+        }
+        if (Schema::hasColumn('acesso_permissoes', 'descricao')) {
+            $permissaoValues['descricao'] = null;
+        }
+        if (Schema::hasColumn('acesso_permissoes', 'updated_at')) {
+            $permissaoValues['updated_at'] = now();
+        }
+
+        DB::table('acesso_permissoes')->updateOrInsert(
+            ['slug' => $permissaoSlug],
+            $permissaoValues
+        );
+        $permissaoId = DB::table('acesso_permissoes')->where('slug', $permissaoSlug)->value('id');
+
+        $pivotValues = Schema::hasColumn('acesso_usuario_perfil', 'updated_at')
+            ? ['updated_at' => now()]
+            : [];
+        DB::table('acesso_usuario_perfil')->updateOrInsert([
+            'id_usuario' => $usuario->id,
+            'id_perfil' => $perfilId,
+        ], $pivotValues);
+        $pivotValues = Schema::hasColumn('acesso_perfil_permissao', 'updated_at')
+            ? ['updated_at' => now()]
+            : [];
+        DB::table('acesso_perfil_permissao')->updateOrInsert([
+            'id_perfil' => $perfilId,
+            'id_permissao' => $permissaoId,
+        ], $pivotValues);
     }
 }

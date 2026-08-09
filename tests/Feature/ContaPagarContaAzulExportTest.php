@@ -21,6 +21,7 @@ use App\Models\ContaPagar;
 use App\Models\ContaPagarPagamento;
 use App\Models\Fornecedor;
 use App\Models\LancamentoFinanceiro;
+use App\Models\Loja;
 use App\Services\ContaPagarCommandService;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Support\Facades\Artisan;
@@ -47,6 +48,9 @@ class ContaPagarContaAzulExportTest extends TestCase
 
     /** @var array<int, int> */
     private array $conexaoIds = [];
+
+    /** @var array<int, int> */
+    private array $lojaIds = [];
 
     /** @var array<int, int> */
     private array $categoriaIds = [];
@@ -124,6 +128,10 @@ class ContaPagarContaAzulExportTest extends TestCase
             ContaAzulConexao::query()
                 ->whereIn('id', $this->conexaoIds)
                 ->delete();
+        }
+
+        if ($this->lojaIds !== []) {
+            Loja::query()->whereIn('id', $this->lojaIds)->delete();
         }
 
         Mockery::close();
@@ -564,7 +572,14 @@ class ContaPagarContaAzulExportTest extends TestCase
 
     private function criarConexaoContaAzul(): ContaAzulConexao
     {
+        $loja = Loja::create([
+            'codigo' => 'pagar-' . uniqid(),
+            'nome' => 'Loja Conta Pagar',
+        ]);
+        $this->lojaIds[] = (int) $loja->id;
+
         $conexao = ContaAzulConexao::create([
+            'loja_id' => $loja->id,
             'status' => 'ativa',
             'ambiente' => 'homologacao',
         ]);

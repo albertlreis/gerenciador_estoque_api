@@ -40,9 +40,11 @@ use Illuminate\Http\Response;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
  * Controlador responsável por operações relacionadas a pedidos.
@@ -251,6 +253,28 @@ class PedidoController extends Controller
     }
 
     /**
+     * Download do XML original de uma importaÃ§Ã£o de pedido.
+     */
+    public function downloadImportacaoXml(PedidoImportacao $importacao): BinaryFileResponse|StreamedResponse|JsonResponse
+    {
+        if (!AuthHelper::hasPermissao('pedidos.importar_pdf')) {
+            return response()->json(['message' => 'Sem permissÃ£o para baixar XML de importaÃ§Ã£o.'], 403);
+        }
+
+        $disk = Storage::disk('local');
+        if (!$importacao->arquivo_path || !$disk->exists($importacao->arquivo_path)) {
+            return response()->json(['message' => 'XML original nÃ£o encontrado para esta importaÃ§Ã£o.'], 404);
+        }
+
+        $nome = preg_replace('/[\\x00-\\x1F\\x7F]+/u', '_', (string) ($importacao->arquivo_nome ?: "importacao_{$importacao->id}.xml"));
+        $nome = trim(basename($nome ?: "importacao_{$importacao->id}.xml"));
+
+        return $disk->download($importacao->arquivo_path, $nome, [
+            'Content-Type' => 'application/xml',
+        ]);
+    }
+
+    /**
      * Exporta pedidos em PDF ou Excel.
      *
      * @param Request $request
@@ -341,9 +365,36 @@ class PedidoController extends Controller
             ], 422);
         }
 
+        $importacao = null;
+        $hash = null;
+
         try {
             $arquivo = $request->file('arquivo');
             $tipoImportacaoSolicitado = $tipoImportacao;
+
+            $hashArquivo = hash_file('sha256', $arquivo->getRealPath());
+            $hash = hash('sha256', $hashArquivo . '|' . $tipoImportacao . '|' . Str::uuid());
+
+            $importacao = PedidoImportacao::create([
+                'arquivo_hash' => $hash,
+                'arquivo_nome' => $arquivo->getClientOriginalName(),
+                'arquivo_hash_conteudo' => $hashArquivo,
+                'arquivo_tamanho' => $arquivo->getSize(),
+                'arquivo_mime' => $arquivo->getMimeType() ?: $arquivo->getClientMimeType(),
+                'usuario_id' => auth()->id(),
+                'status' => 'processando',
+            ]);
+
+            $disk = Storage::disk('local');
+            $arquivoPath = "pedido-importacoes/{$importacao->id}";
+            if (!$disk->putFileAs($arquivoPath, $arquivo, 'original.xml')) {
+                throw new \RuntimeException('NÃ£o foi possÃ­vel salvar o XML original.');
+            }
+
+            $importacao->forceFill([
+                'arquivo_path' => "{$arquivoPath}/original.xml",
+                'arquivo_salvo_at' => now(),
+            ])->save();
             $tipoDetectado = $this->detectarTipoImportacaoXml($arquivo->getRealPath());
 
             if ($tipoDetectado !== null && $tipoDetectado !== $tipoImportacao) {
@@ -363,8 +414,6 @@ class PedidoController extends Controller
             // - A mesma importação (mesmo arquivo) deve poder ser reprocessada N vezes.
             // - Mantemos o hash do conteúdo apenas para log/telemetria, mas o identificador da importação
             //   precisa ser único por tentativa (sem travas por hash/nome).
-            $hash = hash('sha256', $hashArquivo . '|' . $tipoImportacao . '|' . Str::uuid());
-
             SierraLog::inventory('inventory.order_import.started', [
                 'request_id' => $requestId,
                 'etapa' => 'upload',
@@ -393,6 +442,10 @@ class PedidoController extends Controller
                 $temPedidoMinimo = $this->temPedidoMinimo($pedido, $totais);
                 if (!$temPedidoMinimo) {
                     $nomeArquivo = $arquivo->getClientOriginalName();
+                    $importacao->forceFill([
+                        'status' => 'erro',
+                        'erro' => 'Dados mÃ­nimos do pedido nÃ£o identificados.',
+                    ])->save();
                     SierraLog::inventory('inventory.order_import.minimum_data_missing', [
                         'request_id' => $requestId,
                         'tipo_importacao' => $tipoImportacao,
@@ -484,15 +537,12 @@ class PedidoController extends Controller
                 'debug_motivo_itens_zero' => $dados['debug_motivo_itens_zero'] ?? null,
             ];
 
-            $importacao = PedidoImportacao::create([
-                'arquivo_hash' => $hash,
-                'arquivo_nome' => $arquivo->getClientOriginalName(),
+            $importacao->forceFill([
                 'numero_externo' => null,
-                'usuario_id' => auth()->id(),
                 'status' => 'extraido',
                 'dados_json' => $payload,
                 'erro' => null,
-            ]);
+            ])->save();
 
             SierraLog::inventory('inventory.order_import.extraction_finished', [
                 'request_id' => $requestId,
@@ -514,6 +564,10 @@ class PedidoController extends Controller
                 'dados' => $payload,
             ]);
         } catch (\InvalidArgumentException $e) {
+            if ($importacao) {
+                $importacao->forceFill(['status' => 'erro', 'erro' => $e->getMessage()])->save();
+            }
+
             SierraLog::inventory('inventory.order_import.parse_failed', [
                 'request_id' => $requestId,
                 'tipo_importacao' => $tipoImportacao,
@@ -529,13 +583,17 @@ class PedidoController extends Controller
                 ? $hash
                 : hash('sha256', ($request->file('arquivo')?->getClientOriginalName() ?? uniqid()) . '|' . $tipoImportacao . '|' . Str::uuid());
 
-            PedidoImportacao::create([
-                'arquivo_hash' => $hashErro,
-                'arquivo_nome' => $request->file('arquivo')?->getClientOriginalName(),
-                'usuario_id' => auth()->id(),
-                'status' => 'erro',
-                'erro' => $e->getMessage(),
-            ]);
+            if ($importacao) {
+                $importacao->forceFill(['status' => 'erro', 'erro' => $e->getMessage()])->save();
+            } else {
+                PedidoImportacao::create([
+                    'arquivo_hash' => $hashErro,
+                    'arquivo_nome' => $request->file('arquivo')?->getClientOriginalName(),
+                    'usuario_id' => auth()->id(),
+                    'status' => 'erro',
+                    'erro' => $e->getMessage(),
+                ]);
+            }
 
             SierraLog::inventory('inventory.order_import.process_failed', [
                 'request_id' => $requestId,

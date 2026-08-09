@@ -13,6 +13,11 @@ class PedidoImportacao extends Model
     protected $fillable = [
         'arquivo_nome',
         'arquivo_hash',
+        'arquivo_path',
+        'arquivo_hash_conteudo',
+        'arquivo_tamanho',
+        'arquivo_mime',
+        'arquivo_salvo_at',
         'numero_externo',
         'pedido_id',
         'usuario_id',
@@ -23,6 +28,8 @@ class PedidoImportacao extends Model
 
     protected $casts = [
         'dados_json' => 'array',
+        'arquivo_tamanho' => 'integer',
+        'arquivo_salvo_at' => 'datetime',
     ];
 
     public function pedido(): BelongsTo

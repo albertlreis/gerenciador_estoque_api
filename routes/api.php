@@ -401,6 +401,8 @@ Route::middleware(['auth:sanctum', 'senha.nao_obrigatoria'])
             Route::post('import', [PedidoController::class, 'importar']);
             Route::post('import/pdf/confirm', [PedidoController::class, 'confirmarImportacaoPDF']);
             Route::post('import/xml/confirm', [PedidoController::class, 'confirmarImportacaoXml']);
+            Route::get('importacoes/{importacao}/xml', [PedidoController::class, 'downloadImportacaoXml'])
+                ->whereNumber('importacao');
         });
 
         Route::prefix('pedidos/{pedido}')->whereNumber('pedido')->group(function () {

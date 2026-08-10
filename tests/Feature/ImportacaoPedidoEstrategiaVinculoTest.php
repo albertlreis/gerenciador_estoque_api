@@ -506,4 +506,164 @@ class ImportacaoPedidoEstrategiaVinculoTest extends TestCase
         $this->assertSame($variacao->id, $pedido->itens()->first()?->id_variacao);
         $this->assertSame($variacoesAntes, ProdutoVariacao::query()->count());
     }
+
+    public function test_variacao_existente_com_atributos_ausentes_exige_decisao(): void
+    {
+        [$usuario, $fornecedor, $categoria, $variacao] = $this->criarCenarioRevisaoAtributos();
+        $payload = $this->payloadRevisaoAtributos($fornecedor, $categoria, $variacao);
+
+        $response = $this->actingAs($usuario, 'sanctum')
+            ->postJson('/api/v1/pedidos/import/xml/confirm', $payload);
+
+        $response->assertStatus(422)->assertJsonValidationErrors('itens.0.decisao_atributos_variacao');
+        $this->assertSame(0, Pedido::query()->count());
+        $this->assertSame(0, ProdutoVariacaoAtributo::query()->count());
+    }
+
+    public function test_decisao_adicionar_cria_somente_pares_ausentes_e_e_idempotente(): void
+    {
+        [$usuario, $fornecedor, $categoria, $variacao] = $this->criarCenarioRevisaoAtributos();
+        $payload = $this->payloadRevisaoAtributos($fornecedor, $categoria, $variacao, 'adicionar');
+
+        $this->actingAs($usuario, 'sanctum')
+            ->postJson('/api/v1/pedidos/import/xml/confirm', $payload)
+            ->assertOk();
+
+        $this->assertEqualsCanonicalizing([
+            ['atributo' => 'madeira', 'valor' => 'AC25'],
+            ['atributo' => 'tecido_1', 'valor' => 'E-13233 - OFF WHITE'],
+            ['atributo' => 'tecido_2', 'valor' => 'MESMA COR DO TECIDO'],
+            ['atributo' => 'tecido_2', 'valor' => 'I-24604'],
+        ], ProdutoVariacaoAtributo::query()
+            ->where('id_variacao', $variacao->id)
+            ->get(['atributo', 'valor'])
+            ->map->only(['atributo', 'valor'])
+            ->all());
+
+        $auditoria = PedidoImportacaoItem::query()->latest('id')->firstOrFail();
+        $this->assertSame('adicionar', $auditoria->dados_confirmados_json['decisao_atributos_variacao']);
+        $this->assertCount(4, $auditoria->dados_confirmados_json['atributos_adicionados_variacao']);
+
+        $payload['idempotency_key'] = 'revisao-atributos-idempotente-2';
+        $payload['pedido']['numero_externo'] = 'IMP-REV-IDEM-2';
+        unset($payload['itens'][0]['decisao_atributos_variacao']);
+        $this->actingAs($usuario, 'sanctum')
+            ->postJson('/api/v1/pedidos/import/xml/confirm', $payload)
+            ->assertOk();
+
+        $this->assertSame(4, ProdutoVariacaoAtributo::query()
+            ->where('id_variacao', $variacao->id)
+            ->count());
+    }
+
+    public function test_decisao_manter_preserva_cadastro_e_fica_na_auditoria(): void
+    {
+        [$usuario, $fornecedor, $categoria, $variacao] = $this->criarCenarioRevisaoAtributos();
+        $payload = $this->payloadRevisaoAtributos($fornecedor, $categoria, $variacao, 'manter');
+
+        $this->actingAs($usuario, 'sanctum')
+            ->postJson('/api/v1/pedidos/import/xml/confirm', $payload)
+            ->assertOk();
+
+        $this->assertSame(0, ProdutoVariacaoAtributo::query()
+            ->where('id_variacao', $variacao->id)
+            ->count());
+        $auditoria = PedidoImportacaoItem::query()->latest('id')->firstOrFail();
+        $this->assertSame('manter', $auditoria->dados_confirmados_json['decisao_atributos_variacao']);
+        $this->assertSame([], $auditoria->dados_confirmados_json['atributos_adicionados_variacao']);
+    }
+
+    public function test_conflito_impede_adicionar_mas_permite_manter(): void
+    {
+        [$usuario, $fornecedor, $categoria, $variacao] = $this->criarCenarioRevisaoAtributos();
+        ProdutoVariacaoAtributo::create([
+            'id_variacao' => $variacao->id,
+            'atributo' => 'madeira',
+            'valor' => 'AC24',
+        ]);
+        $payload = $this->payloadRevisaoAtributos($fornecedor, $categoria, $variacao, 'adicionar');
+
+        $this->actingAs($usuario, 'sanctum')
+            ->postJson('/api/v1/pedidos/import/xml/confirm', $payload)
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('itens.0.decisao_atributos_variacao');
+        $this->assertSame(1, ProdutoVariacaoAtributo::query()->where('id_variacao', $variacao->id)->count());
+
+        $payload['idempotency_key'] = 'revisao-atributos-conflito-manter';
+        $payload['pedido']['numero_externo'] = 'IMP-REV-CONFLITO-MANTER';
+        $payload['itens'][0]['decisao_atributos_variacao'] = 'manter';
+        $this->actingAs($usuario, 'sanctum')
+            ->postJson('/api/v1/pedidos/import/xml/confirm', $payload)
+            ->assertOk();
+        $this->assertSame(1, ProdutoVariacaoAtributo::query()->where('id_variacao', $variacao->id)->count());
+    }
+
+    private function criarCenarioRevisaoAtributos(): array
+    {
+        $usuario = Usuario::create([
+            'nome' => 'Usuario Revisao Atributos',
+            'email' => 'usuario_revisao_'.Str::random(6).'@example.com',
+            'senha' => 'teste',
+            'ativo' => 1,
+        ]);
+        $categoria = Categoria::create(['nome' => 'Cat Revisao Atributos']);
+        $fornecedor = Fornecedor::create(['nome' => 'Fornecedor Revisao Atributos', 'status' => 1]);
+        $produto = Produto::create([
+            'nome' => 'Cama Damiani',
+            'id_categoria' => $categoria->id,
+            'id_fornecedor' => $fornecedor->id,
+            'ativo' => true,
+        ]);
+        $variacao = ProdutoVariacao::create([
+            'produto_id' => $produto->id,
+            'referencia' => '3545K',
+            'nome' => 'Cama Damiani King',
+            'preco' => 13913.62,
+            'custo' => 7000,
+        ]);
+
+        return [$usuario, $fornecedor, $categoria, $variacao];
+    }
+
+    private function payloadRevisaoAtributos(
+        Fornecedor $fornecedor,
+        Categoria $categoria,
+        ProdutoVariacao $variacao,
+        ?string $decisao = null
+    ): array {
+        $item = [
+            'id_variacao' => $variacao->id,
+            'ref' => '3545K',
+            'nome' => 'Cama Damiani King',
+            'quantidade' => 1,
+            'valor' => 13913.62,
+            'preco_unitario' => 13913.62,
+            'custo_unitario' => 7000,
+            'id_categoria' => $categoria->id,
+            'atributos_detectados_lista' => [
+                ['atributo' => 'madeira', 'valor' => 'AC25'],
+                ['atributo' => 'tecido_1', 'valor' => 'E-13233 - OFF WHITE'],
+                ['atributo' => 'tecido_2', 'valor' => 'MESMA COR DO TECIDO'],
+                ['atributo' => 'tecido_2', 'valor' => 'I-24604'],
+            ],
+        ];
+        if ($decisao !== null) {
+            $item['decisao_atributos_variacao'] = $decisao;
+        }
+
+        return [
+            'importacao_id' => null,
+            'idempotency_key' => 'revisao-atributos-'.Str::random(10),
+            'cliente' => [],
+            'pedido' => [
+                'tipo' => 'reposicao',
+                'numero_externo' => 'IMP-REV-'.Str::random(8),
+                'id_fornecedor' => $fornecedor->id,
+                'total' => 13913.62,
+                'data_pedido' => '2026-08-10',
+            ],
+            'movimentar_estoque' => false,
+            'itens' => [$item],
+        ];
+    }
 }

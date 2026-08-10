@@ -65,6 +65,7 @@ class ImportacaoPedidoService
     private const METADADOS_PREVIEW_ITEM = [
         'atributos_detectados',
         'atributos_detectados_lista',
+        'revisao_atributos_variacao',
         'nome_detectado',
         'vinculo_sugerido',
         'variacoes_encontradas',
@@ -139,6 +140,11 @@ class ImportacaoPedidoService
             'itens.*.atributos_lista.*.atributo' => 'nullable',
             'itens.*.atributos_lista.*.valor' => 'nullable',
             'itens.*.atributos_nfe' => 'nullable|array',
+            'itens.*.atributos_detectados_lista' => 'nullable|array',
+            'itens.*.atributos_detectados_lista.*' => 'array',
+            'itens.*.atributos_detectados_lista.*.atributo' => 'nullable|string|max:100',
+            'itens.*.atributos_detectados_lista.*.valor' => 'nullable|string|max:100',
+            'itens.*.decisao_atributos_variacao' => 'nullable|in:adicionar,manter',
             'estrategia_vinculo' => 'nullable|in:'.implode(',', EstrategiaVinculoImportacao::valores()),
             'itens.*.forcar_produto_novo' => 'nullable|boolean',
         ], [
@@ -203,6 +209,14 @@ class ImportacaoPedidoService
                     ->map(fn ($id) => (int) $id)
                     ->flip();
 
+            $variacoesParaRevisao = $variacaoIds->isEmpty()
+                ? collect()
+                : ProdutoVariacao::query()
+                    ->with('atributos')
+                    ->whereIn('id', $variacaoIds)
+                    ->get()
+                    ->keyBy('id');
+
             foreach ($itens as $index => $item) {
                 $label = 'Produto '.($index + 1);
                 $forcarProdutoNovo = $this->itemDeveForcarProdutoNovo($request, $item);
@@ -224,6 +238,28 @@ class ImportacaoPedidoService
                 $variacaoId = $item['id_variacao'] ?? null;
                 if (is_numeric($variacaoId) && $variacoesComCategoriaProibida->has((int) $variacaoId)) {
                     $validator->errors()->add("itens.$index.id_categoria", self::MENSAGEM_CATEGORIA_IMPORTACAO_INVALIDA);
+                }
+
+                if (! $forcarProdutoNovo && is_numeric($variacaoId)) {
+                    $variacaoRevisada = $variacoesParaRevisao->get((int) $variacaoId);
+                    if ($variacaoRevisada) {
+                        $revisao = $this->analisarRevisaoAtributosVariacao($item, $variacaoRevisada);
+                        $decisao = trim((string) ($item['decisao_atributos_variacao'] ?? ''));
+
+                        if ($revisao['requerida'] && ! in_array($decisao, ['adicionar', 'manter'], true)) {
+                            $validator->errors()->add(
+                                "itens.$index.decisao_atributos_variacao",
+                                "$label: escolha adicionar os atributos detectados ou manter o cadastro atual."
+                            );
+                        }
+
+                        if ($revisao['requerida'] && $decisao === 'adicionar' && $revisao['conflitos'] !== []) {
+                            $validator->errors()->add(
+                                "itens.$index.decisao_atributos_variacao",
+                                "$label: existem atributos conflitantes no cadastro. Mantenha o cadastro, selecione outra variação ou cadastre uma nova."
+                            );
+                        }
+                    }
                 }
 
                 $quantidade = (int) ($item['quantidade'] ?? 0);
@@ -636,6 +672,10 @@ class ImportacaoPedidoService
                     }
 
                     $forcarProdutoNovo = $this->itemDeveForcarProdutoNovo($request, $item);
+                    $revisaoAtributosVariacao = null;
+                    $atributosAdicionadosVariacao = [];
+                    $decisaoAtributosVariacao = null;
+                    $variacaoExistente = false;
 
                     $variacao = null;
 
@@ -667,6 +707,51 @@ class ImportacaoPedidoService
                             $variacao = $variacoesPorIdentificador->first();
                         } elseif ($variacoesPorIdentificador->count() > 1) {
                             throw $this->erroReferenciaAmbiguaImportacao($item, $index, $variacoesPorIdentificador);
+                        }
+                    }
+
+                    if ($variacao) {
+                        $variacao = ProdutoVariacao::query()
+                            ->with('atributos')
+                            ->lockForUpdate()
+                            ->findOrFail($variacao->id);
+                        $variacaoExistente = true;
+                        $revisaoAtributosVariacao = $this->analisarRevisaoAtributosVariacao($item, $variacao);
+
+                        if ($revisaoAtributosVariacao['requerida']) {
+                            $decisaoAtributosVariacao = trim((string) ($item['decisao_atributos_variacao'] ?? ''));
+
+                            if (! in_array($decisaoAtributosVariacao, ['adicionar', 'manter'], true)) {
+                                throw ValidationException::withMessages([
+                                    "itens.$index.decisao_atributos_variacao" => [
+                                        'Produto '.($index + 1).': escolha adicionar os atributos detectados ou manter o cadastro atual.',
+                                    ],
+                                ]);
+                            }
+
+                            if ($decisaoAtributosVariacao === 'adicionar') {
+                                if ($revisaoAtributosVariacao['conflitos'] !== []) {
+                                    throw ValidationException::withMessages([
+                                        "itens.$index.decisao_atributos_variacao" => [
+                                            'Produto '.($index + 1).': existem atributos conflitantes no cadastro. Mantenha o cadastro, selecione outra variação ou cadastre uma nova.',
+                                        ],
+                                    ]);
+                                }
+
+                                foreach ($revisaoAtributosVariacao['ausentes'] as $atributoAusente) {
+                                    $atributoCriado = ProdutoVariacaoAtributo::firstOrCreate([
+                                        'id_variacao' => $variacao->id,
+                                        'atributo' => $atributoAusente['atributo'],
+                                        'valor' => $atributoAusente['valor'],
+                                    ]);
+
+                                    if ($atributoCriado->wasRecentlyCreated) {
+                                        $atributosAdicionadosVariacao[] = $atributoAusente;
+                                    }
+                                }
+
+                                $variacao->load('atributos');
+                            }
                         }
                     }
 
@@ -769,8 +854,26 @@ class ImportacaoPedidoService
                             'atributos' => $item['atributos'],
                             'atributos_lista' => $item['atributos_lista'],
                             'atributos_nfe' => $item['atributos_nfe'] ?? null,
+                            'revisao_atributos_variacao' => $revisaoAtributosVariacao,
+                            'decisao_atributos_variacao' => $decisaoAtributosVariacao,
+                            'atributos_adicionados_variacao' => $atributosAdicionadosVariacao,
                         ],
                     ]);
+
+                    if ($variacaoExistente && ($revisaoAtributosVariacao['requerida'] ?? false)) {
+                        SierraLog::inventory('inventory.order_xml_import.variation_attributes_reviewed', [
+                            'usuario_id' => $usuario->id,
+                            'entity_type' => 'produto_variacao',
+                            'entity_id' => $variacao->id,
+                            'batch_id' => $importacaoId,
+                            'pedido_id' => $pedido->id,
+                            'pedido_item_id' => $pedidoItem->id,
+                            'decisao' => $decisaoAtributosVariacao,
+                            'atributos_ausentes' => $revisaoAtributosVariacao['ausentes'],
+                            'atributos_conflitantes' => $revisaoAtributosVariacao['conflitos'],
+                            'atributos_adicionados' => $atributosAdicionadosVariacao,
+                        ]);
+                    }
                 }
 
                 if (isset($importacao)) {
@@ -1161,6 +1264,100 @@ class ImportacaoPedidoService
                 true
             )
         );
+    }
+
+    /** @return list<array{atributo: string, valor: string}> */
+    private function atributosDetectadosProdutoImportacao(array $item): array
+    {
+        $fonte = is_array($item['atributos_detectados_lista'] ?? null)
+            ? $item['atributos_detectados_lista']
+            : $this->atributosListaProdutoImportacao($item);
+        $atributos = [];
+        $chaves = [];
+
+        foreach ($fonte as $atributo) {
+            if (! is_array($atributo)) {
+                continue;
+            }
+
+            $nome = StringHelper::normalizarAtributo((string) ($atributo['atributo'] ?? $atributo['nome'] ?? ''));
+            $valor = $atributo['valor'] ?? null;
+
+            if (
+                $nome === ''
+                || in_array($nome, self::ATRIBUTOS_FISCAIS_NFE, true)
+                || is_array($valor)
+                || is_object($valor)
+                || trim((string) $valor) === ''
+            ) {
+                continue;
+            }
+
+            $valor = trim((string) $valor);
+            $chave = $nome.'|'.$this->normalizarValorAtributoComparacao($valor);
+            if (isset($chaves[$chave])) {
+                continue;
+            }
+
+            $chaves[$chave] = true;
+            $atributos[] = ['atributo' => $nome, 'valor' => $valor];
+        }
+
+        return $atributos;
+    }
+
+    /**
+     * @return array{
+     *   requerida: bool,
+     *   existentes: list<array{atributo: string, valor: string}>,
+     *   detectados: list<array{atributo: string, valor: string}>,
+     *   ausentes: list<array{atributo: string, valor: string}>,
+     *   conflitos: list<array{atributo: string, valor_detectado: string, valores_existentes: list<string>}>
+     * }
+     */
+    private function analisarRevisaoAtributosVariacao(array $item, ProdutoVariacao $variacao): array
+    {
+        $existentes = $this->atributosListaVariacao($variacao);
+        $detectados = $this->atributosDetectadosProdutoImportacao($item);
+        $existentesPorTipo = collect($existentes)->groupBy(
+            fn (array $atributo) => StringHelper::normalizarAtributo($atributo['atributo'])
+        );
+        $ausentes = [];
+        $conflitos = [];
+
+        foreach ($detectados as $detectado) {
+            $tipo = $detectado['atributo'];
+            $valorNormalizado = $this->normalizarValorAtributoComparacao($detectado['valor']);
+            $doMesmoTipo = $existentesPorTipo->get($tipo, collect());
+            $parExiste = $doMesmoTipo->contains(
+                fn (array $existente) => $this->normalizarValorAtributoComparacao($existente['valor']) === $valorNormalizado
+            );
+
+            if ($parExiste) {
+                continue;
+            }
+
+            $ausentes[] = $detectado;
+            if ($doMesmoTipo->isNotEmpty()) {
+                $conflitos[] = [
+                    'atributo' => $tipo,
+                    'valor_detectado' => $detectado['valor'],
+                    'valores_existentes' => $doMesmoTipo
+                        ->pluck('valor')
+                        ->unique()
+                        ->values()
+                        ->all(),
+                ];
+            }
+        }
+
+        return [
+            'requerida' => $ausentes !== [],
+            'existentes' => $existentes,
+            'detectados' => $detectados,
+            'ausentes' => $ausentes,
+            'conflitos' => $conflitos,
+        ];
     }
 
     /**
@@ -1837,6 +2034,7 @@ class ImportacaoPedidoService
     private function mapearItemComVariacaoEncontrada(array $item, int $linha, ?string $ref, ProdutoVariacao $variacao): array
     {
         $produto = $variacao->produto;
+        $revisaoAtributosVariacao = $this->analisarRevisaoAtributosVariacao($item, $variacao);
 
         $atributosVariacaoLista = $this->atributosListaVariacao($variacao);
         $atributosImportacaoLista = $this->atributosListaDoContrato(
@@ -1886,6 +2084,8 @@ class ImportacaoPedidoService
             'categoria' => $categoriaNome,
             'atributos' => $atributosFinal,
             'atributos_lista' => $atributosFinalLista,
+            'revisao_atributos_variacao' => $revisaoAtributosVariacao,
+            'decisao_atributos_variacao' => null,
             'fixos' => $fixosFinal,
             // garante que o front não exiba seleção antiga
             'variacoes_encontradas' => [],

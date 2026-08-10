@@ -182,6 +182,45 @@ class ImportacaoPedidoServiceTest extends TestCase
         $this->assertCount(1, $itens[0]['variacoes_encontradas']);
     }
 
+    public function test_preview_compara_atributos_detectados_com_variacao_existente(): void
+    {
+        $categoria = Categoria::create(['nome' => 'Categoria Revisao']);
+        $produto = Produto::create([
+            'nome' => 'Produto Revisao',
+            'id_categoria' => $categoria->id,
+            'ativo' => true,
+        ]);
+        $variacao = ProdutoVariacao::create([
+            'produto_id' => $produto->id,
+            'referencia' => 'REF-REVISAO',
+            'nome' => 'Variacao Revisao',
+            'preco' => 10,
+            'custo' => 5,
+        ]);
+        ProdutoVariacaoAtributo::create([
+            'id_variacao' => $variacao->id,
+            'atributo' => 'madeira',
+            'valor' => 'AC25',
+        ]);
+
+        $itens = app(ImportacaoPedidoService::class)->mesclarItensComVariacoes([[
+            'codigo' => 'REF-REVISAO',
+            'descricao' => 'Produto XML',
+            'quantidade' => '1',
+            'preco_unitario' => '99',
+            'atributos_detectados_lista' => [
+                ['atributo' => 'madeira', 'valor' => 'AC25'],
+                ['atributo' => 'tecido_1', 'valor' => 'OFF WHITE'],
+            ],
+        ]]);
+
+        $revisao = $itens[0]['revisao_atributos_variacao'];
+        $this->assertTrue($revisao['requerida']);
+        $this->assertSame([['atributo' => 'tecido_1', 'valor' => 'OFF WHITE']], $revisao['ausentes']);
+        $this->assertSame([], $revisao['conflitos']);
+        $this->assertNull($itens[0]['decisao_atributos_variacao']);
+    }
+
     public function test_mescla_referencia_ambigua_exige_selecao_manual_no_preview(): void
     {
         $categoria = Categoria::create(['nome' => 'Categoria Ambigua']);

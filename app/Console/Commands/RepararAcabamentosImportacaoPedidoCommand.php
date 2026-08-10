@@ -22,6 +22,7 @@ class RepararAcabamentosImportacaoPedidoCommand extends Command
         {pedido_importacao_id : ID da importacao de pedido a analisar}
         {--execute : Persiste as correcoes ou o rollback}
         {--dry-run : Forca simulacao, mesmo com --execute}
+        {--somente-sem-atributos-tipados : Limita o reparo a variacoes que ainda nao possuem atributos tipados}
         {--manifest= : Caminho relativo para gravar o manifesto gerado}
         {--rollback= : Caminho relativo do manifesto de execucao a reverter}';
 
@@ -40,12 +41,13 @@ class RepararAcabamentosImportacaoPedidoCommand extends Command
         }
 
         $execute = (bool) $this->option('execute') && ! (bool) $this->option('dry-run');
+        $somenteSemAtributosTipados = (bool) $this->option('somente-sem-atributos-tipados');
         $rollback = trim((string) $this->option('rollback'));
 
         try {
             return $rollback !== ''
                 ? $this->reverter($importacaoId, $rollback, $execute)
-                : $this->reparar($importacaoId, $execute, $classificador);
+                : $this->reparar($importacaoId, $execute, $classificador, $somenteSemAtributosTipados);
         } catch (RuntimeException $exception) {
             $this->error($exception->getMessage());
 
@@ -56,9 +58,10 @@ class RepararAcabamentosImportacaoPedidoCommand extends Command
     private function reparar(
         int $importacaoId,
         bool $execute,
-        FornecedorModeloAtributosService $classificador
+        FornecedorModeloAtributosService $classificador,
+        bool $somenteSemAtributosTipados
     ): int {
-        $processar = function () use ($importacaoId, $execute, $classificador): array {
+        $processar = function () use ($importacaoId, $execute, $classificador, $somenteSemAtributosTipados): array {
             $itens = PedidoImportacaoItem::query()
                 ->where('pedido_importacao_id', $importacaoId)
                 ->orderBy('id')
@@ -66,7 +69,12 @@ class RepararAcabamentosImportacaoPedidoCommand extends Command
             $entradas = [];
 
             foreach ($itens as $item) {
-                $entradas[] = $this->analisarItem($item, $execute, $classificador);
+                $entradas[] = $this->analisarItem(
+                    $item,
+                    $execute,
+                    $classificador,
+                    $somenteSemAtributosTipados
+                );
             }
 
             $modo = $execute ? 'execucao' : 'dry-run';
@@ -87,7 +95,8 @@ class RepararAcabamentosImportacaoPedidoCommand extends Command
     private function analisarItem(
         PedidoImportacaoItem $item,
         bool $execute,
-        FornecedorModeloAtributosService $classificador
+        FornecedorModeloAtributosService $classificador,
+        bool $somenteSemAtributosTipados
     ): array {
         $entrada = [
             'pedido_importacao_item_id' => (int) $item->id,
@@ -141,6 +150,10 @@ class RepararAcabamentosImportacaoPedidoCommand extends Command
                 true
             ))
             ->values();
+
+        if ($somenteSemAtributosTipados && $tipadosExistentes->isNotEmpty()) {
+            return $this->finalizarEntrada($entrada, 'fora_escopo_atributos_tipados');
+        }
 
         $conflitantes = $tipadosExistentes->filter(function (ProdutoVariacaoAtributo $atributo) use ($desejados, $tiposDesejados): bool {
             $tipo = $this->normalizarNome((string) $atributo->atributo);

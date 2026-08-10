@@ -7,6 +7,7 @@ use App\Models\PedidoImportacao;
 use App\Models\PedidoImportacaoItem;
 use App\Models\Produto;
 use App\Models\ProdutoVariacao;
+use App\Models\ProdutoVariacaoAtributo;
 use App\Models\Usuario;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\DB;
@@ -100,6 +101,35 @@ class RepararAcabamentosImportacaoPedidoCommandTest extends TestCase
         $this->assertSame('conflito_atributos_existentes', $this->lerManifesto('testes/conflito.json')['itens'][0]['acao']);
         $this->assertSame(1, $variacao->atributos()->where('atributo', 'acabamentos')->count());
         $this->assertSame(2, $variacao->atributos()->count());
+    }
+
+    public function test_filtro_limita_reparo_a_variacoes_sem_atributos_tipados(): void
+    {
+        Storage::fake('local');
+        [$importacao, $variacao] = $this->criarCenario(
+            'TECIDO UNICO#TECIDO FORNECIDO#FORNECIDO#MESMA COR DO TECIDO'
+        );
+        ProdutoVariacaoAtributo::create([
+            'id_variacao' => $variacao->id,
+            'atributo' => 'tecido_1',
+            'valor' => 'Correcao manual',
+        ]);
+        $manifesto = 'testes/reparo-acabamentos/filtro-sem-tipados.json';
+
+        $this->artisan('pedidos:reparar-acabamentos-importacao', [
+            'pedido_importacao_id' => $importacao->id,
+            '--somente-sem-atributos-tipados' => true,
+            '--manifest' => $manifesto,
+        ])->assertSuccessful();
+
+        $dados = json_decode(Storage::disk('local')->get($manifesto), true, 512, JSON_THROW_ON_ERROR);
+        $this->assertSame('fora_escopo_atributos_tipados', $dados['itens'][0]['acao']);
+        $this->assertSame(2, ProdutoVariacaoAtributo::query()->where('id_variacao', $variacao->id)->count());
+        $this->assertDatabaseHas('produto_variacao_atributos', [
+            'id_variacao' => $variacao->id,
+            'atributo' => 'tecido_1',
+            'valor' => 'Correcao manual',
+        ]);
     }
 
     public function test_converte_model_raw_quando_a_variacao_nao_tem_atributo_legado(): void

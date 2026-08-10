@@ -106,9 +106,7 @@ class RepararAcabamentosImportacaoPedidoCommandTest extends TestCase
     public function test_filtro_limita_reparo_a_variacoes_sem_atributos_tipados(): void
     {
         Storage::fake('local');
-        [$importacao, $variacao] = $this->criarCenario(
-            'TECIDO UNICO#TECIDO FORNECIDO#FORNECIDO#MESMA COR DO TECIDO'
-        );
+        [$importacao, $variacao] = $this->criarCenario();
         ProdutoVariacaoAtributo::create([
             'id_variacao' => $variacao->id,
             'atributo' => 'tecido_1',
@@ -147,6 +145,30 @@ class RepararAcabamentosImportacaoPedidoCommandTest extends TestCase
         $this->assertSame(4, $variacao->atributos()->count());
     }
 
+    public function test_deduplica_par_classificado_repetido_antes_de_persistir(): void
+    {
+        Storage::fake('local');
+        [$importacao, $variacao] = $this->criarCenario(false, 'AC03#AC03#TRAVERTINO');
+
+        $this->artisan('pedidos:reparar-acabamentos-importacao', [
+            'pedido_importacao_id' => $importacao->id,
+            '--execute' => true,
+            '--somente-sem-atributos-tipados' => true,
+            '--manifest' => 'testes/reparo-acabamentos/deduplicado.json',
+        ])->assertSuccessful();
+
+        $this->assertEqualsCanonicalizing([
+            ['atributo' => 'madeira', 'valor' => 'AC03'],
+            ['atributo' => 'tecido_2', 'valor' => 'TRAVERTINO'],
+        ], $variacao->atributos()
+            ->get(['atributo', 'valor'])
+            ->map->only(['atributo', 'valor'])
+            ->all());
+        $manifesto = $this->lerManifesto('testes/reparo-acabamentos/deduplicado.json');
+        $this->assertSame('criado', $manifesto['itens'][0]['acao']);
+        $this->assertCount(2, $manifesto['itens'][0]['atributos_criados']);
+    }
+
     public function test_rejeita_manifesto_de_rollback_adulterado(): void
     {
         Storage::fake('local');
@@ -171,7 +193,10 @@ class RepararAcabamentosImportacaoPedidoCommandTest extends TestCase
         Storage::disk('local')->assertMissing('testes/nao-deve-existir.json');
     }
 
-    private function criarCenario(bool $comLegado = true): array
+    private function criarCenario(
+        bool $comLegado = true,
+        string $modelo = 'AC25#E-13233 - OFF WHITE#MESMA COR DO TECIDO#I-24604'
+    ): array
     {
         $usuario = Usuario::create([
             'nome' => 'Usuario Reparo Acabamentos',
@@ -217,7 +242,7 @@ class RepararAcabamentosImportacaoPedidoCommandTest extends TestCase
             'dados_importados_json' => [
                 'atributos_raw' => [[
                     'nome' => 'modelo_referencia',
-                    'valor' => 'AC25#E-13233 - OFF WHITE#MESMA COR DO TECIDO#I-24604',
+                    'valor' => $modelo,
                 ]],
             ],
             'dados_confirmados_json' => ['atributos_lista' => []],
@@ -226,7 +251,7 @@ class RepararAcabamentosImportacaoPedidoCommandTest extends TestCase
         if ($comLegado) {
             $variacao->atributos()->create([
                 'atributo' => 'acabamentos',
-                'valor' => 'AC25#E-13233 - OFF WHITE#MESMA COR DO TECIDO#I-24604',
+                'valor' => $modelo,
             ]);
         }
 

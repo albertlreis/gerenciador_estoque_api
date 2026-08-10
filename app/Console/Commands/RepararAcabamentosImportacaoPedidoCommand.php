@@ -136,7 +136,14 @@ class RepararAcabamentosImportacaoPedidoCommand extends Command
             return $this->finalizarEntrada($entrada, 'sem_origem');
         }
 
-        $desejados = $classificador->classificar($modelo);
+        $desejados = collect($classificador->classificar($modelo))
+            ->unique(fn (array $atributo) => sprintf(
+                '%s|%s',
+                $this->normalizarNome((string) ($atributo['atributo'] ?? '')),
+                $this->normalizarValor((string) ($atributo['valor'] ?? ''))
+            ))
+            ->values()
+            ->all();
         $entrada['atributos_desejados'] = $desejados;
         if ($desejados === []) {
             return $this->finalizarEntrada($entrada, 'sem_atributos_classificados');

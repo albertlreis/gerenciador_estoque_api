@@ -17,7 +17,7 @@ class PedidoCompletoResource extends JsonResource
     {
         $entregaService = app(\App\Services\EntregaProdutoService::class);
         $entregaResumo = $entregaService->resumoPedido($this->resource);
-        $statusOperacional = $entregaService->statusOperacionalPedido($this->resource);
+        $statusEnvio = $entregaService->statusOperacionalPedido($this->resource);
         $agoraBelem = Carbon::now('America/Belem');
         $dataLimite = $this->data_limite_entrega ? Carbon::parse($this->data_limite_entrega) : null;
         $dataLimiteCalculada = null;
@@ -55,8 +55,8 @@ class PedidoCompletoResource extends JsonResource
             'status'      => $statusAtualValor,
             'status_label' => $statusAtualValor ? $statusAtualMeta['label'] : null,
             'status_acompanhamento' => $statusAtualValor,
-            'status_operacional' => $statusOperacional,
-            'proxima_acao' => $statusOperacional['proxima_acao'],
+            'status_envio' => $statusEnvio,
+            'proxima_acao' => $statusEnvio['proxima_acao'],
             'tipo'        => $this->tipo,
             'origem_abastecimento' => $this->origem_abastecimento,
 

@@ -1364,6 +1364,23 @@ class EntregaProdutoService
             };
         }
 
+        $codigoOperacional = match (true) {
+            $statusAcompanhamento === PedidoStatus::CANCELADO->value => 'cancelado',
+            $statusAcompanhamento === PedidoStatus::FINALIZADO->value => 'finalizado',
+            $pedido->isVenda() && $total > 0 && $entregue >= $total => 'entregue_cliente',
+            $pedido->isVenda() && $entregue > 0 => 'entrega_parcial',
+            $pedido->isVenda() && $expedido > 0 => 'em_entrega',
+            $pedido->isVenda() && in_array($etapaEntrega, ['pronto_para_entrega', 'aguardando_entrega_cliente'], true) => 'aguardando_entrega_cliente',
+            $fluxoFabrica && $total > 0 && $recebido >= $total => $pedido->isVenda()
+                ? 'aguardando_entrega_cliente'
+                : 'recebido_estoque',
+            $fluxoFabrica && $recebido > 0 => 'recebimento_parcial',
+            $fluxoFabrica && $etapaRecebimento === 'recebido_estoque' => 'recebido_estoque',
+            $fluxoFabrica && $etapaRecebimento === 'aguardando_fabrica' => 'aguardando_fabrica',
+            $statusAcompanhamento === PedidoStatus::ENTREGA_ESTOQUE->value => 'recebido_estoque',
+            default => $statusAcompanhamento !== '' ? $statusAcompanhamento : 'aguardando_fabrica',
+        };
+
         $proximaAcao = match (true) {
             $conflitoEntregaEstoque || $contadorExcedido || (int) $resumo['pendentes_revisao'] > 0 => 'reconciliar_divergencia',
             $fluxoFabrica && $recebido < $total => 'registrar_recebimento_estoque',
@@ -1372,6 +1389,7 @@ class EntregaProdutoService
         };
 
         return [
+            'codigo' => $codigoOperacional,
             'recebimento_fabrica' => [
                 'etapa' => $etapaRecebimento,
                 'quantidade_esperada' => $fluxoFabrica ? $total : 0,

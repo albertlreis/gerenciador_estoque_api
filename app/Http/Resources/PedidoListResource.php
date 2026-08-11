@@ -81,7 +81,6 @@ class PedidoListResource extends JsonResource
             'status'                 => $statusAtualValue,
             'status_label'           => $statusAtualEnum?->label(),
             'status_acompanhamento'  => $statusAtualValue,
-            'status_operacional'     => $statusEnvio,
             'status_envio'           => $statusEnvio,
             'entrega_produtos'       => $envioProdutos,
             'envio_produtos'         => $envioProdutos,

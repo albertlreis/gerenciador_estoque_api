@@ -25,6 +25,7 @@ use App\Services\FornecedorPedidoXmlParserService;
 use App\Services\ImportacaoPedidoService;
 use App\Services\NfeXmlParserService;
 use App\Services\PedidoService;
+use App\Http\Requests\PedidoIndexRequest;
 use App\Services\PedidoCancelamentoService;
 use App\Services\PedidoUpdateService;
 use App\Services\EstatisticaPedidoService;
@@ -83,10 +84,10 @@ class PedidoController extends Controller
     /**
      * Lista pedidos com filtros, paginação e indicadores adicionais.
      *
-     * @param Request $request
+     * @param PedidoIndexRequest $request
      * @return JsonResponse
      */
-    public function index(Request $request): JsonResponse
+    public function index(PedidoIndexRequest $request): JsonResponse
     {
         return $this->pedidoService->listarPedidos($request);
     }

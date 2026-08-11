@@ -266,6 +266,7 @@ class ProdutoEntregaCentralTest extends TestCase
         );
 
         $service = app(EntregaProdutoService::class);
+        $this->assertCodigoOperacional($service, $pedido, PedidoStatus::PEDIDO_CRIADO->value);
         $service->criarDemandaPedido($pedido, $usuario->id, true);
         $service->expedirPedido($pedido, $usuario->id);
 
@@ -940,19 +941,23 @@ class ProdutoEntregaCentralTest extends TestCase
         $service = app(EntregaProdutoService::class);
         $service->criarDemandaPedido($pedido, $usuario->id, true);
 
+        $this->assertCodigoOperacional($service, $pedido, 'aguardando_entrega_cliente');
         $this->assertFiltroSituacaoContem('aguardando_entrega_cliente', $pedido->id);
         $this->assertFiltroSituacaoNaoContem('em_entrega', $pedido->id);
 
         $service->expedirPedido($pedido, $usuario->id);
+        $this->assertCodigoOperacional($service, $pedido, 'em_entrega');
         $this->assertFiltroSituacaoContem('em_entrega', $pedido->id);
         $this->assertFiltroSituacaoNaoContem('aguardando_entrega_cliente', $pedido->id);
 
         $entrega = ProdutoEntregaItem::query()->where('pedido_id', $pedido->id)->firstOrFail();
         $service->entregarItem($entrega, 1, $usuario->id, 'Entrega parcial', 'filtro-entrega-parcial');
+        $this->assertCodigoOperacional($service, $pedido, 'entrega_parcial');
         $this->assertFiltroSituacaoContem('entrega_parcial', $pedido->id);
         $this->assertFiltroSituacaoNaoContem('em_entrega', $pedido->id);
 
         $service->entregarItem($entrega, 2, $usuario->id, 'Entrega integral', 'filtro-entrega-integral');
+        $this->assertCodigoOperacional($service, $pedido, 'entregue_cliente');
         $this->assertFiltroSituacaoContem('entregue_cliente', $pedido->id);
 
         PedidoStatusHistorico::create([
@@ -961,6 +966,7 @@ class ProdutoEntregaCentralTest extends TestCase
             'data_status' => now()->addSecond(),
             'usuario_id' => $usuario->id,
         ]);
+        $this->assertCodigoOperacional($service, $pedido, 'finalizado');
         $this->assertFiltroSituacaoContem('finalizado', $pedido->id);
         $this->assertFiltroSituacaoNaoContem('entregue_cliente', $pedido->id);
 
@@ -982,14 +988,114 @@ class ProdutoEntregaCentralTest extends TestCase
         [$usuarioReposicao, $reposicao, , $depositoReposicao] = $this->criarPedidoComItem(3, Pedido::TIPO_REPOSICAO);
         Sanctum::actingAs($usuarioReposicao);
         $entregaReposicao = $service->criarDemandaPedido($reposicao, $usuarioReposicao->id, false)->firstOrFail();
+        $this->assertCodigoOperacional($service, $reposicao, 'aguardando_fabrica');
         $this->assertFiltroSituacaoContem('aguardando_fabrica', $reposicao->id);
 
         $service->receberItem($entregaReposicao, $depositoReposicao->id, 1, $usuarioReposicao->id, 'Recebimento parcial', 'filtro-recebimento-parcial');
+        $this->assertCodigoOperacional($service, $reposicao, 'recebimento_parcial');
         $this->assertFiltroSituacaoContem('recebimento_parcial', $reposicao->id);
         $this->assertFiltroSituacaoNaoContem('aguardando_fabrica', $reposicao->id);
 
         $service->receberItem($entregaReposicao, $depositoReposicao->id, 2, $usuarioReposicao->id, 'Recebimento integral', 'filtro-recebimento-integral');
+        $this->assertCodigoOperacional($service, $reposicao, 'finalizado');
         $this->assertFiltroSituacaoContem('finalizado', $reposicao->id);
+    }
+
+    public function test_entrega_integral_sem_recebimento_nao_vaza_para_situacoes_anteriores(): void
+    {
+        [$usuario, $pedido] = $this->criarPedidoComItem(4);
+        Sanctum::actingAs($usuario);
+
+        $pedido->forceFill([
+            'origem_abastecimento' => Pedido::ORIGEM_ABASTECIMENTO_FABRICA,
+        ])->save();
+
+        $service = app(EntregaProdutoService::class);
+        $entrega = $service->criarDemandaPedido($pedido->fresh('itens'), $usuario->id, false)->firstOrFail();
+        $entrega->forceFill([
+            'status' => ProdutoEntregaItem::STATUS_ENTREGUE,
+            'quantidade_recebida' => 0,
+            'quantidade_reservada' => 0,
+            'quantidade_expedida' => 0,
+            'quantidade_entregue' => 4,
+        ])->save();
+
+        $pedidoAtualizado = $pedido->fresh(['statusAtual', 'entregaItens']);
+        $this->assertSame('entregue_cliente', $service->statusOperacionalPedido($pedidoAtualizado)['codigo']);
+        $this->assertFiltroSituacaoContem('entregue_cliente', $pedido->id);
+
+        foreach ([
+            'aguardando_fabrica',
+            'recebimento_parcial',
+            'recebido_estoque',
+            'aguardando_entrega_cliente',
+            'em_entrega',
+            'entrega_parcial',
+        ] as $situacaoAnterior) {
+            $this->assertFiltroSituacaoNaoContem($situacaoAnterior, $pedido->id);
+        }
+
+        $idsSemEntregues = app(PedidoRepository::class)
+            ->comFiltros(Request::create('/pedidos', 'GET', [
+                'status_operacionais' => [
+                    'aguardando_fabrica',
+                    'recebimento_parcial',
+                    'recebido_estoque',
+                    'aguardando_entrega_cliente',
+                    'em_entrega',
+                    'entrega_parcial',
+                ],
+            ]))
+            ->pluck('pedidos.id')
+            ->map(fn ($id) => (int) $id)
+            ->all();
+
+        $this->assertNotContains($pedido->id, $idsSemEntregues);
+
+        Cache::put('permissoes_usuario_' . $usuario->id, [
+            'estoque.movimentar',
+            'pedidos.visualizar',
+            'pedidos.visualizar.todos',
+        ], now()->addHour());
+
+        $parametrosSemEntregues = http_build_query([
+            'page' => 1,
+            'per_page' => 10,
+            'status_operacionais' => [
+                'aguardando_fabrica',
+                'recebimento_parcial',
+                'recebido_estoque',
+                'aguardando_entrega_cliente',
+                'em_entrega',
+                'entrega_parcial',
+            ],
+        ]);
+        $this->getJson('/api/v1/pedidos?' . $parametrosSemEntregues)
+            ->assertOk()
+            ->assertJsonPath('meta.current_page', 1)
+            ->assertJsonPath('meta.per_page', 10)
+            ->assertJsonPath('meta.total', 0)
+            ->assertJsonCount(0, 'data');
+
+        $parametrosEntregues = http_build_query([
+            'page' => 1,
+            'per_page' => 10,
+            'status_operacionais' => ['entregue_cliente'],
+        ]);
+        $this->getJson('/api/v1/pedidos?' . $parametrosEntregues)
+            ->assertOk()
+            ->assertJsonPath('meta.current_page', 1)
+            ->assertJsonPath('meta.per_page', 10)
+            ->assertJsonPath('meta.total', 1)
+            ->assertJsonPath('data.0.id', $pedido->id)
+            ->assertJsonPath('data.0.status_envio.codigo', 'entregue_cliente');
+    }
+
+    private function assertCodigoOperacional(EntregaProdutoService $service, Pedido $pedido, string $codigo): void
+    {
+        $pedidoAtualizado = $pedido->fresh(['statusAtual', 'entregaItens']);
+
+        $this->assertSame($codigo, $service->statusOperacionalPedido($pedidoAtualizado)['codigo']);
     }
 
     private function assertFiltroSituacaoContem(string $situacao, int $pedidoId): void

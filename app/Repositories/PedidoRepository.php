@@ -17,6 +17,16 @@ class PedidoRepository
         'aguardando_entrega_cliente', 'em_entrega', 'entrega_parcial',
         'entregue_cliente', 'finalizado', 'cancelado',
     ];
+
+    private const STATUS_OPERACIONAIS_EM_FLUXO_POR_PRIORIDADE = [
+        'entregue_cliente',
+        'entrega_parcial',
+        'em_entrega',
+        'aguardando_entrega_cliente',
+        'recebido_estoque',
+        'recebimento_parcial',
+        'aguardando_fabrica',
+    ];
     /**
      * Retorna um builder de pedidos com filtros aplicados.
      *
@@ -36,10 +46,6 @@ class PedidoRepository
                 $q->whereDoesntHave('consignacoes')
                     ->orWhereHas('consignacoes', fn (Builder $sub) => $sub->where('status', 'comprado'));
             });
-        }
-
-        if ($request->filled('status')) {
-            $query->whereHas('statusAtual', fn($q) => $q->where('status', $request->status));
         }
 
         if (in_array($request->input('tipo'), [Pedido::TIPO_VENDA, Pedido::TIPO_REPOSICAO], true)) {
@@ -93,7 +99,7 @@ class PedidoRepository
     {
         $valores = $request->input('status_operacionais');
         if (!is_array($valores)) {
-            $valores = $request->filled('status_operacional') ? [$request->input('status_operacional')] : [];
+            $valores = [];
         }
 
         return array_values(array_unique(array_filter(
@@ -104,10 +110,6 @@ class PedidoRepository
 
     private function aplicarFiltroOperacional(Builder $query, string $status): void
     {
-        $principal = fn (Builder $item) => $item
-            ->where('tipo_origem', \App\Models\ProdutoEntregaItem::ORIGEM_PEDIDO)
-            ->where('status', '!=', \App\Models\ProdutoEntregaItem::STATUS_CANCELADO);
-
         $emFluxo = fn (Builder $pedido) => $pedido->whereDoesntHave(
             'statusAtual',
             fn (Builder $statusAtual) => $statusAtual->whereIn('status', ['finalizado', 'cancelado'])
@@ -126,6 +128,26 @@ class PedidoRepository
         }
 
         $emFluxo($query);
+
+        $this->aplicarCondicaoOperacional($query, $status);
+
+        $indicePrioridade = array_search($status, self::STATUS_OPERACIONAIS_EM_FLUXO_POR_PRIORIDADE, true);
+        if ($indicePrioridade === false) {
+            return;
+        }
+
+        foreach (array_slice(self::STATUS_OPERACIONAIS_EM_FLUXO_POR_PRIORIDADE, 0, $indicePrioridade) as $statusPrioritario) {
+            $query->whereNot(function (Builder $pedido) use ($statusPrioritario) {
+                $this->aplicarCondicaoOperacional($pedido, $statusPrioritario);
+            });
+        }
+    }
+
+    private function aplicarCondicaoOperacional(Builder $query, string $status): void
+    {
+        $principal = fn (Builder $item) => $item
+            ->where('tipo_origem', \App\Models\ProdutoEntregaItem::ORIGEM_PEDIDO)
+            ->where('status', '!=', \App\Models\ProdutoEntregaItem::STATUS_CANCELADO);
 
         match ($status) {
             'aguardando_fabrica' => $query

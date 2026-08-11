@@ -29,7 +29,7 @@ class PedidoFluxoOperacionalV2Test extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_listagem_expoe_campos_de_envio_e_previsao_de_embarque_sem_substituir_campos_legados(): void
+    public function test_listagem_expoe_contrato_canonico_de_envio_e_previsao_de_embarque(): void
     {
         [, $pedido] = $this->criarPedido(2, Pedido::ORIGEM_ABASTECIMENTO_FABRICA);
         app(EntregaProdutoService::class)->criarDemandaPedido($pedido, null, false);
@@ -48,7 +48,7 @@ class PedidoFluxoOperacionalV2Test extends TestCase
         $this->assertSame('2026-08-15', $data['previsao_embarque']);
         $this->assertArrayHasKey('status_envio', $data);
         $this->assertArrayHasKey('envio_produtos', $data);
-        $this->assertSame($data['status_operacional'], $data['status_envio']);
+        $this->assertArrayNotHasKey('status_operacional', $data);
         $this->assertSame($data['entrega_produtos'], $data['envio_produtos']);
         $this->assertArrayHasKey('status_acompanhamento', $data);
         $this->assertArrayHasKey('previsao', $data);
@@ -83,7 +83,8 @@ class PedidoFluxoOperacionalV2Test extends TestCase
         $this->postJson("/api/v1/pedidos/{$pedido->id}/recebimentos", $primeiro)
             ->assertOk()
             ->assertJsonPath('status_aplicado', false)
-            ->assertJsonPath('status_operacional.recebimento_fabrica.etapa', 'recebimento_parcial');
+            ->assertJsonPath('status_envio.recebimento_fabrica.etapa', 'recebimento_parcial')
+            ->assertJsonMissingPath('status_operacional');
         $this->postJson("/api/v1/pedidos/{$pedido->id}/recebimentos", $primeiro)->assertOk();
 
         $entrega = $entrega->fresh();
@@ -105,7 +106,8 @@ class PedidoFluxoOperacionalV2Test extends TestCase
             'aplicar_status_ao_concluir' => true,
         ])->assertOk()
             ->assertJsonPath('status_aplicado', true)
-            ->assertJsonPath('status_operacional.recebimento_fabrica.etapa', 'recebido_estoque');
+            ->assertJsonPath('status_envio.recebimento_fabrica.etapa', 'recebido_estoque')
+            ->assertJsonMissingPath('status_operacional');
 
         $entrega = $entrega->fresh();
         $this->assertSame(2, (int) $entrega->quantidade_recebida);

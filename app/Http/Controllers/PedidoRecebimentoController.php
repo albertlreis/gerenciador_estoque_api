@@ -161,7 +161,7 @@ class PedidoRecebimentoController extends Controller
                 ? 'Recebimento concluido com sucesso.'
                 : 'Recebimento parcial registrado com sucesso.',
             'status_aplicado' => $statusAplicado,
-            'status_operacional' => $this->entregas->statusOperacionalPedido($pedido->fresh('entregaItens')),
+            'status_envio' => $this->entregas->statusOperacionalPedido($pedido->fresh('entregaItens')),
             'itens' => ProdutoEntregaItemResource::collection($processados)->resolve($request),
         ]);
     }

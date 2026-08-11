@@ -186,4 +186,29 @@ class PedidoListEntregaSituacaoTest extends TestCase
             ->json('data');
         $this->assertSame([$segundo->id, $primeiro->id], collect($direcaoInvalida)->pluck('id')->map(fn ($id) => (int) $id)->all());
     }
+
+    public function test_aceita_apenas_tamanhos_de_pagina_suportados_pelo_frontend(): void
+    {
+        $this->autenticar();
+
+        foreach ([10, 25, 50, 100] as $perPage) {
+            $this->getJson("/api/v1/pedidos?page=1&per_page={$perPage}")
+                ->assertOk()
+                ->assertJsonPath('meta.current_page', 1)
+                ->assertJsonPath('meta.per_page', $perPage);
+        }
+    }
+
+    public function test_rejeita_pagina_e_tamanho_de_pagina_invalidos(): void
+    {
+        $this->autenticar();
+
+        $this->getJson('/api/v1/pedidos?page=0&per_page=20')
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['page', 'per_page']);
+
+        $this->getJson('/api/v1/pedidos?page=abc&per_page=500')
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['page', 'per_page']);
+    }
 }

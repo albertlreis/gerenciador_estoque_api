@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Enums\PedidoStatus;
 use App\Models\Categoria;
 use App\Models\Cliente;
+use App\Models\ClienteEndereco;
 use App\Models\Consignacao;
 use App\Models\ConsignacaoDevolucao;
 use App\Models\Deposito;
@@ -133,6 +134,66 @@ class ConsignacaoRoteiroPdfTest extends TestCase
         ])->render();
 
         $this->assertStringContainsString('src="data:image/png;base64,aGVsbG8="', $html);
+    }
+
+    public function test_template_exibe_endereco_selecionado_em_vez_do_principal(): void
+    {
+        [$pedidoId] = $this->criarPedidoConsignado('pendente', PedidoStatus::CONSIGNADO);
+        $pedido = Pedido::with(['cliente.enderecoPrincipal', 'usuario', 'parceiro'])->findOrFail($pedidoId);
+
+        ClienteEndereco::create([
+            'cliente_id' => $pedido->cliente->id,
+            'cep' => '66000001',
+            'endereco' => 'Rua Principal',
+            'numero' => '100',
+            'bairro' => 'Centro',
+            'cidade' => 'Belem',
+            'estado' => 'PA',
+            'principal' => true,
+            'fingerprint' => hash('sha256', 'endereco-principal-roteiro'),
+        ]);
+        $enderecoSelecionado = ClienteEndereco::create([
+            'cliente_id' => $pedido->cliente->id,
+            'cep' => '66635000',
+            'endereco' => 'Avenida Centenario Cond. Agua Cristal',
+            'numero' => '2000',
+            'complemento' => 'Bloco A',
+            'bairro' => 'Parque Verde',
+            'cidade' => 'Belem',
+            'estado' => 'PA',
+            'principal' => false,
+            'fingerprint' => hash('sha256', 'endereco-selecionado-roteiro'),
+        ]);
+        $pedido->load('cliente.enderecoPrincipal');
+
+        $html = view('exports.roteiro-consignacao', [
+            'pedido' => $pedido,
+            'grupos' => collect(),
+            'tituloRoteiro' => 'Roteiro de consignacao',
+            'enderecoEntrega' => $enderecoSelecionado,
+        ])->render();
+
+        $this->assertStringContainsString(
+            'Avenida Centenario Cond. Agua Cristal - 2000 - Bloco A - Parque Verde - Belem/PA - CEP 66635000',
+            $html
+        );
+        $this->assertStringNotContainsString('Rua Principal - 100', $html);
+    }
+
+    public function test_template_usa_endereco_legado_quando_nao_ha_endereco_estruturado(): void
+    {
+        [$pedidoId] = $this->criarPedidoConsignado('pendente', PedidoStatus::CONSIGNADO);
+        $pedido = Pedido::with(['cliente.enderecoPrincipal', 'usuario', 'parceiro'])->findOrFail($pedidoId);
+        $pedido->cliente->setAttribute('endereco', 'Endereco legado do cliente');
+
+        $html = view('exports.roteiro-consignacao', [
+            'pedido' => $pedido,
+            'grupos' => collect(),
+            'tituloRoteiro' => 'Roteiro de consignacao',
+            'enderecoEntrega' => null,
+        ])->render();
+
+        $this->assertStringContainsString('<strong>END:</strong> Endereco legado do cliente', $html);
     }
 
     public function test_roteiros_com_sete_itens_mantem_encerramento_e_rodape_na_primeira_pagina(): void

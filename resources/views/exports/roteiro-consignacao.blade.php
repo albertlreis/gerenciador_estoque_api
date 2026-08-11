@@ -40,16 +40,12 @@
 </div>
 
 @php
-    $enderecoPrincipal = $pedido->cliente?->enderecoPrincipal ?? null;
-    $enderecoTexto = $enderecoPrincipal
-        ? trim(implode(' - ', array_filter([
-            $enderecoPrincipal->logradouro ?? null,
-            $enderecoPrincipal->numero ?? null,
-            $enderecoPrincipal->bairro ?? null,
-            $enderecoPrincipal->cidade ?? null,
-            $enderecoPrincipal->uf ?? null,
-        ])))
-        : ($pedido->cliente?->endereco ?? '-'); // fallback caso exista coluna legada
+    $enderecoSelecionado = $enderecoEntrega ?? $pedido->cliente?->enderecoPrincipal ?? null;
+    $enderecoTexto = \App\Support\Pdf\ClienteEnderecoPdf::textoEndereco($enderecoSelecionado);
+
+    if ($enderecoTexto === '' && !empty($pedido->cliente?->endereco)) {
+        $enderecoTexto = $pedido->cliente->endereco;
+    }
 @endphp
 
 <table width="100%" style="margin-bottom: 10px;">

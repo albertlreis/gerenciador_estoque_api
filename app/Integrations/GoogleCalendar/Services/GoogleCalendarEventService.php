@@ -443,9 +443,6 @@ class GoogleCalendarEventService
         mixed $response,
         ?GoogleCalendarException $exception = null
     ): void {
-        $requestResumo = $this->summarize($request);
-        $responseResumo = $this->summarize($response);
-
         app(AuditoriaLogService::class)->registrar([
             'occurred_at' => now(),
             'tipo' => 'integracao',
@@ -455,7 +452,9 @@ class GoogleCalendarEventService
             'acao' => $action,
             'status' => $status,
             'label' => 'Log Google Agenda',
-            'message' => $exception?->getMessage() ?: $responseResumo,
+            'message' => $status === 'erro'
+                ? 'Falha na operacao solicitada ao Google Agenda.'
+                : 'Operacao solicitada ao Google Agenda concluida.',
             'actor_id' => $usuarioId,
             'entity_type' => 'google_calendar_event',
             'entity_id' => $eventId,
@@ -464,10 +463,7 @@ class GoogleCalendarEventService
                 'conexao_id' => $conexao->id,
                 'calendar_id' => $calendarId,
                 'event_id' => $eventId,
-                'request_resumo' => $requestResumo,
-                'response_resumo' => $responseResumo,
                 'erro_codigo' => $exception?->reason,
-                'erro_mensagem' => $exception?->getMessage(),
             ],
             'source_system' => 'estoque',
             'source_kind' => 'sync',
@@ -475,17 +471,4 @@ class GoogleCalendarEventService
         ]);
     }
 
-    private function summarize(mixed $value): ?string
-    {
-        if ($value === null || $value === []) {
-            return null;
-        }
-
-        $json = json_encode($value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-        if (!is_string($json)) {
-            return null;
-        }
-
-        return mb_substr($json, 0, 1000);
-    }
 }

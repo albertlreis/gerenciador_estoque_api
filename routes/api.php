@@ -744,6 +744,7 @@ Route::middleware(['auth:sanctum', 'senha.nao_obrigatoria'])
 
         Route::prefix('integrations/google-calendar')->group(function () {
             Route::get('oauth/authorize', [GoogleCalendarOAuthController::class, 'redirect']);
+            Route::delete('connection', [GoogleCalendarController::class, 'disconnect']);
             Route::get('status', [GoogleCalendarController::class, 'status']);
             Route::get('calendars', [GoogleCalendarController::class, 'calendars']);
             Route::post('calendars/{calendarId}/enable', [GoogleCalendarController::class, 'enableCalendar'])

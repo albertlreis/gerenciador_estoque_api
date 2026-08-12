@@ -9,6 +9,7 @@ use App\Integrations\GoogleCalendar\Models\GoogleCalendarCalendar;
 use App\Integrations\GoogleCalendar\Models\GoogleCalendarConexao;
 use App\Integrations\GoogleCalendar\Models\GoogleCalendarToken;
 use Carbon\CarbonImmutable;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
 class GoogleCalendarConnectionService
@@ -182,6 +183,41 @@ class GoogleCalendarConnectionService
         $calendar->update(['enabled' => $enabled]);
 
         return $calendar->fresh();
+    }
+
+    /**
+     * @return array{local_deleted:bool,google_revoked:bool}
+     */
+    public function disconnect(): array
+    {
+        $connections = GoogleCalendarConexao::query()
+            ->with('token')
+            ->orderByDesc('id')
+            ->get();
+
+        $googleRevoked = true;
+        foreach ($connections as $connection) {
+            $token = $connection->token;
+            if (!$token) {
+                continue;
+            }
+
+            $revocationToken = (string) ($token->refresh_token ?: $token->access_token);
+            $googleRevoked = $this->oauth->revokeToken($revocationToken) && $googleRevoked;
+        }
+
+        $localDeleted = $connections->isNotEmpty();
+        DB::transaction(function (): void {
+            GoogleCalendarConexao::query()->delete();
+        });
+
+        Cache::add('google_calendar_events_version', 1, now()->addYear());
+        Cache::increment('google_calendar_events_version');
+
+        return [
+            'local_deleted' => $localDeleted,
+            'google_revoked' => $googleRevoked,
+        ];
     }
 
     /**

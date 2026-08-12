@@ -97,6 +97,136 @@ class GoogleCalendarEndpointsTest extends TestCase
         ]);
     }
 
+    public function test_disconnect_revokes_google_and_deletes_local_connection_data(): void
+    {
+        $this->actingUser(['google_calendar.configurar']);
+        $conexao = GoogleCalendarConexao::create([
+            'status' => 'ativa',
+            'email_externo' => 'central@example.test',
+        ]);
+        GoogleCalendarToken::create([
+            'conexao_id' => $conexao->id,
+            'access_token' => 'access-token',
+            'refresh_token' => 'refresh-token',
+            'expires_at' => now()->addHour(),
+        ]);
+        GoogleCalendarCalendar::create([
+            'conexao_id' => $conexao->id,
+            'calendar_id' => 'primary',
+            'summary' => 'Principal',
+            'enabled' => true,
+        ]);
+
+        $oauth = Mockery::mock(GoogleCalendarOAuthService::class);
+        $oauth->shouldReceive('revokeToken')->once()->with('refresh-token')->andReturnTrue();
+        $this->app->instance(GoogleCalendarOAuthService::class, $oauth);
+        $this->app->forgetInstance(GoogleCalendarConnectionService::class);
+
+        $response = $this->deleteJson('/api/v1/integrations/google-calendar/connection');
+
+        $response->assertOk()->assertExactJson([
+            'ok' => true,
+            'local_deleted' => true,
+            'google_revoked' => true,
+            'manual_revoke_url' => null,
+        ]);
+        $this->assertDatabaseCount('google_calendar_conexoes', 0);
+        $this->assertDatabaseCount('google_calendar_tokens', 0);
+        $this->assertDatabaseCount('google_calendar_calendars', 0);
+    }
+
+    public function test_disconnect_deletes_local_data_when_google_is_unavailable(): void
+    {
+        $this->actingUser(['google_calendar.configurar']);
+        $conexao = GoogleCalendarConexao::create(['status' => 'ativa']);
+        GoogleCalendarToken::create([
+            'conexao_id' => $conexao->id,
+            'access_token' => 'access-token',
+            'refresh_token' => 'refresh-token',
+            'expires_at' => now()->addHour(),
+        ]);
+
+        $oauth = Mockery::mock(GoogleCalendarOAuthService::class);
+        $oauth->shouldReceive('revokeToken')->once()->andReturnFalse();
+        $this->app->instance(GoogleCalendarOAuthService::class, $oauth);
+        $this->app->forgetInstance(GoogleCalendarConnectionService::class);
+
+        $response = $this->deleteJson('/api/v1/integrations/google-calendar/connection');
+
+        $response->assertOk()
+            ->assertJsonPath('local_deleted', true)
+            ->assertJsonPath('google_revoked', false)
+            ->assertJsonPath('manual_revoke_url', 'https://myaccount.google.com/connections');
+        $this->assertDatabaseCount('google_calendar_conexoes', 0);
+        $this->assertDatabaseCount('google_calendar_tokens', 0);
+    }
+
+    public function test_disconnect_is_idempotent_without_connection(): void
+    {
+        $this->actingUser(['google_calendar.configurar']);
+
+        $response = $this->deleteJson('/api/v1/integrations/google-calendar/connection');
+
+        $response->assertOk()->assertExactJson([
+            'ok' => true,
+            'local_deleted' => false,
+            'google_revoked' => true,
+            'manual_revoke_url' => null,
+        ]);
+    }
+
+    public function test_disconnect_requires_configuration_permission(): void
+    {
+        $this->actingUser([]);
+
+        $this->deleteJson('/api/v1/integrations/google-calendar/connection')->assertForbidden();
+    }
+
+    public function test_audit_sanitizer_removes_event_content_and_preserves_operational_metadata(): void
+    {
+        $log = AuditoriaLog::query()->create([
+            'occurred_at' => now(),
+            'tipo' => 'integracao',
+            'categoria' => 'integracao',
+            'nivel' => 'info',
+            'modulo' => 'google_calendar',
+            'acao' => 'create',
+            'status' => 'sucesso',
+            'message' => 'Evento Cliente Confidencial',
+            'entity_type' => 'google_calendar_event',
+            'entity_id' => 'event-1',
+            'source_system' => 'estoque',
+            'source_kind' => 'sync',
+            'source_table' => 'google_calendar_logs',
+            'context_json' => [
+                'conexao_id' => 10,
+                'calendar_id' => 'primary',
+                'event_id' => 'event-1',
+                'request_resumo' => '{"summary":"Cliente Confidencial"}',
+                'response_resumo' => '{"description":"Segredo"}',
+                'erro_mensagem' => 'Segredo',
+            ],
+            'metadata_json' => ['attendee' => 'pessoa@example.test'],
+            'raw_excerpt' => 'Cliente Confidencial',
+            'retention_days' => 90,
+        ]);
+
+        $this->artisan('google-calendar:sanitize-audit-logs', ['--apply' => true])
+            ->expectsOutput('Registros sanitizados: 1')
+            ->assertExitCode(0);
+
+        $log->refresh();
+        $this->assertSame('Operacao solicitada ao Google Agenda concluida.', $log->message);
+        $this->assertEquals([
+            'conexao_id' => 10,
+            'calendar_id' => 'primary',
+            'event_id' => 'event-1',
+        ], $log->context_json);
+        $this->assertNull($log->metadata_json);
+        $this->assertNull($log->raw_excerpt);
+        $this->assertSame(365, $log->retention_days);
+    }
+
     public function test_calendar_visibility_rejects_invalid_values(): void
     {
         $this->actingUser(['google_calendar.configurar']);

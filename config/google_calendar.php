@@ -4,6 +4,7 @@ return [
     'base_url' => rtrim((string) env('GOOGLE_CALENDAR_BASE_URL', 'https://www.googleapis.com/calendar/v3'), '/'),
     'auth_url' => rtrim((string) env('GOOGLE_CALENDAR_AUTH_URL', 'https://accounts.google.com'), '/'),
     'token_url' => env('GOOGLE_CALENDAR_TOKEN_URL', 'https://oauth2.googleapis.com/token'),
+    'revoke_url' => env('GOOGLE_CALENDAR_REVOKE_URL', 'https://oauth2.googleapis.com/revoke'),
     'client_id' => env('GOOGLE_CALENDAR_CLIENT_ID'),
     'client_secret' => env('GOOGLE_CALENDAR_CLIENT_SECRET'),
     'redirect_uri' => env('GOOGLE_CALENDAR_REDIRECT_URI'),

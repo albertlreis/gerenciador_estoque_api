@@ -5,6 +5,10 @@ namespace Tests\Unit;
 use App\Integrations\GoogleCalendar\Auth\GoogleCalendarOAuthService;
 use App\Integrations\GoogleCalendar\Exceptions\GoogleCalendarException;
 use PHPUnit\Framework\TestCase;
+use GuzzleHttp\Client;
+use GuzzleHttp\Handler\MockHandler;
+use GuzzleHttp\HandlerStack;
+use GuzzleHttp\Psr7\Response;
 
 class GoogleCalendarOAuthServiceTest extends TestCase
 {
@@ -54,5 +58,36 @@ class GoogleCalendarOAuthServiceTest extends TestCase
             ], $e->context['missing_config']);
             $this->assertStringNotContainsString('client-secret', $e->getMessage());
         }
+    }
+
+    /**
+     * @dataProvider successfulRevocationStatuses
+     */
+    public function test_revoke_token_accepts_revoked_and_already_invalid_tokens(int $status): void
+    {
+        $handler = new MockHandler([new Response($status)]);
+        $client = new Client(['handler' => HandlerStack::create($handler), 'http_errors' => false]);
+        $service = new GoogleCalendarOAuthService([
+            'revoke_url' => 'https://oauth2.googleapis.com/revoke',
+        ], $client);
+
+        $this->assertTrue($service->revokeToken('refresh-token'));
+        $request = $handler->getLastRequest();
+        $this->assertSame('https://oauth2.googleapis.com/revoke', (string) $request->getUri());
+        $this->assertSame('token=refresh-token', (string) $request->getBody());
+    }
+
+    public function successfulRevocationStatuses(): array
+    {
+        return [[200], [400]];
+    }
+
+    public function test_revoke_token_returns_false_when_google_is_unavailable(): void
+    {
+        $handler = new MockHandler([new Response(503)]);
+        $client = new Client(['handler' => HandlerStack::create($handler), 'http_errors' => false]);
+        $service = new GoogleCalendarOAuthService([], $client);
+
+        $this->assertFalse($service->revokeToken('refresh-token'));
     }
 }

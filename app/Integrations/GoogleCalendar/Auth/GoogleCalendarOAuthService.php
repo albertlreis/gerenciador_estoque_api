@@ -74,6 +74,26 @@ class GoogleCalendarOAuthService
         ], 'refresh_token_falhou');
     }
 
+    public function revokeToken(string $token): bool
+    {
+        if (trim($token) === '') {
+            return true;
+        }
+
+        try {
+            $response = $this->http->post((string) ($this->config['revoke_url'] ?? 'https://oauth2.googleapis.com/revoke'), [
+                'form_params' => ['token' => $token],
+                'headers' => ['Accept' => 'application/json'],
+            ]);
+        } catch (\Throwable) {
+            return false;
+        }
+
+        // An invalid token is already unusable and therefore satisfies the
+        // security objective of revocation without retrying or exposing it.
+        return in_array($response->getStatusCode(), [200, 400], true);
+    }
+
     /**
      * @param array<string, string> $form
      * @return array<string, mixed>

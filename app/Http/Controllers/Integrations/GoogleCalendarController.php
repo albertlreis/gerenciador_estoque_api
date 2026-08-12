@@ -16,6 +16,8 @@ use Illuminate\Support\Facades\Schema;
 
 class GoogleCalendarController extends Controller
 {
+    private const MANUAL_REVOKE_URL = 'https://myaccount.google.com/connections';
+
     public function __construct(
         private readonly GoogleCalendarConnectionService $connections,
         private readonly GoogleCalendarEventService $events
@@ -65,6 +67,22 @@ class GoogleCalendarController extends Controller
             ->values();
 
         return response()->json(['data' => $calendars]);
+    }
+
+    public function disconnect(): JsonResponse
+    {
+        if ($response = $this->autorizar('google_calendar.configurar')) {
+            return $response;
+        }
+
+        $result = $this->connections->disconnect();
+
+        return response()->json([
+            'ok' => true,
+            'local_deleted' => $result['local_deleted'],
+            'google_revoked' => $result['google_revoked'],
+            'manual_revoke_url' => $result['google_revoked'] ? null : self::MANUAL_REVOKE_URL,
+        ]);
     }
 
     public function enableCalendar(string $calendarId): JsonResponse

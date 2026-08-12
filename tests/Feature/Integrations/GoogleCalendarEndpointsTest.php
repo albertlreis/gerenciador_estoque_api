@@ -99,6 +99,7 @@ class GoogleCalendarEndpointsTest extends TestCase
 
     public function test_disconnect_revokes_google_and_deletes_local_connection_data(): void
     {
+        $this->clearGoogleCalendarConnections();
         $this->actingUser(['google_calendar.configurar']);
         $conexao = GoogleCalendarConexao::create([
             'status' => 'ativa',
@@ -137,6 +138,7 @@ class GoogleCalendarEndpointsTest extends TestCase
 
     public function test_disconnect_deletes_local_data_when_google_is_unavailable(): void
     {
+        $this->clearGoogleCalendarConnections();
         $this->actingUser(['google_calendar.configurar']);
         $conexao = GoogleCalendarConexao::create(['status' => 'ativa']);
         GoogleCalendarToken::create([
@@ -163,6 +165,7 @@ class GoogleCalendarEndpointsTest extends TestCase
 
     public function test_disconnect_is_idempotent_without_connection(): void
     {
+        $this->clearGoogleCalendarConnections();
         $this->actingUser(['google_calendar.configurar']);
 
         $response = $this->deleteJson('/api/v1/integrations/google-calendar/connection');
@@ -415,5 +418,10 @@ class GoogleCalendarEndpointsTest extends TestCase
         Cache::put('perfis_usuario_' . $usuario->id, [], now()->addHour());
 
         return $usuario;
+    }
+
+    private function clearGoogleCalendarConnections(): void
+    {
+        GoogleCalendarConexao::query()->delete();
     }
 }

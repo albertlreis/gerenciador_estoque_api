@@ -246,10 +246,6 @@ class GoogleCalendarConnectionService
             $calendar->visibility = 'private';
         }
 
-        if (!$calendar->exists && (bool) ($item['primary'] ?? false)) {
-            $calendar->enabled = true;
-        }
-
         $calendar->save();
 
         return $calendar;

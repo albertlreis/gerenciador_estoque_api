@@ -317,6 +317,42 @@ class GoogleCalendarEndpointsTest extends TestCase
         ]);
     }
 
+    public function test_calendar_sync_keeps_new_primary_calendar_disabled_until_explicit_selection(): void
+    {
+        $conexao = GoogleCalendarConexao::create(['status' => 'ativa']);
+        GoogleCalendarToken::create([
+            'conexao_id' => $conexao->id,
+            'access_token' => 'access-token',
+            'expires_at' => CarbonImmutable::now()->addHour(),
+        ]);
+
+        $client = Mockery::mock(GoogleCalendarClient::class);
+        $client->shouldReceive('get')->once()->andReturn([
+            'status' => 200,
+            'body' => null,
+            'json' => ['items' => [[
+                'id' => 'primary',
+                'summary' => 'Principal',
+                'primary' => true,
+                'accessRole' => 'owner',
+            ]]],
+        ]);
+
+        $service = new GoogleCalendarConnectionService(
+            config('google_calendar'),
+            Mockery::mock(GoogleCalendarOAuthService::class),
+            $client
+        );
+        $service->syncCalendars($conexao);
+
+        $this->assertDatabaseHas('google_calendar_calendars', [
+            'conexao_id' => $conexao->id,
+            'calendar_id' => 'primary',
+            'primary' => true,
+            'enabled' => false,
+        ]);
+    }
+
     public function test_update_event_requires_start_and_end_together(): void
     {
         $this->actingUser(['google_calendar.editar']);

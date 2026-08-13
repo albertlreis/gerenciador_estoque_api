@@ -624,16 +624,33 @@ class GoogleCalendarEndpointsTest extends TestCase
             return;
         }
 
-        $perfilId = DB::table('acesso_perfil_permissao')
-            ->join('acesso_permissoes', 'acesso_perfil_permissao.id_permissao', '=', 'acesso_permissoes.id')
-            ->where('acesso_permissoes.slug', $slug)
-            ->value('acesso_perfil_permissao.id_perfil');
+        $permissaoId = DB::table('acesso_permissoes')
+            ->where('slug', $slug)
+            ->value('id');
 
-        $this->assertNotNull($perfilId, "Nenhum perfil de teste possui a permissao {$slug}.");
-        DB::table('acesso_usuario_perfil')->insert([
-            'id_usuario' => $usuario->id,
-            'id_perfil' => $perfilId,
-        ]);
+        $this->assertNotNull($permissaoId, "A permissao {$slug} nao existe no banco de teste.");
+
+        $perfilId = DB::table('acesso_perfil_permissao')
+            ->where('id_permissao', $permissaoId)
+            ->value('id_perfil');
+
+        if ($perfilId === null) {
+            $perfilId = DB::table('acesso_perfis')->value('id');
+            $this->assertNotNull($perfilId, 'Nenhum perfil existe no banco de teste.');
+
+            DB::table('acesso_perfil_permissao')->insert([
+                'id_perfil' => $perfilId,
+                'id_permissao' => $permissaoId,
+            ]);
+        }
+
+        DB::table('acesso_usuario_perfil')->updateOrInsert(
+            [
+                'id_usuario' => $usuario->id,
+                'id_perfil' => $perfilId,
+            ],
+            []
+        );
     }
 
     private function clearGoogleCalendarConnections(): void

@@ -53,6 +53,18 @@ class ContaAzulMultiLojaTest extends TestCase
         $this->assertMatchesRegularExpression('/^[0-9a-f]{32}$/', $segundaLoja['codigo']);
         $this->assertNotSame($loja['codigo'], $segundaLoja['codigo']);
 
+        DB::table('notas_fiscais')->insert([
+            'loja_id' => $segundaLoja['id'],
+            'chave_acesso' => 'nota-loja-protegida-' . uniqid(),
+            'origem' => 'conta_azul',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $this->deleteJson('/api/v1/integrations/conta-azul/lojas/' . $segundaLoja['id'])
+            ->assertStatus(409)
+            ->assertJsonPath('dependencias.notas_fiscais', 1);
+
         ContaAzulConexao::create([
             'loja_id' => $loja['id'],
             'status' => 'inativa',

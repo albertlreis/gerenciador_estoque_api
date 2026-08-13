@@ -21,6 +21,7 @@ class ContaAzulLojaController extends Controller
         'conta_azul_sync_logs' => 'logs_sincronizacao',
         'conta_azul_reconciliation_states' => 'estados_reconciliacao',
         'conta_azul_cobrancas' => 'cobrancas',
+        'notas_fiscais' => 'notas_fiscais',
         'stg_conta_azul_pessoas' => 'staging_pessoas',
         'stg_conta_azul_produtos' => 'staging_produtos',
         'stg_conta_azul_vendas' => 'staging_vendas',

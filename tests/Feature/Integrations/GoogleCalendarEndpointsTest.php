@@ -628,7 +628,15 @@ class GoogleCalendarEndpointsTest extends TestCase
             ->where('slug', $slug)
             ->value('id');
 
-        $this->assertNotNull($permissaoId, "A permissao {$slug} nao existe no banco de teste.");
+        if ($permissaoId === null) {
+            $permissaoId = DB::table('acesso_permissoes')->insertGetId([
+                'slug' => $slug,
+                'nome' => 'Permissao Google Calendar de teste',
+                'descricao' => 'Permissao criada apenas dentro da transacao do teste.',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+        }
 
         $perfilId = DB::table('acesso_perfil_permissao')
             ->where('id_permissao', $permissaoId)
@@ -636,11 +644,21 @@ class GoogleCalendarEndpointsTest extends TestCase
 
         if ($perfilId === null) {
             $perfilId = DB::table('acesso_perfis')->value('id');
-            $this->assertNotNull($perfilId, 'Nenhum perfil existe no banco de teste.');
+
+            if ($perfilId === null) {
+                $perfilId = DB::table('acesso_perfis')->insertGetId([
+                    'nome' => 'Perfil Google Calendar de teste',
+                    'descricao' => 'Perfil criado apenas dentro da transacao do teste.',
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]);
+            }
 
             DB::table('acesso_perfil_permissao')->insert([
                 'id_perfil' => $perfilId,
                 'id_permissao' => $permissaoId,
+                'created_at' => now(),
+                'updated_at' => now(),
             ]);
         }
 
@@ -649,7 +667,10 @@ class GoogleCalendarEndpointsTest extends TestCase
                 'id_usuario' => $usuario->id,
                 'id_perfil' => $perfilId,
             ],
-            []
+            [
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]
         );
     }
 

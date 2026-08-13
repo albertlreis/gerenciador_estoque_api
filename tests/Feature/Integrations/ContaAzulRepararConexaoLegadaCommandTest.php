@@ -99,6 +99,20 @@ class ContaAzulRepararConexaoLegadaCommandTest extends TestCase
             'status' => 'concluido',
         ]);
 
+        $auditoriaPendente = $this->legacyAudit('historico tardio');
+        $this->artisan('conta-azul:reparar-conexao-legada', [
+            '--connection' => $conexao->id,
+            '--nome' => self::NOME_LOJA,
+            '--execute' => true,
+        ])->assertSuccessful();
+
+        $this->assertSame(
+            $loja->id,
+            (int) $auditoriaPendente->fresh()->context_json['loja_id']
+        );
+        $this->assertDatabaseCount('lojas', 1);
+        $this->assertSame(1, AuditoriaLog::query()->where('acao', 'classificar_conexao_legada')->count());
+
         $this->artisan('conta-azul:reparar-conexao-legada', [
             '--connection' => $conexao->id,
             '--nome' => self::NOME_LOJA,
@@ -106,7 +120,6 @@ class ContaAzulRepararConexaoLegadaCommandTest extends TestCase
         ])->assertSuccessful();
 
         $this->assertDatabaseCount('lojas', 1);
-        $this->assertSame(1, AuditoriaLog::query()->where('acao', 'classificar_conexao_legada')->count());
     }
 
     public function test_recusa_conflito_de_unicidade_sem_gravar(): void
@@ -194,7 +207,12 @@ class ContaAzulRepararConexaoLegadaCommandTest extends TestCase
             'created_at' => now(),
             'updated_at' => now(),
         ]);
-        AuditoriaLog::query()->create([
+        $this->legacyAudit('historico legado');
+    }
+
+    private function legacyAudit(string $message): AuditoriaLog
+    {
+        return AuditoriaLog::query()->create([
             'occurred_at' => now(),
             'tipo' => 'integracao',
             'categoria' => 'integracao',
@@ -202,9 +220,10 @@ class ContaAzulRepararConexaoLegadaCommandTest extends TestCase
             'modulo' => 'conta_azul',
             'acao' => 'import',
             'status' => 'sucesso',
-            'message' => 'historico legado',
+            'message' => $message,
             'source_system' => 'estoque',
             'source_kind' => 'legacy_table',
+            'context_json' => ['loja_id' => null],
             'retention_days' => 365,
         ]);
     }

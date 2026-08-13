@@ -109,35 +109,40 @@ class ContaAzulRepararConexaoLegadaCommand extends Command
 
             $resultado = DB::transaction(function () use ($connectionId, $nome, $auditoria): array {
                 $planoAtual = $this->inspecionar((int) $connectionId, $nome);
-                if ($planoAtual['estado'] !== 'pronto') {
+                if (! in_array($planoAtual['estado'], ['pronto', 'auditoria_pendente'], true)) {
                     throw new RuntimeException('O estado mudou depois do dry-run; o reparo foi cancelado.');
                 }
 
                 $tokenAntes = $this->tokenFingerprint((int) $connectionId);
-                $lojaId = DB::table('lojas')->insertGetId([
-                    'codigo' => str_replace('-', '', (string) Str::uuid()),
-                    'nome' => $nome,
-                    'ativo' => true,
-                    'created_at' => now(),
-                    'updated_at' => now(),
-                ]);
+                $reparoInicial = $planoAtual['estado'] === 'pronto';
+                $lojaId = $reparoInicial
+                    ? DB::table('lojas')->insertGetId([
+                        'codigo' => str_replace('-', '', (string) Str::uuid()),
+                        'nome' => $nome,
+                        'ativo' => true,
+                        'created_at' => now(),
+                        'updated_at' => now(),
+                    ])
+                    : (int) $planoAtual['loja_id'];
 
                 $alterados = [];
-                foreach (self::HISTORY_TABLES as $table) {
-                    if (! Schema::hasTable($table) || ! Schema::hasColumn($table, 'loja_id')) {
-                        continue;
+                if ($reparoInicial) {
+                    foreach (self::HISTORY_TABLES as $table) {
+                        if (! Schema::hasTable($table) || ! Schema::hasColumn($table, 'loja_id')) {
+                            continue;
+                        }
+
+                        $alterados[$table] = DB::table($table)
+                            ->whereNull('loja_id')
+                            ->update(['loja_id' => $lojaId]);
                     }
 
-                    $alterados[$table] = DB::table($table)
-                        ->whereNull('loja_id')
-                        ->update(['loja_id' => $lojaId]);
-                }
-
-                if (Schema::hasTable('notas_fiscais') && Schema::hasColumn('notas_fiscais', 'loja_id')) {
-                    $alterados['notas_fiscais'] = DB::table('notas_fiscais')
-                        ->where('origem', 'conta_azul')
-                        ->whereNull('loja_id')
-                        ->update(['loja_id' => $lojaId]);
+                    if (Schema::hasTable('notas_fiscais') && Schema::hasColumn('notas_fiscais', 'loja_id')) {
+                        $alterados['notas_fiscais'] = DB::table('notas_fiscais')
+                            ->where('origem', 'conta_azul')
+                            ->whereNull('loja_id')
+                            ->update(['loja_id' => $lojaId]);
+                    }
                 }
 
                 if (Schema::hasTable('auditoria_logs')) {
@@ -145,18 +150,23 @@ class ContaAzulRepararConexaoLegadaCommand extends Command
                         "UPDATE auditoria_logs
                          SET context_json = JSON_SET(COALESCE(context_json, JSON_OBJECT()), '$.loja_id', CAST(? AS UNSIGNED))
                          WHERE modulo = 'conta_azul'
-                           AND JSON_EXTRACT(context_json, '$.loja_id') IS NULL",
+                           AND (
+                               JSON_EXTRACT(context_json, '$.loja_id') IS NULL
+                               OR JSON_TYPE(JSON_EXTRACT(context_json, '$.loja_id')) = 'NULL'
+                           )",
                         [$lojaId]
                     );
                 }
 
-                $alterados['conta_azul_conexoes'] = DB::table('conta_azul_conexoes')
-                    ->where('id', (int) $connectionId)
-                    ->whereNull('loja_id')
-                    ->update(['loja_id' => $lojaId, 'updated_at' => now()]);
+                if ($reparoInicial) {
+                    $alterados['conta_azul_conexoes'] = DB::table('conta_azul_conexoes')
+                        ->where('id', (int) $connectionId)
+                        ->whereNull('loja_id')
+                        ->update(['loja_id' => $lojaId, 'updated_at' => now()]);
 
-                if ($alterados['conta_azul_conexoes'] !== 1) {
-                    throw new RuntimeException('A conexao legada nao foi vinculada; o reparo foi revertido.');
+                    if ($alterados['conta_azul_conexoes'] !== 1) {
+                        throw new RuntimeException('A conexao legada nao foi vinculada; o reparo foi revertido.');
+                    }
                 }
 
                 if (! hash_equals($tokenAntes, $this->tokenFingerprint((int) $connectionId))) {
@@ -177,6 +187,7 @@ class ContaAzulRepararConexaoLegadaCommand extends Command
                     'source_table' => 'conta_azul_conexoes',
                     'source_id' => (string) $connectionId,
                     'source_uid' => hash('sha256', "conta-azul|classificar-conexao-legada|{$connectionId}|{$lojaId}"),
+                    'replace_existing' => true,
                     'entity_type' => 'lojas',
                     'entity_id' => (string) $lojaId,
                     'context_json' => [
@@ -234,7 +245,21 @@ class ContaAzulRepararConexaoLegadaCommand extends Command
             && (int) $tokens->first()->conexao_id === $connectionId) {
             $pendencias = $this->contagensHistoricas(null, true);
             if (array_sum($pendencias) !== 0) {
-                throw new RuntimeException('O reparo esta parcial: ainda existem registros Conta Azul sem loja.');
+                $pendenciasSemAuditoria = $pendencias;
+                unset($pendenciasSemAuditoria['auditoria_logs']);
+
+                if (array_sum($pendenciasSemAuditoria) === 0 && ($pendencias['auditoria_logs'] ?? 0) > 0) {
+                    return [
+                        'estado' => 'auditoria_pendente',
+                        'loja_id' => (int) $lojas->first()->id,
+                        'conexao_id' => $connectionId,
+                        'nome' => $nome,
+                        'registros_sem_loja' => $pendencias,
+                        'token_preservado' => true,
+                    ];
+                }
+
+                throw new RuntimeException('O reparo esta parcial fora da auditoria; a retomada automatica foi cancelada.');
             }
 
             return [

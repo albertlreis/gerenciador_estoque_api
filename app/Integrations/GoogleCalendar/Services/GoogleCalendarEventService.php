@@ -24,18 +24,20 @@ class GoogleCalendarEventService
      * @param array<string, mixed> $filters
      * @return array<int, array<string, mixed>>
      */
-    public function listEvents(array $filters, ?int $usuarioId = null): array
+    public function listEvents(array $filters, int $usuarioId): array
     {
-        $conexao = $this->requireConnection();
+        $conexao = $this->requireConnection($usuarioId);
         $calendars = $this->selectedCalendars($conexao, $filters['calendar_ids'] ?? []);
         if ($calendars->isEmpty()) {
             return [];
         }
 
-        $version = (int) Cache::get('google_calendar_events_version', 1);
+        $versionKey = "google_calendar_events_version:{$usuarioId}:{$conexao->id}";
+        $version = (int) Cache::get($versionKey, 1);
         $cacheKey = 'google_calendar_events:' . md5(json_encode([
             'version' => $version,
             'usuario_id' => $usuarioId,
+            'conexao_id' => $conexao->id,
             'start' => $filters['start'] ?? null,
             'end' => $filters['end'] ?? null,
             'calendar_ids' => $calendars->pluck('calendar_id')->values()->all(),
@@ -60,9 +62,9 @@ class GoogleCalendarEventService
      * @param array<string, mixed> $payload
      * @return array<string, mixed>
      */
-    public function createEvent(array $payload, ?int $usuarioId = null): array
+    public function createEvent(array $payload, int $usuarioId): array
     {
-        $conexao = $this->requireConnection();
+        $conexao = $this->requireConnection($usuarioId);
         $calendar = $this->writableCalendar($conexao, (string) ($payload['calendar_id'] ?? ''));
         $token = $this->connections->getValidAccessToken($conexao);
         $body = $this->eventBody($payload, true);
@@ -79,7 +81,7 @@ class GoogleCalendarEventService
             $this->log($conexao, $usuarioId, 'create', 'erro', $calendar->calendar_id, null, $body, $e->context, $e);
             throw $e;
         }
-        $this->invalidateCache();
+        $this->invalidateCache($usuarioId, $conexao->id);
 
         $event = $this->formatEvent($res['json'] ?? [], $calendar);
         $this->log($conexao, $usuarioId, 'create', 'sucesso', $calendar->calendar_id, $event['id'] ?? null, $body, $res['json'] ?? null);
@@ -91,9 +93,9 @@ class GoogleCalendarEventService
      * @param array<string, mixed> $payload
      * @return array<string, mixed>
      */
-    public function updateEvent(string $calendarId, string $eventId, array $payload, ?int $usuarioId = null): array
+    public function updateEvent(string $calendarId, string $eventId, array $payload, int $usuarioId): array
     {
-        $conexao = $this->requireConnection();
+        $conexao = $this->requireConnection($usuarioId);
         $calendar = $this->writableCalendar($conexao, $calendarId);
         $token = $this->connections->getValidAccessToken($conexao);
         $body = $this->eventBody($payload, false);
@@ -116,7 +118,7 @@ class GoogleCalendarEventService
             $this->log($conexao, $usuarioId, 'update', 'erro', $calendarId, $eventId, $body, $e->context, $e);
             throw $e;
         }
-        $this->invalidateCache();
+        $this->invalidateCache($usuarioId, $conexao->id);
 
         $event = $this->formatEvent($res['json'] ?? [], $calendar);
         $this->log($conexao, $usuarioId, 'update', 'sucesso', $calendarId, $eventId, $body, $res['json'] ?? null);
@@ -127,9 +129,9 @@ class GoogleCalendarEventService
     /**
      * @param array<string, mixed> $payload
      */
-    public function deleteEvent(string $calendarId, string $eventId, array $payload = [], ?int $usuarioId = null): void
+    public function deleteEvent(string $calendarId, string $eventId, array $payload, int $usuarioId): void
     {
-        $conexao = $this->requireConnection();
+        $conexao = $this->requireConnection($usuarioId);
         $this->writableCalendar($conexao, $calendarId);
         $token = $this->connections->getValidAccessToken($conexao);
         try {
@@ -139,19 +141,18 @@ class GoogleCalendarEventService
             $this->log($conexao, $usuarioId, 'delete', 'erro', $calendarId, $eventId, $payload, $e->context, $e);
             throw $e;
         }
-        $this->invalidateCache();
+        $this->invalidateCache($usuarioId, $conexao->id);
         $this->log($conexao, $usuarioId, 'delete', 'sucesso', $calendarId, $eventId, $payload, $res['json'] ?? ['status' => $res['status']]);
     }
 
-    public function invalidateCache(): void
+    public function invalidateCache(int $usuarioId, int $conexaoId): void
     {
-        Cache::add('google_calendar_events_version', 1, now()->addYear());
-        Cache::increment('google_calendar_events_version');
+        $this->connections->invalidateEventCache($usuarioId, $conexaoId);
     }
 
-    private function requireConnection(): GoogleCalendarConexao
+    private function requireConnection(int $usuarioId): GoogleCalendarConexao
     {
-        $conexao = $this->connections->latest();
+        $conexao = $this->connections->forUser($usuarioId);
         if (!$conexao || $conexao->status !== 'ativa') {
             throw new GoogleCalendarException('Nenhuma conexao ativa com Google Agenda.', 'conexao_inativa');
         }

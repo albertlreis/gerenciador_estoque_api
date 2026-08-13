@@ -38,4 +38,9 @@ class AcessoUsuario extends Authenticatable
     {
         return $this->hasMany(Pedido::class, 'id_usuario');
     }
+
+    public function googleCalendarConexao(): \Illuminate\Database\Eloquent\Relations\HasOne
+    {
+        return $this->hasOne(\App\Integrations\GoogleCalendar\Models\GoogleCalendarConexao::class, 'usuario_id');
+    }
 }

@@ -11,7 +11,10 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
+use App\Models\AcessoUsuario;
 
 class GoogleCalendarOAuthController extends Controller
 {
@@ -23,6 +26,9 @@ class GoogleCalendarOAuthController extends Controller
 
     public function redirect(Request $request): JsonResponse|RedirectResponse
     {
+        if (!$request->user()?->ativo) {
+            return response()->json(['message' => 'Usuario inativo.'], 403);
+        }
         if (!AuthHelper::hasPermissao('google_calendar.configurar')) {
             return response()->json(['message' => 'Sem permissao para configurar a integracao Google Agenda.'], 403);
         }
@@ -70,14 +76,18 @@ class GoogleCalendarOAuthController extends Controller
             return redirect()->away($front . '?gc=erro&reason=' . urlencode('state_invalido'));
         }
 
+        $usuarioId = (int) ($payload['user_id'] ?? 0);
+        $usuario = $usuarioId > 0 ? AcessoUsuario::query()->find($usuarioId) : null;
+        if (!$usuario || !$usuario->ativo) {
+            return redirect()->away($front . '?gc=erro&reason=' . urlencode('usuario_inativo'));
+        }
+        if (!$this->userHasPermission($usuarioId, 'google_calendar.configurar')) {
+            return redirect()->away($front . '?gc=erro&reason=' . urlencode('permissao_revogada'));
+        }
+
         try {
             $tokens = $this->oauth->exchangeCodeForToken($code);
-            $conexao = $this->connections->findOrCreate();
-            $this->connections->persistTokensFromOAuth($conexao, $tokens);
-            if (!$this->connections->healthcheck($conexao)) {
-                return redirect()->away($front . '?gc=erro&reason=' . urlencode('healthcheck_failed'));
-            }
-            $this->connections->syncCalendars($conexao->fresh(['token']));
+            $this->connections->completeOAuthForUser($usuarioId, $tokens);
         } catch (GoogleCalendarException $e) {
             return redirect()->away($front . '?gc=erro&reason=' . urlencode($e->reason));
         } catch (\Throwable $e) {
@@ -85,5 +95,22 @@ class GoogleCalendarOAuthController extends Controller
         }
 
         return redirect()->away($front . '?gc=ok');
+    }
+
+    private function userHasPermission(int $usuarioId, string $slug): bool
+    {
+        if (!Schema::hasTable('acesso_usuario_perfil')
+            || !Schema::hasTable('acesso_perfil_permissao')
+            || !Schema::hasTable('acesso_permissoes')) {
+            $cached = Cache::get('permissoes_usuario_' . $usuarioId, []);
+            return is_array($cached) && in_array($slug, $cached, true);
+        }
+
+        return DB::table('acesso_usuario_perfil')
+            ->join('acesso_perfil_permissao', 'acesso_usuario_perfil.id_perfil', '=', 'acesso_perfil_permissao.id_perfil')
+            ->join('acesso_permissoes', 'acesso_perfil_permissao.id_permissao', '=', 'acesso_permissoes.id')
+            ->where('acesso_usuario_perfil.id_usuario', $usuarioId)
+            ->where('acesso_permissoes.slug', $slug)
+            ->exists();
     }
 }

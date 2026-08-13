@@ -24,13 +24,13 @@ class GoogleCalendarController extends Controller
     ) {
     }
 
-    public function status(): JsonResponse
+    public function status(Request $request): JsonResponse
     {
         if ($response = $this->autorizar('google_calendar.visualizar')) {
             return $response;
         }
 
-        $conexao = $this->connections->latest();
+        $conexao = $this->connections->forUser((int) $request->user()->id);
         if (!$conexao) {
             return response()->json(['conectado' => false, 'conexao' => null]);
         }
@@ -41,13 +41,13 @@ class GoogleCalendarController extends Controller
         ]);
     }
 
-    public function calendars(): JsonResponse
+    public function calendars(Request $request): JsonResponse
     {
         if ($response = $this->autorizar('google_calendar.visualizar')) {
             return $response;
         }
 
-        $conexao = $this->connections->latest();
+        $conexao = $this->connections->forUser((int) $request->user()->id);
         if (!$conexao) {
             return response()->json(['data' => []]);
         }
@@ -69,13 +69,13 @@ class GoogleCalendarController extends Controller
         return response()->json(['data' => $calendars]);
     }
 
-    public function disconnect(): JsonResponse
+    public function disconnect(Request $request): JsonResponse
     {
         if ($response = $this->autorizar('google_calendar.configurar')) {
             return $response;
         }
 
-        $result = $this->connections->disconnect();
+        $result = $this->connections->disconnect((int) $request->user()->id);
 
         return response()->json([
             'ok' => true,
@@ -85,14 +85,14 @@ class GoogleCalendarController extends Controller
         ]);
     }
 
-    public function enableCalendar(string $calendarId): JsonResponse
+    public function enableCalendar(Request $request, string $calendarId): JsonResponse
     {
-        return $this->setCalendarEnabled($calendarId, true);
+        return $this->setCalendarEnabled($request, $calendarId, true);
     }
 
-    public function disableCalendar(string $calendarId): JsonResponse
+    public function disableCalendar(Request $request, string $calendarId): JsonResponse
     {
-        return $this->setCalendarEnabled($calendarId, false);
+        return $this->setCalendarEnabled($request, $calendarId, false);
     }
 
     public function updateCalendarVisibility(Request $request, string $calendarId): JsonResponse
@@ -105,7 +105,7 @@ class GoogleCalendarController extends Controller
             'visibility' => ['required', 'string', 'in:public,private'],
         ]);
 
-        $conexao = $this->connections->latest();
+        $conexao = $this->connections->forUser((int) $request->user()->id);
         if (!$conexao) {
             return response()->json(['ok' => false, 'mensagem' => 'Conexao Google Agenda nao encontrada.'], 404);
         }
@@ -269,6 +269,7 @@ class GoogleCalendarController extends Controller
         $perPage = max(1, min((int) $request->query('per_page', 25), 100));
         $page = AuditoriaLog::query()
             ->where('modulo', 'google_calendar')
+            ->where('actor_id', (int) $request->user()->id)
             ->where(function ($query) {
                 $query->where('source_table', 'google_calendar_logs')
                     ->orWhereNull('source_table');
@@ -312,15 +313,14 @@ class GoogleCalendarController extends Controller
         ];
     }
 
-    private function setCalendarEnabled(string $calendarId, bool $enabled): JsonResponse
+    private function setCalendarEnabled(Request $request, string $calendarId, bool $enabled): JsonResponse
     {
         if ($response = $this->autorizar('google_calendar.configurar')) {
             return $response;
         }
 
         try {
-            $calendar = $this->connections->setCalendarEnabled($calendarId, $enabled);
-            $this->events->invalidateCache();
+            $calendar = $this->connections->setCalendarEnabled((int) $request->user()->id, $calendarId, $enabled);
         } catch (GoogleCalendarException $e) {
             return response()->json(['ok' => false, 'mensagem' => $e->getMessage(), 'reason' => $e->reason], 422);
         }
@@ -330,6 +330,10 @@ class GoogleCalendarController extends Controller
 
     private function autorizar(string $permissao): ?JsonResponse
     {
+        if (!auth()->user()?->ativo) {
+            return response()->json(['message' => 'Usuario inativo.'], 403);
+        }
+
         if (AuthHelper::hasPermissao($permissao)) {
             return null;
         }

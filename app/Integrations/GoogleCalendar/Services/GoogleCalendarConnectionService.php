@@ -21,14 +21,79 @@ class GoogleCalendarConnectionService
     ) {
     }
 
-    public function latest(): ?GoogleCalendarConexao
+    public function forUser(int $usuarioId): ?GoogleCalendarConexao
     {
-        return GoogleCalendarConexao::query()->with('token')->orderByDesc('id')->first();
+        return GoogleCalendarConexao::query()
+            ->with('token')
+            ->where('usuario_id', $usuarioId)
+            ->first();
     }
 
-    public function findOrCreate(): GoogleCalendarConexao
+    public function findOrCreateForUser(int $usuarioId): GoogleCalendarConexao
     {
-        return $this->latest() ?? GoogleCalendarConexao::create(['status' => 'inativa']);
+        return $this->forUser($usuarioId) ?? GoogleCalendarConexao::create([
+            'usuario_id' => $usuarioId,
+            'status' => 'inativa',
+        ]);
+    }
+
+    /**
+     * Valida a nova autorizacao no Google antes de substituir a conexao ativa.
+     *
+     * @param array<string, mixed> $tokenResponse
+     */
+    public function completeOAuthForUser(int $usuarioId, array $tokenResponse): GoogleCalendarConexao
+    {
+        $access = trim((string) ($tokenResponse['access_token'] ?? ''));
+        $refresh = trim((string) ($tokenResponse['refresh_token'] ?? ''));
+        if ($access === '') {
+            throw new GoogleCalendarException('Resposta OAuth sem access_token.', 'token_sem_access_token');
+        }
+        if ($refresh === '') {
+            throw new GoogleCalendarException(
+                'O Google nao forneceu acesso offline. Revogue o acesso anterior e conecte novamente.',
+                'refresh_token_ausente'
+            );
+        }
+
+        $items = $this->fetchCalendarItems($access);
+
+        return DB::transaction(function () use ($usuarioId, $tokenResponse, $items) {
+            $conexao = GoogleCalendarConexao::query()
+                ->where('usuario_id', $usuarioId)
+                ->lockForUpdate()
+                ->first();
+
+            if (!$conexao) {
+                $conexao = GoogleCalendarConexao::create([
+                    'usuario_id' => $usuarioId,
+                    'status' => 'inativa',
+                ]);
+            }
+
+            $this->persistTokensFromOAuth($conexao, $tokenResponse);
+            $conexao->update([
+                'status' => 'ativa',
+                'ultimo_healthcheck_em' => now(),
+                'ultimo_erro' => null,
+            ]);
+
+            $conexao->calendars()->delete();
+            foreach ($items as $item) {
+                $this->upsertCalendar($conexao, $item, false);
+            }
+
+            $primary = collect($items)->first(fn (array $item) => (bool) ($item['primary'] ?? false));
+            $primaryId = is_array($primary) ? (string) ($primary['id'] ?? '') : '';
+            $conexao->update([
+                'email_externo' => filter_var($primaryId, FILTER_VALIDATE_EMAIL) ? $primaryId : null,
+                'nome_externo' => null,
+            ]);
+
+            $this->invalidateEventCache($usuarioId, $conexao->id);
+
+            return $conexao->fresh(['token', 'calendars']);
+        });
     }
 
     /**
@@ -132,37 +197,20 @@ class GoogleCalendarConnectionService
     public function syncCalendars(GoogleCalendarConexao $conexao): array
     {
         $token = $this->getValidAccessToken($conexao);
-        $path = (string) ($this->config['paths']['calendar_list'] ?? '/users/me/calendarList');
         $items = [];
-        $pageToken = null;
-
-        do {
-            $query = ['maxResults' => 250, 'minAccessRole' => 'reader'];
-            if ($pageToken) {
-                $query['pageToken'] = $pageToken;
-            }
-
-            $res = $this->client->get($path, $token, $query);
-            if ($res['status'] < 200 || $res['status'] >= 300 || !is_array($res['json'])) {
-                throw new GoogleCalendarException('Nao foi possivel listar agendas Google.', 'calendar_list_failed', ['response' => $res]);
-            }
-
-            foreach (($res['json']['items'] ?? []) as $item) {
-                if (!is_array($item) || empty($item['id'])) {
-                    continue;
-                }
-                $items[] = $this->upsertCalendar($conexao, $item);
-            }
-
-            $pageToken = isset($res['json']['nextPageToken']) ? (string) $res['json']['nextPageToken'] : null;
-        } while ($pageToken);
+        foreach ($this->fetchCalendarItems($token) as $item) {
+            $items[] = $this->upsertCalendar($conexao, $item);
+        }
 
         return $items;
     }
 
-    public function setCalendarEnabled(string $calendarId, bool $enabled): GoogleCalendarCalendar
+    public function setCalendarEnabled(int $usuarioId, string $calendarId, bool $enabled): GoogleCalendarCalendar
     {
-        $conexao = $this->findOrCreate();
+        $conexao = $this->forUser($usuarioId);
+        if (!$conexao || $conexao->status !== 'ativa') {
+            throw new GoogleCalendarException('Nenhuma conexao ativa com Google Agenda.', 'conexao_inativa');
+        }
         $calendar = GoogleCalendarCalendar::query()
             ->where('conexao_id', $conexao->id)
             ->where('calendar_id', $calendarId)
@@ -181,6 +229,7 @@ class GoogleCalendarConnectionService
         }
 
         $calendar->update(['enabled' => $enabled]);
+        $this->invalidateEventCache($usuarioId, $conexao->id);
 
         return $calendar->fresh();
     }
@@ -188,31 +237,28 @@ class GoogleCalendarConnectionService
     /**
      * @return array{local_deleted:bool,google_revoked:bool}
      */
-    public function disconnect(): array
+    public function disconnect(int $usuarioId): array
     {
-        $connections = GoogleCalendarConexao::query()
+        $connection = GoogleCalendarConexao::query()
             ->with('token')
-            ->orderByDesc('id')
-            ->get();
+            ->where('usuario_id', $usuarioId)
+            ->first();
 
         $googleRevoked = true;
-        foreach ($connections as $connection) {
+        if ($connection) {
             $token = $connection->token;
-            if (!$token) {
-                continue;
+            if ($token) {
+                $revocationToken = (string) ($token->refresh_token ?: $token->access_token);
+                $googleRevoked = $this->oauth->revokeToken($revocationToken);
             }
-
-            $revocationToken = (string) ($token->refresh_token ?: $token->access_token);
-            $googleRevoked = $this->oauth->revokeToken($revocationToken) && $googleRevoked;
         }
 
-        $localDeleted = $connections->isNotEmpty();
-        DB::transaction(function (): void {
-            GoogleCalendarConexao::query()->delete();
-        });
-
-        Cache::add('google_calendar_events_version', 1, now()->addYear());
-        Cache::increment('google_calendar_events_version');
+        $localDeleted = $connection !== null;
+        if ($connection) {
+            $connectionId = (int) $connection->id;
+            DB::transaction(fn () => $connection->delete());
+            $this->invalidateEventCache($usuarioId, $connectionId);
+        }
 
         return [
             'local_deleted' => $localDeleted,
@@ -223,7 +269,45 @@ class GoogleCalendarConnectionService
     /**
      * @param array<string, mixed> $item
      */
-    private function upsertCalendar(GoogleCalendarConexao $conexao, array $item): GoogleCalendarCalendar
+    public function invalidateEventCache(int $usuarioId, int $conexaoId): void
+    {
+        $key = "google_calendar_events_version:{$usuarioId}:{$conexaoId}";
+        Cache::add($key, 1, now()->addYear());
+        Cache::increment($key);
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    private function fetchCalendarItems(string $token): array
+    {
+        $path = (string) ($this->config['paths']['calendar_list'] ?? '/users/me/calendarList');
+        $items = [];
+        $pageToken = null;
+
+        do {
+            $query = ['maxResults' => 250, 'minAccessRole' => 'reader'];
+            if ($pageToken) {
+                $query['pageToken'] = $pageToken;
+            }
+
+            $res = $this->client->get($path, $token, $query);
+            if ($res['status'] < 200 || $res['status'] >= 300 || !is_array($res['json'])) {
+                throw new GoogleCalendarException('Nao foi possivel listar agendas Google.', 'calendar_list_failed');
+            }
+
+            foreach (($res['json']['items'] ?? []) as $item) {
+                if (is_array($item) && !empty($item['id'])) {
+                    $items[] = $item;
+                }
+            }
+            $pageToken = isset($res['json']['nextPageToken']) ? (string) $res['json']['nextPageToken'] : null;
+        } while ($pageToken);
+
+        return $items;
+    }
+
+    private function upsertCalendar(GoogleCalendarConexao $conexao, array $item, ?bool $enabled = null): GoogleCalendarCalendar
     {
         $calendar = GoogleCalendarCalendar::query()->firstOrNew([
             'conexao_id' => $conexao->id,
@@ -241,6 +325,10 @@ class GoogleCalendarConnectionService
             'synced_at' => now(),
             'metadata_json' => $item,
         ]);
+
+        if ($enabled !== null) {
+            $calendar->enabled = $enabled;
+        }
 
         if (!$calendar->visibility) {
             $calendar->visibility = 'private';

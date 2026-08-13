@@ -629,13 +629,19 @@ class GoogleCalendarEndpointsTest extends TestCase
             ->value('id');
 
         if ($permissaoId === null) {
-            $permissaoId = DB::table('acesso_permissoes')->insertGetId([
-                'slug' => $slug,
-                'nome' => 'Permissao Google Calendar de teste',
-                'descricao' => 'Permissao criada apenas dentro da transacao do teste.',
-                'created_at' => now(),
-                'updated_at' => now(),
-            ]);
+            $permissaoValues = [];
+            if (Schema::hasColumn('acesso_permissoes', 'nome')) {
+                $permissaoValues['nome'] = 'Permissao Google Calendar de teste';
+            }
+            if (Schema::hasColumn('acesso_permissoes', 'descricao')) {
+                $permissaoValues['descricao'] = 'Permissao criada apenas dentro da transacao do teste.';
+            }
+            if (Schema::hasColumn('acesso_permissoes', 'updated_at')) {
+                $permissaoValues['updated_at'] = now();
+            }
+
+            DB::table('acesso_permissoes')->updateOrInsert(['slug' => $slug], $permissaoValues);
+            $permissaoId = DB::table('acesso_permissoes')->where('slug', $slug)->value('id');
         }
 
         $perfilId = DB::table('acesso_perfil_permissao')
@@ -646,31 +652,41 @@ class GoogleCalendarEndpointsTest extends TestCase
             $perfilId = DB::table('acesso_perfis')->value('id');
 
             if ($perfilId === null) {
-                $perfilId = DB::table('acesso_perfis')->insertGetId([
-                    'nome' => 'Perfil Google Calendar de teste',
-                    'descricao' => 'Perfil criado apenas dentro da transacao do teste.',
-                    'created_at' => now(),
-                    'updated_at' => now(),
-                ]);
+                $perfilValues = [];
+                if (Schema::hasColumn('acesso_perfis', 'descricao')) {
+                    $perfilValues['descricao'] = 'Perfil criado apenas dentro da transacao do teste.';
+                }
+                if (Schema::hasColumn('acesso_perfis', 'updated_at')) {
+                    $perfilValues['updated_at'] = now();
+                }
+
+                DB::table('acesso_perfis')->updateOrInsert(
+                    ['nome' => 'Perfil Google Calendar de teste'],
+                    $perfilValues
+                );
+                $perfilId = DB::table('acesso_perfis')
+                    ->where('nome', 'Perfil Google Calendar de teste')
+                    ->value('id');
             }
 
             DB::table('acesso_perfil_permissao')->insert([
                 'id_perfil' => $perfilId,
                 'id_permissao' => $permissaoId,
-                'created_at' => now(),
-                'updated_at' => now(),
+                ...(Schema::hasColumn('acesso_perfil_permissao', 'updated_at')
+                    ? ['updated_at' => now()]
+                    : []),
             ]);
         }
 
+        $usuarioPerfilValues = Schema::hasColumn('acesso_usuario_perfil', 'updated_at')
+            ? ['updated_at' => now()]
+            : [];
         DB::table('acesso_usuario_perfil')->updateOrInsert(
             [
                 'id_usuario' => $usuario->id,
                 'id_perfil' => $perfilId,
             ],
-            [
-                'created_at' => now(),
-                'updated_at' => now(),
-            ]
+            $usuarioPerfilValues
         );
     }
 

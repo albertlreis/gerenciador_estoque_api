@@ -92,7 +92,7 @@ class ImportacaoPedidoService
             'tipo_importacao' => 'nullable|in:'.implode(',', TipoImportacao::valores()),
             'idempotency_key' => ['nullable', 'string', 'max:191', 'regex:/^[A-Za-z0-9._:-]+$/'],
 
-            'cliente.id' => 'nullable|numeric|min:1',
+            'cliente.id' => 'nullable|integer|min:1|exists:clientes,id',
 
             'pedido.numero_externo' => 'required|string|max:50',
             'pedido.id_usuario' => 'nullable|integer|exists:acesso_usuarios,id',
@@ -152,7 +152,9 @@ class ImportacaoPedidoService
             'itens.min' => 'Adicione ao menos um item ao pedido (inserção manual) antes de confirmar.',
             'pedido.numero_externo.required' => 'Informe o número do pedido antes de confirmar.',
             'pedido.numero_externo.max' => 'Número do pedido deve ter no máximo 50 caracteres.',
-            'idempotency_key.required' => 'Informe a chave de idempotencia para confirmar a reposicao manual.',
+            'idempotency_key.required' => 'Informe a chave de idempotencia para confirmar o pedido manual.',
+            'cliente.id.required' => 'Selecione um cliente para confirmar o pedido manual de venda.',
+            'cliente.id.exists' => 'O cliente selecionado não foi encontrado.',
             'itens.*.nome.required' => 'Informe o nome do produto.',
             'itens.*.nome.max' => 'O nome do produto deve ter no máximo 255 caracteres.',
             'itens.*.ref.max' => 'A referência do produto deve ter no máximo 100 caracteres.',
@@ -361,6 +363,12 @@ class ImportacaoPedidoService
             return empty($input->importacao_id) && empty($input->tipo_importacao);
         });
 
+        $validator->sometimes('cliente.id', 'required', function ($input) {
+            return empty($input->importacao_id)
+                && empty($input->tipo_importacao)
+                && data_get($input, 'pedido.tipo') === Pedido::TIPO_VENDA;
+        });
+
         if ($validator->fails()) {
             SierraLog::inventory('inventory.order_xml_import.validation_failed', [
                 'usuario_id' => Auth::id(),
@@ -397,7 +405,7 @@ class ImportacaoPedidoService
                     $idempotencyKey = trim((string) $request->input('idempotency_key'));
                     $arquivoHash = hash('sha256', "manual:{$usuario->id}:{$idempotencyKey}");
                     PedidoImportacao::query()->insertOrIgnore([
-                        'arquivo_nome' => 'reposicao-manual',
+                        'arquivo_nome' => $tipo === Pedido::TIPO_VENDA ? 'venda-manual' : 'reposicao-manual',
                         'arquivo_hash' => $arquivoHash,
                         'numero_externo' => $dadosPedido['numero_externo'] ?? null,
                         'usuario_id' => $usuario->id,

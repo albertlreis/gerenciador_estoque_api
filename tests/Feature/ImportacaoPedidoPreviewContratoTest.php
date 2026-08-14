@@ -3,6 +3,8 @@
 namespace Tests\Feature;
 
 use App\Models\Categoria;
+use App\Models\Cliente;
+use App\Models\EstoqueMovimentacao;
 use App\Models\Fornecedor;
 use App\Models\Pedido;
 use App\Models\PedidoImportacao;
@@ -581,5 +583,94 @@ XML
         $this->assertNotNull($importacao);
         $this->assertSame('reposicao-manual', $importacao->arquivo_nome);
         $this->assertSame('confirmado', $importacao->status);
+    }
+
+    public function test_confirmar_manual_venda_com_cliente_cria_pedido_sem_movimentar_estoque(): void
+    {
+        $usuario = $this->criarUsuario('confirm-manual-venda@example.com');
+        $cliente = Cliente::create([
+            'nome' => 'Cliente Manual',
+            'tipo' => 'pf',
+        ]);
+        $categoria = $this->criarCategoria();
+
+        $response = $this->actingAs($usuario, 'sanctum')
+            ->postJson('/api/v1/pedidos/import/xml/confirm', [
+                'importacao_id' => null,
+                'idempotency_key' => 'preview-confirmar-venda-manual',
+                'tipo_importacao' => null,
+                'movimentar_estoque' => false,
+                'pedido' => [
+                    'tipo' => 'venda',
+                    'numero_externo' => 'MAN-VENDA-001',
+                    'total' => 100,
+                ],
+                'cliente' => ['id' => $cliente->id],
+                'itens' => [
+                    [
+                        'ref' => 'REF-MANUAL-VENDA',
+                        'sku_interno' => 'SKU-MANUAL-VENDA',
+                        'nome' => 'Produto Manual Venda',
+                        'quantidade' => 1,
+                        'valor' => 100,
+                        'preco_unitario' => 100,
+                        'custo_unitario' => 80,
+                        'id_categoria' => $categoria->id,
+                    ],
+                ],
+            ]);
+
+        $response->assertOk();
+        $pedido = Pedido::findOrFail($response->json('id'));
+        $this->assertSame(Pedido::TIPO_VENDA, $pedido->tipo);
+        $this->assertSame($cliente->id, $pedido->id_cliente);
+        $this->assertSame(0, EstoqueMovimentacao::query()->where('pedido_id', $pedido->id)->count());
+        $this->assertDatabaseHas('pedido_importacoes', [
+            'pedido_id' => $pedido->id,
+            'arquivo_nome' => 'venda-manual',
+            'status' => 'confirmado',
+        ]);
+    }
+
+    public function test_confirmar_manual_venda_exige_cliente_valido(): void
+    {
+        $usuario = $this->criarUsuario('confirm-manual-venda-invalida@example.com');
+        $categoria = $this->criarCategoria();
+        $payload = [
+            'importacao_id' => null,
+            'idempotency_key' => 'preview-confirmar-venda-sem-cliente',
+            'tipo_importacao' => null,
+            'movimentar_estoque' => false,
+            'pedido' => [
+                'tipo' => 'venda',
+                'numero_externo' => 'MAN-VENDA-INVALIDA',
+                'total' => 100,
+            ],
+            'cliente' => [],
+            'itens' => [
+                [
+                    'ref' => 'REF-MANUAL-VENDA-INVALIDA',
+                    'nome' => 'Produto Manual Venda Invalida',
+                    'quantidade' => 1,
+                    'valor' => 100,
+                    'preco_unitario' => 100,
+                    'custo_unitario' => 80,
+                    'id_categoria' => $categoria->id,
+                ],
+            ],
+        ];
+
+        $this->actingAs($usuario, 'sanctum')
+            ->postJson('/api/v1/pedidos/import/xml/confirm', $payload)
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('cliente.id');
+
+        $payload['idempotency_key'] = 'preview-confirmar-venda-cliente-inexistente';
+        $payload['cliente'] = ['id' => 999999];
+
+        $this->actingAs($usuario, 'sanctum')
+            ->postJson('/api/v1/pedidos/import/xml/confirm', $payload)
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('cliente.id');
     }
 }

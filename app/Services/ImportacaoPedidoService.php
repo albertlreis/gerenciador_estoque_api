@@ -60,6 +60,17 @@ class ImportacaoPedidoService
         'tecido_1',
         'metal_vidro',
         'tecido_2',
+        'largura',
+        'comprimento',
+        'profundidade',
+        'altura',
+        'diametro',
+        'formato',
+        'medida',
+        'medidas',
+        'dimensao_1',
+        'dimensao_2',
+        'dimensao_3',
     ];
 
     private const METADADOS_PREVIEW_ITEM = [
@@ -1543,7 +1554,7 @@ class ImportacaoPedidoService
                 return $this->aplicarCategoriaSugerida($item, $categoriaSugerida);
             }
 
-            if ($this->possuiAtributosDetectados($item)) {
+            if ($this->possuiAtributosDetectados($item) || $this->possuiDimensoesIdentidade($item)) {
                 return $this->mesclarItemComIdentificacaoAutomatica(
                     $item,
                     $linha,
@@ -1639,6 +1650,16 @@ class ImportacaoPedidoService
         );
     }
 
+    private function possuiDimensoesIdentidade(array $item): bool
+    {
+        return collect(['altura', 'largura', 'profundidade', 'comprimento', 'diametro', 'formato', 'dimensao_1', 'dimensao_2', 'dimensao_3'])
+            ->contains(function (string $campo) use ($item): bool {
+                $valor = $item['fixos'][$campo] ?? $item[$campo] ?? null;
+
+                return ! is_array($valor) && ! is_object($valor) && trim((string) $valor) !== '';
+            });
+    }
+
     private function mesclarItemComIdentificacaoAutomatica(
         array $item,
         int $linha,
@@ -1653,6 +1674,14 @@ class ImportacaoPedidoService
                 $item['atributos_detectados'] ?? []
             )
         );
+        foreach (['altura', 'largura', 'profundidade', 'comprimento', 'diametro', 'formato', 'dimensao_1', 'dimensao_2', 'dimensao_3'] as $campo) {
+            $valor = $item['fixos'][$campo] ?? $item[$campo] ?? null;
+            if (! is_array($valor) && ! is_object($valor) && trim((string) $valor) !== '') {
+                $atributo = $campo === 'comprimento' ? 'profundidade' : $campo;
+                $atributosIdentidade[$atributo][] = trim((string) $valor);
+                $atributosIdentidade[$atributo] = array_values(array_unique($atributosIdentidade[$atributo]));
+            }
+        }
         $candidatos = $this->buscarCandidatosIdentificacaoAutomatica($referencia, $codigoOrigem);
 
         $avaliados = $candidatos
@@ -1791,16 +1820,19 @@ class ImportacaoPedidoService
             $atributoNormalizado = StringHelper::normalizarAtributo(
                 (string) ($atributo['atributo'] ?? '')
             );
+            if ($atributoNormalizado === 'comprimento') {
+                $atributoNormalizado = 'profundidade';
+            }
             $valor = trim((string) $valor);
 
             if (! in_array($atributoNormalizado, self::ATRIBUTOS_IDENTIDADE_VARIACAO, true) || $valor === '') {
                 continue;
             }
 
-            $chaveValor = $this->normalizarValorAtributoComparacao($valor);
+            $chaveValor = $this->normalizarValorIdentidade($atributoNormalizado, $valor);
             $valoresExistentes = $normalizados[$atributoNormalizado] ?? [];
             $jaExiste = collect($valoresExistentes)->contains(
-                fn (string $existente) => $this->normalizarValorAtributoComparacao($existente) === $chaveValor
+                fn (string $existente) => $this->normalizarValorIdentidade($atributoNormalizado, $existente) === $chaveValor
             );
 
             if (! $jaExiste) {
@@ -1824,8 +1856,8 @@ class ImportacaoPedidoService
 
         foreach ($atributosImportados as $atributo => $valoresImportados) {
             $valoresCandidato = $atributosCandidato[$atributo] ?? [];
-            $conjuntoImportado = $this->normalizarConjuntoValoresAtributo($valoresImportados);
-            $conjuntoCandidato = $this->normalizarConjuntoValoresAtributo($valoresCandidato);
+            $conjuntoImportado = $this->normalizarConjuntoValoresAtributo($atributo, $valoresImportados);
+            $conjuntoCandidato = $this->normalizarConjuntoValoresAtributo($atributo, $valoresCandidato);
             $exigeConjuntoCompleto = count($conjuntoImportado) > 1 || count($conjuntoCandidato) > 1;
 
             if ($valoresCandidato === []) {
@@ -1873,10 +1905,10 @@ class ImportacaoPedidoService
     }
 
     /** @param list<string> $valores */
-    private function normalizarConjuntoValoresAtributo(array $valores): array
+    private function normalizarConjuntoValoresAtributo(string $atributo, array $valores): array
     {
         $normalizados = collect($valores)
-            ->map(fn ($valor) => $this->normalizarValorAtributoComparacao((string) $valor))
+            ->map(fn ($valor) => $this->normalizarValorIdentidade($atributo, (string) $valor))
             ->filter(fn (string $valor) => $valor !== '')
             ->unique()
             ->sort()
@@ -1913,6 +1945,20 @@ class ImportacaoPedidoService
                 foreach ($this->extrairAtributosLegadosComparacao($valor) as $atributoLegado => $valorLegado) {
                     $legados[$atributoLegado][] = $valorLegado;
                 }
+            }
+        }
+
+        $produto = $variacao->produto;
+        foreach (['altura', 'largura', 'profundidade'] as $campo) {
+            $valor = $produto?->{$campo};
+            if ($valor !== null && trim((string) $valor) !== '') {
+                $diretos[$campo][] = (string) $valor;
+            }
+        }
+        foreach (['dimensao_1', 'dimensao_2', 'dimensao_3'] as $campo) {
+            $valor = $variacao->{$campo};
+            if ($valor !== null && trim((string) $valor) !== '') {
+                $diretos[$campo][] = (string) $valor;
             }
         }
 
@@ -1953,6 +1999,21 @@ class ImportacaoPedidoService
         $valor = Str::ascii(mb_strtolower(trim($valor), 'UTF-8'));
 
         return preg_replace('/[^a-z0-9]+/', '', $valor) ?? '';
+    }
+
+    private function normalizarValorIdentidade(string $atributo, string $valor): string
+    {
+        if (in_array($atributo, [
+            'altura', 'largura', 'profundidade', 'diametro', 'medida', 'medidas',
+            'dimensao_1', 'dimensao_2', 'dimensao_3',
+        ], true)) {
+            $numero = str_replace(',', '.', trim($valor));
+            if (preg_match('/-?\d+(?:\.\d+)?/', $numero, $matches) === 1) {
+                return rtrim(rtrim(number_format((float) $matches[0], 4, '.', ''), '0'), '.');
+            }
+        }
+
+        return $this->normalizarValorAtributoComparacao($valor);
     }
 
     private function compararCandidatosVariacao(array $a, array $b): int

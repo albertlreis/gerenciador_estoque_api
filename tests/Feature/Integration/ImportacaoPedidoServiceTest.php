@@ -708,4 +708,44 @@ class ImportacaoPedidoServiceTest extends TestCase
             array_column($itens[0]['variacoes_encontradas'], 'id_variacao')
         );
     }
+
+    public function test_mesma_referencia_com_medidas_diferentes_preserva_variacoes_distintas(): void
+    {
+        $categoria = Categoria::create(['nome' => 'Tapetes']);
+        $produtoMenor = Produto::create([
+            'nome' => 'Tapete Esteira 200', 'id_categoria' => $categoria->id,
+            'largura' => 200, 'profundidade' => 300, 'ativo' => true,
+        ]);
+        $produtoMaior = Produto::create([
+            'nome' => 'Tapete Esteira 220', 'id_categoria' => $categoria->id,
+            'largura' => 220, 'profundidade' => 300, 'ativo' => true,
+        ]);
+        $variacaoMenor = ProdutoVariacao::create([
+            'produto_id' => $produtoMenor->id, 'referencia' => '8205',
+            'nome' => '200 x 300 cm', 'preco' => 10, 'custo' => 5,
+        ]);
+        $variacaoMaior = ProdutoVariacao::create([
+            'produto_id' => $produtoMaior->id, 'referencia' => '8205',
+            'nome' => '220 x 300 cm', 'preco' => 10, 'custo' => 5,
+        ]);
+
+        $itens = app(ImportacaoPedidoService::class)->mesclarItensComVariacoes([
+            [
+                'codigo' => '8205', 'descricao' => 'Tapete 200 x 300 cm',
+                'fixos' => ['largura' => '200,00 cm', 'comprimento' => '300 cm'],
+                'atributos_detectados' => ['largura' => '200,00 cm'],
+            ],
+            [
+                'codigo' => '8205', 'descricao' => 'Tapete 220 x 300 cm',
+                'fixos' => ['largura' => '220 cm', 'comprimento' => '300,00'],
+                'atributos_detectados' => ['largura' => '220 cm'],
+            ],
+        ]);
+
+        $this->assertCount(2, $itens);
+        $this->assertSame($variacaoMenor->id, $itens[0]['id_variacao']);
+        $this->assertSame($variacaoMaior->id, $itens[1]['id_variacao']);
+        $this->assertSame('existente', $itens[0]['vinculo_sugerido']['decisao']);
+        $this->assertSame('existente', $itens[1]['vinculo_sugerido']['decisao']);
+    }
 }

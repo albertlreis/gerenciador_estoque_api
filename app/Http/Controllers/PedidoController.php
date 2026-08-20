@@ -2,13 +2,14 @@
 
 namespace App\Http\Controllers;
 
-use App\Helpers\AuthHelper;
-use App\Http\Requests\StorePedidoRequest;
-use App\Http\Requests\UpdatePedidoRequest;
-use App\Http\Resources\PedidoCompletoResource;
 use App\Enums\EstrategiaVinculoImportacao;
 use App\Enums\PedidoStatus;
 use App\Enums\TipoImportacao;
+use App\Helpers\AuthHelper;
+use App\Http\Requests\PedidoIndexRequest;
+use App\Http\Requests\StorePedidoRequest;
+use App\Http\Requests\UpdatePedidoRequest;
+use App\Http\Resources\PedidoCompletoResource;
 use App\Models\Categoria;
 use App\Models\Consignacao;
 use App\Models\Deposito;
@@ -19,18 +20,17 @@ use App\Models\Pedido;
 use App\Models\PedidoImportacao;
 use App\Models\ProdutoEntregaEvento;
 use App\Models\ProdutoEntregaItem;
-use App\Services\EstoqueDisponibilidadeService;
 use App\Services\EntregaProdutoService;
+use App\Services\EstatisticaPedidoService;
+use App\Services\EstoqueDisponibilidadeService;
 use App\Services\FornecedorPedidoXmlParserService;
 use App\Services\ImportacaoPedidoService;
 use App\Services\NfeXmlParserService;
-use App\Services\PedidoService;
-use App\Http\Requests\PedidoIndexRequest;
-use App\Services\PedidoCancelamentoService;
-use App\Services\PedidoUpdateService;
-use App\Services\EstatisticaPedidoService;
-use App\Services\PedidoExportService;
 use App\Services\PdfImageService;
+use App\Services\PedidoCancelamentoService;
+use App\Services\PedidoExportService;
+use App\Services\PedidoService;
+use App\Services\PedidoUpdateService;
 use App\Support\Logging\SierraLog;
 use App\Support\Pdf\ClienteEnderecoPdf;
 use Barryvdh\DomPDF\Facade\Pdf;
@@ -38,8 +38,8 @@ use Exception;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
-use Illuminate\Support\Collection;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -53,15 +53,23 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 class PedidoController extends Controller
 {
     private const NS_NFE = 'http://www.portalfiscal.inf.br/nfe';
+
     private const FORNECEDOR_AVANTI_TOKEN = 'avanti';
+
     private const FORNECEDOR_AVANTI_CNPJS = ['09341891000467'];
+
     private const FORNECEDOR_AVANTI_RAZOES_SOCIAIS = ['snl industria e comercio textil'];
+
     private const CATEGORIA_SUGERIDA_AVANTI = 'Tapete';
 
     protected PedidoService $pedidoService;
+
     protected PedidoUpdateService $pedidoUpdateService;
+
     protected ImportacaoPedidoService $importacaoService;
+
     protected EstatisticaPedidoService $estatisticaService;
+
     protected PedidoExportService $exportService;
 
     /**
@@ -83,9 +91,6 @@ class PedidoController extends Controller
 
     /**
      * Lista pedidos com filtros, paginação e indicadores adicionais.
-     *
-     * @param PedidoIndexRequest $request
-     * @return JsonResponse
      */
     public function index(PedidoIndexRequest $request): JsonResponse
     {
@@ -95,8 +100,6 @@ class PedidoController extends Controller
     /**
      * Cria um pedido a partir de um carrinho existente.
      *
-     * @param StorePedidoRequest $request
-     * @return JsonResponse
      * @throws \Illuminate\Validation\ValidationException
      */
     public function store(StorePedidoRequest $request): JsonResponse
@@ -109,7 +112,7 @@ class PedidoController extends Controller
      */
     public function update(UpdatePedidoRequest $request, Pedido $pedido): JsonResponse
     {
-        if (!AuthHelper::hasPermissao('pedidos.editar')) {
+        if (! AuthHelper::hasPermissao('pedidos.editar')) {
             return response()->json(['message' => 'Sem permissão para editar pedidos.'], 403);
         }
 
@@ -147,7 +150,7 @@ class PedidoController extends Controller
 
     public function cancelar(Request $request, Pedido $pedido, PedidoCancelamentoService $service): JsonResponse
     {
-        if (!AuthHelper::hasPermissao('pedidos.editar')) {
+        if (! AuthHelper::hasPermissao('pedidos.editar')) {
             return response()->json(['message' => 'Sem permissão para cancelar pedidos.'], 403);
         }
 
@@ -168,9 +171,6 @@ class PedidoController extends Controller
 
     /**
      * Retorna os dados completos de um pedido.
-     *
-     * @param int $pedidoId
-     * @return \App\Http\Resources\PedidoCompletoResource
      */
     public function completo(int $pedidoId): PedidoCompletoResource
     {
@@ -182,7 +182,7 @@ class PedidoController extends Controller
      */
     public function uploadXml(Request $request, Pedido $pedido): JsonResponse
     {
-        if (!AuthHelper::hasPermissao('pedidos.editar')) {
+        if (! AuthHelper::hasPermissao('pedidos.editar')) {
             return response()->json(['message' => 'Sem permissão para anexar XML.'], 403);
         }
 
@@ -238,11 +238,11 @@ class PedidoController extends Controller
      */
     public function downloadXml(Pedido $pedido): BinaryFileResponse|JsonResponse
     {
-        if (!AuthHelper::hasPermissao('pedidos.visualizar.todos') && $pedido->id_usuario !== auth()->id()) {
+        if (! AuthHelper::hasPermissao('pedidos.visualizar.todos') && $pedido->id_usuario !== auth()->id()) {
             return response()->json(['message' => 'Sem permissão para acessar este pedido.'], 403);
         }
 
-        if (!$pedido->nfe_xml_path || !Storage::disk('local')->exists($pedido->nfe_xml_path)) {
+        if (! $pedido->nfe_xml_path || ! Storage::disk('local')->exists($pedido->nfe_xml_path)) {
             return response()->json(['message' => 'XML não encontrado para este pedido.'], 404);
         }
 
@@ -258,12 +258,12 @@ class PedidoController extends Controller
      */
     public function downloadImportacaoXml(PedidoImportacao $importacao): BinaryFileResponse|StreamedResponse|JsonResponse
     {
-        if (!AuthHelper::hasPermissao('pedidos.importar_pdf')) {
+        if (! AuthHelper::hasPermissao('pedidos.importar_pdf')) {
             return response()->json(['message' => 'Sem permissÃ£o para baixar XML de importaÃ§Ã£o.'], 403);
         }
 
         $disk = Storage::disk('local');
-        if (!$importacao->arquivo_path || !$disk->exists($importacao->arquivo_path)) {
+        if (! $importacao->arquivo_path || ! $disk->exists($importacao->arquivo_path)) {
             return response()->json(['message' => 'XML original nÃ£o encontrado para esta importaÃ§Ã£o.'], 404);
         }
 
@@ -277,9 +277,6 @@ class PedidoController extends Controller
 
     /**
      * Exporta pedidos em PDF ou Excel.
-     *
-     * @param Request $request
-     * @return Response|BinaryFileResponse|JsonResponse
      */
     public function exportar(Request $request): Response|BinaryFileResponse|JsonResponse
     {
@@ -288,9 +285,6 @@ class PedidoController extends Controller
 
     /**
      * Retorna estatísticas de pedidos por mês.
-     *
-     * @param Request $request
-     * @return JsonResponse
      */
     public function estatisticas(Request $request): JsonResponse
     {
@@ -300,8 +294,6 @@ class PedidoController extends Controller
     /**
      * Confirma a importação de um pedido previamente lido e armazenado em preview.
      *
-     * @param Request $request
-     * @return JsonResponse
      * @throws \Illuminate\Validation\ValidationException
      */
     public function confirmarImportacaoXml(Request $request): JsonResponse
@@ -328,7 +320,7 @@ class PedidoController extends Controller
         $tiposPermitidos = TipoImportacao::valores();
         $tipoImportacao = strtoupper((string) $request->input('tipo_importacao', TipoImportacao::PRODUTOS_XML_FORNECEDORES->value));
 
-        if (!in_array($tipoImportacao, $tiposPermitidos, true)) {
+        if (! in_array($tipoImportacao, $tiposPermitidos, true)) {
             return response()->json([
                 'sucesso' => false,
                 'mensagem' => 'Tipo de importação inválido.',
@@ -374,7 +366,7 @@ class PedidoController extends Controller
             $tipoImportacaoSolicitado = $tipoImportacao;
 
             $hashArquivo = hash_file('sha256', $arquivo->getRealPath());
-            $hash = hash('sha256', $hashArquivo . '|' . $tipoImportacao . '|' . Str::uuid());
+            $hash = hash('sha256', $hashArquivo.'|'.$tipoImportacao.'|'.Str::uuid());
 
             $importacao = PedidoImportacao::create([
                 'arquivo_hash' => $hash,
@@ -388,7 +380,7 @@ class PedidoController extends Controller
 
             $disk = Storage::disk('local');
             $arquivoPath = "pedido-importacoes/{$importacao->id}";
-            if (!$disk->putFileAs($arquivoPath, $arquivo, 'original.xml')) {
+            if (! $disk->putFileAs($arquivoPath, $arquivo, 'original.xml')) {
                 throw new \RuntimeException('NÃ£o foi possÃ­vel salvar o XML original.');
             }
 
@@ -439,9 +431,9 @@ class PedidoController extends Controller
             $temItens = is_array($itens) && count($itens) > 0;
             $permitePreviewSemItens = true;
 
-            if ($permitePreviewSemItens && !$temItens) {
+            if ($permitePreviewSemItens && ! $temItens) {
                 $temPedidoMinimo = $this->temPedidoMinimo($pedido, $totais);
-                if (!$temPedidoMinimo) {
+                if (! $temPedidoMinimo) {
                     $nomeArquivo = $arquivo->getClientOriginalName();
                     $importacao->forceFill([
                         'status' => 'erro',
@@ -452,10 +444,11 @@ class PedidoController extends Controller
                         'tipo_importacao' => $tipoImportacao,
                         'arquivo_nome' => $nomeArquivo,
                     ], 'warning');
+
                     return response()->json([
                         'sucesso' => false,
                         'mensagem' => "Não foi possível extrair os dados mínimos do pedido (cabeçalho/totais). Arquivo: {$nomeArquivo}",
-                        'erro' => "Dados mínimos do pedido não identificados.",
+                        'erro' => 'Dados mínimos do pedido não identificados.',
                     ], 422);
                 }
                 $nomeArquivo = $arquivo->getClientOriginalName();
@@ -518,7 +511,7 @@ class PedidoController extends Controller
             ];
 
             $itensExtraidos = $temItens;
-            $requerInsercaoManual = !$itensExtraidos;
+            $requerInsercaoManual = ! $itensExtraidos;
             $avisos = [];
             if ($requerInsercaoManual && $permitePreviewSemItens) {
                 $avisos[] = 'Itens não puderam ser extraídos automaticamente. Insira manualmente.';
@@ -574,6 +567,7 @@ class PedidoController extends Controller
                 'tipo_importacao' => $tipoImportacao,
                 'exception' => $e,
             ], 'warning');
+
             return response()->json([
                 'sucesso' => false,
                 'mensagem' => $e->getMessage(),
@@ -582,7 +576,7 @@ class PedidoController extends Controller
         } catch (Exception $e) {
             $hashErro = isset($hash)
                 ? $hash
-                : hash('sha256', ($request->file('arquivo')?->getClientOriginalName() ?? uniqid()) . '|' . $tipoImportacao . '|' . Str::uuid());
+                : hash('sha256', ($request->file('arquivo')?->getClientOriginalName() ?? uniqid()).'|'.$tipoImportacao.'|'.Str::uuid());
 
             if ($importacao) {
                 $importacao->forceFill(['status' => 'erro', 'erro' => $e->getMessage()])->save();
@@ -616,11 +610,11 @@ class PedidoController extends Controller
 
     private function detectarTipoImportacaoXml(?string $path): ?string
     {
-        if ($path === null || !is_file($path)) {
+        if ($path === null || ! is_file($path)) {
             return null;
         }
 
-        $dom = new \DOMDocument();
+        $dom = new \DOMDocument;
         $dom->preserveWhiteSpace = false;
         $dom->formatOutput = false;
 
@@ -628,7 +622,7 @@ class PedidoController extends Controller
         $loaded = $dom->load($path, LIBXML_NONET);
         libxml_clear_errors();
 
-        if (!$loaded || !$dom->documentElement) {
+        if (! $loaded || ! $dom->documentElement) {
             return null;
         }
 
@@ -674,7 +668,7 @@ class PedidoController extends Controller
         $status = $pedidoBase->statusAtual?->getRawOriginal('status') ?? $pedidoBase->statusAtual?->status;
         $tipoRoteiro = $this->normalizarTipoRoteiro($request->query('tipo_roteiro'));
         $isConsignado = in_array($status, ['consignado', 'devolucao_consignacao'], true);
-        if (!$isConsignado) {
+        if (! $isConsignado) {
             $isConsignado = $pedidoBase->isConsignado();
         }
 
@@ -745,9 +739,9 @@ class PedidoController extends Controller
             ]);
 
             $pdf = Pdf::loadView('exports.roteiro-consignacao', [
-                'pedido'     => $pedido,
-                'grupos'     => $grupos,
-                'geradoEm'   => now('America/Belem')->format('d/m/Y H:i'),
+                'pedido' => $pedido,
+                'grupos' => $grupos,
+                'geradoEm' => now('America/Belem')->format('d/m/Y H:i'),
                 'tituloRoteiro' => $tituloRoteiro,
                 'enderecoEntrega' => $enderecoEntrega,
             ])->setPaper('a4');
@@ -796,7 +790,7 @@ class PedidoController extends Controller
         // Depósitos: temos id_deposito no item, e model Deposito existe.
         $depositoIds = $pedido->itens
             ->pluck('id_deposito')
-            ->filter(fn($id) => !is_null($id) && (int)$id > 0)
+            ->filter(fn ($id) => ! is_null($id) && (int) $id > 0)
             ->unique()
             ->values();
 
@@ -805,8 +799,11 @@ class PedidoController extends Controller
             : collect();
 
         $grupos = $pedido->itens->groupBy(function ($item) use ($depositosMap) {
-            $id = (int)($item->id_deposito ?? 0);
-            if ($id <= 0) return 'Sem depósito';
+            $id = (int) ($item->id_deposito ?? 0);
+            if ($id <= 0) {
+                return 'Sem depósito';
+            }
+
             return $depositosMap[$id] ?? ("Depósito #{$id}");
         });
 
@@ -817,9 +814,9 @@ class PedidoController extends Controller
         ]);
 
         $pdf = Pdf::loadView('exports.roteiro-pedido', [
-            'pedido'     => $pedido,
-            'grupos'     => $grupos,
-            'geradoEm'   => now('America/Belem')->format('d/m/Y H:i'),
+            'pedido' => $pedido,
+            'grupos' => $grupos,
+            'geradoEm' => now('America/Belem')->format('d/m/Y H:i'),
             'enderecoEntrega' => $enderecoEntrega,
         ])->setPaper('a4');
 
@@ -833,8 +830,7 @@ class PedidoController extends Controller
         int $pedidoId,
         EstoqueDisponibilidadeService $disponibilidade,
         EntregaProdutoService $entregaService
-    ): JsonResponse
-    {
+    ): JsonResponse {
         $pedido = Pedido::with('cliente.enderecos')->findOrFail($pedidoId);
 
         if (
@@ -849,6 +845,7 @@ class PedidoController extends Controller
 
         $queryBase = fn () => ProdutoEntregaItem::query()
             ->with([
+                'pedido:id,tipo,origem_abastecimento',
                 'pedidoItem',
                 'variacao.imagem',
                 'variacao.produto.imagemPrincipal',
@@ -987,6 +984,23 @@ class PedidoController extends Controller
             $idempotencyKey,
             $disponibilidade
         );
+
+        $itensComRecebimentoPendente = $registrarEntrega
+            ? $this->itensComRecebimentoPendente(
+                $selecionados,
+                $entregas,
+                $entregaService,
+                $idempotencyKey
+            )
+            : collect();
+
+        if ($fluxoV2 && $itensComRecebimentoPendente->isNotEmpty()) {
+            return response()->json([
+                'code' => 'RECEBIMENTO_PENDENTE_PARA_ENTREGA',
+                'message' => 'Registre o recebimento da fabrica antes de entregar estes produtos ao cliente.',
+                'itens' => $itensComRecebimentoPendente->values(),
+            ], 409);
+        }
 
         $itensSemSaldo = $notaItens
             ->filter(fn (ProdutoEntregaItem $item) => (int) $item->getAttribute('nota_entregar_sem_expedicao') > 0)
@@ -1174,7 +1188,7 @@ class PedidoController extends Controller
 
         return response($pdfOutput, 200, [
             'Content-Type' => 'application/pdf',
-            'Content-Disposition' => 'attachment; filename="' . $filename . '"',
+            'Content-Disposition' => 'attachment; filename="'.$filename.'"',
         ]);
     }
 
@@ -1186,7 +1200,15 @@ class PedidoController extends Controller
     ): array {
         $pendenteTotal = max(0, (int) $item->quantidade_total - (int) $item->quantidade_entregue);
         $pendenteExpedido = max(0, (int) $item->quantidade_expedida - (int) $item->quantidade_entregue);
-        $pendenteExpedicao = max(0, (int) $item->quantidade_total - (int) $item->quantidade_expedida);
+        $entregas = app(EntregaProdutoService::class);
+        $pendenteExpedicao = min(
+            max(0, (int) $item->quantidade_total - (int) $item->quantidade_expedida),
+            $entregas->quantidadeLiberadaExpedicao($item)
+        );
+        $exigeRecebimento = $entregas->exigeRecebimentoAntesDaEntrega($item);
+        $liberadaEntrega = $exigeRecebimento
+            ? max(0, min((int) $item->quantidade_recebida, (int) $item->quantidade_total) - (int) $item->quantidade_entregue)
+            : $pendenteTotal;
         $reimpressao = $modoNota === 'reimpressao';
         $pdfImageService ??= app(PdfImageService::class);
 
@@ -1201,11 +1223,20 @@ class PedidoController extends Controller
             'id_variacao' => $item->id_variacao,
             'quantidade_total' => (int) $item->quantidade_total,
             'quantidade_reservada' => (int) $item->quantidade_reservada,
+            'quantidade_recebida' => (int) $item->quantidade_recebida,
             'quantidade_expedida' => (int) $item->quantidade_expedida,
             'quantidade_entregue' => (int) $item->quantidade_entregue,
             'quantidade_pendente_total' => $pendenteTotal,
             'quantidade_pendente_entrega' => $pendenteExpedido,
             'quantidade_pendente_expedicao_nota' => $pendenteExpedicao,
+            'quantidade_liberada_expedicao' => $pendenteExpedicao,
+            'quantidade_liberada_entrega' => $liberadaEntrega,
+            'bloqueado_por_recebimento' => $exigeRecebimento
+                && $pendenteTotal > 0
+                && ((int) $item->quantidade_recebida - (int) $item->quantidade_entregue) <= 0,
+            'mensagem_bloqueio_recebimento' => $exigeRecebimento
+                ? 'A entrega ao cliente e limitada a quantidade recebida da fabrica.'
+                : null,
             'quantidade_reimpressao' => $reimpressao ? (int) $item->quantidade_entregue : null,
             'id_deposito_origem' => $item->id_deposito_origem,
             'id_deposito_destino' => $item->id_deposito_destino,
@@ -1221,6 +1252,52 @@ class PedidoController extends Controller
                 $pendenteExpedicao
             ),
         ];
+    }
+
+    private function itensComRecebimentoPendente(
+        Collection $selecionados,
+        Collection $entregas,
+        EntregaProdutoService $service,
+        string $idempotencyKey
+    ): Collection {
+        return $selecionados->map(function (array $selecionado) use ($entregas, $service, $idempotencyKey) {
+            /** @var ProdutoEntregaItem|null $item */
+            $item = $entregas->get($selecionado['id']);
+            if (! $item
+                || ! $service->exigeRecebimentoAntesDaEntrega($item)
+                || $this->notaEntregaSelecaoJaRegistrada($item, $selecionado, $idempotencyKey)) {
+                return null;
+            }
+
+            $quantidadeSolicitada = $selecionado['quantidade'] !== null
+                ? (int) $selecionado['quantidade']
+                : (int) $selecionado['entregar_expedido']
+                    + (int) collect($selecionado['alocacoes'])->sum('quantidade');
+            $quantidadeLiberada = max(
+                0,
+                min((int) $item->quantidade_recebida, (int) $item->quantidade_total)
+                    - (int) $item->quantidade_entregue
+            );
+
+            if ($quantidadeSolicitada <= $quantidadeLiberada) {
+                return null;
+            }
+
+            return [
+                'produto_entrega_item_id' => (int) $item->id,
+                'pedido_item_id' => $item->pedido_item_id ? (int) $item->pedido_item_id : null,
+                'id_variacao' => (int) $item->id_variacao,
+                'produto' => $item->variacao?->produto?->nome,
+                'referencia' => $item->variacao?->referencia,
+                'quantidade_total' => (int) $item->quantidade_total,
+                'quantidade_recebida' => (int) $item->quantidade_recebida,
+                'quantidade_expedida' => (int) $item->quantidade_expedida,
+                'quantidade_entregue' => (int) $item->quantidade_entregue,
+                'quantidade_solicitada' => $quantidadeSolicitada,
+                'quantidade_liberada' => $quantidadeLiberada,
+                'quantidade_bloqueada' => max(0, $quantidadeSolicitada - $quantidadeLiberada),
+            ];
+        })->filter()->values();
     }
 
     private function normalizarItensNotaEntrega(array $itens, bool $registrarEntrega = false): Collection
@@ -1358,7 +1435,7 @@ class PedidoController extends Controller
                 $eventosEntregaDireta = $registrarEntrega
                     ? ProdutoEntregaEvento::query()
                         ->where('tipo_evento', ProdutoEntregaEvento::ENTREGUE_CLIENTE)
-                        ->where('idempotency_key', 'like', $prefixoEventoDireto . '%')
+                        ->where('idempotency_key', 'like', $prefixoEventoDireto.'%')
                         ->get()
                     : collect();
                 $entregaDiretaJaRegistrada = $eventosEntregaDireta->isNotEmpty();
@@ -1623,8 +1700,7 @@ class PedidoController extends Controller
     private function validarItemSelecionavelNotaEntrega(
         ?ProdutoEntregaItem $item,
         bool $permitirEntregueRegistrado = false
-    ): ?string
-    {
+    ): ?string {
         if (! $item) {
             return 'Item de entrega nao encontrado.';
         }
@@ -1748,7 +1824,7 @@ class PedidoController extends Controller
                 ];
             })
             ->filter()
-            ->sortBy(fn (array $deposito) => ($deposito['is_reserva'] ? '0' : '1') . '|' . $deposito['nome'])
+            ->sortBy(fn (array $deposito) => ($deposito['is_reserva'] ? '0' : '1').'|'.$deposito['nome'])
             ->values()
             ->all();
     }
@@ -1787,7 +1863,7 @@ class PedidoController extends Controller
         ?Fornecedor $fornecedorVinculado,
         ?string $nomeArquivo
     ): ?Categoria {
-        if (!$this->isContextoFornecedorAvanti($fornecedorSugerido, $fornecedorVinculado, $nomeArquivo)) {
+        if (! $this->isContextoFornecedorAvanti($fornecedorSugerido, $fornecedorVinculado, $nomeArquivo)) {
             return null;
         }
 
@@ -1795,7 +1871,7 @@ class PedidoController extends Controller
             ->where('nome', self::CATEGORIA_SUGERIDA_AVANTI)
             ->first();
 
-        if (!$categoria) {
+        if (! $categoria) {
             SierraLog::inventory('inventory.order_import.suggested_category_unavailable', [
                 'categoria_sugerida' => self::CATEGORIA_SUGERIDA_AVANTI,
                 'fornecedor_sugerido' => $fornecedorSugerido['nome'] ?? null,
@@ -1835,7 +1911,7 @@ class PedidoController extends Controller
             if (
                 $normalizado
                 && (
-                    str_contains(" {$normalizado} ", ' ' . self::FORNECEDOR_AVANTI_TOKEN . ' ')
+                    str_contains(" {$normalizado} ", ' '.self::FORNECEDOR_AVANTI_TOKEN.' ')
                     || $this->isRazaoSocialAvanti($normalizado)
                 )
             ) {
@@ -1905,7 +1981,8 @@ class PedidoController extends Controller
         $matchesPorToken = $fornecedoresAtivos
             ->filter(function (Fornecedor $fornecedor) {
                 $normalizado = $this->normalizarNomeFornecedor($fornecedor->nome);
-                return $normalizado && str_contains(" {$normalizado} ", ' ' . self::FORNECEDOR_AVANTI_TOKEN . ' ');
+
+                return $normalizado && str_contains(" {$normalizado} ", ' '.self::FORNECEDOR_AVANTI_TOKEN.' ');
             })
             ->values();
 
@@ -1966,7 +2043,7 @@ class PedidoController extends Controller
         }
 
         $nomeNormalizado = $this->normalizarNomeFornecedor($fornecedorSugerido['nome'] ?? null);
-        if (!$nomeNormalizado) {
+        if (! $nomeNormalizado) {
             return null;
         }
 
@@ -2027,7 +2104,7 @@ class PedidoController extends Controller
     private function resolverFornecedorPorNomeArquivo(array $fornecedorSugerido, ?string $nomeArquivo): ?Fornecedor
     {
         $nomeArquivoNormalizado = $this->normalizarNomeFornecedor($nomeArquivo);
-        if (!$nomeArquivoNormalizado) {
+        if (! $nomeArquivoNormalizado) {
             return null;
         }
 
@@ -2038,7 +2115,7 @@ class PedidoController extends Controller
         $matchesPorNomeCompleto = $fornecedoresAtivos
             ->filter(function (Fornecedor $fornecedor) use ($nomeArquivoNormalizado) {
                 $fornecedorNormalizado = $this->normalizarNomeFornecedor($fornecedor->nome);
-                if (!$fornecedorNormalizado) {
+                if (! $fornecedorNormalizado) {
                     return false;
                 }
 
@@ -2064,11 +2141,11 @@ class PedidoController extends Controller
         $matchesPorToken = $fornecedoresAtivos
             ->filter(function (Fornecedor $fornecedor) use ($nomeArquivoNormalizado) {
                 $fornecedorNormalizado = $this->normalizarNomeFornecedor($fornecedor->nome);
-                if (!$fornecedorNormalizado) {
+                if (! $fornecedorNormalizado) {
                     return false;
                 }
 
-                return str_contains(" {$nomeArquivoNormalizado} ", ' ' . $this->primeiroTokenFornecedor($fornecedorNormalizado) . ' ');
+                return str_contains(" {$nomeArquivoNormalizado} ", ' '.$this->primeiroTokenFornecedor($fornecedorNormalizado).' ');
             })
             ->values();
 
@@ -2091,7 +2168,7 @@ class PedidoController extends Controller
         return $fornecedores
             ->filter(function (Fornecedor $fornecedor) use ($textoNormalizado) {
                 $fornecedorNormalizado = $this->normalizarNomeFornecedor($fornecedor->nome);
-                if (!$fornecedorNormalizado) {
+                if (! $fornecedorNormalizado) {
                     return false;
                 }
 
@@ -2108,7 +2185,7 @@ class PedidoController extends Controller
         return $fornecedores
             ->filter(function (Fornecedor $fornecedor) use ($token) {
                 $fornecedorNormalizado = $this->normalizarNomeFornecedor($fornecedor->nome);
-                if (!$fornecedorNormalizado) {
+                if (! $fornecedorNormalizado) {
                     return false;
                 }
 
@@ -2143,6 +2220,7 @@ class PedidoController extends Controller
     private function normalizarDocumentoFornecedor(mixed $value): ?string
     {
         $documento = preg_replace('/\D+/', '', (string) ($value ?? ''));
+
         return $documento !== '' ? $documento : null;
     }
 
@@ -2163,10 +2241,11 @@ class PedidoController extends Controller
 
     private function temPedidoMinimo(array $pedido, array $totais): bool
     {
-        $temNumero = !empty(trim((string) ($pedido['numero_pedido'] ?? '')));
-        $temData = !empty(trim((string) ($pedido['data_pedido'] ?? '')));
+        $temNumero = ! empty(trim((string) ($pedido['numero_pedido'] ?? '')));
+        $temData = ! empty(trim((string) ($pedido['data_pedido'] ?? '')));
         $temTotal = isset($totais['total_liquido']) && trim((string) $totais['total_liquido']) !== ''
             || isset($totais['total_bruto']) && trim((string) $totais['total_bruto']) !== '';
+
         return $temNumero || $temData || $temTotal;
     }
 
@@ -2177,6 +2256,7 @@ class PedidoController extends Controller
     {
         $pedido = $preview['pedido'] ?? [];
         $totais = $preview['totais'] ?? [];
+
         return $this->temPedidoMinimo($pedido, $totais);
     }
 
@@ -2187,15 +2267,16 @@ class PedidoController extends Controller
     {
         $itens = $preview['itens'] ?? [];
         $temItens = is_array($itens) && count($itens) > 0;
-        if (!array_key_exists('itens_extraidos', $preview)) {
+        if (! array_key_exists('itens_extraidos', $preview)) {
             $preview['itens_extraidos'] = $temItens;
         }
-        if (!array_key_exists('requer_insercao_manual', $preview)) {
-            $preview['requer_insercao_manual'] = !$temItens;
+        if (! array_key_exists('requer_insercao_manual', $preview)) {
+            $preview['requer_insercao_manual'] = ! $temItens;
         }
-        if (!array_key_exists('avisos', $preview)) {
+        if (! array_key_exists('avisos', $preview)) {
             $preview['avisos'] = $temItens ? [] : ['Itens não puderam ser extraídos automaticamente. Insira manualmente.'];
         }
+
         return $preview;
     }
 
@@ -2212,13 +2293,14 @@ class PedidoController extends Controller
 
         return $pedido->consignacoes->every(function ($item) {
             $status = strtolower((string) ($item->status ?? ''));
+
             return in_array($status, ['devolvido', 'comprado', 'finalizado'], true);
         });
     }
 
     private function gruposRoteiroConsignacao(Pedido $pedido, bool $isDevolucao, Request $request)
     {
-        if (!$isDevolucao) {
+        if (! $isDevolucao) {
             return $pedido->consignacoes->groupBy(fn ($item) => $item->deposito->nome ?? 'Sem depósito');
         }
 
@@ -2250,7 +2332,7 @@ class PedidoController extends Controller
             ->values();
 
         $faltando = $consignacaoIds
-            ->filter(fn ($consignacaoId) => !$destinos->has($consignacaoId))
+            ->filter(fn ($consignacaoId) => ! $destinos->has($consignacaoId))
             ->values();
 
         if ($faltando->isNotEmpty()) {
@@ -2265,7 +2347,7 @@ class PedidoController extends Controller
             ->keyBy('id');
 
         $invalidos = $consignacaoIds
-            ->filter(fn ($consignacaoId) => !$depositos->has((int) $destinos->get($consignacaoId)))
+            ->filter(fn ($consignacaoId) => ! $depositos->has((int) $destinos->get($consignacaoId)))
             ->values();
 
         if ($invalidos->isNotEmpty()) {

@@ -3,22 +3,22 @@
 namespace Tests\Feature;
 
 use App\Enums\PedidoStatus;
+use App\Http\Resources\PedidoListResource;
 use App\Models\Categoria;
 use App\Models\Cliente;
 use App\Models\Deposito;
 use App\Models\Estoque;
 use App\Models\EstoqueMovimentacao;
 use App\Models\Pedido;
-use App\Models\PedidoStatusPrevisao;
 use App\Models\PedidoItem;
 use App\Models\PedidoStatusHistorico;
+use App\Models\PedidoStatusPrevisao;
 use App\Models\Produto;
 use App\Models\ProdutoEntregaEvento;
 use App\Models\ProdutoEntregaItem;
 use App\Models\ProdutoVariacao;
 use App\Models\Usuario;
 use App\Services\EntregaProdutoService;
-use App\Http\Resources\PedidoListResource;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Validation\ValidationException;
@@ -202,11 +202,18 @@ class PedidoFluxoOperacionalV2Test extends TestCase
         $this->assertSame(5, $resumo['fluxos']['devolucoes']['quantidade_total']);
     }
 
-    public function test_nota_exige_confirmacao_sem_saldo_e_grava_data_recebedor_sem_movimento(): void
+    public function test_nota_bloqueia_entrega_da_fabrica_sem_recebimento_e_nao_aceita_override(): void
     {
         [$usuario, $pedido] = $this->criarPedido(1, Pedido::ORIGEM_ABASTECIMENTO_FABRICA);
         Sanctum::actingAs($usuario);
         $entrega = app(EntregaProdutoService::class)->criarDemandaPedido($pedido, $usuario->id, false)->firstOrFail();
+
+        $this->getJson("/api/v1/pedidos/{$pedido->id}/nota-entrega/itens")
+            ->assertOk()
+            ->assertJsonPath('data.0.quantidade_liberada_expedicao', 0)
+            ->assertJsonPath('data.0.quantidade_liberada_entrega', 0)
+            ->assertJsonPath('data.0.bloqueado_por_recebimento', true);
+
         $payload = [
             'acao' => 'registrar_entrega',
             'data_entrega' => '2026-07-08',
@@ -220,10 +227,11 @@ class PedidoFluxoOperacionalV2Test extends TestCase
 
         $this->postJson("/api/v1/pedidos/{$pedido->id}/pdf/nota-entrega", $payload)
             ->assertStatus(409)
-            ->assertJsonPath('code', 'ENTREGA_SEM_SALDO_REQUER_CONFIRMACAO')
-            ->assertJsonPath('itens.0.quantidade', 1)
-            ->assertJsonPath('itens.0.disponivel', 0)
-            ->assertJsonPath('itens.0.faltante', 1);
+            ->assertJsonPath('code', 'RECEBIMENTO_PENDENTE_PARA_ENTREGA')
+            ->assertJsonPath('itens.0.quantidade_recebida', 0)
+            ->assertJsonPath('itens.0.quantidade_solicitada', 1)
+            ->assertJsonPath('itens.0.quantidade_liberada', 0)
+            ->assertJsonPath('itens.0.quantidade_bloqueada', 1);
 
         $this->assertSame(0, ProdutoEntregaEvento::query()
             ->where('produto_entrega_item_id', $entrega->id)
@@ -231,42 +239,24 @@ class PedidoFluxoOperacionalV2Test extends TestCase
             ->count());
 
         $payload['confirmar_entrega_sem_saldo'] = true;
-        $this->postJson("/api/v1/pedidos/{$pedido->id}/pdf/nota-entrega", $payload)->assertOk();
-        $this->postJson("/api/v1/pedidos/{$pedido->id}/pdf/nota-entrega", $payload)->assertOk();
+        $this->postJson("/api/v1/pedidos/{$pedido->id}/pdf/nota-entrega", $payload)
+            ->assertStatus(409)
+            ->assertJsonPath('code', 'RECEBIMENTO_PENDENTE_PARA_ENTREGA');
 
-        $evento = ProdutoEntregaEvento::query()
-            ->where('idempotency_key', "nota-entrega:nota-v2-sem-saldo:item:{$entrega->id}:entregar-sem-saldo")
-            ->firstOrFail();
-        $this->assertSame('2026-07-08', $evento->ocorrido_em?->toDateString());
-        $this->assertSame('Maria da Silva', $evento->metadata_json['recebedor']);
-        $this->assertTrue((bool) $evento->metadata_json['confirmado_sem_saldo']);
         $this->assertSame(0, EstoqueMovimentacao::query()->where('pedido_id', $pedido->id)->count());
-        $this->assertDatabaseHas('pedido_status_historico', [
-            'pedido_id' => $pedido->id,
-            'status' => PedidoStatus::ENTREGA_CLIENTE->value,
-        ]);
+        $this->assertSame(0, ProdutoEntregaEvento::query()
+            ->where('produto_entrega_item_id', $entrega->id)
+            ->whereIn('tipo_evento', [ProdutoEntregaEvento::EXPEDIDO_CLIENTE, ProdutoEntregaEvento::ENTREGUE_CLIENTE])
+            ->count());
     }
 
-    public function test_chegada_da_fabrica_apos_venda_antecipada_nao_regride_status_comercial(): void
+    public function test_recebimento_parcial_libera_somente_a_mesma_quantidade_para_entrega(): void
     {
-        [$usuario, $pedido, $variacao, $deposito] = $this->criarPedido(1, Pedido::ORIGEM_ABASTECIMENTO_FABRICA);
+        [$usuario, $pedido, $variacao, $deposito] = $this->criarPedido(2, Pedido::ORIGEM_ABASTECIMENTO_FABRICA);
         Sanctum::actingAs($usuario);
-        Estoque::updateOrCreate(
-            ['id_variacao' => $variacao->id, 'id_deposito' => $deposito->id],
-            ['quantidade' => 1]
-        );
 
         $service = app(EntregaProdutoService::class);
         $entrega = $service->criarDemandaPedido($pedido, $usuario->id, false)->firstOrFail();
-        $service->reservarItem($entrega, $deposito->id, 1, $usuario->id, 'Antecipacao', 'antecipacao-status-1');
-        $service->expedirItem($entrega, $deposito->id, 1, $usuario->id, 'Saida antecipada', idempotencyKey: 'antecipacao-status-2');
-        $service->entregarItem($entrega, 1, $usuario->id, 'Entrega antecipada', 'antecipacao-status-3');
-        PedidoStatusHistorico::create([
-            'pedido_id' => $pedido->id,
-            'status' => PedidoStatus::ENTREGA_CLIENTE,
-            'data_status' => now(),
-            'usuario_id' => $usuario->id,
-        ]);
 
         $this->postJson("/api/v1/pedidos/{$pedido->id}/recebimentos", [
             'itens' => [[
@@ -274,18 +264,32 @@ class PedidoFluxoOperacionalV2Test extends TestCase
                 'quantidade' => 1,
                 'id_deposito_destino' => $deposito->id,
                 'ocorrido_em' => '2026-07-10 12:00:00',
-                'idempotency_key' => 'reposicao-pos-entrega-1',
+                'idempotency_key' => 'recebimento-parcial-entrega-1',
             ]],
-            'aplicar_status_ao_concluir' => true,
         ])->assertOk();
 
-        $ultimo = $pedido->historicoStatus()->latest('data_status')->latest('id')->firstOrFail();
-        $this->assertSame(PedidoStatus::ENTREGA_CLIENTE->value, $ultimo->getRawOriginal('status'));
-        $this->assertDatabaseMissing('pedido_status_historico', [
-            'pedido_id' => $pedido->id,
-            'status' => PedidoStatus::ENTREGA_ESTOQUE->value,
-        ]);
-        $this->assertSame(1, (int) Estoque::query()
+        $payload = [
+            'acao' => 'registrar_entrega',
+            'data_entrega' => '2026-07-10',
+            'idempotency_key' => 'nota-recebimento-parcial',
+            'itens' => [[
+                'produto_entrega_item_id' => $entrega->id,
+                'quantidade' => 2,
+            ]],
+        ];
+        $this->postJson("/api/v1/pedidos/{$pedido->id}/pdf/nota-entrega", $payload)
+            ->assertStatus(409)
+            ->assertJsonPath('itens.0.quantidade_liberada', 1);
+
+        $payload['itens'][0]['quantidade'] = 1;
+        $this->postJson("/api/v1/pedidos/{$pedido->id}/pdf/nota-entrega", $payload)->assertOk();
+        $this->postJson("/api/v1/pedidos/{$pedido->id}/pdf/nota-entrega", $payload)->assertOk();
+
+        $entrega->refresh();
+        $this->assertSame(1, (int) $entrega->quantidade_recebida);
+        $this->assertSame(1, (int) $entrega->quantidade_expedida);
+        $this->assertSame(1, (int) $entrega->quantidade_entregue);
+        $this->assertSame(0, (int) Estoque::query()
             ->where('id_variacao', $variacao->id)
             ->where('id_deposito', $deposito->id)
             ->value('quantidade'));
@@ -324,7 +328,7 @@ class PedidoFluxoOperacionalV2Test extends TestCase
 
     public function test_nota_com_quantidade_autoaloca_saldo_real_e_baixa_estoque(): void
     {
-        [$usuario, $pedido, $variacao, $deposito] = $this->criarPedido(1, Pedido::ORIGEM_ABASTECIMENTO_FABRICA);
+        [$usuario, $pedido, $variacao, $deposito] = $this->criarPedido(1, Pedido::ORIGEM_ABASTECIMENTO_ESTOQUE);
         Sanctum::actingAs($usuario);
         Estoque::updateOrCreate(
             ['id_variacao' => $variacao->id, 'id_deposito' => $deposito->id],
@@ -371,10 +375,15 @@ class PedidoFluxoOperacionalV2Test extends TestCase
         $this->postJson("/api/v1/pedidos/{$pedido->id}/pdf/nota-entrega", $payload)->assertForbidden();
 
         Cache::put('permissoes_usuario_'.$usuario->id, ['estoque.movimentar'], now()->addHour());
-        Estoque::updateOrCreate(
-            ['id_variacao' => $variacao->id, 'id_deposito' => $deposito->id],
-            ['quantidade' => 1]
-        );
+        $this->postJson("/api/v1/pedidos/{$pedido->id}/recebimentos", [
+            'itens' => [[
+                'produto_entrega_item_id' => $entrega->id,
+                'quantidade' => 1,
+                'id_deposito_destino' => $deposito->id,
+                'ocorrido_em' => '2026-07-10 09:00:00',
+                'idempotency_key' => 'recebimento-nota-v2-seguranca',
+            ]],
+        ])->assertOk();
         PedidoStatusHistorico::create([
             'pedido_id' => $pedido->id,
             'status' => PedidoStatus::ENTREGA_ESTOQUE,

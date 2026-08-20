@@ -29,6 +29,39 @@ class EntregaProdutoService
         private readonly EstoqueMovimentacaoService $movimentacoes,
     ) {}
 
+    public function exigeRecebimentoAntesDaEntrega(ProdutoEntregaItem $item): bool
+    {
+        if ($item->tipo_origem !== ProdutoEntregaItem::ORIGEM_PEDIDO || ! $item->pedido_id) {
+            return false;
+        }
+
+        $pedido = $item->relationLoaded('pedido')
+            ? $item->pedido
+            : Pedido::query()->select('id', 'tipo', 'origem_abastecimento')->find($item->pedido_id);
+
+        return $pedido?->isVenda()
+            && $pedido->origem_abastecimento === Pedido::ORIGEM_ABASTECIMENTO_FABRICA;
+    }
+
+    public function quantidadeLiberadaExpedicao(ProdutoEntregaItem $item): int
+    {
+        $limite = $this->exigeRecebimentoAntesDaEntrega($item)
+            ? (int) $item->quantidade_recebida
+            : (int) $item->quantidade_total;
+
+        return max(0, $limite - (int) $item->quantidade_expedida);
+    }
+
+    public function quantidadeLiberadaEntrega(ProdutoEntregaItem $item): int
+    {
+        $limiteExpedido = (int) $item->quantidade_expedida;
+        $limite = $this->exigeRecebimentoAntesDaEntrega($item)
+            ? min((int) $item->quantidade_recebida, $limiteExpedido)
+            : $limiteExpedido;
+
+        return max(0, $limite - (int) $item->quantidade_entregue);
+    }
+
     public function criarDemandaPedido(Pedido $pedido, ?int $usuarioId = null, bool $reservarAutomaticamente = true): Collection
     {
         return DB::transaction(function () use ($pedido, $usuarioId, $reservarAutomaticamente) {
@@ -751,9 +784,21 @@ class EntregaProdutoService
             }
 
             $pendente = max(0, (int) $entrega->quantidade_total - (int) $entrega->quantidade_expedida);
-            $quantidade = $quantidade !== null ? min((int) $quantidade, $pendente) : $pendente;
+            $quantidadeSolicitada = $quantidade !== null ? (int) $quantidade : $pendente;
+            $quantidade = min($quantidadeSolicitada, $pendente);
             if ($quantidade <= 0) {
                 return $entrega;
+            }
+
+            if (
+                $tipoEvento === ProdutoEntregaEvento::EXPEDIDO_CLIENTE
+                && $this->exigeRecebimentoAntesDaEntrega($entrega)
+                && $quantidadeSolicitada > $this->quantidadeLiberadaExpedicao($entrega)
+            ) {
+                $liberada = $this->quantidadeLiberadaExpedicao($entrega);
+                throw ValidationException::withMessages([
+                    'quantidade' => ["Recebimento da fabrica pendente. Quantidade liberada para expedicao: {$liberada}."],
+                ]);
             }
 
             if (
@@ -1028,11 +1073,18 @@ class EntregaProdutoService
                 return $entrega;
             }
 
-            $baseEntregavel = $permitirSemExpedicao
-                ? (int) $entrega->quantidade_total
-                : (int) $entrega->quantidade_expedida;
+            $exigeRecebimento = $this->exigeRecebimentoAntesDaEntrega($entrega);
+            $baseEntregavel = $exigeRecebimento
+                ? min((int) $entrega->quantidade_recebida, (int) $entrega->quantidade_expedida)
+                : ($permitirSemExpedicao ? (int) $entrega->quantidade_total : (int) $entrega->quantidade_expedida);
             $pendente = max(0, $baseEntregavel - (int) $entrega->quantidade_entregue);
-            $quantidade = $quantidade !== null ? min((int) $quantidade, $pendente) : $pendente;
+            $quantidadeSolicitada = $quantidade !== null ? (int) $quantidade : $pendente;
+            if ($exigeRecebimento && $quantidadeSolicitada > $pendente) {
+                throw ValidationException::withMessages([
+                    'quantidade' => ["Recebimento/expedicao pendente. Quantidade liberada para entrega: {$pendente}."],
+                ]);
+            }
+            $quantidade = min($quantidadeSolicitada, $pendente);
             if ($quantidade <= 0) {
                 return $entrega;
             }

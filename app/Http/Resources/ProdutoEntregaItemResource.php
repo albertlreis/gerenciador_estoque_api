@@ -8,6 +8,7 @@ class ProdutoEntregaItemResource extends JsonResource
 {
     public function toArray($request): array
     {
+        $entregas = app(\App\Services\EntregaProdutoService::class);
         $total = (int) $this->quantidade_total;
         $recebida = (int) $this->quantidade_recebida;
         $expedida = (int) $this->quantidade_expedida;
@@ -37,6 +38,12 @@ class ProdutoEntregaItemResource extends JsonResource
             'divergencia' => 'reconciliar_divergencia',
             default => null,
         };
+        $exigeRecebimento = $entregas->exigeRecebimentoAntesDaEntrega($this->resource);
+        $liberadaExpedicao = $entregas->quantidadeLiberadaExpedicao($this->resource);
+        $liberadaEntrega = $entregas->quantidadeLiberadaEntrega($this->resource);
+        $bloqueadoPorRecebimento = $exigeRecebimento
+            && $liberadaExpedicao <= 0
+            && (int) $this->quantidade_expedida < $total;
 
         return [
             'id' => $this->id,
@@ -66,6 +73,12 @@ class ProdutoEntregaItemResource extends JsonResource
             'quantidade_pendente_reserva' => max(0, $total - $atendido),
             'quantidade_pendente_expedicao' => max(0, (int) $this->quantidade_total - (int) $this->quantidade_expedida),
             'quantidade_pendente_entrega' => max(0, (int) $this->quantidade_expedida - (int) $this->quantidade_entregue),
+            'quantidade_liberada_expedicao' => $liberadaExpedicao,
+            'quantidade_liberada_entrega' => $liberadaEntrega,
+            'bloqueado_por_recebimento' => $bloqueadoPorRecebimento,
+            'mensagem_bloqueio_recebimento' => $bloqueadoPorRecebimento
+                ? 'Registre o recebimento da fabrica antes de entregar ao cliente.'
+                : null,
             'id_deposito_origem' => $this->id_deposito_origem,
             'id_deposito_destino' => $this->id_deposito_destino,
             'status' => $this->status,

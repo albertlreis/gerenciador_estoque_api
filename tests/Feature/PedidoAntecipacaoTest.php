@@ -188,7 +188,7 @@ class PedidoAntecipacaoTest extends TestCase
             ->count());
     }
 
-    public function test_put_preserva_origem_e_progresso_operacional_de_antecipacao_consumida(): void
+    public function test_put_preserva_reserva_antecipada_sem_autorizar_entrega_antes_do_recebimento(): void
     {
         [$usuario, $pedido, $item, $variacao, $deposito] = $this->criarContexto(2);
         Sanctum::actingAs($usuario);
@@ -207,22 +207,19 @@ class PedidoAntecipacaoTest extends TestCase
             'idempotency_key' => 'antecipacao-progresso-registro',
         ])->assertOk();
         $entrega = ProdutoEntregaItem::query()->where('pedido_item_id', $item->id)->firstOrFail();
-        $service = app(EntregaProdutoService::class);
-        $service->expedirItem(
-            $entrega,
-            $deposito->id,
-            1,
-            $usuario->id,
-            'Expedicao antecipada',
-            idempotencyKey: 'antecipacao-progresso-expedicao'
-        );
-        $service->entregarItem(
-            $entrega,
-            1,
-            $usuario->id,
-            'Entrega antecipada',
-            'antecipacao-progresso-entrega'
-        );
+        try {
+            app(EntregaProdutoService::class)->expedirItem(
+                $entrega,
+                $deposito->id,
+                1,
+                $usuario->id,
+                'Expedicao antecipada',
+                idempotencyKey: 'antecipacao-progresso-expedicao'
+            );
+            $this->fail('A expedicao deveria exigir recebimento da fabrica.');
+        } catch (\Illuminate\Validation\ValidationException $exception) {
+            $this->assertArrayHasKey('quantidade', $exception->errors());
+        }
 
         $this->putJson("/api/v1/pedidos/{$pedido->id}", [
             'itens' => [[
@@ -237,9 +234,9 @@ class PedidoAntecipacaoTest extends TestCase
         $entrega = $entrega->fresh();
         $this->assertSame((int) $deposito->id, (int) $entrega->id_deposito_origem);
         $this->assertSame(1, (int) $entrega->quantidade_reservada);
-        $this->assertSame(1, (int) $entrega->quantidade_expedida);
-        $this->assertSame(1, (int) $entrega->quantidade_entregue);
-        $this->assertSame(ProdutoEntregaItem::STATUS_RESERVADO, $entrega->status);
+        $this->assertSame(0, (int) $entrega->quantidade_expedida);
+        $this->assertSame(0, (int) $entrega->quantidade_entregue);
+        $this->assertSame(ProdutoEntregaItem::STATUS_AGUARDANDO_ESTOQUE, $entrega->status);
         $this->assertSame(1, ProdutoEntregaEvento::query()
             ->where('produto_entrega_item_id', $entrega->id)
             ->where('tipo_evento', ProdutoEntregaEvento::RESERVA_CRIADA)

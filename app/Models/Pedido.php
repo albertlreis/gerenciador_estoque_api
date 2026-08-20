@@ -4,18 +4,21 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasManyThrough;
 use Illuminate\Database\Eloquent\Relations\HasOne;
-use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class Pedido extends Model
 {
     protected $table = 'pedidos';
 
-    public const TIPO_VENDA     = 'venda';
+    public const TIPO_VENDA = 'venda';
+
     public const TIPO_REPOSICAO = 'reposicao';
+
     public const ORIGEM_ABASTECIMENTO_FABRICA = 'fabrica';
+
     public const ORIGEM_ABASTECIMENTO_ESTOQUE = 'estoque';
 
     protected $fillable = [
@@ -111,6 +114,11 @@ class Pedido extends Model
     public function statusPrevisoes(): HasMany
     {
         return $this->hasMany(PedidoStatusPrevisao::class);
+    }
+
+    public function historicoStatusItens(): HasMany
+    {
+        return $this->hasMany(PedidoItemStatusHistorico::class);
     }
 
     public function statusAtual(): HasOne

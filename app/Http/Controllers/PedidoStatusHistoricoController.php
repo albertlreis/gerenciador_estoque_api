@@ -7,6 +7,7 @@ use App\Models\Pedido;
 use App\Models\PedidoStatusHistorico;
 use App\Services\Comunicacao\ComunicacaoOutboxService;
 use App\Services\EntregaProdutoService;
+use App\Services\PedidoItemStatusService;
 use App\Services\PedidoStatusFluxoService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -21,9 +22,10 @@ class PedidoStatusHistoricoController extends Controller
         'finalizado',
     ];
 
-    public function __construct(private readonly PedidoStatusFluxoService $statusFluxo)
-    {
-    }
+    public function __construct(
+        private readonly PedidoStatusFluxoService $statusFluxo,
+        private readonly PedidoItemStatusService $itemStatusService,
+    ) {}
 
     public function fluxoStatus(Pedido $pedido): JsonResponse
     {
@@ -35,6 +37,55 @@ class PedidoStatusHistoricoController extends Controller
         return response()->json($this->statusFluxo->opcoesDisponiveis($pedido));
     }
 
+    public function itensStatus(Request $request, Pedido $pedido): JsonResponse
+    {
+        $dados = $request->validate([
+            'status' => ['required', 'string', Rule::in($this->statusFluxo->codigosFluxo($pedido))],
+        ]);
+
+        return response()->json($this->itemStatusService->itensElegiveis($pedido, $dados['status']));
+    }
+
+    public function registrarStatusItens(Request $request, Pedido $pedido): JsonResponse
+    {
+        $dados = $request->validate([
+            'status' => ['required', 'string', Rule::in($this->statusFluxo->codigosFluxo($pedido))],
+            'data_status' => ['required', 'date_format:Y-m-d'],
+            'data_prevista' => ['nullable', 'date_format:Y-m-d'],
+            'observacoes' => ['nullable', 'string'],
+            'itens' => ['required', 'array', 'min:1'],
+            'itens.*.pedido_item_id' => ['required', 'integer', 'distinct'],
+            'itens.*.quantidade' => ['required', 'integer', 'min:1'],
+        ]);
+
+        if ($this->statusFluxo->exigePrevisaoManual($pedido, $dados['status']) && empty($dados['data_prevista'])) {
+            return response()->json([
+                'message' => 'Informe a previsão para este status.',
+                'errors' => ['data_prevista' => ['Informe a previsão para este status.']],
+            ], 422);
+        }
+
+        $resultado = $this->itemStatusService->registrar($pedido, $dados, auth()->id());
+
+        logAuditoria('pedido_item_status', "Status '{$dados['status']}' registrado por item no Pedido #{$pedido->id}.", [
+            'acao' => 'criacao',
+            'status_novo' => $dados['status'],
+            'data_status' => $dados['data_status'],
+            'grupo_uuid' => $resultado['grupo_uuid'],
+            'itens' => collect($dados['itens'])->map(fn ($item) => [
+                'pedido_item_id' => (int) $item['pedido_item_id'],
+                'quantidade' => (int) $item['quantidade'],
+            ])->values()->all(),
+            'marco_global_criado' => $resultado['marco_global_criado'],
+        ], $pedido);
+
+        return response()->json([
+            'message' => 'Status dos itens atualizado com sucesso.',
+            'grupo_uuid' => $resultado['grupo_uuid'],
+            'marco_global_criado' => $resultado['marco_global_criado'],
+        ], 201);
+    }
+
     public function historico(Pedido $pedido): JsonResponse
     {
         $usuario = auth()->user();
@@ -42,6 +93,11 @@ class PedidoStatusHistoricoController extends Controller
         $historico = $pedido->historicoStatus()
             ->with('usuario')
             ->get();
+
+        $historicoItens = $pedido->historicoStatusItens()
+            ->with(['usuario', 'pedidoItem.variacao.produto'])
+            ->get()
+            ->groupBy('grupo_uuid');
 
         $previsoesManuais = $pedido->statusPrevisoes()
             ->get()
@@ -78,15 +134,43 @@ class PedidoStatusHistoricoController extends Controller
                 'observacoes' => $item->observacoes,
                 'usuario' => $item->usuario?->nome,
                 'ehPrevisao' => false,
+                'ehItem' => false,
             ];
         });
+
+        $historicoItensFormatado = $historicoItens->map(function ($itens) {
+            $primeiro = $itens->first();
+            $status = (string) $primeiro->getRawOriginal('status');
+            $meta = $this->statusFluxo->statusMeta($status);
+
+            return [
+                'id' => null,
+                'grupo_uuid' => $primeiro->grupo_uuid,
+                'status' => $status,
+                'label' => $meta['label'],
+                'icone' => $meta['icone'],
+                'cor' => $meta['cor'],
+                'severidade' => $meta['severidade'],
+                'data_status' => $primeiro->data_status,
+                'data_prevista' => $primeiro->data_prevista?->toDateString(),
+                'observacoes' => $primeiro->observacoes,
+                'usuario' => $primeiro->usuario?->nome,
+                'ehPrevisao' => false,
+                'ehItem' => true,
+                'itens' => $itens->map(fn ($item) => [
+                    'pedido_item_id' => (int) $item->pedido_item_id,
+                    'produto' => $item->pedidoItem?->variacao?->produto?->nome ?: "Item {$item->pedido_item_id}",
+                    'quantidade' => (int) $item->quantidade,
+                ])->values(),
+            ];
+        })->values();
 
         $statusRegistrados = $historico
             ->map(fn ($h) => (string) $h->getRawOriginal('status'))
             ->unique();
 
         $previsoesFuturas = collect($previsoes)
-            ->filter(fn ($data, $status) => $data && !$statusRegistrados->contains($status))
+            ->filter(fn ($data, $status) => $data && ! $statusRegistrados->contains($status))
             ->map(function ($data, $status) use ($previsoesManuais) {
                 $meta = $this->statusFluxo->statusMeta((string) $status);
 
@@ -101,19 +185,21 @@ class PedidoStatusHistoricoController extends Controller
                     'observacoes' => isset($previsoesManuais[$status]) ? 'Previsao manual' : 'Previsão automática',
                     'usuario' => null,
                     'ehPrevisao' => true,
+                    'ehItem' => false,
                     'origem_previsao' => isset($previsoesManuais[$status]) ? 'manual' : 'automatica',
                 ];
             });
 
         $ordenado = $historicoFormatado
+            ->merge($historicoItensFormatado)
             ->merge($previsoesFuturas)
             ->sortByDesc(fn ($item) => $ordemMap[$item['status']] ?? -1)
             ->values();
 
-        $primeiroRealIndex = $ordenado->search(fn ($item) => !$item['ehPrevisao']);
+        $primeiroRealIndex = $ordenado->search(fn ($item) => ! $item['ehPrevisao'] && ! $item['ehItem']);
 
         $resultadoFinal = $ordenado->map(function ($item, $index) use ($usuario, $primeiroRealIndex) {
-            $isUltimo = $index === $primeiroRealIndex;
+            $isUltimo = ! $item['ehItem'] && $index === $primeiroRealIndex;
             $statusCritico = in_array($item['status'], self::STATUS_CRITICOS, true);
             $podeRemoverCritico = $usuario?->can('remover-status-critico') ?? false;
 
@@ -121,7 +207,7 @@ class PedidoStatusHistoricoController extends Controller
                 ...$item,
                 'isUltimo' => $isUltimo,
                 'ultimoReal' => $isUltimo,
-                'podeRemover' => $isUltimo && (!$statusCritico || $podeRemoverCritico),
+                'podeRemover' => $isUltimo && (! $statusCritico || $podeRemoverCritico),
             ];
         });
 
@@ -191,6 +277,7 @@ class PedidoStatusHistoricoController extends Controller
 
             if ($dataPrevista === null || $dataPrevista === '') {
                 $pedido->statusPrevisoes()->where('status', $status)->delete();
+
                 continue;
             }
 
@@ -227,7 +314,7 @@ class PedidoStatusHistoricoController extends Controller
         $novoStatus = $dados['status'];
         $statusPermitidos = $this->statusFluxo->codigosFluxo($pedido);
 
-        if (!in_array($novoStatus, $statusPermitidos, true)) {
+        if (! in_array($novoStatus, $statusPermitidos, true)) {
             return response()->json(['message' => 'Status inválido para esse pedido.'], 422);
         }
 
@@ -260,7 +347,7 @@ class PedidoStatusHistoricoController extends Controller
         $agora = Carbon::now($timezone);
         $dataStatusEfetiva = $agora->copy();
 
-        if (!empty($dados['data_status'])) {
+        if (! empty($dados['data_status'])) {
             $dataStatusDia = Carbon::createFromFormat('Y-m-d', $dados['data_status'], $timezone)->startOfDay();
 
             if ($dataStatusDia->gt($agora->copy()->startOfDay())) {
@@ -370,7 +457,7 @@ class PedidoStatusHistoricoController extends Controller
         $statusExpedicao = [PedidoStatus::ENVIO_CLIENTE->value];
         $statusEntrega = [PedidoStatus::ENTREGA_CLIENTE->value, PedidoStatus::FINALIZADO->value];
 
-        if (!in_array($novoStatus, [...$statusRecebimento, ...$statusExpedicao, ...$statusEntrega], true)) {
+        if (! in_array($novoStatus, [...$statusRecebimento, ...$statusExpedicao, ...$statusEntrega], true)) {
             return null;
         }
 

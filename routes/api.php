@@ -426,6 +426,8 @@ Route::middleware(['auth:sanctum', 'senha.nao_obrigatoria'])
             Route::get('status/previsoes', [PedidoStatusHistoricoController::class, 'previsoes']);
             Route::patch('status/previsoes', [PedidoStatusHistoricoController::class, 'salvarPrevisoes']);
             Route::get('status/opcoes', [PedidoStatusHistoricoController::class, 'opcoes']);
+            Route::get('status/itens', [PedidoStatusHistoricoController::class, 'itensStatus']);
+            Route::post('status/itens', [PedidoStatusHistoricoController::class, 'registrarStatusItens']);
             Route::get('status/fluxo', [PedidoStatusHistoricoController::class, 'fluxoStatus']);
 
             // ações de estoque do pedido

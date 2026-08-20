@@ -14,7 +14,9 @@ use Illuminate\Support\Facades\DB;
 class PedidoStatusFluxoService
 {
     public const TIPO_VENDA = 'venda';
+
     public const TIPO_REPOSICAO = 'reposicao';
+
     public const TIPO_CONSIGNACAO = 'consignacao';
 
     public const TIPOS_FLUXO = [
@@ -60,7 +62,7 @@ class PedidoStatusFluxoService
     {
         $codigo = $this->normalizarStatus($codigo);
 
-        if (!$codigo) {
+        if (! $codigo) {
             return [
                 'codigo' => null,
                 'nome' => 'Sem status',
@@ -78,7 +80,7 @@ class PedidoStatusFluxoService
 
         $status = $this->catalogoMap(true)->get($codigo);
 
-        if (!$status) {
+        if (! $status) {
             $legacy = self::statusLegados()[$codigo] ?? null;
 
             if ($legacy) {
@@ -209,8 +211,25 @@ class PedidoStatusFluxoService
 
         return $this->fluxoDetalhado($pedido)
             ->reject(fn (array $item) => $registrados->contains($item['codigo']))
-            ->map(fn (array $item) => $this->opcaoParaArray($item))
+            ->map(fn (array $item) => [
+                ...$this->opcaoParaArray($item),
+                'escopo_itens' => $this->permiteEscopoItens($pedido, $item['codigo']),
+            ])
             ->values();
+    }
+
+    public function permiteEscopoItens(Pedido $pedido, string $status): bool
+    {
+        $codigos = $this->fluxoDetalhado($pedido)->pluck('codigo')->values()->all();
+        $posicao = array_search($this->normalizarStatus($status), $codigos, true);
+        $inicio = array_search(PedidoStatus::PEDIDO_CRIADO->value, $codigos, true);
+        $fim = array_search(PedidoStatus::ENTREGA_ESTOQUE->value, $codigos, true);
+
+        return $posicao !== false
+            && $inicio !== false
+            && $fim !== false
+            && $posicao > $inicio
+            && $posicao < $fim;
     }
 
     public function proximoStatusDetalhado(Pedido $pedido): ?array
@@ -222,7 +241,7 @@ class PedidoStatusFluxoService
             return null;
         }
 
-        if (!$statusAtual) {
+        if (! $statusAtual) {
             return $fluxo->first();
         }
 
@@ -240,7 +259,7 @@ class PedidoStatusFluxoService
             ->unique();
 
         return $fluxo
-            ->first(fn (array $item) => !$registrados->contains($item['codigo']));
+            ->first(fn (array $item) => ! $registrados->contains($item['codigo']));
     }
 
     public function proximoStatusCodigo(Pedido $pedido): ?string
@@ -252,7 +271,7 @@ class PedidoStatusFluxoService
     {
         $statusAtual = $pedido->statusAtual;
 
-        if (!$statusAtual) {
+        if (! $statusAtual) {
             return null;
         }
 
@@ -307,7 +326,7 @@ class PedidoStatusFluxoService
     {
         $proximo = $this->proximoStatusCodigo($pedido);
 
-        if (!$proximo) {
+        if (! $proximo) {
             return null;
         }
 
@@ -496,9 +515,13 @@ class PedidoStatusFluxoService
             ],
             self::TIPO_REPOSICAO => [
                 ['codigo' => 'pedido_criado'],
+                ['codigo' => 'pedido_enviado_fabrica', 'prazo_dias' => 5],
+                ['codigo' => 'nota_emitida'],
+                ['codigo' => 'previsao_embarque_fabrica', 'prazo_dias' => 7, 'exige_previsao_manual' => true],
+                ['codigo' => 'embarque_fabrica', 'exige_previsao_manual' => true],
+                ['codigo' => 'nota_recebida_compra'],
+                ['codigo' => 'previsao_entrega_estoque', 'prazo_dias' => 7, 'exige_previsao_manual' => true],
                 ['codigo' => 'entrega_estoque'],
-                ['codigo' => 'envio_cliente'],
-                ['codigo' => 'entrega_cliente', 'prazo_dias' => 3],
                 ['codigo' => 'finalizado', 'exige_previsao_manual' => true],
             ],
             self::TIPO_CONSIGNACAO => [

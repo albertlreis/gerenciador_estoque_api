@@ -299,7 +299,15 @@ final class PedidoEntregaReconciliacaoService
             ->where('grupo_auditoria', 'CONFIRMADA')
             ->map(function ($divergencia) use ($loteId) {
                 $pedidoItem = PedidoItem::query()->findOrFail((int) $divergencia->pedido_item_id);
-                $depositoId = $pedidoItem->id_deposito ? (int) $pedidoItem->id_deposito : null;
+                $entrega = ProdutoEntregaItem::query()
+                    ->where('tipo_origem', ProdutoEntregaItem::ORIGEM_PEDIDO)
+                    ->where('pedido_item_id', $pedidoItem->id)
+                    ->where('status', '<>', ProdutoEntregaItem::STATUS_CANCELADO)
+                    ->first();
+                $depositoId = $pedidoItem->id_deposito
+                    ?: $entrega?->id_deposito_destino
+                    ?: $entrega?->id_deposito_origem;
+                $depositoId = $depositoId ? (int) $depositoId : null;
                 $saldo = $depositoId
                     ? (int) Estoque::query()->where('id_variacao', $pedidoItem->id_variacao)->where('id_deposito', $depositoId)->value('quantidade')
                     : (int) Estoque::query()->where('id_variacao', $pedidoItem->id_variacao)->sum('quantidade');
@@ -426,8 +434,8 @@ final class PedidoEntregaReconciliacaoService
             ->where('tipo_origem', ProdutoEntregaItem::ORIGEM_PEDIDO)
             ->where('pedido_item_id', $item->id)
             ->where('status', '<>', ProdutoEntregaItem::STATUS_CANCELADO)
-            ->count();
-        if ($entregasAtivas > 1) {
+            ->get();
+        if ($entregasAtivas->count() > 1) {
             $erros[] = "{$prefixo}: existem múltiplos registros centrais de entrega para o mesmo item.";
         }
         $status = $pedido->statusAtual?->getRawOriginal('status') ?? $pedido->statusAtual?->status;
@@ -437,7 +445,16 @@ final class PedidoEntregaReconciliacaoService
         if ((string) ($pedido->numero_externo ?? '') !== (string) $linha['numero_externo']) {
             $erros[] = "{$prefixo}: número externo mudou desde a exportação.";
         }
-        if ($linha['deposito_id'] !== '' && (int) ($item->id_deposito ?? 0) !== (int) $linha['deposito_id'] && $linha['acao'] !== PedidoReconciliacaoItem::ACAO_AJUSTAR_SALDO) {
+        $depositosPermitidos = collect([
+            $item->id_deposito,
+            $entregasAtivas->first()?->id_deposito_destino,
+            $entregasAtivas->first()?->id_deposito_origem,
+        ])->filter()->map(fn ($id) => (int) $id)->unique();
+        if (
+            $linha['deposito_id'] !== ''
+            && ! $depositosPermitidos->contains((int) $linha['deposito_id'])
+            && $linha['acao'] !== PedidoReconciliacaoItem::ACAO_AJUSTAR_SALDO
+        ) {
             $erros[] = "{$prefixo}: depósito do item mudou desde a exportação.";
         }
 

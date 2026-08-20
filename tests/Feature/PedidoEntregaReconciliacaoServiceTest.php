@@ -109,16 +109,28 @@ class PedidoEntregaReconciliacaoServiceTest extends TestCase
 
     public function test_exporta_manifesto_compativel_com_auditoria(): void
     {
-        [, $pedido, $item] = $this->cenario(1, 1, 0);
+        [$usuario, $pedido, $item, $entrega, $deposito] = $this->cenario(1, 1, 0);
+        $item->update(['id_deposito' => null]);
+        $entrega->update(['id_deposito_destino' => $deposito->id]);
         $arquivo = tempnam(sys_get_temp_dir(), 'manifesto-export-').'.csv';
 
-        $resultado = app(PedidoEntregaReconciliacaoService::class)->exportar($arquivo);
-        $linhas = app(PedidoEntregaReconciliacaoService::class)->lerManifesto($arquivo);
+        $service = app(PedidoEntregaReconciliacaoService::class);
+        $resultado = $service->exportar($arquivo);
+        $linhas = $service->lerManifesto($arquivo);
 
         $this->assertSame(1, $resultado['linhas']);
         $this->assertSame((string) $pedido->id, $linhas->first()['pedido_id']);
         $this->assertSame((string) $item->id, $linhas->first()['pedido_item_id']);
+        $this->assertSame((string) $deposito->id, $linhas->first()['deposito_id']);
         $this->assertSame(PedidoReconciliacaoItem::ACAO_BAIXAR_E_ENTREGAR, $linhas->first()['acao']);
+
+        $linha = $linhas->first();
+        $linha['saldo_fisico_confirmado'] = '0';
+        $linha['confirmacao_documental'] = 'SIM';
+        $linha['confirmacao_fisica'] = 'SIM';
+        $linha['evidencia'] = 'Confirmacao documental do teste.';
+        $linha['justificativa'] = 'Reconstrucao da baixa ausente no teste.';
+        $this->assertTrue($service->analisar(collect([$linha]), $usuario->id)['valido']);
         @unlink($arquivo);
     }
 

@@ -209,6 +209,12 @@ class ProdutoService
 
     public function listarProdutosFiltrados(Request $request): LengthAwarePaginator
     {
+        return $this->queryProdutosFiltrados($request)
+            ->paginate($request->integer('per_page', 15));
+    }
+
+    public function queryProdutosFiltrados(Request $request): Builder
+    {
         $view           = $request->get('view', 'completa');
         $depositoId     = $request->input('deposito_id');
         $variacaoId     = $request->input('variacao_id');
@@ -396,7 +402,7 @@ class ProdutoService
 
         $query->orderByDesc('created_at');
 
-        return $query->paginate($request->integer('per_page', 15));
+        return $query;
     }
 
     public function obterProdutoCompleto(int $id, ?int $depositoId = null): Model|Collection|Builder|array|null

@@ -36,7 +36,9 @@ class OutletCrudTest extends TestCase
         Sanctum::actingAs($usuario);
         Cache::put('permissoes_usuario_' . $usuario->id, [
             'produtos.outlet.cadastrar',
+            'produtos.outlet.editar',
             'produtos.outlet.excluir',
+            'produtos.precos_custos',
         ]);
 
         $categoria = Categoria::create(['nome' => 'Categoria Teste ' . $suffix]);
@@ -178,6 +180,7 @@ class OutletCrudTest extends TestCase
             'motivo_id' => $motivo->id,
             'quantidade' => 2,
             'preco_original' => 125.5,
+            'motivo_alteracao_preco' => 'Correcao da tabela comercial',
             'formas_pagamento' => [
                 [
                     'forma_pagamento_id' => $formaPagamento->id,
@@ -275,13 +278,16 @@ class OutletCrudTest extends TestCase
         ]);
         $create->assertStatus(201);
         $outletId = $create->json('data.id');
+        $condicaoId = (int) $create->json('data.formas_pagamento.0.id');
 
         $response = $this->putJson("/api/v1/variacoes/{$variacao->id}/outlets/{$outletId}", [
             'motivo_id' => $motivo->id,
             'quantidade' => 2,
             'preco_original' => 140,
+            'motivo_alteracao_preco' => 'Atualizacao da tabela comercial',
             'formas_pagamento' => [
                 [
+                    'id' => $condicaoId,
                     'forma_pagamento_id' => $formaPagamento->id,
                     'percentual_desconto' => 15,
                     'max_parcelas' => 1,
@@ -296,6 +302,7 @@ class OutletCrudTest extends TestCase
             'preco' => 140,
         ]);
         $this->assertDatabaseHas('produto_variacao_outlet_pagamentos', [
+            'id' => $condicaoId,
             'produto_variacao_outlet_id' => $outletId,
             'forma_pagamento_id' => $formaPagamento->id,
             'percentual_desconto' => 15,

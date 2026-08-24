@@ -22,11 +22,21 @@ class CarrinhoItem extends Model
         'subtotal',
         'id_deposito',
         'outlet_id',
+        'outlet_pagamento_id',
+        'outlet_preco_base',
+        'outlet_forma_pagamento_id',
+        'outlet_forma_pagamento',
+        'outlet_percentual_desconto',
+        'outlet_max_parcelas',
+        'outlet_preco_final',
     ];
 
     protected $casts = [
         'preco_unitario' => 'decimal:2',
         'subtotal' => 'decimal:2',
+        'outlet_preco_base' => 'decimal:2',
+        'outlet_percentual_desconto' => 'decimal:2',
+        'outlet_preco_final' => 'decimal:2',
     ];
 
     public function carrinho(): BelongsTo
@@ -47,6 +57,11 @@ class CarrinhoItem extends Model
     public function outlet(): BelongsTo
     {
         return $this->belongsTo(ProdutoVariacaoOutlet::class, 'outlet_id');
+    }
+
+    public function outletPagamento(): BelongsTo
+    {
+        return $this->belongsTo(ProdutoVariacaoOutletPagamento::class, 'outlet_pagamento_id');
     }
 
     /**

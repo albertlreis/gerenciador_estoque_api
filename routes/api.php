@@ -199,6 +199,7 @@ Route::middleware(['auth:sanctum', 'senha.nao_obrigatoria'])
 
         // Catálogo Outlet
         Route::prefix('outlet')->group(function () {
+            Route::get('itens', [OutletCatalogoController::class, 'itens']);
             Route::get('motivos', [OutletCatalogoController::class, 'motivos']);
             Route::get('formas-pagamento', [OutletCatalogoController::class, 'formas']);
         });
@@ -214,6 +215,7 @@ Route::middleware(['auth:sanctum', 'senha.nao_obrigatoria'])
         Route::prefix('variacoes/{variacao}/outlets')->whereNumber('variacao')->group(function () {
             Route::get('/', [ProdutoVariacaoOutletController::class, 'index']);
             Route::post('/', [ProdutoVariacaoOutletController::class, 'store']);
+            Route::get('{outlet}', [ProdutoVariacaoOutletController::class, 'show'])->whereNumber('outlet');
             Route::put('{outlet}', [ProdutoVariacaoOutletController::class, 'update'])->whereNumber('outlet');
             Route::delete('{outlet}', [ProdutoVariacaoOutletController::class, 'destroy'])->whereNumber('outlet');
         });
@@ -228,6 +230,7 @@ Route::middleware(['auth:sanctum', 'senha.nao_obrigatoria'])
             Route::post('importacoes/xml/confirmar', [ProdutoController::class, 'confirmarImportacao']);
 
             // Exportação de catálogo outlet (selecionados)
+            Route::post('catalogo/export', [ProdutoController::class, 'exportarCatalogo']);
             Route::post('outlet/export', [ProdutoController::class, 'exportarOutlet']);
 
             // Imagens
@@ -469,6 +472,7 @@ Route::middleware(['auth:sanctum', 'senha.nao_obrigatoria'])
 
         Route::prefix('carrinhos/{carrinho}/itens')->whereNumber('carrinho')->group(function () {
             Route::post('/', [CarrinhoItemController::class, 'store']);
+            Route::post('reprecificar', [CarrinhoItemController::class, 'reprecificar']);
             Route::delete('{item}', [CarrinhoItemController::class, 'destroy'])->whereNumber('item');
             Route::delete('/', [CarrinhoItemController::class, 'clear']);
             Route::patch('depositos', [CarrinhoItemController::class, 'atualizarDepositos']);

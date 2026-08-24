@@ -6,6 +6,8 @@ use App\Http\Requests\StoreCarrinhoItemRequest;
 use App\Models\Carrinho;
 use App\Models\CarrinhoItem;
 use App\Models\ProdutoVariacaoOutlet;
+use App\Models\ProdutoVariacaoOutletPagamento;
+use App\Services\OutletCatalogoPricingService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -18,6 +20,10 @@ use Illuminate\Validation\ValidationException;
  */
 class CarrinhoItemController extends Controller
 {
+    public function __construct(private readonly OutletCatalogoPricingService $pricing)
+    {
+    }
+
     /**
      * Adiciona ou atualiza um item no carrinho.
      *
@@ -34,33 +40,44 @@ class CarrinhoItemController extends Controller
 
         $carrinho = $query->firstOrFail();
 
-        $this->validarOutletSelecionado($request);
+        $item = DB::transaction(function () use ($request, $carrinho) {
+            $snapshot = $this->validarOutletSelecionado($request);
+            $preco = $snapshot['outlet_preco_final'] ?? round((float) $request->preco_unitario, 2);
 
-        $item = CarrinhoItem::updateOrCreate(
-            [
-                'id_carrinho' => $carrinho->id,
-                'id_variacao' => $request->id_variacao,
-                'outlet_id' => $request->outlet_id ?? null,
-            ],
-            [
-                'quantidade'     => $request->quantidade,
-                'preco_unitario' => $request->preco_unitario,
-                'subtotal'       => $request->quantidade * $request->preco_unitario,
-                'outlet_id'      => $request->outlet_id ?? null,
-            ]
-        );
+            return CarrinhoItem::updateOrCreate(
+                [
+                    'id_carrinho' => $carrinho->id,
+                    'id_variacao' => $request->id_variacao,
+                    'outlet_id' => $request->outlet_id ?? null,
+                    'outlet_pagamento_id' => $request->outlet_pagamento_id ?? null,
+                ],
+                array_merge([
+                    'quantidade' => $request->quantidade,
+                    'preco_unitario' => $preco,
+                    'subtotal' => round($request->quantidade * $preco, 2),
+                ], $snapshot)
+            );
+        });
 
         return response()->json($item, 201);
     }
 
-    private function validarOutletSelecionado(StoreCarrinhoItemRequest $request): void
+    private function validarOutletSelecionado(StoreCarrinhoItemRequest $request): array
     {
         if (!$request->filled('outlet_id')) {
-            return;
+            if ($request->filled('outlet_pagamento_id')) {
+                throw ValidationException::withMessages([
+                    'outlet_id' => ['Informe o outlet da condicao comercial selecionada.'],
+                ]);
+            }
+            return [];
         }
 
         /** @var ProdutoVariacaoOutlet|null $outlet */
-        $outlet = ProdutoVariacaoOutlet::query()->find($request->outlet_id);
+        $outlet = ProdutoVariacaoOutlet::query()
+            ->with(['variacao', 'formasPagamento.formaPagamento'])
+            ->lockForUpdate()
+            ->find($request->outlet_id);
 
         if (!$outlet || (int) $outlet->produto_variacao_id !== (int) $request->id_variacao) {
             throw ValidationException::withMessages([
@@ -81,6 +98,18 @@ class CarrinhoItemController extends Controller
                 ],
             ]);
         }
+
+        $condicao = ProdutoVariacaoOutletPagamento::query()
+            ->where('produto_variacao_outlet_id', $outlet->id)
+            ->whereHas('formaPagamento', fn ($query) => $query->where('ativo', true))
+            ->find($request->outlet_pagamento_id);
+        if (!$condicao) {
+            throw ValidationException::withMessages([
+                'outlet_pagamento_id' => ['A condicao comercial nao pertence ao outlet ou esta inativa.'],
+            ]);
+        }
+
+        return $this->pricing->buildSnapshot($outlet, $condicao);
     }
 
     /**
@@ -123,6 +152,59 @@ class CarrinhoItemController extends Controller
         $carrinho->itens()->delete();
 
         return response()->json(['message' => 'Carrinho limpo com sucesso.']);
+    }
+
+    public function reprecificar(Request $request, int $carrinho): JsonResponse
+    {
+        $data = $request->validate([
+            'itens' => ['required', 'array', 'min:1'],
+            'itens.*.id_carrinho_item' => ['required', 'integer', 'distinct'],
+            'itens.*.outlet_pagamento_id' => ['nullable', 'integer'],
+        ]);
+        $carrinhoModel = $this->carrinhoAutorizado($carrinho);
+
+        $itens = DB::transaction(function () use ($data, $carrinhoModel) {
+            return collect($data['itens'])->map(function (array $payload) use ($carrinhoModel) {
+                $item = $carrinhoModel->itens()->lockForUpdate()->findOrFail($payload['id_carrinho_item']);
+                if (!$item->outlet_id) {
+                    throw ValidationException::withMessages([
+                        'itens' => ['Somente itens outlet podem ser reprecificados por este fluxo.'],
+                    ]);
+                }
+
+                $condicaoId = $payload['outlet_pagamento_id'] ?? $item->outlet_pagamento_id;
+                if (!$condicaoId) {
+                    throw ValidationException::withMessages([
+                        'itens' => ['Selecione uma nova condicao para o item cuja condicao foi removida.'],
+                    ]);
+                }
+
+                $outlet = ProdutoVariacaoOutlet::query()
+                    ->with(['variacao', 'formasPagamento.formaPagamento'])
+                    ->lockForUpdate()
+                    ->findOrFail($item->outlet_id);
+                $condicao = ProdutoVariacaoOutletPagamento::query()
+                    ->where('produto_variacao_outlet_id', $outlet->id)
+                    ->whereHas('formaPagamento', fn ($query) => $query->where('ativo', true))
+                    ->find($condicaoId);
+
+                if (!$condicao || (int) $outlet->quantidade_restante < (int) $item->quantidade) {
+                    throw ValidationException::withMessages([
+                        'itens' => ['A condicao selecionada ou o saldo do outlet nao esta mais disponivel.'],
+                    ]);
+                }
+
+                $snapshot = $this->pricing->buildSnapshot($outlet, $condicao);
+                $item->fill(array_merge($snapshot, [
+                    'preco_unitario' => $snapshot['outlet_preco_final'],
+                    'subtotal' => round($snapshot['outlet_preco_final'] * (int) $item->quantidade, 2),
+                ]))->save();
+
+                return $item->fresh();
+            });
+        });
+
+        return response()->json(['data' => $itens->values()]);
     }
 
     /**

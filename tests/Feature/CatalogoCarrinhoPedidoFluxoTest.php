@@ -13,6 +13,8 @@ use App\Models\EstoqueMovimentacao;
 use App\Models\EstoqueReserva;
 use App\Models\Fornecedor;
 use App\Models\OutletMotivo;
+use App\Models\OutletFormaPagamento;
+use App\Models\ProdutoVariacaoOutletPagamento;
 use App\Models\Pedido;
 use App\Models\Produto;
 use App\Models\ProdutoEntregaItem;
@@ -127,13 +129,29 @@ class CatalogoCarrinhoPedidoFluxoTest extends TestCase
             'ativo' => true,
         ]);
 
-        return ProdutoVariacaoOutlet::create([
+        $outlet = ProdutoVariacaoOutlet::create([
             'produto_variacao_id' => $variacao->id,
             'motivo_id' => $motivo->id,
             'quantidade' => $quantidade,
             'quantidade_restante' => $quantidadeRestante ?? $quantidade,
             'usuario_id' => null,
         ]);
+        $forma = OutletFormaPagamento::create([
+            'slug' => uniqid('pix-', false),
+            'nome' => 'PIX',
+            'percentual_desconto_default' => 10,
+            'max_parcelas_default' => 1,
+            'ativo' => true,
+        ]);
+        $condicao = ProdutoVariacaoOutletPagamento::create([
+            'produto_variacao_outlet_id' => $outlet->id,
+            'forma_pagamento_id' => $forma->id,
+            'percentual_desconto' => 10,
+            'max_parcelas' => 1,
+        ]);
+        $outlet->setAttribute('condicao_teste_id', $condicao->id);
+
+        return $outlet;
     }
 
     public function test_cria_carrinho_com_cliente_existente_e_vendedor_selecionado_quando_permitido(): void
@@ -242,6 +260,7 @@ class CatalogoCarrinhoPedidoFluxoTest extends TestCase
             'quantidade' => 3,
             'preco_unitario' => 99.9,
             'outlet_id' => $outlet->id,
+            'outlet_pagamento_id' => $outlet->condicao_teste_id,
         ]);
 
         $response->assertCreated()
@@ -252,7 +271,12 @@ class CatalogoCarrinhoPedidoFluxoTest extends TestCase
             'id_carrinho' => $carrinho->id,
             'id_variacao' => $variacao->id,
             'outlet_id' => $outlet->id,
+            'outlet_pagamento_id' => $outlet->condicao_teste_id,
             'quantidade' => 3,
+            'preco_unitario' => 108,
+            'outlet_preco_base' => 120,
+            'outlet_percentual_desconto' => 10,
+            'outlet_preco_final' => 108,
         ]);
     }
 
@@ -277,6 +301,7 @@ class CatalogoCarrinhoPedidoFluxoTest extends TestCase
             'quantidade' => 2,
             'preco_unitario' => 90,
             'outlet_id' => $outlet->id,
+            'outlet_pagamento_id' => $outlet->condicao_teste_id,
         ]);
 
         $response->assertStatus(422)
@@ -308,6 +333,7 @@ class CatalogoCarrinhoPedidoFluxoTest extends TestCase
             'quantidade' => 2,
             'preco_unitario' => 90,
             'outlet_id' => $outlet->id,
+            'outlet_pagamento_id' => $outlet->condicao_teste_id,
         ]);
 
         $response->assertStatus(422)
@@ -346,6 +372,7 @@ class CatalogoCarrinhoPedidoFluxoTest extends TestCase
             'quantidade' => 1,
             'preco_unitario' => 99.9,
             'outlet_id' => $outlet->id,
+            'outlet_pagamento_id' => $outlet->condicao_teste_id,
         ])->assertCreated();
 
         $this->assertDatabaseCount('carrinho_itens', 2);
@@ -360,6 +387,54 @@ class CatalogoCarrinhoPedidoFluxoTest extends TestCase
             'id_variacao' => $variacao->id,
             'outlet_id' => $outlet->id,
             'quantidade' => 1,
+        ]);
+    }
+
+    public function test_bloqueia_finalizacao_e_reprecifica_quando_preco_outlet_muda(): void
+    {
+        $usuario = $this->autenticar(['carrinhos.finalizar'], ['Vendedor']);
+        $cliente = $this->criarCliente();
+        $deposito = Deposito::create(['nome' => 'Deposito Reprecificacao']);
+        ['variacao' => $variacao] = $this->criarProdutoComVariacao([], ['preco' => 120], $deposito, 10);
+        $outlet = $this->criarOutletParaVariacao($variacao, 5, 5);
+        $carrinho = Carrinho::create([
+            'id_usuario' => $usuario->id,
+            'id_cliente' => $cliente->id,
+            'status' => 'rascunho',
+        ]);
+
+        $itemResponse = $this->postJson("/api/v1/carrinhos/{$carrinho->id}/itens", [
+            'id_carrinho' => $carrinho->id,
+            'id_variacao' => $variacao->id,
+            'quantidade' => 1,
+            'preco_unitario' => 1,
+            'outlet_id' => $outlet->id,
+            'outlet_pagamento_id' => $outlet->condicao_teste_id,
+        ])->assertCreated();
+        $itemId = (int) $itemResponse->json('id');
+
+        $variacao->update(['preco' => 130]);
+
+        $this->postJson('/api/v1/pedidos', [
+            'id_carrinho' => $carrinho->id,
+            'id_cliente' => $cliente->id,
+        ])->assertStatus(409)
+            ->assertJsonPath('code', 'outlet_pricing_changed')
+            ->assertJsonPath('itens.0.id_carrinho_item', $itemId)
+            ->assertJsonPath('itens.0.snapshot_anterior.preco_final', 108)
+            ->assertJsonPath('itens.0.situacao_atual.preco_final', 117);
+
+        $this->assertDatabaseCount('pedidos', 0);
+
+        $this->postJson("/api/v1/carrinhos/{$carrinho->id}/itens/reprecificar", [
+            'itens' => [['id_carrinho_item' => $itemId]],
+        ])->assertOk();
+
+        $this->assertDatabaseHas('carrinho_itens', [
+            'id' => $itemId,
+            'outlet_preco_base' => 130,
+            'outlet_preco_final' => 117,
+            'preco_unitario' => 117,
         ]);
     }
 

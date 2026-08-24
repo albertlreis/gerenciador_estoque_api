@@ -139,6 +139,24 @@ class ProdutosOutletTest extends TestCase
             ->assertJsonPath('data.0.outlet_catalogo.preco_final_venda', 88);
     }
 
+    public function test_consulta_dedicada_retorna_uma_linha_por_outlet_com_preco_canonico(): void
+    {
+        $this->seedUsuario();
+        $categoria = Categoria::create(['nome' => 'Cadeiras']);
+        $produto = $this->criarProdutoOutlet('CADEIRA DUBLIN BASE INOX', '1827', $categoria, 15902, 65);
+        $outlet = ProdutoVariacaoOutlet::whereHas('variacao', fn ($query) => $query->where('produto_id', $produto->id))->firstOrFail();
+
+        $response = $this->getJson('/api/v1/outlet/itens?q=1827&id_categoria[]=' . $categoria->id);
+
+        $response->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.outlet_id', $outlet->id)
+            ->assertJsonPath('data.0.preco_base', 15902)
+            ->assertJsonPath('data.0.melhor_condicao.percentual_desconto', 65)
+            ->assertJsonPath('data.0.melhor_condicao.preco_final', 5565.7)
+            ->assertJsonPath('data.0.quantidade_restante', 2);
+    }
+
     public function test_export_outlet_retorna_apenas_produtos_com_outlet(): void
     {
         $this->seedUsuario();

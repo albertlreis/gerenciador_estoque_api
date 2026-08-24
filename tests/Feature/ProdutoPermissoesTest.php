@@ -111,7 +111,7 @@ class ProdutoPermissoesTest extends TestCase
             ->assertNoContent();
     }
 
-    public function test_vendedor_recebe_422_em_produto_variacao_outlet_invalido(): void
+    public function test_vendedor_recebe_403_antes_de_validar_produto_variacao_outlet(): void
     {
         $this->criarUsuario(['Vendedor'], []);
         [$categoriaId, $fornecedorId, $now] = $this->criarProdutoBase();
@@ -145,7 +145,7 @@ class ProdutoPermissoesTest extends TestCase
             'formas_pagamento' => [
                 ['forma_pagamento_id' => null, 'percentual_desconto' => 10, 'max_parcelas' => 1],
             ],
-        ])->assertStatus(422);
+        ])->assertForbidden();
     }
 
     public function test_admin_consegue_criar_produto_e_variacao(): void

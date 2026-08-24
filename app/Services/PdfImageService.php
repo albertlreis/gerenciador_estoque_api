@@ -7,12 +7,26 @@ use App\Models\Produto;
 use App\Models\ProdutoVariacao;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Throwable;
 
 class PdfImageService
 {
+    private const CATALOG_CARD_WIDTH = 640;
+
+    private const CATALOG_CARD_HEIGHT = 360;
+
+    private const CATALOG_CARD_JPEG_QUALITY = 85;
+
     private ?string $placeholderDataUri = null;
+
+    /** @var array<string, string|null> */
+    private array $remoteDataUris = [];
+
+    /** @var array<string, string|null> */
+    private array $catalogCardDataUris = [];
 
     /**
      * @var array<string, list<array{produto_id: int, url: string}>>
@@ -34,59 +48,133 @@ class PdfImageService
         }
 
         $relativePath = $this->normalizeToStorageRelativePath($normalized);
-        if ($relativePath === null) {
+        if ($relativePath !== null && Storage::disk('public')->exists($relativePath)) {
+            $absolutePath = Storage::disk('public')->path($relativePath);
+            if (is_file($absolutePath)) {
+                $raw = @file_get_contents($absolutePath);
+                if ($raw !== false) {
+                    $dataUri = $this->dataUriFromBytes($raw, File::mimeType($absolutePath) ?: null);
+                    if ($dataUri !== null) {
+                        return $dataUri;
+                    }
+                }
+            }
+        }
+
+        return Str::startsWith(Str::lower($normalized), 'https://')
+            ? $this->remoteDataUri($normalized)
+            : null;
+    }
+
+    private function dataUriFromBytes(string $raw, ?string $declaredMime = null): ?string
+    {
+        if ($raw === '') {
             return null;
         }
 
-        if (!Storage::disk('public')->exists($relativePath)) {
+        $detectedMime = class_exists(\finfo::class)
+            ? (new \finfo(FILEINFO_MIME_TYPE))->buffer($raw)
+            : $declaredMime;
+        $allowedMimes = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
+        if (!in_array($detectedMime, $allowedMimes, true)) {
             return null;
         }
 
-        $absolutePath = Storage::disk('public')->path($relativePath);
-        if (!is_file($absolutePath)) {
-            return null;
-        }
-
-        $raw = @file_get_contents($absolutePath);
-        if ($raw === false) {
-            return null;
-        }
-
-        $mime = File::mimeType($absolutePath) ?: 'application/octet-stream';
-
-        if ($mime === 'image/webp') {
-            $raw = $this->convertWebpToPng($absolutePath);
-            if ($raw === null) {
+        if ($detectedMime === 'image/webp') {
+            if (!function_exists('imagecreatefromstring')) {
                 return null;
             }
 
-            $mime = 'image/png';
+            $image = @imagecreatefromstring($raw);
+            if ($image === false) {
+                return null;
+            }
+
+            ob_start();
+            $encoded = @imagepng($image);
+            $png = ob_get_clean();
+            imagedestroy($image);
+            if (!$encoded || !is_string($png) || $png === '') {
+                return null;
+            }
+
+            $raw = $png;
+            $detectedMime = 'image/png';
         }
 
-        return sprintf('data:%s;base64,%s', $mime, base64_encode($raw));
+        return sprintf('data:%s;base64,%s', $detectedMime, base64_encode($raw));
     }
 
-    private function convertWebpToPng(string $absolutePath): ?string
+    private function remoteDataUri(string $url): ?string
     {
-        if (!function_exists('imagecreatefromwebp')) {
-            return null;
+        if (array_key_exists($url, $this->remoteDataUris)) {
+            return $this->remoteDataUris[$url];
         }
 
-        $image = @imagecreatefromwebp($absolutePath);
-        if ($image === false) {
-            return null;
+        $parts = parse_url($url);
+        $host = Str::lower((string) ($parts['host'] ?? ''));
+        $scheme = Str::lower((string) ($parts['scheme'] ?? ''));
+        $port = isset($parts['port']) ? (int) $parts['port'] : null;
+        if (
+            $scheme !== 'https'
+            || $host === ''
+            || isset($parts['user'])
+            || isset($parts['pass'])
+            || ($port !== null && $port !== 443)
+            || !in_array($host, $this->allowedRemoteHosts(), true)
+        ) {
+            return $this->remoteDataUris[$url] = null;
         }
 
-        ob_start();
-        $encoded = @imagepng($image);
-        $png = ob_get_clean();
-        imagedestroy($image);
+        $maxBytes = max(1, (int) config('services.pdf_images.max_bytes', 8 * 1024 * 1024));
+        $timeout = max(1, (int) config('services.pdf_images.timeout_seconds', 5));
 
-        if (!$encoded || !is_string($png) || $png === '') {
-            return null;
+        try {
+            $response = Http::timeout($timeout)
+                ->withOptions(['allow_redirects' => false])
+                ->accept('image/*')
+                ->get($url);
+            if (!$response->successful()) {
+                return $this->remoteDataUris[$url] = null;
+            }
+
+            $declaredMime = Str::lower(trim(explode(';', (string) $response->header('Content-Type'))[0]));
+            if (!in_array($declaredMime, ['image/png', 'image/jpeg', 'image/gif', 'image/webp'], true)) {
+                return $this->remoteDataUris[$url] = null;
+            }
+
+            $declaredLength = (int) ($response->header('Content-Length') ?: 0);
+            if ($declaredLength > $maxBytes) {
+                return $this->remoteDataUris[$url] = null;
+            }
+
+            $raw = $response->body();
+            if ($raw === '' || strlen($raw) > $maxBytes) {
+                return $this->remoteDataUris[$url] = null;
+            }
+
+            return $this->remoteDataUris[$url] = $this->dataUriFromBytes($raw, $declaredMime);
+        } catch (Throwable) {
+            return $this->remoteDataUris[$url] = null;
+        }
+    }
+
+    /** @return list<string> */
+    private function allowedRemoteHosts(): array
+    {
+        $configured = config('services.pdf_images.allowed_hosts', []);
+        $hosts = is_array($configured) ? $configured : explode(',', (string) $configured);
+        $appHost = parse_url((string) config('app.url'), PHP_URL_HOST);
+        if (is_string($appHost) && $appHost !== '') {
+            $hosts[] = $appHost;
         }
 
-        return $png;
+        return collect($hosts)
+            ->map(fn ($host) => Str::lower(trim((string) $host)))
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
     }
 
     public function toPdfSrc(?string $path): string
@@ -164,6 +252,112 @@ class PdfImageService
     public function fromProdutoVariacaoProdutoFirstOrPlaceholder(?ProdutoVariacao $variacao): string
     {
         return $this->fromProdutoVariacaoProdutoFirst($variacao) ?? $this->placeholderDataUri();
+    }
+
+    public function fromProdutoVariacaoProdutoFirstForCatalogOrPlaceholder(?ProdutoVariacao $variacao): string
+    {
+        $source = $this->fromProdutoVariacaoProdutoFirst($variacao);
+        if ($source === null) {
+            return $this->placeholderDataUri();
+        }
+
+        return $this->catalogCardDataUri($source) ?? $this->placeholderDataUri();
+    }
+
+    /**
+     * Normaliza uma imagem raster para o enquadramento 16:9 usado no catálogo.
+     */
+    public function catalogCardDataUri(?string $dataUri): ?string
+    {
+        if ($dataUri === null || !function_exists('imagecreatefromstring')) {
+            return null;
+        }
+
+        $cacheKey = hash('sha256', $dataUri);
+        if (array_key_exists($cacheKey, $this->catalogCardDataUris)) {
+            return $this->catalogCardDataUris[$cacheKey];
+        }
+
+        if (!preg_match('#^data:image/(?:png|jpeg|gif|webp);base64,(.+)$#s', $dataUri, $matches)) {
+            return $this->catalogCardDataUris[$cacheKey] = null;
+        }
+
+        $raw = base64_decode($matches[1], true);
+        if (!is_string($raw) || $raw === '') {
+            return $this->catalogCardDataUris[$cacheKey] = null;
+        }
+
+        $source = null;
+        $target = null;
+
+        try {
+            $source = @imagecreatefromstring($raw);
+            if ($source === false) {
+                return $this->catalogCardDataUris[$cacheKey] = null;
+            }
+
+            $sourceWidth = imagesx($source);
+            $sourceHeight = imagesy($source);
+            if ($sourceWidth < 1 || $sourceHeight < 1 || ($sourceWidth * $sourceHeight) > 40_000_000) {
+                return $this->catalogCardDataUris[$cacheKey] = null;
+            }
+
+            $targetRatio = self::CATALOG_CARD_WIDTH / self::CATALOG_CARD_HEIGHT;
+            $sourceRatio = $sourceWidth / $sourceHeight;
+            $cropX = 0;
+            $cropY = 0;
+            $cropWidth = $sourceWidth;
+            $cropHeight = $sourceHeight;
+
+            if ($sourceRatio > $targetRatio) {
+                $cropWidth = max(1, (int) round($sourceHeight * $targetRatio));
+                $cropX = max(0, (int) floor(($sourceWidth - $cropWidth) / 2));
+            } elseif ($sourceRatio < $targetRatio) {
+                $cropHeight = max(1, (int) round($sourceWidth / $targetRatio));
+                $cropY = max(0, (int) floor(($sourceHeight - $cropHeight) / 2));
+            }
+
+            $target = imagecreatetruecolor(self::CATALOG_CARD_WIDTH, self::CATALOG_CARD_HEIGHT);
+            if ($target === false) {
+                return $this->catalogCardDataUris[$cacheKey] = null;
+            }
+
+            $background = imagecolorallocate($target, 246, 241, 232);
+            imagefill($target, 0, 0, $background);
+            $copied = imagecopyresampled(
+                $target,
+                $source,
+                0,
+                0,
+                $cropX,
+                $cropY,
+                self::CATALOG_CARD_WIDTH,
+                self::CATALOG_CARD_HEIGHT,
+                $cropWidth,
+                $cropHeight,
+            );
+            if (!$copied) {
+                return $this->catalogCardDataUris[$cacheKey] = null;
+            }
+
+            ob_start();
+            $encoded = imagejpeg($target, null, self::CATALOG_CARD_JPEG_QUALITY);
+            $jpeg = ob_get_clean();
+            if (!$encoded || !is_string($jpeg) || $jpeg === '') {
+                return $this->catalogCardDataUris[$cacheKey] = null;
+            }
+
+            return $this->catalogCardDataUris[$cacheKey] = 'data:image/jpeg;base64,' . base64_encode($jpeg);
+        } catch (Throwable) {
+            return $this->catalogCardDataUris[$cacheKey] = null;
+        } finally {
+            if ($source !== null && $source !== false) {
+                imagedestroy($source);
+            }
+            if ($target !== null && $target !== false) {
+                imagedestroy($target);
+            }
+        }
     }
 
     public function publicUrlFromProdutoVariacaoProdutoFirst(?ProdutoVariacao $variacao): ?string
@@ -259,12 +453,22 @@ class PdfImageService
      */
     private function produtoFirstImagePaths(ProdutoVariacao $variacao): array
     {
-        return collect([
-            $variacao->produto?->imagemPrincipal?->url,
-            $variacao->produto?->imagemPrincipal?->url_completa,
-            $variacao->imagem?->url,
-            $variacao->imagem?->url_completa,
-        ])
+        $produto = $variacao->produto;
+        $produtoImagens = $produto?->relationLoaded('imagens') ? $produto->imagens : collect();
+        $variacaoImagens = $variacao->relationLoaded('imagens') ? $variacao->imagens : collect();
+
+        return collect($produtoImagens)
+            ->flatMap(fn ($imagem) => [$imagem->url, $imagem->url_completa])
+            ->concat([
+                $produto?->imagemPrincipal?->url,
+                $produto?->imagemPrincipal?->url_completa,
+            ])
+            ->concat(collect($variacaoImagens)
+                ->flatMap(fn ($imagem) => [$imagem->url, $imagem->url_completa]))
+            ->concat([
+                $variacao->imagem?->url,
+                $variacao->imagem?->url_completa,
+            ])
             ->merge($this->productImagePathsBySameReference($variacao))
             ->map(fn ($path): string => trim((string) $path))
             ->filter()

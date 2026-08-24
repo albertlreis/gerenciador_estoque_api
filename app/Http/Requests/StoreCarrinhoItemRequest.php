@@ -21,6 +21,7 @@ class StoreCarrinhoItemRequest extends FormRequest
             'quantidade'     => 'required|integer|min:1',
             'preco_unitario' => 'required|numeric|min:0',
             'outlet_id' => 'nullable|exists:produto_variacao_outlets,id',
+            'outlet_pagamento_id' => 'nullable|required_with:outlet_id|exists:produto_variacao_outlet_pagamentos,id',
         ];
     }
 

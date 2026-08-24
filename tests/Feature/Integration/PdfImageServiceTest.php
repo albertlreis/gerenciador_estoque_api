@@ -9,6 +9,7 @@ use App\Models\ProdutoVariacao;
 use App\Models\ProdutoVariacaoImagem;
 use App\Services\PdfImageService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
@@ -93,6 +94,71 @@ class PdfImageServiceTest extends TestCase
 
         $this->assertStringStartsWith('data:image/svg+xml;base64,', $dataUri);
         $this->assertSame($service->placeholderDataUri(), $dataUri);
+    }
+
+    public function test_baixa_imagem_https_de_host_sierra_permitido_e_usa_cache(): void
+    {
+        Storage::fake('public');
+        config()->set('services.pdf_images.allowed_hosts', ['estoque.sierra.acadsoft.com.br']);
+        $url = 'https://estoque.sierra.acadsoft.com.br/storage/produtos/variacoes/remota.png';
+        Http::fake([
+            $url => Http::response(base64_decode(self::PNG_VARIACAO), 200, [
+                'Content-Type' => 'image/png',
+            ]),
+        ]);
+
+        $service = app(PdfImageService::class);
+
+        $this->assertSame($this->pngDataUri(self::PNG_VARIACAO), $service->toDataUri($url));
+        $this->assertSame($this->pngDataUri(self::PNG_VARIACAO), $service->toDataUri($url));
+        Http::assertSentCount(1);
+    }
+
+    public function test_nao_acessa_host_remoto_fora_da_lista_permitida(): void
+    {
+        Storage::fake('public');
+        config()->set('services.pdf_images.allowed_hosts', ['estoque.sierra.acadsoft.com.br']);
+        Http::preventStrayRequests();
+
+        $this->assertNull(app(PdfImageService::class)->toDataUri(
+            'https://exemplo-invalido.test/imagem.png'
+        ));
+        Http::assertNothingSent();
+    }
+
+    public function test_rejeita_resposta_remota_que_nao_seja_imagem(): void
+    {
+        Storage::fake('public');
+        config()->set('services.pdf_images.allowed_hosts', ['estoque.sierra.acadsoft.com.br']);
+        $url = 'https://estoque.sierra.acadsoft.com.br/storage/arquivo.txt';
+        Http::fake([$url => Http::response('conteudo', 200, ['Content-Type' => 'text/plain'])]);
+
+        $this->assertNull(app(PdfImageService::class)->toDataUri($url));
+    }
+
+    public function test_rejeita_imagem_remota_acima_do_limite(): void
+    {
+        Storage::fake('public');
+        config()->set('services.pdf_images.allowed_hosts', ['estoque.sierra.acadsoft.com.br']);
+        config()->set('services.pdf_images.max_bytes', 8);
+        $url = 'https://estoque.sierra.acadsoft.com.br/storage/grande.png';
+        Http::fake([$url => Http::response(base64_decode(self::PNG_VARIACAO), 200, [
+            'Content-Type' => 'image/png',
+        ])]);
+
+        $this->assertNull(app(PdfImageService::class)->toDataUri($url));
+    }
+
+    public function test_falha_remota_mantem_placeholder(): void
+    {
+        Storage::fake('public');
+        config()->set('services.pdf_images.allowed_hosts', ['estoque.sierra.acadsoft.com.br']);
+        $url = 'https://estoque.sierra.acadsoft.com.br/storage/indisponivel.png';
+        Http::fake([$url => Http::response('', 503, ['Content-Type' => 'image/png'])]);
+
+        $service = app(PdfImageService::class);
+
+        $this->assertSame($service->placeholderDataUri(), $service->toPdfSrc($url));
     }
 
     public function test_resolve_imagem_da_variacao_com_prioridade(): void
@@ -187,6 +253,42 @@ class PdfImageServiceTest extends TestCase
         $this->assertSame(
             $this->pngDataUri(self::PNG_VARIACAO),
             $service->fromProdutoVariacaoProdutoFirst($variacao->fresh()->load('imagem', 'produto.imagemPrincipal'))
+        );
+    }
+
+    public function test_resolve_imagem_remota_da_variacao_quando_arquivo_do_produto_nao_existe(): void
+    {
+        Storage::fake('public');
+        config()->set('services.pdf_images.allowed_hosts', ['estoque.sierra.acadsoft.com.br']);
+        $url = 'https://estoque.sierra.acadsoft.com.br/storage/produtos/variacoes/catalogo.png';
+        Http::fake([$url => Http::response(base64_decode(self::PNG_VARIACAO), 200, [
+            'Content-Type' => 'image/png',
+        ])]);
+
+        $produto = $this->createProduto('Produto com arquivo remoto');
+        $variacao = $this->createVariacao($produto, 'REF-REMOTA');
+        ProdutoImagem::create([
+            'id_produto' => $produto->id,
+            'url' => 'produto-local-inexistente.png',
+            'principal' => true,
+        ]);
+        ProdutoVariacaoImagem::create([
+            'id_variacao' => $variacao->id,
+            'url' => $url,
+            'principal' => true,
+            'ordem' => 0,
+        ]);
+
+        $variacaoCarregada = $variacao->fresh()->load([
+            'imagem',
+            'imagens',
+            'produto.imagemPrincipal',
+            'produto.imagens',
+        ]);
+
+        $this->assertSame(
+            $this->pngDataUri(self::PNG_VARIACAO),
+            app(PdfImageService::class)->fromProdutoVariacaoProdutoFirst($variacaoCarregada)
         );
     }
 
@@ -320,4 +422,5 @@ class PdfImageServiceTest extends TestCase
     {
         return 'data:image/png;base64,' . $base64;
     }
+
 }

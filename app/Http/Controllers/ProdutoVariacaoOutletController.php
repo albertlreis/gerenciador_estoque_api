@@ -54,6 +54,44 @@ class ProdutoVariacaoOutletController extends Controller
         ]);
     }
 
+    public function show(int $id, int $outletId): JsonResponse
+    {
+        $outlet = ProdutoVariacaoOutlet::query()
+            ->where('produto_variacao_id', $id)
+            ->with([
+                'usuario', 'imagemSelecionada', 'motivo',
+                'formasPagamento.formaPagamento',
+                'variacao.imagem', 'variacao.imagens', 'variacao.estoques',
+                'variacao.outlets:id,produto_variacao_id,quantidade',
+                'variacao.produto.imagemPrincipal',
+            ])
+            ->findOrFail($outletId);
+        $podeValores = AuthHelper::hasPermissao('produtos.precos_custos');
+
+        return response()->json([
+            'data' => [
+                'variacao' => array_filter([
+                    'id' => (int) $outlet->variacao->id,
+                    'preco' => (float) $outlet->variacao->preco,
+                    'custo' => $podeValores ? (float) $outlet->variacao->custo : null,
+                    'pode_editar_precos_custos' => $podeValores,
+                    'estoque_total' => (int) $outlet->variacao->estoques->sum('quantidade'),
+                    'outlets' => $outlet->variacao->outlets->map(fn ($item) => [
+                        'id' => (int) $item->id,
+                        'quantidade' => (int) $item->quantidade,
+                    ])->values(),
+                    'imagens' => $outlet->variacao->imagens->map(fn ($imagem) => [
+                        'id' => (int) $imagem->id,
+                        'url' => $imagem->url,
+                        'principal' => (bool) ($imagem->principal ?? false),
+                        'ordem' => $imagem->ordem ?? 0,
+                    ])->values(),
+                ], fn ($value, $key) => $key !== 'custo' || $podeValores, ARRAY_FILTER_USE_BOTH),
+                'outlet' => (new ProdutoVariacaoOutletResource($outlet))->resolve(request()),
+            ],
+        ]);
+    }
+
     public function store(StoreProdutoVariacaoOutletRequest $request, int $id): JsonResponse
     {
         $variacao = ProdutoVariacao::with(['estoques', 'outlets'])->findOrFail($id);
@@ -128,6 +166,16 @@ class ProdutoVariacaoOutletController extends Controller
 
     public function update(Request $request, int $id, int $outletId): ProdutoVariacaoOutletResource|JsonResponse
     {
+        if ($resposta = $this->autorizarOutlet('editar')) {
+            return $resposta;
+        }
+
+        $this->normalizarPayload($request);
+        if (($request->has('preco_original') || $request->has('custo_original'))
+            && !AuthHelper::hasPermissao('produtos.precos_custos')) {
+            return response()->json(['message' => 'Sem permissao para alterar preco ou custo.'], 403);
+        }
+
         $variacao = ProdutoVariacao::with(['estoques', 'outlets'])->findOrFail($id);
 
         $estoqueTotal = (int) $variacao->estoques->sum('quantidade');
@@ -150,7 +198,9 @@ class ProdutoVariacaoOutletController extends Controller
             'produto_variacao_imagem_id' => 'nullable|integer|exists:produto_variacao_imagens,id',
             'preco_original' => 'sometimes|numeric|min:0',
             'custo_original' => 'sometimes|numeric|min:0',
+            'motivo_alteracao_preco' => 'nullable|string|max:500',
             'formas_pagamento' => 'sometimes|array|min:1',
+            'formas_pagamento.*.id' => 'nullable|integer',
             'formas_pagamento.*.forma_pagamento_id' => 'required_with:formas_pagamento|exists:outlet_formas_pagamento,id',
             'formas_pagamento.*.percentual_desconto'=> 'required_with:formas_pagamento|numeric|min:0|max:100',
             'formas_pagamento.*.max_parcelas'       => 'nullable|integer|min:1|max:36',
@@ -173,6 +223,10 @@ class ProdutoVariacaoOutletController extends Controller
 
             $updates = [
                 'quantidade' => $data['quantidade'],
+                'quantidade_restante' => max(
+                    0,
+                    (int) $data['quantidade'] - max(0, (int) $outlet->quantidade - (int) $outlet->quantidade_restante)
+                ),
                 'motivo_id'  => (int)$data['motivo_id'],
             ];
 
@@ -183,14 +237,7 @@ class ProdutoVariacaoOutletController extends Controller
             $outlet->update($updates);
 
             if ($request->has('formas_pagamento')) {
-                $outlet->formasPagamento()->delete();
-                foreach ($data['formas_pagamento'] as $fp) {
-                    $outlet->formasPagamento()->create([
-                        'forma_pagamento_id' => (int)$fp['forma_pagamento_id'],
-                        'percentual_desconto'=> $fp['percentual_desconto'],
-                        'max_parcelas'       => $fp['max_parcelas'] ?? null,
-                    ]);
-                }
+                $this->sincronizarFormasPagamento($outlet, $data['formas_pagamento']);
             }
         });
 
@@ -295,10 +342,22 @@ class ProdutoVariacaoOutletController extends Controller
             return $variacao;
         }
 
+        $motivo = trim((string) $request->input('motivo_alteracao_preco', ''));
+        if ($motivo === '') {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'variacao.motivo_alteracao_preco' => ['Informe o motivo da alteracao do preco global.'],
+            ]);
+        }
+
+        $audit = array_merge(self::PRECO_OUTLET_AUDIT, [
+            'motivo' => $motivo,
+            'origin' => 'outlet',
+        ]);
+
         return $this->variacaoService->salvarComAuditoria(
             $variacao,
             ['preco' => $precoOriginal],
-            self::PRECO_OUTLET_AUDIT,
+            $audit,
             self::PRECO_OUTLET_AUDIT['label']
         );
     }
@@ -319,9 +378,45 @@ class ProdutoVariacaoOutletController extends Controller
         return $this->variacaoService->salvarComAuditoria(
             $variacao,
             ['custo' => $custoOriginal],
-            self::CUSTO_OUTLET_AUDIT,
+            array_merge(self::CUSTO_OUTLET_AUDIT, ['origin' => 'outlet']),
             self::CUSTO_OUTLET_AUDIT['label']
         );
+    }
+
+    private function normalizarPayload(Request $request): void
+    {
+        $outlet = is_array($request->input('outlet')) ? $request->input('outlet') : [];
+        $variacao = is_array($request->input('variacao')) ? $request->input('variacao') : [];
+        $globais = [];
+        foreach (['preco' => 'preco_original', 'custo' => 'custo_original', 'motivo_alteracao_preco' => 'motivo_alteracao_preco'] as $origem => $destino) {
+            if (array_key_exists($origem, $variacao)) {
+                $globais[$destino] = $variacao[$origem];
+            }
+        }
+        $request->merge(array_merge($outlet, $globais));
+    }
+
+    private function sincronizarFormasPagamento(ProdutoVariacaoOutlet $outlet, array $formas): void
+    {
+        $idsMantidos = [];
+        foreach ($formas as $forma) {
+            $id = isset($forma['id']) ? (int) $forma['id'] : null;
+            $dados = [
+                'forma_pagamento_id' => (int) $forma['forma_pagamento_id'],
+                'percentual_desconto' => $forma['percentual_desconto'],
+                'max_parcelas' => $forma['max_parcelas'] ?? null,
+            ];
+
+            if ($id) {
+                $condicao = $outlet->formasPagamento()->whereKey($id)->firstOrFail();
+                $condicao->update($dados);
+            } else {
+                $condicao = $outlet->formasPagamento()->create($dados);
+            }
+            $idsMantidos[] = $condicao->id;
+        }
+
+        $outlet->formasPagamento()->whereNotIn('id', $idsMantidos)->delete();
     }
 
 }

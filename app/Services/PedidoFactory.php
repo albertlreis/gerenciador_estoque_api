@@ -44,6 +44,14 @@ final class PedidoFactory
                 'preco_unitario' => $precoFinal,
                 'subtotal'       => round($precoFinal * (int) $item->quantidade, 2),
                 'id_deposito'    => $item->id_deposito ?? null,
+                'outlet_id' => $item->outlet_id,
+                'outlet_pagamento_id' => $item->outlet_pagamento_id,
+                'outlet_preco_base' => $item->outlet_preco_base,
+                'outlet_forma_pagamento_id' => $item->outlet_forma_pagamento_id,
+                'outlet_forma_pagamento' => $item->outlet_forma_pagamento,
+                'outlet_percentual_desconto' => $item->outlet_percentual_desconto,
+                'outlet_max_parcelas' => $item->outlet_max_parcelas,
+                'outlet_preco_final' => $item->outlet_preco_final,
             ]);
 
             return [(int) $item->id => $pedidoItem];
@@ -70,6 +78,10 @@ final class PedidoFactory
 
     private function resolverPrecoOriginal(CarrinhoItem $item): float
     {
+        if ($item->outlet_id) {
+            return round((float) $item->outlet_preco_final, 2);
+        }
+
         $precoBase = round((float) ($item->variacao?->preco ?? 0), 2);
         $percentualOutlet = round((float) ($item->outlet?->formasPagamento?->max('percentual_desconto') ?? 0), 2);
 

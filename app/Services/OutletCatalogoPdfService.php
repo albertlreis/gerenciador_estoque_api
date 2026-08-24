@@ -62,6 +62,41 @@ class OutletCatalogoPdfService
         ];
     }
 
+    public function buildOutlets(iterable $outlets): array
+    {
+        $cards = collect($outlets)->map(function ($outlet) {
+            $pricing = $this->pricingService->buildOutlet($outlet);
+            $melhor = $pricing['melhor_condicao'];
+            $variacao = $outlet->variacao;
+            $produto = $variacao->produto;
+
+            return [
+                'tipo' => 'avulso',
+                'id' => (int) $outlet->id,
+                'outlet_id' => (int) $outlet->id,
+                'produto_id' => (int) $produto->id,
+                'nome' => $produto->nome,
+                'variacao_nome' => $variacao->nome_completo ?: $variacao->nome ?: $produto->nome,
+                'categoria_nome' => $produto->categoria?->nome,
+                'referencia' => $variacao->referencia,
+                'altura' => $produto->altura,
+                'largura' => $produto->largura,
+                'profundidade' => $produto->profundidade,
+                'imagem_src' => $this->resolverImagemSrcVariacao($variacao),
+                'preco' => $melhor['preco_final'] ?? $pricing['preco_base'],
+                'preco_label' => $this->formatMoney((float) ($melhor['preco_final'] ?? $pricing['preco_base'])),
+                'preco_original_label' => $melhor && $melhor['preco_final'] < $pricing['preco_base']
+                    ? $this->formatMoney((float) $pricing['preco_base']) : null,
+                'percentual_desconto' => (float) ($melhor['percentual_desconto'] ?? 0),
+                'pagamento_label' => $melhor ? $melhor['forma_pagamento'] : null,
+                'qtd_total_restante' => (int) $outlet->quantidade_restante,
+                'atributos_acabamentos' => $this->mapearAtributos($variacao),
+            ];
+        })->values()->all();
+
+        return ['conjuntos' => [], 'itens_avulsos' => $cards];
+    }
+
     /**
      * @param Collection<int, Produto> $produtos
      * @return Collection<int, array<string,mixed>>
@@ -79,7 +114,8 @@ class OutletCatalogoPdfService
                     }
 
                     $pricing = $this->pricingService->build(collect([$variacao]));
-                    $precoBase = $pricing['preco_venda'];
+                    $precoBase = round((float) ($variacao->preco ?? 0), 2);
+                    $precoBase = $precoBase > 0 ? $precoBase : null;
                     $precoOutlet = $pricing['preco_final_venda'] ?? $pricing['preco_outlet'] ?? $precoBase;
                     $temPrecoOriginal = $precoBase !== null
                         && $precoOutlet !== null

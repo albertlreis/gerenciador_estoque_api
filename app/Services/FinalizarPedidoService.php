@@ -43,6 +43,7 @@ final class FinalizarPedidoService
         private readonly EstoqueDisponibilidadeService $disponibilidade,
         private readonly EntregaProdutoService $entregaProdutoService,
         private readonly AuditLogger $auditLogger,
+        private readonly OutletCatalogoPricingService $outletPricing,
     ) {}
 
     /**
@@ -69,7 +70,11 @@ final class FinalizarPedidoService
 
         $query = Carrinho::with(['itens.variacao.produto'])
             ->where('id', $request->id_carrinho);
-        $query->with('itens.outlet.formasPagamento');
+        $query->with([
+            'itens.outlet.variacao',
+            'itens.outlet.formasPagamento.formaPagamento',
+            'itens.outletPagamento.formaPagamento',
+        ]);
 
         if (!AuthHelper::podeVisualizarCarrinhosDeTodos()) {
             $query->where('id_usuario', $usuarioId);
@@ -78,6 +83,15 @@ final class FinalizarPedidoService
         $carrinho = $query->firstOrFail();
         if ($carrinho->itens->isEmpty()) {
             return response()->json(['message' => 'Carrinho está vazio.'], 422);
+        }
+
+        $conflitosOutlet = $this->conflitosOutlet($carrinho->itens);
+        if ($conflitosOutlet !== []) {
+            return response()->json([
+                'message' => 'As condicoes comerciais de um ou mais itens outlet foram alteradas.',
+                'code' => 'outlet_pricing_changed',
+                'itens' => $conflitosOutlet,
+            ], 409);
         }
 
         if ($idUsuarioInput !== null) {
@@ -340,6 +354,10 @@ final class FinalizarPedidoService
 
     private function resolverPrecoOriginal(CarrinhoItem $item): float
     {
+        if ($item->outlet_id) {
+            return round((float) $item->outlet_preco_final, 2);
+        }
+
         $precoBase = round((float) ($item->variacao?->preco ?? 0), 2);
         $percentualOutlet = round((float) ($item->outlet?->formasPagamento?->max('percentual_desconto') ?? 0), 2);
 
@@ -348,5 +366,80 @@ final class FinalizarPedidoService
         }
 
         return $precoBase;
+    }
+
+    private function conflitosOutlet(Collection $itens): array
+    {
+        return $itens->filter(fn (CarrinhoItem $item) => $item->outlet_id || $item->outlet_preco_base !== null)
+            ->map(function (CarrinhoItem $item) {
+                $anterior = [
+                    'outlet_id' => $item->outlet_id,
+                    'outlet_pagamento_id' => $item->outlet_pagamento_id,
+                    'preco_base' => $item->outlet_preco_base !== null ? (float) $item->outlet_preco_base : null,
+                    'forma_pagamento_id' => $item->outlet_forma_pagamento_id,
+                    'forma_pagamento' => $item->outlet_forma_pagamento,
+                    'percentual_desconto' => $item->outlet_percentual_desconto !== null ? (float) $item->outlet_percentual_desconto : null,
+                    'max_parcelas' => $item->outlet_max_parcelas,
+                    'preco_final' => $item->outlet_preco_final !== null ? (float) $item->outlet_preco_final : null,
+                ];
+
+                $outlet = $item->outlet;
+                $condicao = $item->outletPagamento;
+                if (!$outlet || !$condicao || !$item->outlet_pagamento_id) {
+                    return [
+                        'id_carrinho_item' => (int) $item->id,
+                        'snapshot_anterior' => $anterior,
+                        'situacao_atual' => null,
+                        'acao_necessaria' => 'selecionar_condicao',
+                    ];
+                }
+
+                try {
+                    $atualSnapshot = $this->outletPricing->buildSnapshot($outlet, $condicao);
+                } catch (\DomainException) {
+                    return [
+                        'id_carrinho_item' => (int) $item->id,
+                        'snapshot_anterior' => $anterior,
+                        'situacao_atual' => null,
+                        'acao_necessaria' => 'selecionar_condicao',
+                    ];
+                }
+
+                $atual = [
+                    'outlet_id' => $atualSnapshot['outlet_id'],
+                    'outlet_pagamento_id' => $atualSnapshot['outlet_pagamento_id'],
+                    'preco_base' => $atualSnapshot['outlet_preco_base'],
+                    'forma_pagamento_id' => $atualSnapshot['outlet_forma_pagamento_id'],
+                    'forma_pagamento' => $atualSnapshot['outlet_forma_pagamento'],
+                    'percentual_desconto' => $atualSnapshot['outlet_percentual_desconto'],
+                    'max_parcelas' => $atualSnapshot['outlet_max_parcelas'],
+                    'preco_final' => $atualSnapshot['outlet_preco_final'],
+                ];
+
+                return $this->snapshotsIguais($anterior, $atual) ? null : [
+                    'id_carrinho_item' => (int) $item->id,
+                    'snapshot_anterior' => $anterior,
+                    'situacao_atual' => $atual,
+                    'acao_necessaria' => 'confirmar_reprecificacao',
+                ];
+            })
+            ->filter()
+            ->values()
+            ->all();
+    }
+
+    private function snapshotsIguais(array $anterior, array $atual): bool
+    {
+        foreach (['outlet_id', 'outlet_pagamento_id', 'forma_pagamento_id', 'forma_pagamento', 'max_parcelas'] as $campo) {
+            if (($anterior[$campo] ?? null) != ($atual[$campo] ?? null)) {
+                return false;
+            }
+        }
+        foreach (['preco_base', 'percentual_desconto', 'preco_final'] as $campo) {
+            if (abs((float) ($anterior[$campo] ?? -1) - (float) ($atual[$campo] ?? -2)) >= 0.01) {
+                return false;
+            }
+        }
+        return true;
     }
 }

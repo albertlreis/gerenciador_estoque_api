@@ -37,4 +37,16 @@ return [
         'api_secret' => env('COMMS_API_SECRET'),
     ],
 
+    'pdf_images' => [
+        'allowed_hosts' => array_values(array_filter(array_map(
+            'trim',
+            explode(',', env(
+                'PDF_IMAGE_ALLOWED_HOSTS',
+                'estoque.sierra.acadsoft.com.br,hml-estoque.sierra.acadsoft.com.br'
+            ))
+        ))),
+        'timeout_seconds' => (int) env('PDF_IMAGE_TIMEOUT_SECONDS', 5),
+        'max_bytes' => (int) env('PDF_IMAGE_MAX_BYTES', 8388608),
+    ],
+
 ];

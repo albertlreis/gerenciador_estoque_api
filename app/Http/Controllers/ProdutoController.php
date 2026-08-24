@@ -13,6 +13,7 @@ use App\Http\Resources\ProdutoSimplificadoResource;
 use App\Services\LogService;
 use App\Services\OutletCatalogoPricingService;
 use App\Services\OutletCatalogoPdfService;
+use App\Services\OutletItensQueryService;
 use App\Services\PdfImageService;
 use App\Services\ProdutoSugestoesOutletService;
 use App\Support\Logging\SierraLog;
@@ -27,6 +28,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use App\Http\Requests\{ConfirmarImportacaoRequest,
+    ExportarCatalogoProdutosRequest,
     ExportarProdutosOutletRequest,
     FiltrarProdutosRequest,
     ImportarXmlRequest,
@@ -35,6 +37,8 @@ use App\Http\Requests\{ConfirmarImportacaoRequest,
 use App\Http\Resources\ProdutoResource;
 use App\Models\Produto;
 use App\Services\ProdutoService;
+use App\Services\CatalogoProdutosPdfService;
+use Illuminate\Support\Facades\Auth;
 
 class ProdutoController extends Controller
 {
@@ -44,10 +48,83 @@ class ProdutoController extends Controller
     /**
      * Construtor com injeção de dependência do ProdutoService.
      */
-    public function __construct(ProdutoService $produtoService, ImportacaoProdutosService $service)
-    {
+    public function __construct(
+        ProdutoService $produtoService,
+        ImportacaoProdutosService $service,
+        private readonly CatalogoProdutosPdfService $catalogoProdutosPdfService,
+    ) {
         $this->produtoService = $produtoService;
         $this->service = $service;
+    }
+
+    public function exportarCatalogo(ExportarCatalogoProdutosRequest $request)
+    {
+        $startedAt = microtime(true);
+        $validated = $request->validated();
+        $mode = $validated['mode'];
+        $variationIds = $mode === 'selected'
+            ? array_values(array_map('intval', $validated['variation_ids'] ?? []))
+            : null;
+
+        if ($mode === 'selected') {
+            $produtos = Produto::query()
+                ->whereHas('variacoes', fn ($query) => $query->whereIn('id', $variationIds))
+                ->with([
+                    'categoria',
+                    'imagemPrincipal',
+                    'imagens',
+                    'variacoes' => function ($query) use ($variationIds) {
+                        $query->whereIn('id', $variationIds)->with([
+                            'atributos',
+                            'imagem',
+                            'imagens',
+                            'estoques',
+                            'outlets.imagemSelecionada',
+                            'outlets.formasPagamento.formaPagamento',
+                        ]);
+                    },
+                ])
+                ->get();
+        } else {
+            $filters = $validated['filters'] ?? [];
+            $filterRequest = Request::create('', 'GET', array_merge($filters, [
+                'view' => 'completa',
+                'incluir_estoque' => true,
+            ]));
+            $produtos = $this->produtoService
+                ->queryProdutosFiltrados($filterRequest)
+                ->get();
+        }
+
+        $variationCount = $produtos->sum(fn (Produto $produto) => $produto->variacoes->count());
+        if ($variationCount > 2000) {
+            return response()->json([
+                'message' => 'O catalogo excede o limite de 2.000 variacoes. Restrinja os filtros e tente novamente.',
+            ], 422);
+        }
+
+        $cards = $this->catalogoProdutosPdfService->build($produtos, $variationIds);
+        if ($cards === []) {
+            return response()->json([
+                'message' => 'Nenhum produto encontrado para gerar o catalogo.',
+            ], 422);
+        }
+
+        Pdf::setOptions(['isRemoteEnabled' => false]);
+        $pdf = Pdf::loadView('exports.catalogo-produtos', [
+            'cards' => $cards,
+            'generatedAt' => now('America/Belem')->format('d/m/Y H:i'),
+        ])->setPaper('a4', 'landscape');
+
+        SierraLog::inventory('inventory.product_catalog.export_finished', [
+            'user_id' => Auth::id(),
+            'mode' => $mode,
+            'total_cards' => count($cards),
+            'total_variations' => $variationCount,
+            'duration_ms' => (int) ((microtime(true) - $startedAt) * 1000),
+        ]);
+
+        return $pdf->download('catalogo_produtos_' . now('America/Belem')->format('Y-m-d') . '.pdf');
     }
 
     /**
@@ -84,12 +161,19 @@ class ProdutoController extends Controller
         $start = microtime(true);
         $validated = $request->validated();
         $ids = $validated['ids'] ?? [];
+        $outletIds = $validated['outlet_ids'] ?? [];
         $filters = $validated['filters'] ?? [];
         $format = strtolower((string) $request->input('format', 'csv'));
         $format = in_array($format, ['csv', 'pdf'], true) ? $format : 'csv';
+        $usarConsultaDedicada = !empty($outletIds) || empty($ids);
+        $itensOutlet = collect();
+        if ($usarConsultaDedicada) {
+            $filtrosOutlet = array_merge($filters, ['outlet_ids' => $outletIds]);
+            $itensOutlet = app(OutletItensQueryService::class)->query($filtrosOutlet)->limit(2000)->get();
+        }
 
         $produtosQuery = Produto::query()
-            ->whereHas('variacoes.outlet')
+            ->whereHas('variacoes.outlets', fn ($query) => $query->where('quantidade_restante', '>', 0))
             ->with([
                 'categoria',
                 'imagemPrincipal',
@@ -100,7 +184,14 @@ class ProdutoController extends Controller
                 'variacoes.outlets.formasPagamento.formaPagamento',
             ]);
 
-        if (!empty($ids)) {
+        if (!empty($outletIds)) {
+            $produtosQuery->whereHas('variacoes.outlets', fn ($query) => $query
+                ->whereIn('produto_variacao_outlets.id', $outletIds)
+                ->where('quantidade_restante', '>', 0));
+            $produtosQuery->with(['variacoes.outlets' => fn ($query) => $query
+                ->whereIn('produto_variacao_outlets.id', $outletIds)
+                ->where('quantidade_restante', '>', 0)]);
+        } elseif (!empty($ids)) {
             $produtosQuery->whereIn('id', $ids);
         } else {
             $categoriaIds = $filters['id_categoria'] ?? [];
@@ -128,14 +219,16 @@ class ProdutoController extends Controller
             ->limit(2000)
             ->get();
 
-        if ($produtos->isEmpty()) {
+        if (($usarConsultaDedicada && $itensOutlet->isEmpty()) || (!$usarConsultaDedicada && $produtos->isEmpty())) {
             return response()->json([
                 'message' => 'Nenhum produto outlet encontrado para exportacao.',
             ], 422);
         }
 
         if ($format === 'pdf') {
-            $catalogoPdf = app(OutletCatalogoPdfService::class)->build($produtos);
+            $catalogoPdf = $usarConsultaDedicada
+                ? app(OutletCatalogoPdfService::class)->buildOutlets($itensOutlet)
+                : app(OutletCatalogoPdfService::class)->build($produtos);
             $cards = collect($catalogoPdf['conjuntos'])
                 ->concat($catalogoPdf['itens_avulsos'])
                 ->values();
@@ -175,6 +268,29 @@ class ProdutoController extends Controller
                 ]);
             }
             return $pdf->download("catalogo_outlet_{$dateRef}.pdf");
+        }
+
+        if ($usarConsultaDedicada) {
+            $queryService = app(OutletItensQueryService::class);
+            $linhas = $itensOutlet->map(fn ($outlet) => $queryService->serialize($outlet));
+
+            return response()->streamDownload(function () use ($linhas) {
+                $out = fopen('php://output', 'w');
+                fwrite($out, "\xEF\xBB\xBF");
+                fputcsv($out, ['Outlet_ID', 'Produto', 'Categoria', 'Referencia', 'Motivo', 'Quantidade', 'Saldo', 'Preco_Base', 'Preco_Final', 'Forma_Pagamento', 'Desconto', 'Max_Parcelas'], ';');
+                foreach ($linhas as $linha) {
+                    $melhor = $linha['melhor_condicao'] ?? [];
+                    fputcsv($out, [
+                        $linha['outlet_id'], $linha['produto_nome'], $linha['categoria']['nome'] ?? '',
+                        $linha['variacao']['sku_interno'] ?: $linha['variacao']['referencia'],
+                        $linha['motivo']['nome'] ?? '', $linha['quantidade'], $linha['quantidade_restante'],
+                        number_format((float) $linha['preco_base'], 2, ',', ''),
+                        isset($melhor['preco_final']) ? number_format((float) $melhor['preco_final'], 2, ',', '') : '',
+                        $melhor['forma_pagamento'] ?? '', $melhor['percentual_desconto'] ?? '', $melhor['max_parcelas'] ?? '',
+                    ], ';');
+                }
+                fclose($out);
+            }, 'catalogo_outlet.csv', ['Content-Type' => 'text/csv; charset=UTF-8']);
         }
 
         $pricingService = app(OutletCatalogoPricingService::class);

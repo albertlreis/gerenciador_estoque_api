@@ -16,6 +16,8 @@ class ExportarProdutosOutletRequest extends FormRequest
         return [
             'ids' => ['nullable', 'array', 'min:1', 'max:2000'],
             'ids.*' => ['integer', 'distinct', 'exists:produtos,id'],
+            'outlet_ids' => ['nullable', 'array', 'min:1', 'max:2000'],
+            'outlet_ids.*' => ['integer', 'distinct', 'exists:produto_variacao_outlets,id'],
             'filters' => ['nullable', 'array'],
             'filters.id_categoria' => ['nullable', 'array'],
             'filters.id_categoria.*' => ['integer', 'distinct', 'exists:categorias,id'],
@@ -29,9 +31,12 @@ class ExportarProdutosOutletRequest extends FormRequest
     {
         $validator->after(function ($validator) {
             $ids = $this->input('ids');
+            $outletIds = $this->input('outlet_ids');
             $filters = $this->input('filters');
 
-            if ((!is_array($ids) || count($ids) === 0) && (!is_array($filters) || count(array_filter($filters, fn ($value) => $value !== null && $value !== '' && $value !== [])) === 0)) {
+            if ((!is_array($ids) || count($ids) === 0)
+                && (!is_array($outletIds) || count($outletIds) === 0)
+                && (!is_array($filters) || count(array_filter($filters, fn ($value) => $value !== null && $value !== '' && $value !== [])) === 0)) {
                 $validator->errors()->add('ids', 'Informe produtos ou filtros para exportacao.');
             }
         });
@@ -44,6 +49,7 @@ class ExportarProdutosOutletRequest extends FormRequest
             'ids.min' => 'Informe ao menos um produto para exportacao.',
             'ids.max' => 'Quantidade de produtos excede o limite permitido.',
             'ids.*.exists' => 'Algum produto informado nao existe.',
+            'outlet_ids.*.exists' => 'Algum registro outlet informado nao existe.',
             'format.in' => 'Formato invalido. Use csv ou pdf.',
         ];
     }

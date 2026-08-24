@@ -11,6 +11,7 @@ use App\Models\Estoque;
 use App\Models\EstoqueMovimentacao;
 use App\Models\Pedido;
 use App\Models\PedidoItem;
+use App\Models\PedidoItemStatusHistorico;
 use App\Models\PedidoStatusHistorico;
 use App\Models\PedidoStatusPrevisao;
 use App\Models\Produto;
@@ -167,6 +168,122 @@ class PedidoFluxoOperacionalV2Test extends TestCase
             ->where('tipo_evento', ProdutoEntregaEvento::RECEBIDO_ESTOQUE)
             ->where('produto_entrega_item_id', $entrega->id)
             ->count());
+    }
+
+    public function test_recebimento_por_item_respeita_quantidade_embarcada_e_libera_novo_embarque(): void
+    {
+        [$usuario, $pedido, $variacao, $deposito] = $this->criarPedido(2, Pedido::ORIGEM_ABASTECIMENTO_FABRICA);
+        Sanctum::actingAs($usuario);
+        $entrega = app(EntregaProdutoService::class)->criarDemandaPedido($pedido, $usuario->id, false)->firstOrFail();
+        $pedidoItem = $pedido->itens->firstOrFail();
+
+        PedidoItemStatusHistorico::create([
+            'grupo_uuid' => (string) \Illuminate\Support\Str::uuid(),
+            'pedido_id' => $pedido->id,
+            'pedido_item_id' => $pedidoItem->id,
+            'status' => PedidoStatus::EMBARQUE_FABRICA,
+            'quantidade' => 1,
+            'quantidade_avancada' => 1,
+            'data_status' => now(),
+            'usuario_id' => $usuario->id,
+        ]);
+
+        $this->postJson("/api/v1/pedidos/{$pedido->id}/recebimentos", [
+            'itens' => [[
+                'produto_entrega_item_id' => $entrega->id,
+                'quantidade' => 2,
+                'id_deposito_destino' => $deposito->id,
+                'ocorrido_em' => '2026-08-20 10:00:00',
+                'idempotency_key' => 'recebimento-acima-embarque',
+            ]],
+        ])->assertStatus(422)->assertJsonValidationErrors(['quantidade']);
+
+        $this->postJson("/api/v1/pedidos/{$pedido->id}/recebimentos", [
+            'itens' => [[
+                'produto_entrega_item_id' => $entrega->id,
+                'quantidade' => 1,
+                'id_deposito_destino' => $deposito->id,
+                'ocorrido_em' => '2026-08-20 10:00:00',
+                'idempotency_key' => 'recebimento-primeiro-embarque',
+            ]],
+        ])->assertOk()
+            ->assertJsonPath('itens.0.quantidade_embarcada_fabrica', 1)
+            ->assertJsonPath('itens.0.quantidade_liberada_recebimento', 0)
+            ->assertJsonPath('itens.0.bloqueado_por_embarque', true)
+            ->assertJsonPath('status_aplicado', false);
+
+        PedidoItemStatusHistorico::create([
+            'grupo_uuid' => (string) \Illuminate\Support\Str::uuid(),
+            'pedido_id' => $pedido->id,
+            'pedido_item_id' => $pedidoItem->id,
+            'status' => PedidoStatus::EMBARQUE_FABRICA,
+            'quantidade' => 1,
+            'quantidade_avancada' => 2,
+            'data_status' => now()->addSecond(),
+            'usuario_id' => $usuario->id,
+        ]);
+
+        $this->postJson("/api/v1/pedidos/{$pedido->id}/recebimentos", [
+            'itens' => [[
+                'produto_entrega_item_id' => $entrega->id,
+                'quantidade' => 1,
+                'id_deposito_destino' => $deposito->id,
+                'ocorrido_em' => '2026-08-21 10:00:00',
+                'idempotency_key' => 'recebimento-segundo-embarque',
+            ]],
+        ])->assertOk()->assertJsonPath('status_aplicado', true);
+
+        $this->assertSame(2, (int) $entrega->fresh()->quantidade_recebida);
+        $this->assertSame(2, (int) Estoque::query()
+            ->where('id_variacao', $variacao->id)
+            ->where('id_deposito', $deposito->id)
+            ->value('quantidade'));
+    }
+
+    public function test_item_sem_embarque_fica_bloqueado_quando_pedido_usa_embarque_parcial(): void
+    {
+        [$usuario, $pedido, $variacao, $deposito] = $this->criarPedido(1, Pedido::ORIGEM_ABASTECIMENTO_FABRICA);
+        Sanctum::actingAs($usuario);
+        $primeiroItem = $pedido->itens->firstOrFail();
+        PedidoItemStatusHistorico::create([
+            'grupo_uuid' => (string) \Illuminate\Support\Str::uuid(),
+            'pedido_id' => $pedido->id,
+            'pedido_item_id' => $primeiroItem->id,
+            'status' => PedidoStatus::EMBARQUE_FABRICA,
+            'quantidade' => 1,
+            'quantidade_avancada' => 1,
+            'data_status' => now(),
+            'usuario_id' => $usuario->id,
+        ]);
+        $segundaVariacao = ProdutoVariacao::create([
+            'produto_id' => $variacao->produto_id,
+            'referencia' => uniqid('NAO-EMBARCADO-', false),
+            'nome' => 'Variacao nao embarcada',
+            'preco' => 100,
+            'custo' => 50,
+        ]);
+        $segundoItem = PedidoItem::create([
+            'id_pedido' => $pedido->id,
+            'id_variacao' => $segundaVariacao->id,
+            'id_deposito' => $deposito->id,
+            'quantidade' => 1,
+            'preco_unitario' => 100,
+            'subtotal' => 100,
+        ]);
+        $entregas = app(EntregaProdutoService::class)->criarDemandaPedido($pedido->fresh('itens'), $usuario->id, false);
+        $naoEmbarcada = $entregas->firstWhere('pedido_item_id', $segundoItem->id);
+
+        $this->postJson("/api/v1/pedidos/{$pedido->id}/recebimentos", [
+            'itens' => [[
+                'produto_entrega_item_id' => $naoEmbarcada->id,
+                'quantidade' => 1,
+                'id_deposito_destino' => $deposito->id,
+                'ocorrido_em' => '2026-08-20 10:00:00',
+                'idempotency_key' => 'item-sem-embarque',
+            ]],
+        ])->assertStatus(422)->assertJsonValidationErrors(['quantidade']);
+
+        $this->assertSame(0, (int) $naoEmbarcada->fresh()->quantidade_recebida);
     }
 
     public function test_venda_de_catalogo_nao_exibe_recebimento_de_fabrica(): void

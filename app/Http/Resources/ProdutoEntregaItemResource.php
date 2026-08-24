@@ -44,6 +44,14 @@ class ProdutoEntregaItemResource extends JsonResource
         $bloqueadoPorRecebimento = $exigeRecebimento
             && $liberadaExpedicao <= 0
             && (int) $this->quantidade_expedida < $total;
+        $quantidadeEmbarcada = $entregas->quantidadeEmbarcadaFabrica($this->resource);
+        $quantidadeLiberadaRecebimento = max(
+            0,
+            min($total, $quantidadeEmbarcada ?? $total) - $recebida
+        );
+        $bloqueadoPorEmbarque = $quantidadeEmbarcada !== null
+            && $recebida < $total
+            && $quantidadeLiberadaRecebimento <= 0;
 
         return [
             'id' => $this->id,
@@ -70,6 +78,12 @@ class ProdutoEntregaItemResource extends JsonResource
             'quantidade_expedida' => $this->quantidade_expedida,
             'quantidade_entregue' => $this->quantidade_entregue,
             'quantidade_pendente_recebimento' => max(0, (int) $this->quantidade_total - (int) $this->quantidade_recebida),
+            'quantidade_embarcada_fabrica' => $quantidadeEmbarcada,
+            'quantidade_liberada_recebimento' => $quantidadeLiberadaRecebimento,
+            'bloqueado_por_embarque' => $bloqueadoPorEmbarque,
+            'mensagem_bloqueio_embarque' => $bloqueadoPorEmbarque
+                ? 'Aguardando embarque da fabrica para liberar o recebimento deste item.'
+                : null,
             'quantidade_pendente_reserva' => max(0, $total - $atendido),
             'quantidade_pendente_expedicao' => max(0, (int) $this->quantidade_total - (int) $this->quantidade_expedida),
             'quantidade_pendente_entrega' => max(0, (int) $this->quantidade_expedida - (int) $this->quantidade_entregue),

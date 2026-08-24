@@ -11,6 +11,7 @@ use App\Models\EstoqueReserva;
 use App\Models\Pedido;
 use App\Models\PedidoFabricaItem;
 use App\Models\PedidoItem;
+use App\Models\PedidoItemStatusHistorico;
 use App\Models\ProdutoEntregaEvento;
 use App\Models\ProdutoEntregaItem;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
@@ -60,6 +61,44 @@ class EntregaProdutoService
             : $limiteExpedido;
 
         return max(0, $limite - (int) $item->quantidade_entregue);
+    }
+
+    public function quantidadeEmbarcadaFabrica(ProdutoEntregaItem $item): ?int
+    {
+        if (
+            $item->tipo_origem !== ProdutoEntregaItem::ORIGEM_PEDIDO
+            || ! $item->pedido_id
+            || ! $item->pedido_item_id
+        ) {
+            return null;
+        }
+
+        $pedidoId = (int) $item->pedido_id;
+        $controlePorItem = PedidoItemStatusHistorico::query()
+            ->where('pedido_id', $pedidoId)
+            ->where('status', PedidoStatus::EMBARQUE_FABRICA->value)
+            ->exists();
+
+        if (! $controlePorItem) {
+            return null;
+        }
+
+        $pedidoItemId = (int) $item->pedido_item_id;
+        $quantidadeEmbarcada = (int) PedidoItemStatusHistorico::query()
+            ->where('pedido_id', $pedidoId)
+            ->where('pedido_item_id', $pedidoItemId)
+            ->where('status', PedidoStatus::EMBARQUE_FABRICA->value)
+            ->max('quantidade_avancada');
+
+        return min((int) $item->quantidade_total, $quantidadeEmbarcada);
+    }
+
+    public function quantidadeLiberadaRecebimento(ProdutoEntregaItem $item): int
+    {
+        $embarcada = $this->quantidadeEmbarcadaFabrica($item);
+        $limite = $embarcada ?? (int) $item->quantidade_total;
+
+        return max(0, min((int) $item->quantidade_total, $limite) - (int) $item->quantidade_recebida);
     }
 
     public function criarDemandaPedido(Pedido $pedido, ?int $usuarioId = null, bool $reservarAutomaticamente = true): Collection
@@ -688,13 +727,27 @@ class EntregaProdutoService
             }
 
             $pendente = max(0, (int) $entrega->quantidade_total - (int) $entrega->quantidade_recebida);
+            $embarcada = $this->quantidadeEmbarcadaFabrica($entrega);
+            $liberadaPorEmbarque = max(
+                0,
+                min((int) $entrega->quantidade_total, $embarcada ?? (int) $entrega->quantidade_total)
+                    - (int) $entrega->quantidade_recebida
+            );
+            if ($embarcada !== null && $quantidade !== null && (int) $quantidade > $liberadaPorEmbarque) {
+                throw ValidationException::withMessages([
+                    'quantidade' => [
+                        "Quantidade excede o saldo embarcado e liberado para recebimento ({$liberadaPorEmbarque}).",
+                    ],
+                ]);
+            }
             if ($rejeitarExcesso && $quantidade !== null && (int) $quantidade > $pendente) {
                 throw ValidationException::withMessages([
                     'quantidade' => ["Quantidade excede o pendente de recebimento ({$pendente})."],
                 ]);
             }
 
-            $quantidade = $quantidade !== null ? min((int) $quantidade, $pendente) : $pendente;
+            $limiteRecebimento = min($pendente, $liberadaPorEmbarque);
+            $quantidade = $quantidade !== null ? min((int) $quantidade, $limiteRecebimento) : $limiteRecebimento;
             if ($quantidade <= 0) {
                 return $entrega;
             }

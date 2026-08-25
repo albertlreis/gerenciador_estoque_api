@@ -3,6 +3,8 @@
 namespace Tests\Feature;
 
 use App\Enums\PedidoStatus;
+use App\Http\Controllers\ConsignacaoController;
+use App\Http\Controllers\PedidoController;
 use App\Models\Categoria;
 use App\Models\Cliente;
 use App\Models\ClienteEndereco;
@@ -18,11 +20,9 @@ use App\Models\ProdutoEntregaItem;
 use App\Models\ProdutoVariacao;
 use App\Models\ProdutoVariacaoImagem;
 use App\Models\Usuario;
-use App\Http\Controllers\ConsignacaoController;
-use App\Http\Controllers\PedidoController;
 use Barryvdh\DomPDF\Facade\Pdf;
-use Illuminate\Http\Request;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
@@ -32,6 +32,7 @@ class ConsignacaoRoteiroPdfTest extends TestCase
     use RefreshDatabase;
 
     private const WEBP_1X1 = 'UklGRiIAAABXRUJQVlA4IBYAAAAwAQCdASoBAAEADsD+JaQAA3AAAAAA';
+
     private const PNG_1X1 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
 
     public function test_endpoint_de_consignacao_baixa_com_nome_de_roteiro_de_consignacao(): void
@@ -134,6 +135,27 @@ class ConsignacaoRoteiroPdfTest extends TestCase
         ])->render();
 
         $this->assertStringContainsString('src="data:image/png;base64,aGVsbG8="', $html);
+    }
+
+    public function test_observacao_mais_recente_e_multilinha_e_escapada_nos_dois_roteiros(): void
+    {
+        [$pedidoId] = $this->criarPedidoConsignado('pendente', PedidoStatus::CONSIGNADO);
+        $pedido = Pedido::with(['cliente', 'usuario', 'parceiro'])->findOrFail($pedidoId);
+        $pedido->update(['observacoes' => "Primeira linha\n<script>alert('x')</script>"]);
+        $pedido->refresh();
+
+        foreach (['exports.roteiro-consignacao', 'exports.roteiro-pedido'] as $template) {
+            $html = view($template, [
+                'pedido' => $pedido,
+                'grupos' => collect(),
+                'tituloRoteiro' => 'Roteiro',
+                'geradoEm' => '24/08/2026 23:00',
+            ])->render();
+
+            $this->assertStringContainsString("Primeira linha\n&lt;script&gt;alert(&#039;x&#039;)&lt;/script&gt;", $html);
+            $this->assertStringNotContainsString("<script>alert('x')</script>", $html);
+            $this->assertStringContainsString('white-space: pre-wrap', $html);
+        }
     }
 
     public function test_template_exibe_endereco_selecionado_em_vez_do_principal(): void
@@ -575,7 +597,7 @@ class ConsignacaoRoteiroPdfTest extends TestCase
             ]);
         }
 
-        $dataUri = 'data:image/png;base64,' . self::PNG_1X1;
+        $dataUri = 'data:image/png;base64,'.self::PNG_1X1;
         $consignacoes = Consignacao::query()
             ->where('pedido_id', $pedidoId)
             ->with(['deposito', 'produtoVariacao.produto', 'produtoVariacao.estoquesComLocalizacao.localizacao'])
@@ -604,7 +626,7 @@ class ConsignacaoRoteiroPdfTest extends TestCase
     {
         $usuario = Usuario::create([
             'nome' => 'Usuario PDF',
-            'email' => uniqid('pdf-', true) . '@test.com',
+            'email' => uniqid('pdf-', true).'@test.com',
             'senha' => 'senha',
             'ativo' => true,
         ]);

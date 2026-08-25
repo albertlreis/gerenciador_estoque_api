@@ -132,7 +132,10 @@ class PedidoListResource extends JsonResource
             return null;
         }
 
-        $prazoDiasUteis = max(0, (int) ($this->prazo_dias_uteis ?? 0));
+        $prazoDiasUteis = max(0, (int) (
+            $this->prazo_dias_uteis
+            ?? config('orders.prazo_padrao_dias_uteis', 60)
+        ));
 
         return $baseDate->addWeekdays($prazoDiasUteis)->startOfDay();
     }

@@ -14,7 +14,7 @@
         .observations-block, .closing-block { page-break-inside: avoid; }
         .observations-block { margin-top: 10px; }
         .observations-title { margin-bottom: 2px; }
-        .obs { border: 1px solid #000; padding: 5px; min-height: 32px; }
+        .obs { border: 1px solid #000; padding: 5px; min-height: 32px; white-space: pre-wrap; }
         .closing-block { margin-top: 6px; }
         .recebido {
             border: 1px solid #000;

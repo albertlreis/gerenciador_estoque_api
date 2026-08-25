@@ -47,6 +47,18 @@ class FiltroEstoqueDTO
     /** Quantidade minima de dias em estoque sem venda */
     public ?int $diasSemVendaMin = null;
 
+    /** Recorte específico originado no card Tempo em estoque. */
+    public bool $tempoEstoque = false;
+
+    /** Exibe variações de produtos cujo saldo agregado está abaixo do mínimo. */
+    public bool $estoqueBaixo = false;
+
+    /** Faixa calculada a partir da entrada mais antiga do saldo atual. */
+    public ?string $faixaTempoEstoque = null;
+
+    /** Variação específica selecionada no dashboard. */
+    public ?int $variacaoId = null;
+
     /** Texto de busca da localizacao fisica/area do estoque */
     public ?string $localizacao = null;
 
@@ -78,7 +90,7 @@ class FiltroEstoqueDTO
     public ?string $sortOrder = null;
 
     /**
-     * @param array<string, mixed> $data
+     * @param  array<string, mixed>  $data
      */
     public function __construct(array $data)
     {
@@ -91,6 +103,7 @@ class FiltroEstoqueDTO
         $this->categoria = $this->toNullablePositiveInt($data['categoria'] ?? null);
         $this->fornecedor = $this->toNullablePositiveInt($data['fornecedor'] ?? null);
         $this->localizacaoId = $this->toNullablePositiveInt($data['localizacao_id'] ?? null);
+        $this->variacaoId = $this->toNullablePositiveInt($data['variacao_id'] ?? null);
         $this->tipo = isset($data['tipo']) ? trim((string) $data['tipo']) : null;
         if ($this->tipo === '') {
             $this->tipo = null;
@@ -131,6 +144,20 @@ class FiltroEstoqueDTO
         $diasSemVendaMin = $this->toNullablePositiveInt($data['dias_sem_venda_min'] ?? null);
         $this->diasSemVendaMin = $diasSemVendaMin !== null ? max(1, $diasSemVendaMin) : null;
 
+        $this->tempoEstoque = filter_var($data['tempo_estoque'] ?? false, FILTER_VALIDATE_BOOLEAN);
+        $this->estoqueBaixo = filter_var($data['estoque_baixo'] ?? false, FILTER_VALIDATE_BOOLEAN);
+        $faixaTempoEstoque = isset($data['faixa_tempo_estoque'])
+            ? trim((string) $data['faixa_tempo_estoque'])
+            : null;
+        $this->faixaTempoEstoque = in_array(
+            $faixaTempoEstoque,
+            ['ate_30', 'de_31_60', 'de_61_90', 'mais_90'],
+            true
+        ) ? $faixaTempoEstoque : null;
+        if ($this->faixaTempoEstoque !== null) {
+            $this->tempoEstoque = true;
+        }
+
         $localizacao = isset($data['localizacao']) ? trim((string) $data['localizacao']) : '';
         $this->localizacao = $localizacao !== '' ? $localizacao : null;
 
@@ -166,12 +193,17 @@ class FiltroEstoqueDTO
 
     private function toNullablePositiveInt(mixed $value): ?int
     {
-        if ($value === null) return null;
+        if ($value === null) {
+            return null;
+        }
 
         $s = trim((string) $value);
-        if ($s === '' || $s === '0') return null;
+        if ($s === '' || $s === '0') {
+            return null;
+        }
 
         $n = (int) $s;
+
         return $n > 0 ? $n : null;
     }
 }

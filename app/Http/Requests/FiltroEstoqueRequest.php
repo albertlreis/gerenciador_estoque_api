@@ -15,14 +15,14 @@ class FiltroEstoqueRequest extends FormRequest
      * Regras para filtros de estoque/movimentações.
      *
      * Observação:
-      * - periodo deve ser array com 2 datas (YYYY-MM-DD).
+     * - periodo deve ser array com 2 datas (YYYY-MM-DD).
      * - em /estoque/atual, periodo considera data_movimentacao (não estoque.updated_at).
      * - sort_order só aceita asc|desc.
      */
     public function rules(): array
     {
         return [
-            'tipo' => ['nullable', 'string', 'in:entrada,saida'],
+            'tipo' => ['nullable', 'string', 'in:entrada,saida,transferencia'],
 
             'deposito' => ['nullable', 'integer', 'min:1'],
             'categoria' => ['nullable', 'integer', 'min:1'],
@@ -42,6 +42,10 @@ class FiltroEstoqueRequest extends FormRequest
             'estoque_status' => ['nullable', 'in:com_estoque,sem_estoque'],
             'zerados' => ['nullable', 'boolean'], // boolean vem como 0/1 ou "true"/"false" no front
             'dias_sem_venda_min' => ['nullable', 'integer', 'min:1'],
+            'variacao_id' => ['nullable', 'integer', 'min:1'],
+            'faixa_tempo_estoque' => ['nullable', 'string', 'in:ate_30,de_31_60,de_61_90,mais_90'],
+            'tempo_estoque' => ['nullable', 'boolean'],
+            'estoque_baixo' => ['nullable', 'boolean'],
 
             'per_page' => ['nullable', 'integer', 'min:1', 'max:200'],
             'page' => ['nullable', 'integer', 'min:1'],
@@ -64,10 +68,12 @@ class FiltroEstoqueRequest extends FormRequest
     {
         $input = $this->all();
 
-        foreach (['produto', 'localizacao', 'area', 'tipo', 'sort_field', 'sort_order', 'export', 'estoque_cliente_status'] as $k) {
+        foreach (['produto', 'localizacao', 'area', 'tipo', 'sort_field', 'sort_order', 'export', 'estoque_cliente_status', 'faixa_tempo_estoque'] as $k) {
             if (array_key_exists($k, $input) && is_string($input[$k])) {
                 $input[$k] = trim($input[$k]);
-                if ($input[$k] === '') $input[$k] = null;
+                if ($input[$k] === '') {
+                    $input[$k] = null;
+                }
             }
         }
 
@@ -78,19 +84,20 @@ class FiltroEstoqueRequest extends FormRequest
             }
         }
 
-        foreach (['deposito', 'categoria', 'fornecedor', 'localizacao_id', 'per_page', 'page', 'dias_sem_venda_min'] as $k) {
+        foreach (['deposito', 'categoria', 'fornecedor', 'localizacao_id', 'per_page', 'page', 'dias_sem_venda_min', 'variacao_id'] as $k) {
             if (array_key_exists($k, $input) && $input[$k] === '') {
                 $input[$k] = null;
             }
         }
 
-        foreach (['estoque_cliente', 'zerados'] as $k) {
-            if (!array_key_exists($k, $input)) {
+        foreach (['estoque_cliente', 'zerados', 'tempo_estoque', 'estoque_baixo'] as $k) {
+            if (! array_key_exists($k, $input)) {
                 continue;
             }
 
             if ($input[$k] === '') {
                 $input[$k] = null;
+
                 continue;
             }
 
@@ -107,7 +114,9 @@ class FiltroEstoqueRequest extends FormRequest
         // Caso venha "periodo=2025-01-01,2025-01-31" por algum client, tenta normalizar
         if (isset($input['periodo']) && is_string($input['periodo']) && str_contains($input['periodo'], ',')) {
             $parts = array_map('trim', explode(',', $input['periodo']));
-            if (count($parts) === 2) $input['periodo'] = [$parts[0], $parts[1]];
+            if (count($parts) === 2) {
+                $input['periodo'] = [$parts[0], $parts[1]];
+            }
         }
 
         $this->replace($input);

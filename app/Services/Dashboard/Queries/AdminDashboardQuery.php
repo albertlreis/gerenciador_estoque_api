@@ -12,15 +12,28 @@ use Illuminate\Support\Facades\DB;
 class AdminDashboardQuery
 {
     /**
-     * @param array<int> $categoriasTempoEstoqueOcultasIds
+     * Retorna o mesmo conjunto operacional usado pelos cards de pedidos,
+     * sem o limite visual aplicado ao dashboard.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function pedidosOperacionaisParaPeriodo(
+        CarbonInterface $inicio,
+        CarbonInterface $fim,
+        ?int $depositoId = null
+    ): array {
+        return $this->pedidosOperacionais($this->basePedidosQuery($inicio, $fim, $depositoId));
+    }
+
+    /**
+     * @param  array<int>  $categoriasTempoEstoqueOcultasIds
      */
     public function fetch(
         CarbonInterface $inicio,
         CarbonInterface $fim,
         ?int $depositoId = null,
         array $categoriasTempoEstoqueOcultasIds = []
-    ): array
-    {
+    ): array {
         $pedidosBase = $this->basePedidosQuery($inicio, $fim, $depositoId);
 
         $vendasTotal = (float) ((clone $pedidosBase)->sum('pedidos.valor_total') ?? 0);
@@ -147,7 +160,7 @@ class AdminDashboardQuery
             ->get()
             ->map(fn ($pedido) => [
                 'id' => (int) $pedido->id,
-                'numero' => $pedido->numero_externo ?: ('#' . $pedido->id),
+                'numero' => $pedido->numero_externo ?: ('#'.$pedido->id),
                 'cliente' => $pedido->cliente_nome ?: 'Cliente não informado',
                 'valor_total' => (float) ($pedido->valor_total ?? 0),
                 'status' => $pedido->status ?: 'sem_status',
@@ -174,6 +187,8 @@ class AdminDashboardQuery
                 'pedidos.valor_total',
                 'pedidos.data_pedido',
                 'pedidos.data_limite_entrega',
+                'pedidos.prazo_dias_uteis',
+                'pedidos.entregue_em',
                 'clientes.nome as cliente_nome',
                 'status_atual.status',
                 'status_atual.data_status',
@@ -183,8 +198,11 @@ class AdminDashboardQuery
                     ->orWhereNotIn('status_atual.status', [
                         PedidoStatus::FINALIZADO->value,
                         PedidoStatus::CANCELADO->value,
+                        PedidoStatus::ENTREGA_CLIENTE->value,
+                        'entregue',
                     ]);
             })
+            ->whereNull('pedidos.entregue_em')
             ->get();
 
         if ($pedidos->isEmpty()) {
@@ -195,10 +213,11 @@ class AdminDashboardQuery
         $historicos = $this->historicosPorPedido($pedidoIds);
         $previsoesManuais = $this->previsoesManuaisPorPedido($pedidoIds);
         $statusFluxo = app(PedidoStatusFluxoService::class);
-        $hoje = now()->startOfDay();
+        $timezone = config('app.timezone', 'America/Belem');
+        $hoje = CarbonImmutable::now($timezone)->startOfDay();
 
         return $pedidos
-            ->map(function ($pedido) use ($historicos, $previsoesManuais, $statusFluxo, $hoje) {
+            ->map(function ($pedido) use ($historicos, $previsoesManuais, $statusFluxo, $hoje, $timezone) {
                 $pedidoId = (int) $pedido->id;
                 $statusAtual = $pedido->status ?: 'sem_status';
                 $datasHistorico = $historicos[$pedidoId] ?? [];
@@ -207,13 +226,16 @@ class AdminDashboardQuery
                 $fluxo = $statusFluxo->fluxoDetalhadoPorTipo($tipoFluxo);
                 $proximoStatus = $this->proximoStatusPendente($fluxo, array_keys($datasHistorico));
                 $previsoes = $statusFluxo->previsoesPorTipo($tipoFluxo, $datasHistorico, $manuais);
-                $dataPrevista = $proximoStatus ? ($previsoes[$proximoStatus['codigo']] ?? null) : null;
-                $dataPrevista = $dataPrevista ? CarbonImmutable::parse($dataPrevista)->startOfDay() : null;
-                $prioridade = $this->prioridadePedido($dataPrevista, $hoje);
+                $previsaoProximaEtapa = $proximoStatus ? ($previsoes[$proximoStatus['codigo']] ?? null) : null;
+                $previsaoProximaEtapa = $previsaoProximaEtapa
+                    ? CarbonImmutable::parse($previsaoProximaEtapa, $timezone)->startOfDay()
+                    : null;
+                $entregaPrevista = $this->entregaPrevistaPedido($pedido, $timezone);
+                $prioridade = $this->prioridadePedido($entregaPrevista, $hoje);
 
                 return [
                     'id' => $pedidoId,
-                    'numero' => $pedido->numero_externo ?: ('#' . $pedidoId),
+                    'numero' => $pedido->numero_externo ?: ('#'.$pedidoId),
                     'cliente' => $pedido->cliente_nome ?: 'Cliente não informado',
                     'valor_total' => (float) ($pedido->valor_total ?? 0),
                     'status' => $statusAtual,
@@ -221,8 +243,10 @@ class AdminDashboardQuery
                     'proximo_status' => $proximoStatus['codigo'] ?? null,
                     'proximo_status_label' => $proximoStatus['label'] ?? null,
                     'data_pedido' => $pedido->data_pedido,
-                    'data_prevista' => $dataPrevista?->toDateString(),
-                    'dias_para_previsao' => $dataPrevista ? $hoje->diffInDays($dataPrevista, false) : null,
+                    'data_prevista' => $entregaPrevista?->toDateString(),
+                    'data_entrega_prevista' => $entregaPrevista?->toDateString(),
+                    'dias_para_previsao' => $entregaPrevista ? $hoje->diffInDays($entregaPrevista, false) : null,
+                    'previsao_proxima_etapa' => $previsaoProximaEtapa?->toDateString(),
                     'prioridade' => $prioridade['key'],
                     'prioridade_label' => $prioridade['label'],
                     'prioridade_ordem' => $prioridade['ordem'],
@@ -236,6 +260,7 @@ class AdminDashboardQuery
             ])
             ->map(function (array $pedido) {
                 unset($pedido['prioridade_ordem']);
+
                 return $pedido;
             })
             ->values()
@@ -292,13 +317,13 @@ class AdminDashboardQuery
     }
 
     /**
-     * @param array<int, array<string, mixed>> $fluxo
-     * @param string[] $statusRegistrados
+     * @param  array<int, array<string, mixed>>  $fluxo
+     * @param  string[]  $statusRegistrados
      */
     private function proximoStatusPendente(iterable $fluxo, array $statusRegistrados): ?array
     {
         foreach ($fluxo as $status) {
-            if (!in_array($status['codigo'], $statusRegistrados, true)) {
+            if (! in_array($status['codigo'], $statusRegistrados, true)) {
                 return $status;
             }
         }
@@ -308,7 +333,7 @@ class AdminDashboardQuery
 
     private function prioridadePedido(?CarbonImmutable $dataPrevista, CarbonInterface $hoje): array
     {
-        if (!$dataPrevista) {
+        if (! $dataPrevista) {
             return ['key' => 'sem_previsao', 'label' => 'Sem previsão', 'ordem' => 3];
         }
 
@@ -329,6 +354,26 @@ class AdminDashboardQuery
         return ['key' => 'normal', 'label' => 'No prazo', 'ordem' => 4];
     }
 
+    private function entregaPrevistaPedido(object $pedido, string $timezone): ?CarbonImmutable
+    {
+        if ($pedido->data_limite_entrega) {
+            return CarbonImmutable::parse($pedido->data_limite_entrega, $timezone)->startOfDay();
+        }
+
+        if (! $pedido->data_pedido) {
+            return null;
+        }
+
+        $prazoDiasUteis = max(0, (int) (
+            $pedido->prazo_dias_uteis
+            ?? config('orders.prazo_padrao_dias_uteis', 60)
+        ));
+
+        return CarbonImmutable::parse($pedido->data_pedido, $timezone)
+            ->startOfDay()
+            ->addWeekdays($prazoDiasUteis);
+    }
+
     private function statusLabel(?string $status): string
     {
         return app(PedidoStatusFluxoService::class)->statusMeta($status)['label']
@@ -336,7 +381,7 @@ class AdminDashboardQuery
     }
 
     /**
-     * @param array<int> $categoriasOcultasIds
+     * @param  array<int>  $categoriasOcultasIds
      */
     private function produtosPorTempoEmEstoque(?int $depositoId, array $categoriasOcultasIds = []): array
     {
@@ -346,6 +391,13 @@ class AdminDashboardQuery
             ->leftJoin('depositos', 'depositos.id', '=', 'estoque.id_deposito')
             ->where('estoque.quantidade', '>', 0)
             ->whereNotNull('estoque.data_entrada_estoque_atual')
+            ->whereNotExists(function ($outletsAtivos) {
+                $outletsAtivos
+                    ->selectRaw('1')
+                    ->from('produto_variacao_outlets as pvo_tempo_estoque')
+                    ->whereColumn('pvo_tempo_estoque.produto_variacao_id', 'produto_variacoes.id')
+                    ->where('pvo_tempo_estoque.quantidade_restante', '>', 0);
+            })
             ->selectRaw('
                 produto_variacoes.id as variacao_id,
                 produtos.nome as produto_nome,
@@ -409,7 +461,7 @@ class AdminDashboardQuery
 
         foreach ($tempoEstoque as $item) {
             $faixa = $item['faixa'] ?? 'ate_30';
-            if (!array_key_exists($faixa, $resumo)) {
+            if (! array_key_exists($faixa, $resumo)) {
                 $faixa = 'ate_30';
             }
 

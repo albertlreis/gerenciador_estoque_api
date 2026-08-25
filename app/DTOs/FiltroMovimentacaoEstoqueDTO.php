@@ -61,7 +61,9 @@ class FiltroMovimentacaoEstoqueDTO
      */
     public function __construct(array $data)
     {
-        $this->variacao = $this->toNullablePositiveInt($data['variacao'] ?? null);
+        $this->variacao = $this->toNullablePositiveInt(
+            $data['variacao_id'] ?? $data['variacao'] ?? null
+        );
         $this->tipo = isset($data['tipo']) ? trim((string) $data['tipo']) : null;
         $this->produto = isset($data['produto']) ? trim((string) $data['produto']) : null;
         if ($this->tipo === '') {

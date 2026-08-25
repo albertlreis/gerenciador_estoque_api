@@ -2,11 +2,11 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Requests\StoreClienteRequest;
 use App\Models\Cliente;
+use App\Services\ClienteService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use App\Services\ClienteService;
-use App\Http\Requests\StoreClienteRequest;
 use Illuminate\Validation\ValidationException;
 
 class ClienteController extends Controller
@@ -26,6 +26,10 @@ class ClienteController extends Controller
         $filtros = [
             'nome' => $request->string('nome')->toString(),
             'documento' => $request->string('documento')->toString(),
+            'dashboard_filtro' => $request->string('dashboard_filtro')->toString(),
+            'data_inicio' => $request->string('data_inicio')->toString(),
+            'data_fim' => $request->string('data_fim')->toString(),
+            'deposito_id' => $request->integer('deposito_id') ?: null,
         ];
 
         return response()->json(
@@ -40,11 +44,11 @@ class ClienteController extends Controller
     {
         $data = $request->validated();
 
-        if (!empty($data['documento']) && $this->service->documentoDuplicado($data['documento'])) {
+        if (! empty($data['documento']) && $this->service->documentoDuplicado($data['documento'])) {
             throw ValidationException::withMessages(['documento' => 'Documento já cadastrado.']);
         }
 
-        if (!empty($data['documento']) && !$this->service->validarDocumento($data['documento'], $data['tipo'])) {
+        if (! empty($data['documento']) && ! $this->service->validarDocumento($data['documento'], $data['tipo'])) {
             throw ValidationException::withMessages(['documento' => 'Documento inválido.']);
         }
 
@@ -66,7 +70,7 @@ class ClienteController extends Controller
             }
 
             $tipo = $data['tipo'] ?? $cliente->tipo;
-            if (!$this->service->validarDocumento($data['documento'], $tipo)) {
+            if (! $this->service->validarDocumento($data['documento'], $tipo)) {
                 throw ValidationException::withMessages(['documento' => 'Documento inválido.']);
             }
         }
@@ -85,6 +89,7 @@ class ClienteController extends Controller
     {
         $this->service->registrarClienteRemovido($cliente);
         $cliente->delete();
+
         return response()->json(null, 204);
     }
 

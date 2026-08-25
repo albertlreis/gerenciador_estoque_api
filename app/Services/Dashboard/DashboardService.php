@@ -35,7 +35,7 @@ class DashboardService
             ? []
             : Categoria::expandirIdsComFilhos($categoriasOcultasSelecionadas);
         sort($categoriasOcultasExpandidas);
-        $resolved['cache_variant'] = 'tempo_estoque_ocultas:' . sha1(implode(',', $categoriasOcultasExpandidas));
+        $resolved['cache_variant'] = 'tempo_estoque_ocultas:'.sha1(implode(',', $categoriasOcultasExpandidas));
 
         $cacheKey = $this->profileCacheKey('admin', $usuarioId, $resolved);
 
@@ -68,7 +68,7 @@ class DashboardService
     }
 
     /**
-     * @param array<int|string> $categoriaIds
+     * @param  array<int|string>  $categoriaIds
      */
     public function atualizarAdminPreferencias(int $usuarioId, array $categoriaIds): array
     {
@@ -286,6 +286,7 @@ class DashboardService
             'fim' => $resolved['fim']->toDateString(),
             'compare' => $resolved['compare'] ? 1 : 0,
             'deposito_id' => $resolved['deposito_id'],
+            'consignacoes_janela_dias' => (int) config('dashboard.consignacoes.dias_vencendo', 2),
             'updated_at' => now()->toIso8601String(),
         ];
     }
@@ -345,7 +346,7 @@ class DashboardService
     }
 
     /**
-     * @param array<int|string> $ids
+     * @param  array<int|string>  $ids
      * @return array<int>
      */
     private function normalizarIds(array $ids): array
@@ -362,7 +363,7 @@ class DashboardService
     }
 
     /**
-     * @param array<int> $ids
+     * @param  array<int>  $ids
      * @return array<int>
      */
     private function filtrarCategoriasExistentes(array $ids): array

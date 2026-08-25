@@ -7,8 +7,8 @@ use App\Models\Pedido;
 use App\Models\PedidoStatusHistorico;
 use App\Models\Usuario;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Laravel\Sanctum\Sanctum;
@@ -40,6 +40,7 @@ class DashboardApiTest extends TestCase
         $vendedorId = $this->criarUsuario('Vendedor Admin')->id;
 
         $pedidoAtual = $this->criarPedido($clienteId, $vendedorId, now()->subDay(), 300.00);
+        $pedidoAtual->update(['data_limite_entrega' => now()->subDay()->toDateString()]);
         $this->criarStatusPedido($pedidoAtual->id, PedidoStatus::PEDIDO_CRIADO->value, $admin->id);
         DB::table('pedido_status_previsoes')->insert([
             'pedido_id' => $pedidoAtual->id,
@@ -246,7 +247,16 @@ class DashboardApiTest extends TestCase
         $this->assertContains('Adorno Filho Antigo Admin', array_column($response->json('tempo_estoque'), 'produto_nome'));
         $this->assertSame('mais_90', $response->json('tempo_estoque.0.faixa'));
 
-        $responseComDeposito = $this->getJson('/api/v1/dashboard/admin?period=month&fresh=1&deposito_id=' . $depositoId);
+        $destinoAtrasados = $this->getJson(sprintf(
+            '/api/v1/pedidos?dashboard_filtro=atrasados&data_inicio=%s&data_fim=%s&per_page=10',
+            $response->json('meta.inicio'),
+            $response->json('meta.fim'),
+        ));
+        $destinoAtrasados->assertOk();
+        $this->assertSame(1, (int) $destinoAtrasados->json('meta.total'));
+        $this->assertSame($pedidoAtual->id, (int) $destinoAtrasados->json('data.0.id'));
+
+        $responseComDeposito = $this->getJson('/api/v1/dashboard/admin?period=month&fresh=1&deposito_id='.$depositoId);
 
         $responseComDeposito->assertOk();
         $this->assertSame($depositoId, (int) $responseComDeposito->json('meta.deposito_id'));
@@ -329,12 +339,89 @@ class DashboardApiTest extends TestCase
 
         $outroAdmin = $this->criarUsuario('Outro Admin Dashboard');
         Sanctum::actingAs($outroAdmin);
-        Cache::put('permissoes_usuario_' . $outroAdmin->id, ['dashboard.admin'], now()->addHours(2));
+        Cache::put('permissoes_usuario_'.$outroAdmin->id, ['dashboard.admin'], now()->addHours(2));
 
         $outroUsuario = $this->getJson('/api/v1/dashboard/admin?period=month');
         $outroUsuario->assertOk();
         $this->assertContains('Produto Oculto Preferencia', array_column($outroUsuario->json('tempo_estoque'), 'produto_nome'));
         $this->assertContains('Produto Oculto Filho Preferencia', array_column($outroUsuario->json('tempo_estoque'), 'produto_nome'));
+    }
+
+    public function test_dashboard_admin_exclui_variacao_com_outlet_ativo_do_tempo_em_estoque(): void
+    {
+        $usuario = $this->autenticar(['dashboard.admin']);
+
+        $depositoId = DB::table('depositos')->insertGetId([
+            'nome' => 'Deposito Outlet Dashboard',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        $categoriaId = DB::table('categorias')->insertGetId([
+            'nome' => 'Categoria Outlet Dashboard',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        $motivoId = DB::table('outlet_motivos')->insertGetId([
+            'nome' => 'Tempo em estoque',
+            'slug' => 'tempo_estoque_dashboard',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $semOutlet = $this->criarProdutoEmEstoque('Sem Outlet', $categoriaId, $depositoId, 5, 120);
+        $outletParcial = $this->criarProdutoEmEstoque('Outlet Parcial', $categoriaId, $depositoId, 8, 120);
+        $outletTotal = $this->criarProdutoEmEstoque('Outlet Total', $categoriaId, $depositoId, 4, 120);
+        $outletEsgotado = $this->criarProdutoEmEstoque('Outlet Esgotado', $categoriaId, $depositoId, 6, 120);
+
+        DB::table('produto_variacao_outlets')->insert([
+            [
+                'produto_variacao_id' => $outletParcial,
+                'motivo_id' => $motivoId,
+                'quantidade' => 2,
+                'quantidade_restante' => 2,
+                'usuario_id' => $usuario->id,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+            [
+                'produto_variacao_id' => $outletParcial,
+                'motivo_id' => $motivoId,
+                'quantidade' => 1,
+                'quantidade_restante' => 1,
+                'usuario_id' => $usuario->id,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+            [
+                'produto_variacao_id' => $outletTotal,
+                'motivo_id' => $motivoId,
+                'quantidade' => 4,
+                'quantidade_restante' => 4,
+                'usuario_id' => $usuario->id,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+            [
+                'produto_variacao_id' => $outletEsgotado,
+                'motivo_id' => $motivoId,
+                'quantidade' => 6,
+                'quantidade_restante' => 0,
+                'usuario_id' => $usuario->id,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+        ]);
+
+        $response = $this->getJson('/api/v1/dashboard/admin?period=month&fresh=1&deposito_id='.$depositoId);
+
+        $response->assertOk();
+        $nomes = array_column($response->json('tempo_estoque'), 'produto_nome');
+        $this->assertContains('Sem Outlet', $nomes);
+        $this->assertContains('Outlet Esgotado', $nomes);
+        $this->assertNotContains('Outlet Parcial', $nomes);
+        $this->assertNotContains('Outlet Total', $nomes);
+        $this->assertSame(2, (int) $response->json('tempo_estoque_resumo.mais_90.produtos_qtd'));
+        $this->assertSame(11, (int) $response->json('tempo_estoque_resumo.mais_90.quantidade_total'));
     }
 
     public function test_dashboard_admin_funciona_quando_tabela_de_preferencias_nao_existe(): void
@@ -599,7 +686,7 @@ class DashboardApiTest extends TestCase
             'updated_at' => now(),
         ]);
 
-        $response = $this->getJson('/api/v1/dashboard/estoque?period=7d&fresh=1&deposito_id=' . $depositoId);
+        $response = $this->getJson('/api/v1/dashboard/estoque?period=7d&fresh=1&deposito_id='.$depositoId);
 
         $response
             ->assertOk()
@@ -626,7 +713,7 @@ class DashboardApiTest extends TestCase
     {
         $usuario = $this->criarUsuario('Usuario Perfil Estoque');
         Sanctum::actingAs($usuario);
-        Cache::put('perfis_usuario_' . $usuario->id, ['Estoque'], now()->addHours(2));
+        Cache::put('perfis_usuario_'.$usuario->id, ['Estoque'], now()->addHours(2));
 
         $response = $this->getJson('/api/v1/dashboard/estoque?period=7d');
 
@@ -671,7 +758,7 @@ class DashboardApiTest extends TestCase
     {
         $usuario = $this->criarUsuario('Usuario Dashboard');
         Sanctum::actingAs($usuario);
-        Cache::put('permissoes_usuario_' . $usuario->id, $permissoes, now()->addHours(2));
+        Cache::put('permissoes_usuario_'.$usuario->id, $permissoes, now()->addHours(2));
 
         return $usuario;
     }
@@ -682,7 +769,7 @@ class DashboardApiTest extends TestCase
         int $depositoId,
         int $quantidade,
         int $diasEmEstoque
-    ): void {
+    ): int {
         $produtoId = DB::table('produtos')->insertGetId([
             'nome' => $nome,
             'id_categoria' => $categoriaId,
@@ -694,8 +781,8 @@ class DashboardApiTest extends TestCase
 
         $variacaoId = DB::table('produto_variacoes')->insertGetId([
             'produto_id' => $produtoId,
-            'referencia' => 'REF-' . uniqid(),
-            'nome' => 'Variação ' . $nome,
+            'referencia' => 'REF-'.uniqid(),
+            'nome' => 'Variação '.$nome,
             'preco' => 100,
             'custo' => 70,
             'created_at' => now(),
@@ -714,13 +801,15 @@ class DashboardApiTest extends TestCase
                 'updated_at' => now(),
             ]
         );
+
+        return (int) $variacaoId;
     }
 
     private function criarUsuario(string $nome): Usuario
     {
         return Usuario::create([
-            'nome' => $nome . ' ' . uniqid(),
-            'email' => strtolower(str_replace(' ', '.', $nome)) . '.' . uniqid() . '@example.test',
+            'nome' => $nome.' '.uniqid(),
+            'email' => strtolower(str_replace(' ', '.', $nome)).'.'.uniqid().'@example.test',
             'senha' => 'senha',
             'ativo' => true,
         ]);
@@ -743,7 +832,7 @@ class DashboardApiTest extends TestCase
             'id_cliente' => $clienteId,
             'id_usuario' => $usuarioId,
             'tipo' => 'venda',
-            'numero_externo' => 'PED-' . strtoupper(substr(uniqid(), -8)),
+            'numero_externo' => 'PED-'.strtoupper(substr(uniqid(), -8)),
             'data_pedido' => $dataPedido,
             'valor_total' => $valor,
             'prazo_dias_uteis' => 10,

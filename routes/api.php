@@ -1,93 +1,88 @@
 <?php
 
-use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\AniversarioController;
 use App\Http\Controllers\Api\V1\DashboardController as DashboardV1Controller;
-use App\Http\Controllers\Api\V1\UsuarioPreferenciaController;
 use App\Http\Controllers\Api\V1\DashboardHomePreferenceController;
+use App\Http\Controllers\Api\V1\UsuarioPreferenciaController;
+use App\Http\Controllers\AreaEstoqueController;
+use App\Http\Controllers\Assistencia\AssistenciaArquivoController;
+use App\Http\Controllers\Assistencia\AssistenciaChamadoController;
+use App\Http\Controllers\Assistencia\AssistenciaDefeitosController;
+use App\Http\Controllers\Assistencia\AssistenciaItemController;
+use App\Http\Controllers\Assistencia\AssistenciasController;
+use App\Http\Controllers\Assistencia\PedidoLookupController;
+use App\Http\Controllers\AssistenciaRelatorioController;
+use App\Http\Controllers\AuditoriaLogController;
+use App\Http\Controllers\AvisoController;
+use App\Http\Controllers\CarrinhoController;
+use App\Http\Controllers\CarrinhoItemController;
+use App\Http\Controllers\CategoriaController;
+use App\Http\Controllers\CategoriaFinanceiraController;
+use App\Http\Controllers\CentroCustoController;
+use App\Http\Controllers\ClienteController;
+use App\Http\Controllers\ClientLogController;
+use App\Http\Controllers\CommsProxyController;
+use App\Http\Controllers\ComunicacaoJornadaController;
+use App\Http\Controllers\ConciliacaoBancariaController;
+use App\Http\Controllers\ConfiguracaoController;
+use App\Http\Controllers\ConsignacaoController;
+use App\Http\Controllers\ConsignacaoRelatorioController;
+use App\Http\Controllers\ContaFinanceiraController;
+use App\Http\Controllers\ContaPagarController;
+use App\Http\Controllers\ContaReceberController;
+use App\Http\Controllers\ContaReceberExportController;
+use App\Http\Controllers\ContaReceberRelatorioController;
+use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\DepositoController;
+use App\Http\Controllers\DespesaRecorrenteController;
+use App\Http\Controllers\DevolucaoController;
+use App\Http\Controllers\EstoqueController;
+use App\Http\Controllers\EstoqueMovimentacaoController;
+use App\Http\Controllers\EstoqueRelatorioController;
+use App\Http\Controllers\EstoqueSeparacaoController;
+use App\Http\Controllers\EstoqueTransferenciaController;
+use App\Http\Controllers\EventoController;
+use App\Http\Controllers\FeriadoController;
+use App\Http\Controllers\FinanceiroDashboardController;
+use App\Http\Controllers\FinanceiroExtratoController;
+use App\Http\Controllers\FinanceiroRelatorioController;
+use App\Http\Controllers\FormaPagamentoController;
+use App\Http\Controllers\FornecedorController;
+use App\Http\Controllers\ImportacaoNormalizadaController;
+use App\Http\Controllers\ImportEstoqueController;
 use App\Http\Controllers\Integrations\BancoDoBrasilExtratosController;
 use App\Http\Controllers\Integrations\ContaAzulIntegracaoController;
 use App\Http\Controllers\Integrations\ContaAzulLojaController;
-
-use App\Http\Controllers\{AreaEstoqueController,
-    AniversarioController,
-    AuditoriaLogController,
-    EventoController,
-    CarrinhoController,
-    CarrinhoItemController,
-    AvisoController,
-    CategoriaController,
-    CategoriaFinanceiraController,
-    CentroCustoController,
-    ClientLogController,
-    ConciliacaoBancariaController,
-    ClienteController,
-    ConfiguracaoController,
-    ConsignacaoController,
-    ConsignacaoRelatorioController,
-    ContaFinanceiraController,
-    ContaPagarController,
-    ContaReceberController,
-    ContaReceberExportController,
-    ContaReceberRelatorioController,
-    DashboardController,
-    DespesaRecorrenteController,
-    DevolucaoController,
-    DepositoController,
-    EstoqueController,
-    EstoqueSeparacaoController,
-    EstoqueMovimentacaoController,
-    EstoqueRelatorioController,
-    EstoqueTransferenciaController,
-    FeriadoController,
-    FinanceiroDashboardController,
-    FinanceiroExtratoController,
-    FinanceiroRelatorioController,
-    FornecedorController,
-    FormaPagamentoController,
-    ImportEstoqueController,
-    ImportacaoNormalizadaController,
-    LancamentoFinanceiroController,
-    LocalizacaoDimensaoController,
-    LocalizacaoEstoqueController,
-    OutletCatalogoController,
-    ParceiroController,
-    PedidoAntecipacaoController,
-    PedidoController,
-    PedidoEstoqueController,
-    PedidoEstornoOperacionalController,
-    PedidoFabricaController,
-    PedidoItemController,
-    PedidoRecebimentoController,
-    PedidoReconciliacaoController,
-    PedidoReconciliacaoPreviewController,
-    PedidosRelatorioController,
-    PedidoStatusConfiguracaoController,
-    PedidoStatusHistoricoController,
-    ProdutoEntregaController,
-    ProdutoController,
-    ProdutoConjuntoController,
-    ProdutoImagemController,
-    ProdutoVariacaoController,
-    ProdutoVariacaoImagemController,
-    ProdutoVariacaoOutletController,
-    ProdutoAtributoController,
-    CommsProxyController,
-    ComunicacaoJornadaController,
-    TransferenciaFinanceiraController};
-
-use App\Http\Controllers\Assistencia\{
-    AssistenciaArquivoController,
-    AssistenciaChamadoController,
-    AssistenciaDefeitosController,
-    AssistenciaItemController,
-    AssistenciasController,
-    PedidoLookupController
-};
-
-use App\Http\Controllers\AssistenciaRelatorioController;
 use App\Http\Controllers\Integrations\ContaAzulOAuthController;
 use App\Http\Controllers\Integrations\GoogleCalendarController;
 use App\Http\Controllers\Integrations\GoogleCalendarOAuthController;
+use App\Http\Controllers\LancamentoFinanceiroController;
+use App\Http\Controllers\LocalizacaoDimensaoController;
+use App\Http\Controllers\LocalizacaoEstoqueController;
+use App\Http\Controllers\OutletCatalogoController;
+use App\Http\Controllers\ParceiroController;
+use App\Http\Controllers\PedidoAntecipacaoController;
+use App\Http\Controllers\PedidoController;
+use App\Http\Controllers\PedidoEstoqueController;
+use App\Http\Controllers\PedidoEstornoOperacionalController;
+use App\Http\Controllers\PedidoFabricaController;
+use App\Http\Controllers\PedidoItemController;
+use App\Http\Controllers\PedidoRecebimentoController;
+use App\Http\Controllers\PedidoReconciliacaoController;
+use App\Http\Controllers\PedidoReconciliacaoPreviewController;
+use App\Http\Controllers\PedidosRelatorioController;
+use App\Http\Controllers\PedidoStatusConfiguracaoController;
+use App\Http\Controllers\PedidoStatusHistoricoController;
+use App\Http\Controllers\ProdutoAtributoController;
+use App\Http\Controllers\ProdutoConjuntoController;
+use App\Http\Controllers\ProdutoController;
+use App\Http\Controllers\ProdutoEntregaController;
+use App\Http\Controllers\ProdutoImagemController;
+use App\Http\Controllers\ProdutoVariacaoController;
+use App\Http\Controllers\ProdutoVariacaoImagemController;
+use App\Http\Controllers\ProdutoVariacaoOutletController;
+use App\Http\Controllers\TransferenciaFinanceiraController;
+use Illuminate\Support\Facades\Route;
 
 Route::get('v1/health', fn () => response()->json([
     'status' => 'ok',
@@ -491,6 +486,8 @@ Route::middleware(['auth:sanctum', 'senha.nao_obrigatoria'])
             Route::get('/', [ConsignacaoController::class, 'index']);
 
             Route::get('pedidos/{pedido}', [ConsignacaoController::class, 'porPedido'])->whereNumber('pedido');
+            Route::patch('pedidos/{pedido}/observacao', [ConsignacaoController::class, 'atualizarObservacao'])
+                ->whereNumber('pedido');
             Route::post('pedidos/{pedido}/itens', [ConsignacaoController::class, 'adicionarItensAoPedido'])->whereNumber('pedido');
             Route::post('pedidos/{pedido}/desfazer', [ConsignacaoController::class, 'desfazerPedido'])->whereNumber('pedido');
             Route::post('pedidos/{pedido}/devolucoes-em-massa', [ConsignacaoController::class, 'registrarDevolucoesEmMassa'])

@@ -4,6 +4,8 @@ namespace App\Repositories;
 
 use App\Helpers\AuthHelper;
 use App\Models\Pedido;
+use App\Services\Dashboard\Queries\AdminDashboardQuery;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
 
@@ -27,21 +29,26 @@ class PedidoRepository
         'recebimento_parcial',
         'aguardando_fabrica',
     ];
+
     /**
      * Retorna um builder de pedidos com filtros aplicados.
-     *
-     * @param Request $request
-     * @return Builder
      */
     public function comFiltros(Request $request): Builder
     {
         $query = Pedido::with(['cliente', 'parceiro', 'fornecedor', 'usuario', 'statusAtual', 'statusPrevisoes', 'historicoStatus', 'devolucoes:id,pedido_id', 'entregaItens']);
 
-        if (!AuthHelper::podeVisualizarPedidosDeTodos()) {
+        if (! AuthHelper::podeVisualizarPedidosDeTodos()) {
             $query->where('id_usuario', auth()->id());
         }
 
-        if (!$request->boolean('incluir_consignacoes')) {
+        $filtroDashboard = (string) $request->input('dashboard_filtro', '');
+        $recorteDashboardPedidos = in_array(
+            $filtroDashboard,
+            ['abertos', 'atrasados', 'vencem_7_dias', 'prioritarios'],
+            true
+        );
+
+        if (! $recorteDashboardPedidos && ! $request->boolean('incluir_consignacoes')) {
             $query->where(function (Builder $q) {
                 $q->whereDoesntHave('consignacoes')
                     ->orWhereHas('consignacoes', fn (Builder $sub) => $sub->where('status', 'comprado'));
@@ -51,6 +58,23 @@ class PedidoRepository
         if (in_array($request->input('tipo'), [Pedido::TIPO_VENDA, Pedido::TIPO_REPOSICAO], true)) {
             $query->where('tipo', $request->input('tipo'));
         }
+
+        if ($request->filled('pedido_id')) {
+            $query->whereKey($request->integer('pedido_id'));
+        }
+
+        if ($request->filled('deposito_id')) {
+            $depositoId = $request->integer('deposito_id');
+            $query->whereHas('itens', fn (Builder $item) => $item->where('id_deposito', $depositoId));
+        }
+
+        if ($request->boolean('entrega_pendente')) {
+            $query->whereHas('itens', fn (Builder $item) => $item
+                ->where('entrega_pendente', 1)
+                ->whereNull('data_liberacao_entrega'));
+        }
+
+        $this->aplicarFiltroDashboard($query, $request);
 
         $statusOperacionais = $this->normalizarStatusOperacionais($request);
         if ($statusOperacionais !== []) {
@@ -64,29 +88,25 @@ class PedidoRepository
         }
 
         if ($request->filled('data_inicio')) {
-            $query->where('data_pedido', '>=', $request->input('data_inicio') . ' 00:00:00');
+            $query->where('data_pedido', '>=', $request->input('data_inicio').' 00:00:00');
         }
 
         if ($request->filled('data_fim')) {
-            $query->where('data_pedido', '<=', $request->input('data_fim') . ' 23:59:59');
+            $query->where('data_pedido', '<=', $request->input('data_fim').' 23:59:59');
         }
 
         if ($request->filled('busca')) {
             $busca = strtolower(iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $request->busca));
 
             $query->where(function ($q) use ($busca) {
-                $q->orWhereRaw("LOWER(numero_externo) COLLATE utf8mb4_general_ci LIKE ?", ["%$busca%"])
-                    ->orWhereHas('cliente', fn($sub) =>
-                    $sub->whereRaw("LOWER(nome) COLLATE utf8mb4_general_ci LIKE ?", ["%$busca%"])
+                $q->orWhereRaw('LOWER(numero_externo) COLLATE utf8mb4_general_ci LIKE ?', ["%$busca%"])
+                    ->orWhereHas('cliente', fn ($sub) => $sub->whereRaw('LOWER(nome) COLLATE utf8mb4_general_ci LIKE ?', ["%$busca%"])
                     )
-                    ->orWhereHas('parceiro', fn($sub) =>
-                    $sub->whereRaw("LOWER(nome) COLLATE utf8mb4_general_ci LIKE ?", ["%$busca%"])
+                    ->orWhereHas('parceiro', fn ($sub) => $sub->whereRaw('LOWER(nome) COLLATE utf8mb4_general_ci LIKE ?', ["%$busca%"])
                     )
-                    ->orWhereHas('fornecedor', fn($sub) =>
-                    $sub->whereRaw("LOWER(nome) COLLATE utf8mb4_general_ci LIKE ?", ["%$busca%"])
+                    ->orWhereHas('fornecedor', fn ($sub) => $sub->whereRaw('LOWER(nome) COLLATE utf8mb4_general_ci LIKE ?', ["%$busca%"])
                     )
-                    ->orWhereHas('usuario', fn($sub) =>
-                    $sub->whereRaw("LOWER(nome) COLLATE utf8mb4_general_ci LIKE ?", ["%$busca%"])
+                    ->orWhereHas('usuario', fn ($sub) => $sub->whereRaw('LOWER(nome) COLLATE utf8mb4_general_ci LIKE ?', ["%$busca%"])
                     );
             });
         }
@@ -94,11 +114,41 @@ class PedidoRepository
         return $query;
     }
 
+    private function aplicarFiltroDashboard(Builder $query, Request $request): void
+    {
+        $filtro = (string) $request->input('dashboard_filtro', '');
+        if (! in_array($filtro, ['abertos', 'atrasados', 'vencem_7_dias', 'prioritarios'], true)) {
+            return;
+        }
+
+        if (! $request->filled('data_inicio') || ! $request->filled('data_fim')) {
+            return;
+        }
+
+        $inicio = CarbonImmutable::parse($request->input('data_inicio'))->startOfDay();
+        $fim = CarbonImmutable::parse($request->input('data_fim'))->endOfDay();
+        $depositoId = $request->filled('deposito_id') ? $request->integer('deposito_id') : null;
+        $operacionais = app(AdminDashboardQuery::class)
+            ->pedidosOperacionaisParaPeriodo($inicio, $fim, $depositoId);
+
+        if ($filtro === 'atrasados') {
+            $operacionais = array_filter($operacionais, fn (array $pedido) => $pedido['prioridade'] === 'atrasado');
+        } elseif ($filtro === 'vencem_7_dias') {
+            $operacionais = array_filter(
+                $operacionais,
+                fn (array $pedido) => in_array($pedido['prioridade'], ['vence_hoje', 'vence_7_dias'], true)
+            );
+        }
+
+        $ids = array_values(array_map('intval', array_column($operacionais, 'id')));
+        $query->whereKey($ids === [] ? [-1] : $ids);
+    }
+
     /** @return list<string> */
     private function normalizarStatusOperacionais(Request $request): array
     {
         $valores = $request->input('status_operacionais');
-        if (!is_array($valores)) {
+        if (! is_array($valores)) {
             $valores = [];
         }
 

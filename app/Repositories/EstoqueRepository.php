@@ -24,7 +24,6 @@ class EstoqueRepository
      * - atributos
      * - quantidade_estoque (withSum)
      *
-     * @param FiltroEstoqueDTO $filtros
      * @return Builder<ProdutoVariacao>
      */
     public function queryBase(FiltroEstoqueDTO $filtros): Builder
@@ -92,6 +91,41 @@ class EstoqueRepository
             ->withSum('outlets as quantidade_outlet', 'quantidade')
             ->withSum('outlets as quantidade_outlet_restante', 'quantidade_restante');
 
+        if ($filtros->variacaoId) {
+            $query->whereKey($filtros->variacaoId);
+        }
+
+        if ($filtros->tempoEstoque) {
+            $query
+                ->whereDoesntHave('outlets', fn (Builder $outlet) => $outlet->where('quantidade_restante', '>', 0))
+                ->whereHas('estoques', function (Builder $estoque) use ($filtros) {
+                    $estoque
+                        ->where('quantidade', '>', 0)
+                        ->whereNotNull('data_entrada_estoque_atual');
+                    if ($filtros->deposito) {
+                        $estoque->where('id_deposito', $filtros->deposito);
+                    }
+                });
+
+            if ($filtros->faixaTempoEstoque) {
+                $this->aplicarFaixaTempoEstoque($query, $filtros);
+            }
+        }
+
+        if ($filtros->estoqueBaixo) {
+            $query->whereHas('produto', function (Builder $produto) use ($filtros) {
+                $depositoSql = $filtros->deposito ? ' AND e_baixo.id_deposito = ?' : '';
+                $bindings = $filtros->deposito ? [$filtros->deposito] : [];
+                $produto->whereRaw(
+                    '(SELECT COALESCE(SUM(e_baixo.quantidade), 0)'
+                    .' FROM produto_variacoes pv_baixo'
+                    .' JOIN estoque e_baixo ON e_baixo.id_variacao = pv_baixo.id'
+                    .' WHERE pv_baixo.produto_id = produtos.id'.$depositoSql.') < produtos.estoque_minimo',
+                    $bindings
+                );
+            });
+        }
+
         if ($filtros->categoria) {
             $query->whereHas('produto', fn ($q) => $q->where('id_categoria', $filtros->categoria));
         }
@@ -116,8 +150,8 @@ class EstoqueRepository
 
         if ($filtros->produto) {
             $term = trim($filtros->produto);
-            $termLikeAny = '%' . $this->escapeLike($term) . '%';
-            $termLikePrefix = $this->escapeLike($term) . '%';
+            $termLikeAny = '%'.$this->escapeLike($term).'%';
+            $termLikePrefix = $this->escapeLike($term).'%';
 
             $query->where(function (Builder $q) use ($term, $termLikeAny, $termLikePrefix) {
                 if (mb_strlen($term) >= 3) {
@@ -166,7 +200,7 @@ class EstoqueRepository
         // - periodo: limita pela data da movimentação
         // - tipo: limita pelo tipo da movimentação
         $hasPeriodo = $filtros->periodo && count($filtros->periodo) === 2;
-        $hasTipo = !empty($filtros->tipo);
+        $hasTipo = ! empty($filtros->tipo);
 
         if ($hasPeriodo || $hasTipo) {
             $inicio = null;
@@ -187,7 +221,7 @@ class EstoqueRepository
                     $sub->whereBetween('em.data_movimentacao', [$inicio, $final]);
                 }
 
-                if (!empty($filtros->tipo)) {
+                if (! empty($filtros->tipo)) {
                     $sub->where('em.tipo', $filtros->tipo);
                 }
 
@@ -214,19 +248,41 @@ class EstoqueRepository
         return $query;
     }
 
+    private function aplicarFaixaTempoEstoque(Builder $query, FiltroEstoqueDTO $filtros): void
+    {
+        $depositoSql = $filtros->deposito ? ' AND e_tempo_dashboard.id_deposito = ?' : '';
+        $bindings = $filtros->deposito ? [$filtros->deposito] : [];
+        $diasSql = 'DATEDIFF(CURDATE(), DATE((SELECT MIN(e_tempo_dashboard.data_entrada_estoque_atual)'
+            .' FROM estoque e_tempo_dashboard'
+            .' WHERE e_tempo_dashboard.id_variacao = produto_variacoes.id'
+            .' AND e_tempo_dashboard.quantidade > 0'
+            .' AND e_tempo_dashboard.data_entrada_estoque_atual IS NOT NULL'
+            .$depositoSql.')))';
+
+        $condicao = match ($filtros->faixaTempoEstoque) {
+            'ate_30' => $diasSql.' <= 30',
+            'de_31_60' => $diasSql.' BETWEEN 31 AND 60',
+            'de_61_90' => $diasSql.' BETWEEN 61 AND 90',
+            'mais_90' => $diasSql.' > 90',
+            default => null,
+        };
+        if ($condicao) {
+            $query->whereRaw($condicao, $bindings);
+        }
+    }
+
     /**
      * Converte um termo livre em uma query FULLTEXT BOOLEAN MODE:
      * - Divide por espaços
      * - Mantém palavras com "prefix wildcard" (*)
      * - Ex: "mesa madeira" => "+mesa* +madeira*"
-     *
-     * @param string $term
-     * @return string
      */
     private function toBooleanFullText(string $term): string
     {
         $term = preg_replace('/\s+/', ' ', trim($term)) ?? trim($term);
-        if ($term === '') return '';
+        if ($term === '') {
+            return '';
+        }
 
         $parts = array_filter(explode(' ', $term), fn ($p) => $p !== '');
 
@@ -235,8 +291,11 @@ class EstoqueRepository
         $safeParts = array_map(function ($p) {
             $p = preg_replace('/[^\p{L}\p{N}_-]/u', '', $p) ?? $p; // letras/números/_/-
             $p = trim($p);
-            if ($p === '') return null;
-            return '+' . $p . '*';
+            if ($p === '') {
+                return null;
+            }
+
+            return '+'.$p.'*';
         }, $parts);
 
         $safeParts = array_values(array_filter($safeParts));
@@ -249,16 +308,17 @@ class EstoqueRepository
      * - Sem espaços
      * - Tem dígito OU mistura letras/dígitos
      * - Curto/médio (ex.: 2..40)
-     *
-     * @param string $term
-     * @return bool
      */
     private function looksLikeReference(string $term): bool
     {
         $t = trim($term);
-        if ($t === '' || str_contains($t, ' ')) return false;
+        if ($t === '' || str_contains($t, ' ')) {
+            return false;
+        }
         $len = mb_strlen($t);
-        if ($len < 2 || $len > 40) return false;
+        if ($len < 2 || $len > 40) {
+            return false;
+        }
 
         // tem pelo menos um número ou tem hífen/barra comum em referência
         return (bool) preg_match('/\d|[-\/_]/', $t);
@@ -271,7 +331,7 @@ class EstoqueRepository
                 $this->adicionarWhereExistsSubquery($query,
                     $this->clienteEntregaBaseSubquery($filtros)
                         ->selectRaw('1')
-                        ->whereRaw($this->clienteAguardandoEstoqueExpression() . ' > 0')
+                        ->whereRaw($this->clienteAguardandoEstoqueExpression().' > 0')
                 );
                 break;
 
@@ -286,7 +346,7 @@ class EstoqueRepository
                 $this->adicionarWhereExistsSubquery($query,
                     $this->clienteEntregaBaseSubquery($filtros)
                         ->selectRaw('1')
-                        ->whereRaw($this->clientePendenteEntregaExpression() . ' > 0')
+                        ->whereRaw($this->clientePendenteEntregaExpression().' > 0')
                 );
                 break;
 
@@ -325,7 +385,7 @@ class EstoqueRepository
                 ProdutoEntregaItem::STATUS_ENTREGUE,
                 ProdutoEntregaItem::STATUS_CANCELADO,
             ])
-            ->whereRaw($this->clientePendenteTotalExpression() . ' > 0');
+            ->whereRaw($this->clientePendenteTotalExpression().' > 0');
 
         if ($depositoColumn) {
             $query->whereColumn('pei.id_deposito_origem', $depositoColumn);
@@ -364,13 +424,13 @@ class EstoqueRepository
     private function clienteAguardandoEstoquePorVariacaoSubquery(FiltroEstoqueDTO $filtros)
     {
         return $this->clienteEntregaBaseSubquery($filtros)
-            ->selectRaw('COALESCE(SUM(' . $this->clienteAguardandoEstoqueExpression() . '), 0)');
+            ->selectRaw('COALESCE(SUM('.$this->clienteAguardandoEstoqueExpression().'), 0)');
     }
 
     private function clienteAguardandoEstoquePorEstoqueSubquery()
     {
         return $this->clienteEntregaBaseSubquery(null, 'estoque.id_variacao', 'estoque.id_deposito')
-            ->selectRaw('COALESCE(SUM(' . $this->clienteAguardandoEstoqueExpression() . '), 0)');
+            ->selectRaw('COALESCE(SUM('.$this->clienteAguardandoEstoqueExpression().'), 0)');
     }
 
     private function reservasClientePorVariacaoSubquery(FiltroEstoqueDTO $filtros)
@@ -388,13 +448,13 @@ class EstoqueRepository
     private function clientePendenteEntregaPorVariacaoSubquery(FiltroEstoqueDTO $filtros)
     {
         return $this->clienteEntregaBaseSubquery($filtros)
-            ->selectRaw('COALESCE(SUM(' . $this->clientePendenteEntregaExpression() . '), 0)');
+            ->selectRaw('COALESCE(SUM('.$this->clientePendenteEntregaExpression().'), 0)');
     }
 
     private function clientePendenteEntregaPorEstoqueSubquery()
     {
         return $this->clienteEntregaBaseSubquery(null, 'estoque.id_variacao', 'estoque.id_deposito')
-            ->selectRaw('COALESCE(SUM(' . $this->clientePendenteEntregaExpression() . '), 0)');
+            ->selectRaw('COALESCE(SUM('.$this->clientePendenteEntregaExpression().'), 0)');
     }
 
     private function clientePendenteTotalExpression(): string
@@ -421,17 +481,17 @@ class EstoqueRepository
 
     private function clienteAguardandoEstoqueExpression(): string
     {
-        $saldoAguardando = '(' . $this->clientePendenteTotalExpression()
-            . ' - ' . $this->clientePendenteEntregaExpression()
-            . ' - ' . $this->clienteReservaAtivaItemExpression()
-            . ')';
+        $saldoAguardando = '('.$this->clientePendenteTotalExpression()
+            .' - '.$this->clientePendenteEntregaExpression()
+            .' - '.$this->clienteReservaAtivaItemExpression()
+            .')';
 
-        return 'CASE WHEN ' . $saldoAguardando . ' > 0 THEN ' . $saldoAguardando . ' ELSE 0 END';
+        return 'CASE WHEN '.$saldoAguardando.' > 0 THEN '.$saldoAguardando.' ELSE 0 END';
     }
 
     private function aplicarFiltroLocalizacaoDbQuery($query, FiltroEstoqueDTO $filtros): void
     {
-        if (!$filtros->localizacaoId && !$filtros->area && !$filtros->localizacao) {
+        if (! $filtros->localizacaoId && ! $filtros->area && ! $filtros->localizacao) {
             return;
         }
 
@@ -446,7 +506,7 @@ class EstoqueRepository
 
     private function aplicarFiltroLocalizacaoRelation($estoqueQuery, FiltroEstoqueDTO $filtros): void
     {
-        if (!$filtros->localizacaoId && !$filtros->area && !$filtros->localizacao) {
+        if (! $filtros->localizacaoId && ! $filtros->area && ! $filtros->localizacao) {
             return;
         }
 
@@ -458,23 +518,23 @@ class EstoqueRepository
     private function aplicarFiltroLocalizacaoCampos($query, FiltroEstoqueDTO $filtros, string $prefix = ''): void
     {
         if ($filtros->localizacaoId) {
-            $query->where($prefix . 'id', $filtros->localizacaoId);
+            $query->where($prefix.'id', $filtros->localizacaoId);
         }
 
         if ($filtros->area) {
-            $query->where($prefix . 'area', $filtros->area);
+            $query->where($prefix.'area', $filtros->area);
         }
 
         if ($filtros->localizacao) {
             $valor = $filtros->localizacao;
 
             $query->where(function ($q) use ($prefix, $valor) {
-                $q->where($prefix . 'codigo_composto', $valor)
-                    ->orWhere($prefix . 'area', $valor)
-                    ->orWhere($prefix . 'corredor', $valor)
-                    ->orWhere($prefix . 'setor', $valor)
-                    ->orWhere($prefix . 'coluna', $valor)
-                    ->orWhere($prefix . 'nivel', $valor);
+                $q->where($prefix.'codigo_composto', $valor)
+                    ->orWhere($prefix.'area', $valor)
+                    ->orWhere($prefix.'corredor', $valor)
+                    ->orWhere($prefix.'setor', $valor)
+                    ->orWhere($prefix.'coluna', $valor)
+                    ->orWhere($prefix.'nivel', $valor);
             });
         }
     }
@@ -490,8 +550,7 @@ class EstoqueRepository
      * Observação: prefira centralizar eager loading aqui (não no Model),
      * para evitar relações carregarem coisas "sem querer" em outros lugares.
      *
-     * @param Builder<ProdutoVariacao> $query
-     * @param FiltroEstoqueDTO $filtros
+     * @param  Builder<ProdutoVariacao>  $query
      * @return Builder<ProdutoVariacao>
      */
     public function aplicarRelacoesDeEstoque(Builder $query, FiltroEstoqueDTO $filtros): Builder

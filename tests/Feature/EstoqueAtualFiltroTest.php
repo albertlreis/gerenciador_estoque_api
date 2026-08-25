@@ -33,7 +33,7 @@ class EstoqueAtualFiltroTest extends TestCase
 
         $usuario = Usuario::create([
             'nome' => 'Usuario Teste',
-            'email' => 'estoque.' . $suffix . '@test.com',
+            'email' => 'estoque.'.$suffix.'@test.com',
             'senha' => 'senha',
             'ativo' => true,
         ]);
@@ -50,8 +50,8 @@ class EstoqueAtualFiltroTest extends TestCase
 
         $variacaoCom = ProdutoVariacao::create([
             'produto_id' => $produto->id,
-            'referencia' => 'REF-COM-' . $suffix,
-            'sku_interno' => 'SKU-COM-' . $suffix,
+            'referencia' => 'REF-COM-'.$suffix,
+            'sku_interno' => 'SKU-COM-'.$suffix,
             'nome' => 'Variacao Com',
             'preco' => 100,
             'custo' => 50,
@@ -59,8 +59,8 @@ class EstoqueAtualFiltroTest extends TestCase
 
         $variacaoSem = ProdutoVariacao::create([
             'produto_id' => $produto->id,
-            'referencia' => 'REF-SEM-' . $suffix,
-            'sku_interno' => 'SKU-SEM-' . $suffix,
+            'referencia' => 'REF-SEM-'.$suffix,
+            'sku_interno' => 'SKU-SEM-'.$suffix,
             'nome' => 'Variacao Sem',
             'preco' => 120,
             'custo' => 60,
@@ -95,7 +95,7 @@ class EstoqueAtualFiltroTest extends TestCase
 
     private function criarPedido(Usuario $usuario, string $tipo = Pedido::TIPO_VENDA): Pedido
     {
-        $cliente = Cliente::create(['nome' => 'Cliente ' . uniqid()]);
+        $cliente = Cliente::create(['nome' => 'Cliente '.uniqid()]);
 
         return Pedido::create([
             'tipo' => $tipo,
@@ -205,7 +205,7 @@ class EstoqueAtualFiltroTest extends TestCase
     {
         [$variacaoCom, $variacaoSem] = $this->seedBase();
 
-        $response = $this->getJson('/api/v1/estoque/atual?produto=' . urlencode((string) $variacaoCom->sku_interno));
+        $response = $this->getJson('/api/v1/estoque/atual?produto='.urlencode((string) $variacaoCom->sku_interno));
         $response->assertOk();
 
         $ids = collect($response->json('data'))->pluck('variacao_id')->all();
@@ -256,14 +256,14 @@ class EstoqueAtualFiltroTest extends TestCase
 
         $produtoFiltro = urlencode((string) $variacaoCom->sku_interno);
 
-        $response = $this->getJson('/api/v1/estoque/atual?dias_sem_venda_min=10&estoque_status=com_estoque&produto=' . $produtoFiltro);
+        $response = $this->getJson('/api/v1/estoque/atual?dias_sem_venda_min=10&estoque_status=com_estoque&produto='.$produtoFiltro);
         $response->assertOk();
 
         $ids = collect($response->json('data'))->pluck('variacao_id')->all();
         $this->assertContains($variacaoCom->id, $ids);
         $this->assertNotContains($variacaoSem->id, $ids);
 
-        $resumo = $this->getJson('/api/v1/estoque/resumo?dias_sem_venda_min=10&estoque_status=com_estoque&produto=' . $produtoFiltro);
+        $resumo = $this->getJson('/api/v1/estoque/resumo?dias_sem_venda_min=10&estoque_status=com_estoque&produto='.$produtoFiltro);
         $resumo->assertOk();
         $resumoPayload = $resumo->json('data') ?? $resumo->json();
         $this->assertSame(1, (int) ($resumoPayload['totalProdutos'] ?? 0));
@@ -307,7 +307,7 @@ class EstoqueAtualFiltroTest extends TestCase
             ->where('id_deposito', $deposito->id)
             ->update(['localizacao_id' => $localizacaoOutra->id]);
 
-        $response = $this->getJson('/api/v1/estoque/atual?area=' . urlencode('9-D1'));
+        $response = $this->getJson('/api/v1/estoque/atual?area='.urlencode('9-D1'));
         $response->assertOk();
 
         $ids = collect($response->json('data'))->pluck('variacao_id')->all();
@@ -349,14 +349,14 @@ class EstoqueAtualFiltroTest extends TestCase
             ->where('id_deposito', $deposito->id)
             ->update(['localizacao_id' => $localizacaoOutra->id]);
 
-        $response = $this->getJson('/api/v1/estoque/atual?localizacao_id=' . $localizacaoAlvo->id);
+        $response = $this->getJson('/api/v1/estoque/atual?localizacao_id='.$localizacaoAlvo->id);
         $response->assertOk();
 
         $ids = collect($response->json('data'))->pluck('variacao_id')->all();
         $this->assertContains($variacaoCom->id, $ids);
         $this->assertNotContains($variacaoSem->id, $ids);
 
-        $resumo = $this->getJson('/api/v1/estoque/resumo?localizacao_id=' . $localizacaoAlvo->id);
+        $resumo = $this->getJson('/api/v1/estoque/resumo?localizacao_id='.$localizacaoAlvo->id);
         $resumo->assertOk();
         $payload = $resumo->json('data') ?? $resumo->json();
 
@@ -406,10 +406,10 @@ class EstoqueAtualFiltroTest extends TestCase
         [$variacaoReservada, $variacaoAguardando, $deposito, $usuario] = $this->seedBase();
         $produto = $variacaoReservada->produto;
 
-        $variacaoPendenteEntrega = $this->criarVariacao($produto, 'CLIENTE-PENDENTE-' . uniqid());
-        $variacaoEntregue = $this->criarVariacao($produto, 'CLIENTE-ENTREGUE-' . uniqid());
-        $variacaoCancelada = $this->criarVariacao($produto, 'CLIENTE-CANCELADA-' . uniqid());
-        $variacaoReposicao = $this->criarVariacao($produto, 'CLIENTE-REPOSICAO-' . uniqid());
+        $variacaoPendenteEntrega = $this->criarVariacao($produto, 'CLIENTE-PENDENTE-'.uniqid());
+        $variacaoEntregue = $this->criarVariacao($produto, 'CLIENTE-ENTREGUE-'.uniqid());
+        $variacaoCancelada = $this->criarVariacao($produto, 'CLIENTE-CANCELADA-'.uniqid());
+        $variacaoReposicao = $this->criarVariacao($produto, 'CLIENTE-REPOSICAO-'.uniqid());
 
         foreach ([$variacaoPendenteEntrega, $variacaoEntregue, $variacaoCancelada, $variacaoReposicao] as $variacao) {
             Estoque::updateOrCreate(
@@ -512,12 +512,12 @@ class EstoqueAtualFiltroTest extends TestCase
         $suffix = uniqid('', true);
 
         $motivo = OutletMotivo::create([
-            'slug' => 'baixa_rotatividade_' . str_replace('.', '_', $suffix),
+            'slug' => 'baixa_rotatividade_'.str_replace('.', '_', $suffix),
             'nome' => 'Baixa rotatividade',
             'ativo' => true,
         ]);
         $forma = OutletFormaPagamento::create([
-            'slug' => 'pix-estoque-atual-' . $suffix,
+            'slug' => 'pix-estoque-atual-'.$suffix,
             'nome' => 'PIX Estoque Atual',
             'ativo' => true,
         ]);
@@ -541,5 +541,33 @@ class EstoqueAtualFiltroTest extends TestCase
         $this->assertSame(2, (int) $linha['estoque_outlet_total']);
         $this->assertSame(2, (int) $linha['outlet_restante_total']);
         $this->assertTrue((bool) $linha['is_outlet']);
+    }
+
+    public function test_filtro_de_tempo_em_estoque_reconcilia_faixa_e_exclui_outlet_ativo(): void
+    {
+        [$variacaoAntiga, $variacaoRecente, $deposito] = $this->seedBase();
+        Estoque::query()->where('id_variacao', $variacaoAntiga->id)->update([
+            'quantidade' => 5,
+            'data_entrada_estoque_atual' => now()->subDays(100),
+        ]);
+        Estoque::query()->where('id_variacao', $variacaoRecente->id)->update([
+            'quantidade' => 2,
+            'data_entrada_estoque_atual' => now()->subDays(10),
+        ]);
+
+        $url = "/api/v1/estoque/atual?tempo_estoque=1&faixa_tempo_estoque=mais_90&deposito_id={$deposito->id}";
+        $elegivel = $this->getJson($url)->assertOk();
+        $this->assertSame([$variacaoAntiga->id], collect($elegivel->json('data'))->pluck('variacao_id')->all());
+
+        $motivo = OutletMotivo::create(['slug' => 'tempo-estoque', 'nome' => 'Tempo estoque', 'ativo' => true]);
+        ProdutoVariacaoOutlet::create([
+            'produto_variacao_id' => $variacaoAntiga->id,
+            'motivo_id' => $motivo->id,
+            'quantidade' => 1,
+            'quantidade_restante' => 1,
+        ]);
+
+        $excluida = $this->getJson($url)->assertOk();
+        $this->assertNotContains($variacaoAntiga->id, collect($excluida->json('data'))->pluck('variacao_id')->all());
     }
 }

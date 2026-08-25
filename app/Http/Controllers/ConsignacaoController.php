@@ -2,8 +2,9 @@
 
 namespace App\Http\Controllers;
 
-use App\Helpers\AuthHelper;
 use App\Enums\PedidoStatus;
+use App\Helpers\AuthHelper;
+use App\Http\Requests\UpdateConsignacaoObservacaoRequest;
 use App\Http\Resources\ConsignacaoDetalhadaResource;
 use App\Http\Resources\ConsignacaoResource;
 use App\Models\AcessoUsuario;
@@ -20,10 +21,10 @@ use App\Models\PedidoStatusHistorico;
 use App\Models\ProdutoEntregaEvento;
 use App\Models\ProdutoEntregaItem;
 use App\Models\ProdutoVariacao;
-use App\Services\EstoqueMovimentacaoService;
-use App\Services\EstoqueDisponibilidadeService;
-use App\Services\EntregaProdutoService;
 use App\Services\DesfazerConsignacaoService;
+use App\Services\EntregaProdutoService;
+use App\Services\EstoqueDisponibilidadeService;
+use App\Services\EstoqueMovimentacaoService;
 use App\Services\PdfImageService;
 use App\Support\Pdf\ClienteEnderecoPdf;
 use Barryvdh\DomPDF\Facade\Pdf;
@@ -37,13 +38,15 @@ use Illuminate\Validation\ValidationException;
 
 class ConsignacaoController extends Controller
 {
-
     public function index(Request $request): AnonymousResourceCollection
     {
         $request->validate([
             'data_ini' => 'nullable|date_format:Y-m-d',
             'data_fim' => 'nullable|date_format:Y-m-d',
             'parceiro_id' => 'nullable|integer|exists:parceiros,id',
+            'dashboard_filtro' => 'nullable|in:vencendo',
+            'deposito_id' => 'nullable|integer|exists:depositos,id',
+            'janela_dias' => 'nullable|integer|min:1|max:30',
         ]);
 
         $query = Consignacao::with([
@@ -59,7 +62,7 @@ class ConsignacaoController extends Controller
                 'devolucoes as devolvido_total' => fn ($q) => $q->whereNull('consignacao_devolucoes.cancelada_em'),
             ], 'quantidade');
 
-        if (!AuthHelper::podeVisualizarConsignacoesDeTodos()) {
+        if (! AuthHelper::podeVisualizarConsignacoesDeTodos()) {
             $query->whereHas('pedido', function ($q) {
                 $q->where('id_usuario', AuthHelper::getUsuarioId());
             });
@@ -80,6 +83,17 @@ class ConsignacaoController extends Controller
 
         if ($request->filled('vencimento_proximo')) {
             $query->whereDate('prazo_resposta', '<=', now()->addDays(3));
+        }
+
+        if ($request->input('dashboard_filtro') === 'vencendo') {
+            $dias = $request->integer('janela_dias') ?: (int) config('dashboard.consignacoes.dias_vencendo', 2);
+            $query
+                ->where('status', 'pendente')
+                ->whereDate('prazo_resposta', '<=', now()->addDays($dias)->toDateString());
+        }
+
+        if ($request->filled('deposito_id')) {
+            $query->where('deposito_id', $request->integer('deposito_id'));
         }
 
         if ($request->filled('vendedor_id')) {
@@ -113,6 +127,7 @@ class ConsignacaoController extends Controller
         $agrupadas = $consignacoes->groupBy('pedido_id')->map(function ($grupo) {
             $primeira = $grupo->first();
             $primeira->todas_consignacoes = $grupo;
+
             return $primeira;
         });
 
@@ -135,14 +150,20 @@ class ConsignacaoController extends Controller
                         }
                         $temPendente = true;
                     }
-                    if ($item->status === 'comprado') $temComprado = true;
-                    if ($item->status === 'devolvido') $temDevolvido = true;
-                    if ($item->status === 'parcial') $temParcial = true;
+                    if ($item->status === 'comprado') {
+                        $temComprado = true;
+                    }
+                    if ($item->status === 'devolvido') {
+                        $temDevolvido = true;
+                    }
+                    if ($item->status === 'parcial') {
+                        $temParcial = true;
+                    }
                 }
 
                 if ($temPendente) {
                     $status = 'pendente';
-                    if ($consignacao->todas_consignacoes->where('status', 'pendente')->pluck('prazo_resposta')->contains(fn($p) => $p && $p->lt($hoje))) {
+                    if ($consignacao->todas_consignacoes->where('status', 'pendente')->pluck('prazo_resposta')->contains(fn ($p) => $p && $p->lt($hoje))) {
                         $status = 'vencido';
                     }
                 } elseif ($temParcial || ($temComprado && $temDevolvido)) {
@@ -205,14 +226,41 @@ class ConsignacaoController extends Controller
                     'enderecos' => ClienteEnderecoPdf::paraResposta($pedido->cliente),
                 ],
                 'data_envio' => optional($pedido->data_envio)->format('d/m/Y'),
+                'observacoes' => $pedido->observacoes,
             ],
-            'consignacoes' => ConsignacaoDetalhadaResource::collection($consignacoes)
+            'consignacoes' => ConsignacaoDetalhadaResource::collection($consignacoes),
+        ]);
+    }
+
+    public function atualizarObservacao(Pedido $pedido, UpdateConsignacaoObservacaoRequest $request): JsonResponse
+    {
+        $observacoesAnteriores = $pedido->observacoes;
+        $observacoes = $request->validated('observacoes');
+
+        DB::transaction(function () use ($pedido, $observacoes): void {
+            $pedido->forceFill(['observacoes' => $observacoes])->save();
+        });
+
+        logAuditoria('consignacao_observacao', "Observação geral do Pedido #{$pedido->id} atualizada.", [
+            'pedido_id' => $pedido->id,
+            'usuario_id' => AuthHelper::getUsuarioId(),
+            'conteudo_alterado' => $observacoesAnteriores !== $observacoes,
+            'tamanho_anterior' => mb_strlen((string) $observacoesAnteriores),
+            'tamanho_atual' => mb_strlen((string) $observacoes),
+        ], $pedido);
+
+        return response()->json([
+            'mensagem' => 'Observação atualizada com sucesso.',
+            'pedido' => [
+                'id' => $pedido->id,
+                'observacoes' => $pedido->observacoes,
+            ],
         ]);
     }
 
     public function adicionarItensAoPedido(Pedido $pedido, Request $request): JsonResponse
     {
-        if (!AuthHelper::hasPermissao('consignacoes.gerenciar')) {
+        if (! AuthHelper::hasPermissao('consignacoes.gerenciar')) {
             return response()->json(['message' => 'Sem permissao para gerenciar consignacoes.'], 403);
         }
 
@@ -240,7 +288,7 @@ class ConsignacaoController extends Controller
                 abort(422, 'Nao e possivel adicionar produtos a um pedido cancelado.');
             }
 
-            if (!$pedidoAtual->consignacoes->count()) {
+            if (! $pedidoAtual->consignacoes->count()) {
                 abort(422, 'Pedido sem consignacoes para receber novos produtos.');
             }
 
@@ -356,7 +404,7 @@ class ConsignacaoController extends Controller
 
     public function desfazer(int $id, DesfazerConsignacaoService $service): JsonResponse
     {
-        if (!AuthHelper::hasPermissao('consignacoes.gerenciar')) {
+        if (! AuthHelper::hasPermissao('consignacoes.gerenciar')) {
             return response()->json(['message' => 'Sem permissao para gerenciar consignacoes.'], 403);
         }
 
@@ -370,7 +418,7 @@ class ConsignacaoController extends Controller
 
     public function desfazerPedido(Pedido $pedido, DesfazerConsignacaoService $service): JsonResponse
     {
-        if (!AuthHelper::hasPermissao('consignacoes.gerenciar')) {
+        if (! AuthHelper::hasPermissao('consignacoes.gerenciar')) {
             return response()->json(['message' => 'Sem permissao para gerenciar consignacoes.'], 403);
         }
 
@@ -440,7 +488,7 @@ class ConsignacaoController extends Controller
             ->whereDate('prazo_resposta', '<=', now()->addDays(2))
             ->orderBy('prazo_resposta');
 
-        if (!AuthHelper::hasPermissao('consignacoes.vencendo.todos')) {
+        if (! AuthHelper::hasPermissao('consignacoes.vencendo.todos')) {
             $query->whereHas('pedido', function ($q) {
                 $q->where('id_usuario', AuthHelper::getUsuarioId());
             });
@@ -494,7 +542,7 @@ class ConsignacaoController extends Controller
             return ['ok' => true, 'processados' => 1];
         });
 
-        if (!$resultado['ok']) {
+        if (! $resultado['ok']) {
             return response()->json([
                 'message' => $resultado['message'],
                 'erro' => $resultado['message'],
@@ -534,11 +582,12 @@ class ConsignacaoController extends Controller
 
             foreach ($consignacaoIds as $consignacaoId) {
                 $consignacao = $consignacoes->get($consignacaoId);
-                if (!$consignacao) {
+                if (! $consignacao) {
                     $invalidos[] = [
                         'id' => $consignacaoId,
                         'motivo' => 'Item nao encontrado neste pedido.',
                     ];
+
                     continue;
                 }
 
@@ -552,6 +601,7 @@ class ConsignacaoController extends Controller
                         'nome' => $this->nomeConsignacao($consignacao),
                         'motivo' => 'Toda a quantidade ja foi enviada ao cliente.',
                     ];
+
                     continue;
                 }
 
@@ -561,6 +611,7 @@ class ConsignacaoController extends Controller
                         'nome' => $this->nomeConsignacao($consignacao),
                         'motivo' => "Quantidade maior que o pendente de envio ({$pendente}).",
                     ];
+
                     continue;
                 }
 
@@ -591,7 +642,7 @@ class ConsignacaoController extends Controller
             ];
         });
 
-        if (!$resultado['ok']) {
+        if (! $resultado['ok']) {
             return response()->json([
                 'message' => $resultado['message'],
                 'erro' => $resultado['message'],
@@ -619,7 +670,7 @@ class ConsignacaoController extends Controller
 
         $consignacao = Consignacao::with(['devolucoes', 'compras'])->findOrFail($id);
 
-        if (!in_array($consignacao->status, ['pendente', 'parcial'], true)) {
+        if (! in_array($consignacao->status, ['pendente', 'parcial'], true)) {
             return response()->json(['erro' => 'Não é possível registrar devolução para consignação finalizada.'], 422);
         }
 
@@ -688,23 +739,25 @@ class ConsignacaoController extends Controller
 
             foreach ($consignacaoIds as $consignacaoId) {
                 $consignacao = $consignacoes->get($consignacaoId);
-                if (!$consignacao) {
+                if (! $consignacao) {
                     $invalidos[] = [
                         'id' => $consignacaoId,
                         'motivo' => 'Item nao encontrado neste pedido.',
                     ];
+
                     continue;
                 }
 
                 $quantidade = (int) $itensPayload->get($consignacaoId);
                 $restante = $this->quantidadeAcionavelConsignacao($consignacao);
 
-                if (!in_array($consignacao->status, ['pendente', 'parcial'], true)) {
+                if (! in_array($consignacao->status, ['pendente', 'parcial'], true)) {
                     $invalidos[] = [
                         'id' => $consignacao->id,
                         'nome' => $this->nomeConsignacao($consignacao),
                         'motivo' => 'Item ja finalizado.',
                     ];
+
                     continue;
                 }
 
@@ -714,6 +767,7 @@ class ConsignacaoController extends Controller
                         'nome' => $this->nomeConsignacao($consignacao),
                         'motivo' => 'Sem quantidade acionavel para devolucao.',
                     ];
+
                     continue;
                 }
 
@@ -767,7 +821,7 @@ class ConsignacaoController extends Controller
             ];
         });
 
-        if (!$resultado['ok']) {
+        if (! $resultado['ok']) {
             return response()->json([
                 'message' => $resultado['message'],
                 'erro' => $resultado['message'],
@@ -849,7 +903,7 @@ class ConsignacaoController extends Controller
                 $depositoId = (int) $payload['deposito_id'];
                 $saldo = $this->quantidadeAcionavelConsignacao($consignacao);
 
-                if (!in_array($consignacao->status, ['pendente', 'parcial'], true) || $quantidade > $saldo) {
+                if (! in_array($consignacao->status, ['pendente', 'parcial'], true) || $quantidade > $saldo) {
                     throw ValidationException::withMessages(['itens' => ["Quantidade inválida para {$this->nomeConsignacao($consignacao)}."]]);
                 }
 
@@ -997,11 +1051,12 @@ class ConsignacaoController extends Controller
 
             foreach ($consignacaoIds as $consignacaoId) {
                 $consignacao = $consignacoes->get($consignacaoId);
-                if (!$consignacao) {
+                if (! $consignacao) {
                     $invalidos[] = [
                         'id' => $consignacaoId,
                         'motivo' => 'Item nao encontrado neste pedido.',
                     ];
+
                     continue;
                 }
 
@@ -1011,6 +1066,7 @@ class ConsignacaoController extends Controller
                         'nome' => $this->nomeConsignacao($consignacao),
                         'motivo' => 'Item ja finalizado.',
                     ];
+
                     continue;
                 }
 
@@ -1025,6 +1081,7 @@ class ConsignacaoController extends Controller
                         'nome' => $this->nomeConsignacao($consignacao),
                         'motivo' => 'Sem reserva ou saldo disponivel para venda.',
                     ];
+
                     continue;
                 }
 
@@ -1034,6 +1091,7 @@ class ConsignacaoController extends Controller
                         'nome' => $this->nomeConsignacao($consignacao),
                         'motivo' => "Quantidade maior que o saldo com reserva ou estoque disponivel ({$restante}).",
                     ];
+
                     continue;
                 }
 
@@ -1077,7 +1135,7 @@ class ConsignacaoController extends Controller
             ];
         });
 
-        if (!$resultado['ok']) {
+        if (! $resultado['ok']) {
             return response()->json([
                 'message' => $resultado['message'],
                 'erro' => $resultado['message'],
@@ -1111,7 +1169,7 @@ class ConsignacaoController extends Controller
             return response()->json(['erro' => 'Devolucao ja cancelada.'], 422);
         }
 
-        if (!$devolucao->estoque_movimentacao_id) {
+        if (! $devolucao->estoque_movimentacao_id) {
             return response()->json([
                 'erro' => 'Esta devolucao nao possui movimentacao vinculada. Faca a correcao manual do estoque antes de cancelar.',
             ], 422);
@@ -1120,7 +1178,7 @@ class ConsignacaoController extends Controller
         DB::transaction(function () use ($consignacao, $devolucao, $request, $usuarioId) {
             $observacao = "Cancelamento da devolucao #{$devolucao->id} da consignacao #{$consignacao->id}";
 
-            if (!$this->estornarEventoCentralPorMovimentacao((int) $devolucao->estoque_movimentacao_id, $usuarioId, $observacao)) {
+            if (! $this->estornarEventoCentralPorMovimentacao((int) $devolucao->estoque_movimentacao_id, $usuarioId, $observacao)) {
                 app(EstoqueMovimentacaoService::class)->estornarMovimentacao(
                     (int) $devolucao->estoque_movimentacao_id,
                     $usuarioId ? (int) $usuarioId : null,
@@ -1142,7 +1200,7 @@ class ConsignacaoController extends Controller
 
     public function cancelarVenda(int $id, Request $request): JsonResponse
     {
-        if (!AuthHelper::hasPerfil('Administrador')) {
+        if (! AuthHelper::hasPerfil('Administrador')) {
             return response()->json(['erro' => 'Apenas administradores podem cancelar venda de consignacao.'], 403);
         }
 
@@ -1173,6 +1231,7 @@ class ConsignacaoController extends Controller
                 $consignacao->status = 'pendente';
                 $consignacao->data_resposta = null;
                 $consignacao->save();
+
                 return;
             }
 
@@ -1268,9 +1327,9 @@ class ConsignacaoController extends Controller
         Pdf::setOptions(['isRemoteEnabled' => true]);
 
         $pdf = Pdf::loadView('exports.roteiro-consignacao', [
-            'pedido'     => $pedido,
-            'grupos'     => $grupos,
-            'geradoEm'   => now('America/Belem')->format('d/m/Y H:i'),
+            'pedido' => $pedido,
+            'grupos' => $grupos,
+            'geradoEm' => now('America/Belem')->format('d/m/Y H:i'),
             'tituloRoteiro' => $tituloRoteiro,
             'enderecoEntrega' => $enderecoEntrega,
         ])->setPaper('a4');
@@ -1291,6 +1350,7 @@ class ConsignacaoController extends Controller
 
         return $pedido->consignacoes->every(function ($item) {
             $status = strtolower((string) ($item->status ?? ''));
+
             return in_array($status, ['devolvido', 'comprado', 'finalizado'], true);
         });
     }
@@ -1351,13 +1411,13 @@ class ConsignacaoController extends Controller
             })
             ->whereRaw('quantidade > quantidade_consumida')
             ->when($consignacao->pedido_item_id, fn ($query) => $query->where('pedido_item_id', $consignacao->pedido_item_id))
-            ->when(!$consignacao->pedido_item_id && $consignacao->pedido_id, fn ($query) => $query->where('pedido_id', $consignacao->pedido_id))
+            ->when(! $consignacao->pedido_item_id && $consignacao->pedido_id, fn ($query) => $query->where('pedido_id', $consignacao->pedido_id))
             ->sum(DB::raw('GREATEST(0, quantidade - quantidade_consumida)'));
     }
 
     private function gruposRoteiroConsignacao(Pedido $pedido, bool $isDevolucao, Request $request)
     {
-        if (!$isDevolucao) {
+        if (! $isDevolucao) {
             return $pedido->consignacoes->groupBy(fn ($item) => $item->deposito->nome ?? 'Sem depósito');
         }
 
@@ -1382,7 +1442,7 @@ class ConsignacaoController extends Controller
             ->values();
 
         $faltando = $consignacaoIds
-            ->filter(fn ($consignacaoId) => !$destinos->has($consignacaoId))
+            ->filter(fn ($consignacaoId) => ! $destinos->has($consignacaoId))
             ->values();
 
         if ($faltando->isNotEmpty()) {
@@ -1397,7 +1457,7 @@ class ConsignacaoController extends Controller
             ->keyBy('id');
 
         $invalidos = $consignacaoIds
-            ->filter(fn ($consignacaoId) => !$depositos->has((int) $destinos->get($consignacaoId)))
+            ->filter(fn ($consignacaoId) => ! $depositos->has((int) $destinos->get($consignacaoId)))
             ->values();
 
         if ($invalidos->isNotEmpty()) {
@@ -1418,7 +1478,7 @@ class ConsignacaoController extends Controller
         $itens = collect($consignacoes)
             ->flatMap(function (Consignacao $consignacao) {
                 return $consignacao->devolucoes
-                    ->filter(fn (ConsignacaoDevolucao $devolucao) => !$devolucao->cancelada_em)
+                    ->filter(fn (ConsignacaoDevolucao $devolucao) => ! $devolucao->cancelada_em)
                     ->groupBy('deposito_id')
                     ->map(function ($devolucoes, $depositoId) use ($consignacao) {
                         $item = $consignacao->replicate();
@@ -1541,7 +1601,7 @@ class ConsignacaoController extends Controller
             })
             ->whereRaw('quantidade > quantidade_consumida')
             ->when($consignacao->pedido_item_id, fn ($query) => $query->where('pedido_item_id', $consignacao->pedido_item_id))
-            ->when(!$consignacao->pedido_item_id && $consignacao->pedido_id, fn ($query) => $query->where('pedido_id', $consignacao->pedido_id))
+            ->when(! $consignacao->pedido_item_id && $consignacao->pedido_id, fn ($query) => $query->where('pedido_id', $consignacao->pedido_id))
             ->when($consignacao->deposito_id, fn ($query) => $query->where('id_deposito', $consignacao->deposito_id))
             ->orderBy('id')
             ->lockForUpdate()
@@ -1666,7 +1726,7 @@ class ConsignacaoController extends Controller
             ->where('tipo_evento', ProdutoEntregaEvento::RETORNADO_CONSIGNACAO)
             ->first();
 
-        if (!$evento) {
+        if (! $evento) {
             return false;
         }
 
@@ -1730,7 +1790,7 @@ class ConsignacaoController extends Controller
 
     private function marcarPedidoConsignacaoComoVendido(?Pedido $pedido): void
     {
-        if (!$pedido) {
+        if (! $pedido) {
             return;
         }
 
@@ -1763,7 +1823,6 @@ class ConsignacaoController extends Controller
         return $tipo;
     }
 
-
     public function clientes(): JsonResponse
     {
         $clientes = Cliente::whereHas('pedidos.consignacoes')
@@ -1792,7 +1851,7 @@ class ConsignacaoController extends Controller
             ->whereHas('consignacoes')
             ->whereNotNull('id_parceiro');
 
-        if (!AuthHelper::podeVisualizarConsignacoesDeTodos()) {
+        if (! AuthHelper::podeVisualizarConsignacoesDeTodos()) {
             $pedidosQuery->where('id_usuario', AuthHelper::getUsuarioId());
         }
 
@@ -1811,5 +1870,4 @@ class ConsignacaoController extends Controller
 
         return response()->json($parceiros);
     }
-
 }

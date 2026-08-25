@@ -3,12 +3,12 @@
 namespace App\Http\Controllers;
 
 use App\Enums\ContaStatus;
-use App\Integrations\ContaAzul\Exceptions\ContaAzulException;
-use App\Integrations\ContaAzul\Services\ContaAzulCobrancaService;
 use App\Http\Requests\Financeiro\BaixaContaReceberRequest;
 use App\Http\Requests\Financeiro\StoreContaReceberRequest;
 use App\Http\Requests\Financeiro\UpdateContaReceberRequest;
 use App\Http\Resources\ContaReceberResource;
+use App\Integrations\ContaAzul\Exceptions\ContaAzulException;
+use App\Integrations\ContaAzul\Services\ContaAzulCobrancaService;
 use App\Models\ContaReceber;
 use App\Services\ContaReceberCommandService;
 use App\Services\UsuarioPreferenciaService;
@@ -37,12 +37,13 @@ class ContaReceberController extends Controller
      * - numero_pedido (numero_externo do pedido)
      * - data_ini, data_fim (intervalo por data_vencimento)
      * - vencidas (bool) => vencimento passado e status != PAGA
-     *
-     * @param Request $request
-     * @return JsonResponse
      */
     public function index(Request $request): JsonResponse
     {
+        if ($request->input('situacao') === 'vencida') {
+            $request->merge(['vencidas' => true]);
+        }
+
         foreach (['vencidas', 'em_aberto'] as $booleanFilter) {
             if ($request->has($booleanFilter)) {
                 $request->merge([
@@ -52,22 +53,23 @@ class ContaReceberController extends Controller
         }
 
         $request->validate([
-            'page'      => 'nullable|integer|min:1',
-            'per_page'  => 'nullable|integer|min:1|max:200',
-            'busca'     => 'nullable|string|max:255',
-            'status'    => 'nullable|in:ABERTA,PARCIAL,PAGA,CANCELADA',
-            'cliente'   => 'nullable|string|max:255',
+            'page' => 'nullable|integer|min:1',
+            'per_page' => 'nullable|integer|min:1|max:200',
+            'busca' => 'nullable|string|max:255',
+            'status' => 'nullable|in:ABERTA,PARCIAL,PAGA,CANCELADA',
+            'cliente' => 'nullable|string|max:255',
             'cliente_id' => 'nullable|integer|exists:clientes,id',
             'numero_pedido' => 'nullable|string|max:80',
             'forma_recebimento' => 'nullable|string|max:50',
             'centro_custo_id' => 'nullable|integer|exists:centros_custo,id',
             'categoria_id' => 'nullable|integer|exists:categorias_financeiras,id',
             'conta_financeira_id' => 'nullable|integer|exists:contas_financeiras,id',
-            'data_ini'  => 'nullable|date',
-            'data_fim'  => 'nullable|date',
-            'vencidas'  => 'nullable|boolean',
+            'data_ini' => 'nullable|date',
+            'data_fim' => 'nullable|date',
+            'vencidas' => 'nullable|boolean',
             'em_aberto' => 'nullable|boolean',
             'origem' => 'nullable|in:recorrente',
+            'situacao' => 'nullable|in:vencida',
             'sort_field' => ['nullable', 'required_with:sort_direction', Rule::in(ContaReceberOrdenacao::CAMPOS)],
             'sort_direction' => ['nullable', 'required_with:sort_field', Rule::in(ContaReceberOrdenacao::DIRECOES)],
         ]);
@@ -93,7 +95,7 @@ class ContaReceberController extends Controller
         }
 
         if ($request->filled('cliente')) {
-            $cliente = '%' . $request->string('cliente')->toString() . '%';
+            $cliente = '%'.$request->string('cliente')->toString().'%';
             $q->where(function ($inner) use ($cliente) {
                 $inner->whereHas('cliente', fn ($c) => $c->where('nome', 'like', $cliente))
                     ->orWhereHas('pedido.cliente', fn ($c) => $c->where('nome', 'like', $cliente));
@@ -109,9 +111,8 @@ class ContaReceberController extends Controller
         }
 
         if ($request->filled('numero_pedido')) {
-            $np = '%' . $request->string('numero_pedido')->toString() . '%';
-            $q->whereHas('pedido', fn ($p) =>
-            $p->where('numero_externo', 'like', $np)
+            $np = '%'.$request->string('numero_pedido')->toString().'%';
+            $q->whereHas('pedido', fn ($p) => $p->where('numero_externo', 'like', $np)
             );
         }
 

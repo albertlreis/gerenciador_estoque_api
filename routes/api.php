@@ -54,6 +54,7 @@ use App\Http\Controllers\{AreaEstoqueController,
     PedidoAntecipacaoController,
     PedidoController,
     PedidoEstoqueController,
+    PedidoEstornoOperacionalController,
     PedidoFabricaController,
     PedidoItemController,
     PedidoRecebimentoController,
@@ -397,6 +398,10 @@ Route::middleware(['auth:sanctum', 'senha.nao_obrigatoria'])
          * PEDIDOS / ITENS / STATUS / ESTOQUE DO PEDIDO
          * ============================================================ */
         Route::prefix('pedidos')->group(function () {
+            Route::get('{pedido}/estornos-operacionais', [PedidoEstornoOperacionalController::class, 'index'])
+                ->whereNumber('pedido');
+            Route::post('{pedido}/estornos-operacionais', [PedidoEstornoOperacionalController::class, 'store'])
+                ->whereNumber('pedido');
             Route::get('statuses', [PedidoStatusConfiguracaoController::class, 'catalogo']);
             Route::get('export', [PedidoController::class, 'exportar']);
             Route::get('stats', [PedidoController::class, 'estatisticas']);

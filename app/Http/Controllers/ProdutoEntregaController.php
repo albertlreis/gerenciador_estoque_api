@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Helpers\AuthHelper;
 use App\Http\Resources\ProdutoEntregaItemResource;
 use App\Models\Pedido;
 use App\Models\ProdutoEntregaEvento;
@@ -192,6 +193,12 @@ class ProdutoEntregaController extends Controller
 
     public function estornar(Request $request, ProdutoEntregaEvento $evento): JsonResponse
     {
+        abort_unless(
+            AuthHelper::hasPermissao('estoque.movimentar'),
+            403,
+            'Sem permissão para estornar operações de estoque.'
+        );
+
         $data = $request->validate([
             'observacao' => ['nullable', 'string', 'max:1000'],
         ]);

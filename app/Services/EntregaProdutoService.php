@@ -1231,12 +1231,29 @@ class EntregaProdutoService
                 return $existente;
             }
 
+            $estornosAnteriores = ProdutoEntregaEvento::query()
+                ->where('produto_entrega_item_id', $evento->produto_entrega_item_id)
+                ->where('tipo_evento', ProdutoEntregaEvento::ESTORNADO)
+                ->lockForUpdate()
+                ->get()
+                ->filter(fn (ProdutoEntregaEvento $estorno) => (
+                    (int) data_get($estorno->metadata_json, 'evento_original_id') === (int) $evento->id
+                ));
+            $quantidadeRestante = max(
+                0,
+                (int) $evento->quantidade - (int) $estornosAnteriores->sum('quantidade')
+            );
+            if ($quantidadeRestante <= 0) {
+                return $estornosAnteriores->sortByDesc('id')->firstOrFail();
+            }
+
             $movimentacaoEstorno = null;
             if ($evento->estoque_movimentacao_id) {
                 $movimentacaoEstorno = $this->movimentacoes->estornarMovimentacao(
                     (int) $evento->estoque_movimentacao_id,
                     $usuarioId,
-                    $observacao ?: "Estorno do evento central #{$evento->id}"
+                    $observacao ?: "Estorno do evento central #{$evento->id}",
+                    $quantidadeRestante
                 );
             }
 
@@ -1255,12 +1272,12 @@ class EntregaProdutoService
                 ->lockForUpdate()
                 ->findOrFail($evento->produto_entrega_item_id);
 
-            $this->aplicarEstornoNoItem($item, $evento);
+            $this->aplicarEstornoNoItem($item, $evento, $quantidadeRestante);
 
             return $this->registrarEvento(
                 $item,
                 ProdutoEntregaEvento::ESTORNADO,
-                (int) $evento->quantidade,
+                $quantidadeRestante,
                 $evento->id_deposito_destino,
                 $evento->id_deposito_origem,
                 $evento->estoque_reserva_id,
@@ -1708,9 +1725,13 @@ class EntregaProdutoService
         return ProdutoEntregaItem::STATUS_AGUARDANDO_ESTOQUE;
     }
 
-    private function aplicarEstornoNoItem(ProdutoEntregaItem $item, ProdutoEntregaEvento $evento): void
+    private function aplicarEstornoNoItem(
+        ProdutoEntregaItem $item,
+        ProdutoEntregaEvento $evento,
+        ?int $quantidade = null
+    ): void
     {
-        $quantidade = (int) $evento->quantidade;
+        $quantidade ??= (int) $evento->quantidade;
 
         match ($evento->tipo_evento) {
             ProdutoEntregaEvento::RESERVA_CRIADA => $item->quantidade_reservada = max(0, (int) $item->quantidade_reservada - $quantidade),
@@ -1728,7 +1749,7 @@ class EntregaProdutoService
         $item->save();
     }
 
-    private function statusOperacional(ProdutoEntregaItem $item): string
+    public function statusOperacional(ProdutoEntregaItem $item): string
     {
         $total = (int) $item->quantidade_total;
 

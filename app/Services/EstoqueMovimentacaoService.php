@@ -773,9 +773,14 @@ class EstoqueMovimentacaoService
      * Estorna uma movimentação existente, criando um novo registro inverso.
      * Não altera a movimentação original (auditável e imutável).
      */
-    public function estornarMovimentacao(int $movimentacaoId, ?int $usuarioId = null, ?string $observacao = null): EstoqueMovimentacao
+    public function estornarMovimentacao(
+        int $movimentacaoId,
+        ?int $usuarioId = null,
+        ?string $observacao = null,
+        ?int $quantidade = null
+    ): EstoqueMovimentacao
     {
-        return DB::transaction(function () use ($movimentacaoId, $usuarioId, $observacao) {
+        return DB::transaction(function () use ($movimentacaoId, $usuarioId, $observacao, $quantidade) {
             /** @var EstoqueMovimentacao $mov */
             $mov = EstoqueMovimentacao::query()->lockForUpdate()->findOrFail($movimentacaoId);
 
@@ -783,13 +788,21 @@ class EstoqueMovimentacaoService
                 throw new InvalidArgumentException('Não é permitido estornar uma movimentação de estorno.');
             }
 
-            $jaEstornado = EstoqueMovimentacao::query()
+            $quantidadeJaEstornada = (int) EstoqueMovimentacao::query()
                 ->where('ref_type', 'estorno')
                 ->where('ref_id', $mov->id)
-                ->exists();
+                ->lockForUpdate()
+                ->get(['quantidade'])
+                ->sum('quantidade');
+            $quantidadeRestante = max(0, (int) $mov->quantidade - $quantidadeJaEstornada);
 
-            if ($jaEstornado) {
+            if ($quantidadeRestante <= 0) {
                 throw new InvalidArgumentException('Movimentação já estornada.');
+            }
+
+            $quantidadeEstorno = $quantidade ?? $quantidadeRestante;
+            if ($quantidadeEstorno <= 0 || $quantidadeEstorno > $quantidadeRestante) {
+                throw new InvalidArgumentException("Quantidade de estorno inválida. Saldo estornável: {$quantidadeRestante}.");
             }
 
             $origem = $mov->id_deposito_origem;
@@ -808,7 +821,7 @@ class EstoqueMovimentacaoService
                 'id_deposito_origem'  => $estornoOrigem,
                 'id_deposito_destino' => $estornoDestino,
                 'tipo'                => EstoqueMovimentacaoTipo::ESTORNO->value,
-                'quantidade'          => (int) $mov->quantidade,
+                'quantidade'          => $quantidadeEstorno,
                 'id_usuario'          => $usuarioId,
                 'observacao'          => $observacao
                     ? "Estorno da movimentação #{$mov->id}. {$observacao}"

@@ -21,8 +21,6 @@ abstract class TestCase extends BaseTestCase
     {
         parent::setUp();
 
-        config()->set('pedidos.fluxo_operacional_v2_enabled', true);
-
         if (self::$migrationsReady) {
             return;
         }

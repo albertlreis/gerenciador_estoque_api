@@ -419,6 +419,7 @@ Route::middleware(['auth:sanctum', 'senha.nao_obrigatoria'])
             Route::post('recebimentos', [PedidoRecebimentoController::class, 'store']);
             Route::post('itens/{item}/antecipacao', [PedidoAntecipacaoController::class, 'store'])->whereNumber('item');
             Route::post('itens/{item}/antecipacao/cancelar', [PedidoAntecipacaoController::class, 'cancelar'])->whereNumber('item');
+            Route::patch('observacao-interna', [PedidoController::class, 'atualizarObservacaoInterna']);
             Route::patch('cancelar', [PedidoController::class, 'cancelar']);
             Route::post('xml', [PedidoController::class, 'uploadXml']);
             Route::get('xml', [PedidoController::class, 'downloadXml']);

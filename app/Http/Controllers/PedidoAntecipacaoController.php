@@ -64,7 +64,6 @@ class PedidoAntecipacaoController extends Controller
 
     private function autorizar(): void
     {
-        abort_unless(config('pedidos.fluxo_operacional_v2_enabled'), 404);
         abort_unless(AuthHelper::hasPermissao('estoque.movimentar'), 403, 'Sem permissao para antecipar atendimento com estoque atual.');
     }
 }

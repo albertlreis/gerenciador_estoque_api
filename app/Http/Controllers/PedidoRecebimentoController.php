@@ -21,8 +21,6 @@ class PedidoRecebimentoController extends Controller
 
     public function store(Request $request, Pedido $pedido): JsonResponse
     {
-        abort_unless(config('pedidos.fluxo_operacional_v2_enabled'), 404);
-
         if (! AuthHelper::hasPermissao('estoque.movimentar')) {
             return response()->json([
                 'message' => 'Sem permissao para registrar recebimento no estoque.',

@@ -17,10 +17,6 @@ class ReconciliacaoContaAzulService
 
     public function reconciliarRecurso(ContaAzulConexao $conexao, string $recurso, ?int $lojaId = null): void
     {
-        if (!filter_var(config('conta_azul.flags.reconciliacao_ativa', true), FILTER_VALIDATE_BOOL)) {
-            return;
-        }
-
         $tipo = $this->mapRecursoToTipo($recurso);
         if ($tipo !== null) {
             $this->importacao->importarParaStaging($conexao, $tipo, $lojaId);

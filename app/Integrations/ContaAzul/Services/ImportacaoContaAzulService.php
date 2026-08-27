@@ -40,10 +40,6 @@ class ImportacaoContaAzulService
      */
     public function importarParaStaging(ContaAzulConexao $conexao, string $tipoEntidade, ?int $lojaId = null): array
     {
-        if (!filter_var($this->config['flags']['importacao_ativa'] ?? true, FILTER_VALIDATE_BOOL)) {
-            throw new ContaAzulException('Importação desativada por configuração.');
-        }
-
         if ($tipoEntidade === ContaAzulEntityType::PARCELA) {
             return $this->importarParcelasDetalhadas($conexao, $lojaId);
         }

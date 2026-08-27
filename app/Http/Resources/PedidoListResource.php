@@ -20,6 +20,7 @@ use Illuminate\Http\Resources\Json\JsonResource;
  * @property object|null $usuario
  * @property float $valor_total
  * @property string|null $observacoes
+ * @property string|null $observacao_interna
  * @property object|null $statusAtual
  * @property mixed $devolucoes
  */
@@ -103,6 +104,7 @@ class PedidoListResource extends JsonResource
             'atrasado_entrega'       => $atrasadoEntrega,
 
             'observacoes'            => $this->observacoes,
+            'observacao_interna'     => $this->observacao_interna,
             'tem_devolucao'          => $this->devolucoes->isNotEmpty(),
         ];
     }

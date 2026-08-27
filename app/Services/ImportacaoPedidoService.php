@@ -2,7 +2,6 @@
 
 namespace App\Services;
 
-use App\Enums\EstoqueMovimentacaoTipo;
 use App\Enums\EstrategiaVinculoImportacao;
 use App\Enums\PedidoStatus;
 use App\Enums\TipoImportacao;
@@ -16,7 +15,6 @@ use App\Models\PedidoImportacaoItem;
 use App\Models\PedidoItem;
 use App\Models\PedidoStatusHistorico;
 use App\Models\Produto;
-use App\Models\ProdutoEntregaEvento;
 use App\Models\ProdutoVariacao;
 use App\Models\ProdutoVariacaoAtributo;
 use App\Models\ProdutoVariacaoCodigoHistorico;
@@ -39,10 +37,6 @@ use Illuminate\Validation\ValidationException;
 class ImportacaoPedidoService
 {
     private const PRAZO_IMPORTACAO_PADRAO_DIAS_UTEIS = 60;
-
-    private const MOVIMENTACAO_ENTRADA = 'entrada';
-
-    private const MOVIMENTACAO_SAIDA = 'saida';
 
     private const CATEGORIA_IMPORTACAO_SEM_CATEGORIA = 'Importacao XML - Sem categoria';
 
@@ -513,17 +507,6 @@ class ImportacaoPedidoService
                 );
 
                 $entregue = $this->toBoolean($request->input('entregue', $dadosPedido['entregue'] ?? false));
-                $fluxoV2 = (bool) config('pedidos.fluxo_operacional_v2_enabled');
-                $movimentarEstoque = ! $fluxoV2 && $request->has('movimentar_estoque')
-                    ? $this->toBoolean($request->input('movimentar_estoque'))
-                    : false;
-                $tiposMovimentacaoPorIndice = [];
-                foreach ($itens as $index => $itemMovimentacao) {
-                    $tiposMovimentacaoPorIndice[$index] = $this->normalizarTipoMovimentacaoItem(
-                        $tipo,
-                        $itemMovimentacao['movimentacao_estoque_tipo'] ?? null
-                    );
-                }
                 $dataEntregaTopLevel = $request->input('data_entrega');
                 $dataEntregaPedidoLegado = $dadosPedido['data_entrega'] ?? null;
                 $dataEntrega = DateNormalizer::normalizeDate(
@@ -544,36 +527,6 @@ class ImportacaoPedidoService
                     throw ValidationException::withMessages([
                         'data_entrega' => ['Informe a data de entrega quando o pedido já foi entregue.'],
                     ]);
-                }
-
-                if ($movimentarEstoque) {
-                    $itensSemDeposito = collect($itens)
-                        ->filter(fn ($item) => empty($item['deposito_recebimento_id'] ?? $item['id_deposito'] ?? null))
-                        ->keys()
-                        ->map(fn ($index) => 'Item '.((int) $index + 1))
-                        ->values()
-                        ->all();
-
-                    if ($itensSemDeposito !== []) {
-                        throw ValidationException::withMessages([
-                            'itens' => ['Informe deposito para movimentar estoque dos itens importados: '.implode(', ', $itensSemDeposito).'.'],
-                        ]);
-                    }
-                }
-
-                if ($tipo === Pedido::TIPO_VENDA && $entregue && $movimentarEstoque) {
-                    $itensSemSaida = collect($tiposMovimentacaoPorIndice)
-                        ->filter(fn ($tipoMovimentacao) => $tipoMovimentacao !== self::MOVIMENTACAO_SAIDA)
-                        ->keys()
-                        ->map(fn ($index) => 'Item '.((int) $index + 1))
-                        ->values()
-                        ->all();
-
-                    if ($itensSemSaida !== []) {
-                        throw ValidationException::withMessages([
-                            'itens' => [$this->mensagemVendaEntregueItensSemSaida($itensSemSaida)],
-                        ]);
-                    }
                 }
 
                 if ($previsaoTipo === 'DATA' && ! $dataPrevista) {
@@ -637,20 +590,6 @@ class ImportacaoPedidoService
                     'data_status' => $dataBasePedido->toDateTimeString(),
                     'usuario_id' => $usuario->id,
                 ]);
-
-                if (! $fluxoV2 && $movimentarEstoque && ($entregue || $tipo === Pedido::TIPO_REPOSICAO)) {
-                    $dataStatusMovimentacao = $dataEntrega ?? $dataBasePedido;
-
-                    PedidoStatusHistorico::create([
-                        'pedido_id' => $pedido->id,
-                        'status' => $tipo === Pedido::TIPO_REPOSICAO
-                            ? PedidoStatus::ENTREGA_ESTOQUE
-                            : PedidoStatus::ENTREGA_CLIENTE,
-                        'data_status' => $dataStatusMovimentacao->toDateTimeString(),
-                        'usuario_id' => $usuario->id,
-                        'observacoes' => 'Status aplicado na confirmacao da importacao XML (fluxo legado).',
-                    ]);
-                }
 
                 $pedidoItensCriados = collect();
 
@@ -845,7 +784,6 @@ class ImportacaoPedidoService
                     $pedidoItensCriados->push([
                         'item' => $pedidoItem,
                         'antecipacoes' => array_values((array) ($item['antecipacoes'] ?? [])),
-                        'movimentacao_estoque_tipo' => $tiposMovimentacaoPorIndice[$index] ?? self::MOVIMENTACAO_ENTRADA,
                     ]);
 
                     PedidoImportacaoItem::create([
@@ -914,10 +852,7 @@ class ImportacaoPedidoService
                 $this->aplicarMovimentacoesImportacao(
                     $pedido,
                     $pedidoItensCriados,
-                    $usuario->id,
-                    $fluxoV2,
-                    $movimentarEstoque,
-                    $entregue
+                    $usuario->id
                 );
 
                 $itensConfirmados = $pedido->itens()
@@ -977,31 +912,15 @@ class ImportacaoPedidoService
         }
     }
 
-    /** @param Collection<int,array{item:PedidoItem,antecipacoes:array,movimentacao_estoque_tipo:string}> $pedidoItens */
+    /** @param Collection<int,array{item:PedidoItem,antecipacoes:array}> $pedidoItens */
     private function aplicarMovimentacoesImportacao(
         Pedido $pedido,
         Collection $pedidoItens,
-        ?int $usuarioId,
-        bool $fluxoV2,
-        bool $movimentarEstoque,
-        bool $entregue
+        ?int $usuarioId
     ): void {
         $entregas = app(EntregaProdutoService::class);
         $entregaItens = $entregas->criarDemandaPedido($pedido, $usuarioId, false)
             ->keyBy('pedido_item_id');
-
-        if (! $fluxoV2) {
-            $this->aplicarMovimentacoesImportacaoLegada(
-                $pedido,
-                $pedidoItens,
-                $entregaItens,
-                $movimentarEstoque,
-                $entregue,
-                $usuarioId
-            );
-
-            return;
-        }
 
         if (! $pedido->isVenda()) {
             return;
@@ -1040,112 +959,6 @@ class ImportacaoPedidoService
                 $entrega = $entregaAtualizada;
             }
         }
-    }
-
-    private function aplicarMovimentacoesImportacaoLegada(
-        Pedido $pedido,
-        Collection $pedidoItens,
-        Collection $entregaItens,
-        bool $movimentarEstoque,
-        bool $entregue,
-        ?int $usuarioId
-    ): void {
-        if (! $movimentarEstoque) {
-            return;
-        }
-
-        $entregas = app(EntregaProdutoService::class);
-        $movimentacoes = app(EstoqueMovimentacaoService::class);
-
-        foreach ($pedidoItens as $registro) {
-            /** @var PedidoItem $pedidoItem */
-            $pedidoItem = $registro['item'];
-            $tipoMovimentacao = $this->normalizarTipoMovimentacaoItem(
-                (string) $pedido->tipo,
-                $registro['movimentacao_estoque_tipo'] ?? null
-            );
-            $entrega = $entregaItens->get($pedidoItem->id);
-
-            if (! $entrega) {
-                continue;
-            }
-
-            $depositoId = $pedidoItem->id_deposito ? (int) $pedidoItem->id_deposito : null;
-            $quantidade = (int) $pedidoItem->quantidade;
-
-            if ($pedido->isReposicao()) {
-                $entregas->receberItem(
-                    $entrega,
-                    $depositoId,
-                    $quantidade,
-                    $usuarioId,
-                    'Recebimento de reposicao importada (fluxo legado).',
-                    "importacao-pedido:{$pedidoItem->id}:entrada"
-                );
-
-                continue;
-            }
-
-            if ($tipoMovimentacao === self::MOVIMENTACAO_SAIDA) {
-                $entregaAtualizada = $entregas->expedirItem(
-                    $entrega,
-                    $depositoId,
-                    $quantidade,
-                    $usuarioId,
-                    'Saida de estoque registrada na importacao do pedido (fluxo legado).',
-                    ProdutoEntregaEvento::EXPEDIDO_CLIENTE,
-                    "importacao-pedido:{$pedidoItem->id}:saida"
-                );
-
-                if ($entregue) {
-                    $entregas->entregarItem(
-                        $entregaAtualizada,
-                        $quantidade,
-                        $usuarioId,
-                        'Entrega ao cliente registrada na importacao do pedido (fluxo legado).',
-                        "importacao-pedido:{$pedidoItem->id}:entrega"
-                    );
-                }
-
-                continue;
-            }
-
-            $movimentacoes->registrarMovimentacaoManual([
-                'id_variacao' => (int) $pedidoItem->id_variacao,
-                'id_deposito_origem' => null,
-                'id_deposito_destino' => $depositoId,
-                'tipo' => EstoqueMovimentacaoTipo::ENTRADA_DEPOSITO->value,
-                'quantidade' => $quantidade,
-                'observacao' => 'Entrada de fabrica registrada na importacao do pedido (fluxo legado).',
-                'data_movimentacao' => now(),
-                'ref_type' => 'pedido',
-                'ref_id' => $pedido->id,
-                'pedido_id' => $pedido->id,
-                'pedido_item_id' => $pedidoItem->id,
-            ], $usuarioId);
-
-            $entregas->reservarItem(
-                $entrega,
-                $depositoId,
-                $quantidade,
-                $usuarioId,
-                'Reserva criada apos entrada de fabrica importada (fluxo legado).',
-                "importacao-pedido:{$pedidoItem->id}:reserva"
-            );
-        }
-    }
-
-    private function normalizarTipoMovimentacaoItem(string $tipoPedido, mixed $tipoMovimentacao): string
-    {
-        if ($tipoPedido === Pedido::TIPO_REPOSICAO) {
-            return self::MOVIMENTACAO_ENTRADA;
-        }
-
-        $normalizado = strtolower(trim((string) $tipoMovimentacao));
-
-        return $normalizado === self::MOVIMENTACAO_SAIDA
-            ? self::MOVIMENTACAO_SAIDA
-            : self::MOVIMENTACAO_ENTRADA;
     }
 
     private function normalizarNomeItem(mixed $nome): string
@@ -2246,28 +2059,6 @@ class ImportacaoPedidoService
         }
 
         return $prefixo;
-    }
-
-    /**
-     * @param  list<string>  $itensSemSaida
-     */
-    private function mensagemVendaEntregueItensSemSaida(array $itensSemSaida): string
-    {
-        $total = count($itensSemSaida);
-
-        if ($total === 1) {
-            return 'Pedido entregue: este item precisa estar como Saída para baixar o estoque. Altere para Saída ou use "Salvar sem movimentar". Item pendente: '.$itensSemSaida[0].'.';
-        }
-
-        $itensVisiveis = array_slice($itensSemSaida, 0, 3);
-        $restantes = $total - count($itensVisiveis);
-        $resumoItens = implode(', ', $itensVisiveis);
-
-        if ($restantes > 0) {
-            $resumoItens .= " e mais {$restantes}";
-        }
-
-        return "Pedido entregue: {$total} itens precisam estar como Saída para baixar o estoque. Use \"Aplicar a todos > Saída\" ou \"Salvar sem movimentar\". Itens pendentes: {$resumoItens}.";
     }
 
     private function normalizarTextoMensagemImportacao(mixed $valor): string

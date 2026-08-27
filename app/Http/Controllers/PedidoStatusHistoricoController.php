@@ -452,8 +452,7 @@ class PedidoStatusHistoricoController extends Controller
             ], 422);
         }
 
-        $fluxoV2 = (bool) config('pedidos.fluxo_operacional_v2_enabled');
-        $statusRecebimento = $fluxoV2 ? [PedidoStatus::ENTREGA_ESTOQUE->value] : [];
+        $statusRecebimento = [PedidoStatus::ENTREGA_ESTOQUE->value];
         $statusExpedicao = [PedidoStatus::ENVIO_CLIENTE->value];
         $statusEntrega = [PedidoStatus::ENTREGA_CLIENTE->value, PedidoStatus::FINALIZADO->value];
 
@@ -462,8 +461,6 @@ class PedidoStatusHistoricoController extends Controller
         }
 
         if (
-            $fluxoV2
-            &&
             in_array($novoStatus, $statusRecebimento, true)
             && ! $pedido->isReposicao()
             && $pedido->origem_abastecimento !== Pedido::ORIGEM_ABASTECIMENTO_FABRICA
@@ -478,8 +475,7 @@ class PedidoStatusHistoricoController extends Controller
         $pedido->loadMissing('entregaItens');
 
         if (
-            $fluxoV2
-            && $pedido->entregaItens->where('tipo_origem', \App\Models\ProdutoEntregaItem::ORIGEM_PEDIDO)->isEmpty()
+            $pedido->entregaItens->where('tipo_origem', \App\Models\ProdutoEntregaItem::ORIGEM_PEDIDO)->isEmpty()
         ) {
             $entregaService->criarDemandaPedido($pedido, auth()->id(), false);
             $pedido->load('entregaItens');
@@ -541,12 +537,6 @@ class PedidoStatusHistoricoController extends Controller
         }
 
         if (in_array($novoStatus, $statusEntrega, true) && (int) $resumo['quantidade_entregue'] < $total) {
-            if (! $fluxoV2) {
-                return response()->json([
-                    'message' => 'Registre a entrega pelo fluxo central antes de marcar entrega ou finalizacao.',
-                ], 422);
-            }
-
             return response()->json([
                 'code' => 'ENTREGA_CLIENTE_ITENS_PENDENTE',
                 'message' => 'Registre a entrega de todos os itens antes de marcar a entrega ao cliente.',

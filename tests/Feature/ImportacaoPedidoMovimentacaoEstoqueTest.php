@@ -166,9 +166,8 @@ class ImportacaoPedidoMovimentacaoEstoqueTest extends TestCase
             ->count());
     }
 
-    public function test_flag_v2_desligada_preserva_movimentacao_da_importacao_legada(): void
+    public function test_campos_legados_de_movimentacao_nao_alteram_estoque_no_fluxo_consolidado(): void
     {
-        config()->set('pedidos.fluxo_operacional_v2_enabled', false);
         [$usuario, $cliente, $categoria, $variacao, $deposito] = $this->criarContexto();
 
         $response = $this->actingAs($usuario, 'sanctum')
@@ -186,20 +185,23 @@ class ImportacaoPedidoMovimentacaoEstoqueTest extends TestCase
         $response->assertOk();
         $pedidoId = (int) $response->json('id');
 
-        $this->assertSame(2, (int) Estoque::query()
+        $entrega = ProdutoEntregaItem::query()->where('pedido_id', $pedidoId)->firstOrFail();
+
+        $this->assertSame(0, (int) Estoque::query()
             ->where('id_variacao', $variacao->id)
             ->where('id_deposito', $deposito->id)
             ->value('quantidade'));
-        $this->assertSame(1, EstoqueMovimentacao::query()
+        $this->assertSame(0, EstoqueMovimentacao::query()
             ->where('pedido_id', $pedidoId)
             ->where('tipo', 'entrada_deposito')
             ->count());
-        $this->assertSame(1, EstoqueReserva::query()
+        $this->assertSame(0, EstoqueReserva::query()
             ->where('pedido_id', $pedidoId)
             ->where('status', 'ativa')
             ->count());
-
-        config()->set('pedidos.fluxo_operacional_v2_enabled', true);
+        $this->assertSame(0, (int) $entrega->quantidade_recebida);
+        $this->assertSame(0, (int) $entrega->quantidade_expedida);
+        $this->assertSame(0, (int) $entrega->quantidade_entregue);
     }
 
     public function test_campos_legacy_sao_ignorados_e_antecipacao_reserva_sem_reduzir_esperado_da_fabrica(): void

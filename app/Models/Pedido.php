@@ -32,6 +32,7 @@ class Pedido extends Model
         'data_pedido',
         'valor_total',
         'observacoes',
+        'observacao_interna',
         'prazo_dias_uteis',
         'data_limite_entrega',
         'separacao_status',

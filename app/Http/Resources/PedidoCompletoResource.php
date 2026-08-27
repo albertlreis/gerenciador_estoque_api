@@ -90,6 +90,7 @@ class PedidoCompletoResource extends JsonResource
 
             'valor_total' => $this->valor_total,
             'observacoes' => $this->observacoes,
+            'observacao_interna' => $this->observacao_interna,
 
             'nfe_xml_vinculado'   => !empty($this->nfe_xml_path),
             'nfe_xml_nome'        => $this->nfe_xml_nome,

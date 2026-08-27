@@ -17,8 +17,6 @@ final class PedidoReconciliacaoPreviewController extends Controller
      */
     public function show(Pedido $pedido): JsonResponse
     {
-        abort_unless(config('pedidos.fluxo_operacional_v2_enabled'), 404);
-
         return response()->json([
             'data' => $this->service->preview($pedido),
         ])->header('Cache-Control', 'no-store');

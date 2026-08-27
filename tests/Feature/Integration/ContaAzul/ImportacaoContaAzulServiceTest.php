@@ -23,10 +23,11 @@ class ImportacaoContaAzulServiceTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_importa_titulos_aceitando_itens_e_items_e_usa_paginacao_explicita(): void
+    public function test_importa_titulos_sem_depender_da_flag_legada_e_usa_paginacao_explicita(): void
     {
         $config = config('conta_azul');
         $config['pagination']['page_size'] = 2;
+        $config['flags']['importacao_ativa'] = false;
 
         $client = Mockery::mock(\App\Integrations\ContaAzul\Clients\ContaAzulClient::class);
         $client->shouldReceive('get')

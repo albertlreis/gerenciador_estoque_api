@@ -8,6 +8,7 @@ use App\Enums\TipoImportacao;
 use App\Helpers\AuthHelper;
 use App\Http\Requests\PedidoIndexRequest;
 use App\Http\Requests\StorePedidoRequest;
+use App\Http\Requests\UpdatePedidoObservacaoInternaRequest;
 use App\Http\Requests\UpdatePedidoRequest;
 use App\Http\Resources\PedidoCompletoResource;
 use App\Models\Categoria;
@@ -145,6 +146,35 @@ class PedidoController extends Controller
         return response()->json([
             'message' => 'Pedido atualizado com sucesso.',
             'data' => new PedidoCompletoResource($pedidoCompleto),
+        ]);
+    }
+
+    /**
+     * Atualiza somente a observação interna do pedido.
+     */
+    public function atualizarObservacaoInterna(UpdatePedidoObservacaoInternaRequest $request, Pedido $pedido): JsonResponse
+    {
+        $observacaoAnterior = $pedido->observacao_interna;
+        $observacaoInterna = $request->validated('observacao_interna');
+
+        DB::transaction(function () use ($pedido, $observacaoInterna): void {
+            $pedido->forceFill(['observacao_interna' => $observacaoInterna])->save();
+        });
+
+        logAuditoria('pedido_observacao_interna', "Observação interna do Pedido #{$pedido->id} atualizada.", [
+            'pedido_id' => $pedido->id,
+            'usuario_id' => AuthHelper::getUsuarioId(),
+            'conteudo_alterado' => $observacaoAnterior !== $observacaoInterna,
+            'tamanho_anterior' => mb_strlen((string) $observacaoAnterior),
+            'tamanho_atual' => mb_strlen((string) $observacaoInterna),
+        ], $pedido);
+
+        return response()->json([
+            'message' => 'Observação interna atualizada com sucesso.',
+            'data' => [
+                'id' => $pedido->id,
+                'observacao_interna' => $pedido->observacao_interna,
+            ],
         ]);
     }
 
@@ -914,7 +944,6 @@ class PedidoController extends Controller
         $acao = $data['acao'] ?? ((bool) ($data['registrar_entrega'] ?? false)
             ? 'registrar_entrega'
             : 'somente_pdf');
-        $fluxoV2 = (bool) config('pedidos.fluxo_operacional_v2_enabled');
         $registrarEntrega = $acao === 'registrar_entrega';
         $idempotencyKey = trim((string) ($data['idempotency_key'] ?? ''));
 
@@ -924,7 +953,7 @@ class PedidoController extends Controller
             ]);
         }
 
-        if ($fluxoV2 && $registrarEntrega && empty($data['data_entrega'])) {
+        if ($registrarEntrega && empty($data['data_entrega'])) {
             throw ValidationException::withMessages([
                 'data_entrega' => ['Informe a data efetiva da entrega ao cliente.'],
             ]);
@@ -938,7 +967,7 @@ class PedidoController extends Controller
             'fornecedor',
         ])->findOrFail($pedidoId);
 
-        if ($fluxoV2 && $registrarEntrega && ! AuthHelper::hasPermissao('estoque.movimentar')) {
+        if ($registrarEntrega && ! AuthHelper::hasPermissao('estoque.movimentar')) {
             return response()->json([
                 'message' => 'Sem permissao para registrar entrega e movimentar estoque.',
             ], 403);
@@ -994,7 +1023,7 @@ class PedidoController extends Controller
             )
             : collect();
 
-        if ($fluxoV2 && $itensComRecebimentoPendente->isNotEmpty()) {
+        if ($itensComRecebimentoPendente->isNotEmpty()) {
             return response()->json([
                 'code' => 'RECEBIMENTO_PENDENTE_PARA_ENTREGA',
                 'message' => 'Registre o recebimento da fabrica antes de entregar estes produtos ao cliente.',
@@ -1017,8 +1046,7 @@ class PedidoController extends Controller
             ->values();
 
         if (
-            $fluxoV2
-            && $registrarEntrega
+            $registrarEntrega
             && $itensSemSaldo->isNotEmpty()
             && ! ($data['confirmar_entrega_sem_saldo'] ?? false)
         ) {
@@ -1049,7 +1077,7 @@ class PedidoController extends Controller
         ])->setPaper('a4')->output();
 
         if ($registrarEntrega) {
-            DB::transaction(function () use ($notaItens, $entregaService, $idempotencyKey, $data, $pedido, $fluxoV2) {
+            DB::transaction(function () use ($notaItens, $entregaService, $idempotencyKey, $data, $pedido) {
                 $ocorridoEm = ! empty($data['data_entrega'])
                     ? Carbon::parse($data['data_entrega'], config('app.timezone'))
                     : now();
@@ -1124,10 +1152,6 @@ class PedidoController extends Controller
                         );
                     }
                 });
-
-                if (! $fluxoV2) {
-                    return;
-                }
 
                 $pedidoAtualizado = $pedido->fresh('entregaItens');
                 $resumo = $entregaService->resumoPedido($pedidoAtualizado);

@@ -406,6 +406,10 @@ class PedidoFluxoOperacionalV2Test extends TestCase
         $this->assertSame(1, (int) $entrega->quantidade_recebida);
         $this->assertSame(1, (int) $entrega->quantidade_expedida);
         $this->assertSame(1, (int) $entrega->quantidade_entregue);
+        $this->assertSame(1, PedidoStatusHistorico::query()
+            ->where('pedido_id', $pedido->id)
+            ->where('status', PedidoStatus::ENVIO_CLIENTE->value)
+            ->count());
         $this->assertSame(0, (int) Estoque::query()
             ->where('id_variacao', $variacao->id)
             ->where('id_deposito', $deposito->id)
@@ -471,6 +475,49 @@ class PedidoFluxoOperacionalV2Test extends TestCase
             ->where('id_deposito', $deposito->id)
             ->value('quantidade'));
         $this->assertSame(1, EstoqueMovimentacao::query()->where('pedido_id', $pedido->id)->count());
+        $this->assertSame(1, PedidoStatusHistorico::query()
+            ->where('pedido_id', $pedido->id)
+            ->where('status', PedidoStatus::ENTREGA_CLIENTE->value)
+            ->count());
+    }
+
+    public function test_nota_registra_entrega_sem_substituir_status_terminal_do_pedido(): void
+    {
+        [$usuario, $pedido, $variacao, $deposito] = $this->criarPedido(1, Pedido::ORIGEM_ABASTECIMENTO_ESTOQUE);
+        Sanctum::actingAs($usuario);
+        Estoque::updateOrCreate(
+            ['id_variacao' => $variacao->id, 'id_deposito' => $deposito->id],
+            ['quantidade' => 1]
+        );
+        $entrega = app(EntregaProdutoService::class)
+            ->criarDemandaPedido($pedido, $usuario->id, false)
+            ->firstOrFail();
+        PedidoStatusHistorico::create([
+            'pedido_id' => $pedido->id,
+            'status' => PedidoStatus::FINALIZADO,
+            'data_status' => now()->addMinute(),
+            'usuario_id' => $usuario->id,
+        ]);
+
+        $this->postJson("/api/v1/pedidos/{$pedido->id}/pdf/nota-entrega", [
+            'acao' => 'registrar_entrega',
+            'data_entrega' => '2026-07-10',
+            'idempotency_key' => 'nota-pedido-terminal',
+            'itens' => [[
+                'produto_entrega_item_id' => $entrega->id,
+                'quantidade' => 1,
+            ]],
+        ])->assertOk();
+
+        $this->assertSame(1, (int) $entrega->fresh()->quantidade_entregue);
+        $this->assertSame(0, PedidoStatusHistorico::query()
+            ->where('pedido_id', $pedido->id)
+            ->where('status', PedidoStatus::ENTREGA_CLIENTE->value)
+            ->count());
+        $this->assertSame(
+            PedidoStatus::FINALIZADO->value,
+            $pedido->fresh('statusAtual')->statusAtual?->getRawOriginal('status')
+        );
     }
 
     public function test_registro_de_entrega_exige_permissao_e_permite_pedido_divergente(): void

@@ -8,6 +8,7 @@ use App\Models\Categoria;
 use App\Models\Cliente;
 use App\Models\Deposito;
 use App\Models\Estoque;
+use App\Models\EstoqueMovimentacao;
 use App\Models\Pedido;
 use App\Models\Produto;
 use App\Models\ProdutoVariacao;
@@ -115,7 +116,7 @@ class FinalizarPedidoSelecionandoVendedorTest extends TestCase
         $this->assertSame(0, DB::table('contas_receber')->where('pedido_id', $pedido->id)->count());
     }
 
-    public function test_informa_produto_com_saldo_insuficiente_ao_finalizar_com_movimentacao(): void
+    public function test_campo_legado_de_movimentacao_nao_bloqueia_pedido_sem_saldo(): void
     {
         $usuario = Usuario::create([
             'nome' => 'Usuario Saldo',
@@ -187,13 +188,23 @@ class FinalizarPedidoSelecionandoVendedorTest extends TestCase
             ],
         ]);
 
-        $response
-            ->assertStatus(422)
-            ->assertJsonPath('itens_saldo_insuficiente.0.id_carrinho_item', $item->id);
+        $response->assertCreated();
 
-        $this->assertStringContainsString('Mesa Sem Saldo', (string) $response->json('message'));
-        $this->assertSame('rascunho', $carrinho->fresh()->status);
-        $this->assertSame(0, Pedido::where('id_cliente', $cliente->id)->count());
+        $pedidoId = (int) data_get($response->json(), 'pedido.id');
+        $this->assertGreaterThan(0, $pedidoId);
+        $this->assertSame('finalizado', $carrinho->fresh()->status);
+        $this->assertSame(0, (int) Estoque::query()
+            ->where('id_variacao', $variacao->id)
+            ->where('id_deposito', $deposito->id)
+            ->value('quantidade'));
+        $this->assertSame(0, EstoqueMovimentacao::query()->where('pedido_id', $pedidoId)->count());
+        $this->assertDatabaseHas('produto_entrega_itens', [
+            'pedido_id' => $pedidoId,
+            'id_variacao' => $variacao->id,
+            'quantidade_total' => 1,
+            'quantidade_reservada' => 0,
+            'status' => 'aguardando_estoque',
+        ]);
     }
 
     public function test_finaliza_pedido_com_valor_zero_sem_criar_conta_receber(): void

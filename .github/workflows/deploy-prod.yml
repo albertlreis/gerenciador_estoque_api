@@ -100,6 +100,9 @@ jobs:
       - name: Run tests
         run: composer test:full
 
+      - name: Validate deployment rollback
+        run: bash tests/Deployment/deploy_rollback_test.sh
+
       - name: Build and verify production image
         run: |
           docker build --pull --file Dockerfile.prod --tag sierra-estoque-api:ci .
@@ -124,7 +127,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: production
     env:
-      RUN_MIGRATIONS: ${{ github.event_name == 'workflow_dispatch' && inputs.run_migrations }}
+      RUN_MIGRATIONS: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_migrations) }}
 
     steps:
       - name: Start ssh-agent
@@ -138,20 +141,23 @@ jobs:
           ssh-keyscan -p "${{ secrets.DEPLOY_PORT }}" "${{ secrets.DEPLOY_HOST }}" >> ~/.ssh/known_hosts
 
       - name: Trigger deploy on droplet
+        id: deploy
+        continue-on-error: true
         run: |
           deploy_args=""
-          backup_cmd="./html/scripts/backup-production.sh && "
-
           if [ "${RUN_MIGRATIONS}" = "true" ]; then
             deploy_args="--migrate"
           fi
 
           compose_fix_cmd="if [ -f docker-compose.yml ]; then cp docker-compose.yml docker-compose.yml.bak-version-obsolete && sed -i '/^version:/d' docker-compose.yml; fi"
-          remote_command="cd /home/docker/acadsoft/sierra-estoque && repo_git_dir=\$(find . -maxdepth 3 -type d -name .git -print -quit) && repo_dir=\${repo_git_dir%/.git} && if [ -n \"\${repo_dir}\" ]; then git -C \"\${repo_dir}\" fetch origin master && git -C \"\${repo_dir}\" reset --hard origin/master && git -C \"\${repo_dir}\" clean -fd; fi && ${compose_fix_cmd} && ${backup_cmd}bash ./html/scripts/deploy.sh ${deploy_args} && docker-compose -f docker-compose.yml up -d --no-deps nginx && docker update --restart always sierra_estoque_nginx >/dev/null && docker exec sierra_estoque_app sh -lc 'mkdir -p /var/www/html/storage/framework/cache/data /var/www/html/storage/logs /var/www/html/bootstrap/cache && chown -R www-data:www-data /var/www/html/storage/framework/cache /var/www/html/storage/logs /var/www/html/bootstrap/cache && chmod -R ug+rwX /var/www/html/storage/framework/cache /var/www/html/storage/logs /var/www/html/bootstrap/cache'"
+          remote_command="cd /home/docker/acadsoft/sierra-estoque && rm -f .deploy-state/estoque-api.rollback && repo_git_dir=\$(find . -maxdepth 3 -type d -name .git -print -quit) && repo_dir=\${repo_git_dir%/.git} && test -n \"\${repo_dir}\" && previous_sha=\$(git -C \"\${repo_dir}\" rev-parse HEAD) && ./html/scripts/backup-production.sh && git -C \"\${repo_dir}\" fetch origin master && git -C \"\${repo_dir}\" reset --hard origin/master && git -C \"\${repo_dir}\" clean -fd && ${compose_fix_cmd} && AUTO_ROLLBACK=true ROLLBACK_GIT_SHA=\${previous_sha} bash ./html/scripts/deploy.sh ${deploy_args} && docker-compose -f docker-compose.yml up -d --no-deps nginx && docker update --restart always sierra_estoque_nginx >/dev/null && docker exec sierra_estoque_app sh -lc 'mkdir -p /var/www/html/storage/framework/cache/data /var/www/html/storage/logs /var/www/html/bootstrap/cache && chown -R www-data:www-data /var/www/html/storage/framework/cache /var/www/html/storage/logs /var/www/html/bootstrap/cache && chmod -R ug+rwX /var/www/html/storage/framework/cache /var/www/html/storage/logs /var/www/html/bootstrap/cache'"
 
           ssh -p "${{ secrets.DEPLOY_PORT }}" "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" "${remote_command}"
 
       - name: Verify production API health
+        id: api-health
+        if: steps.deploy.outcome == 'success'
+        continue-on-error: true
         run: |
           health_url="https://estoque.sierra.acadsoft.com.br/api/v1/health"
 
@@ -169,6 +175,35 @@ jobs:
           done
 
           echo "Production API did not become healthy at ${health_url}."
+          exit 1
+
+      - name: Roll back failed production candidate
+        if: steps.deploy.outcome == 'failure' || steps.api-health.outcome == 'failure'
+        run: |
+          ssh -p "${{ secrets.DEPLOY_PORT }}" "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" \
+            "cd /home/docker/acadsoft/sierra-estoque && if ! AUTO_ROLLBACK=true bash ./html/scripts/deploy.sh --rollback; then docker exec sierra_estoque_app php artisan down --render='errors::503' || true; exit 1; fi"
+
+          for attempt in {1..12}; do
+            rollback_health="$(curl --fail --show-error --silent --location \
+              --connect-timeout 10 --max-time 20 \
+              https://estoque.sierra.acadsoft.com.br/api/v1/health || true)"
+
+            if printf '%s' "${rollback_health}" | grep -Eq \
+              '"status"[[:space:]]*:[[:space:]]*"ok"'; then
+              exit 0
+            fi
+
+            echo "Waiting for the restored API (${attempt}/12)..."
+            sleep 5
+          done
+
+          echo "The restored API did not become healthy."
+          exit 1
+
+      - name: Fail workflow after automatic rollback
+        if: always() && (steps.deploy.outcome == 'failure' || steps.api-health.outcome == 'failure')
+        run: |
+          echo "Production candidate failed during deploy or health check and was rolled back."
           exit 1
 
       - name: Verify shared production services

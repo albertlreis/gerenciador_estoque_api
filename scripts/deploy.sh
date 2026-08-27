@@ -2,6 +2,7 @@
 # Deploy rápido para sierra-estoque (Laravel + Docker)
 # Uso:
 #   ./scripts/deploy.sh [--no-git] [--no-maintenance] [--no-build] [--migrate] [--composer]
+#   ./scripts/deploy.sh --rollback
 
 set -euo pipefail
 
@@ -16,6 +17,13 @@ DO_MAINTENANCE=true
 DO_BUILD=true
 DO_MIGRATE=false
 DO_COMPOSER=false
+ROLLBACK_ONLY=false
+
+AUTO_ROLLBACK="${AUTO_ROLLBACK:-false}"
+ROLLBACK_GIT_SHA="${ROLLBACK_GIT_SHA:-}"
+ROLLBACK_IMAGE="${ROLLBACK_IMAGE:-sierra-estoque-app:rollback}"
+ROLLBACK_STATE_FILE="${ROLLBACK_STATE_FILE:-$APP_DIR/.deploy-state/estoque-api.rollback}"
+ROLLBACK_READY=false
 
 for arg in "$@"; do
   case "$arg" in
@@ -24,6 +32,7 @@ for arg in "$@"; do
     --no-build) DO_BUILD=false ;;
     --migrate) DO_MIGRATE=true ;;
     --composer) DO_COMPOSER=true ;;
+    --rollback) ROLLBACK_ONLY=true ;;
     *) echo "Argumento desconhecido: $arg"; exit 2 ;;
   esac
 done
@@ -37,6 +46,26 @@ compose() {
 }
 
 log() { printf "\n[%s] %s\n" "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
+
+write_rollback_state() {
+  mkdir -p "$(dirname "$ROLLBACK_STATE_FILE")"
+  umask 077
+  cat >"$ROLLBACK_STATE_FILE" <<EOF
+ROLLBACK_GIT_SHA=$ROLLBACK_GIT_SHA
+ROLLBACK_IMAGE=$ROLLBACK_IMAGE
+EOF
+}
+
+load_rollback_state() {
+  [[ -f "$ROLLBACK_STATE_FILE" ]] || {
+    echo "Estado de rollback não encontrado: $ROLLBACK_STATE_FILE" >&2
+    return 1
+  }
+
+  # O arquivo contém somente SHA e tag Docker gerados por este script.
+  # shellcheck source=/dev/null
+  source "$ROLLBACK_STATE_FILE"
+}
 
 artisan() {
   compose exec -T -u www-data "$SERVICE" bash -lc "php artisan $*"
@@ -154,10 +183,19 @@ verify_database_connection() {
     php artisan migrate:status >/dev/null
 }
 
-[[ -d "$APP_DIR" ]] || { echo "APP_DIR não encontrado: $APP_DIR"; exit 1; }
-[[ -f "$COMPOSE_FILE" ]] || { echo "docker-compose.yml não encontrado"; exit 1; }
-
-log "Projeto: $APP_DIR | Serviço: $SERVICE"
+verify_expected_schema() {
+  log "Validando schema esperado da observação interna…"
+  compose exec -T -u www-data "$SERVICE" php -r '
+    require "/var/www/html/vendor/autoload.php";
+    $app = require "/var/www/html/bootstrap/app.php";
+    $kernel = $app->make(Illuminate\Contracts\Console\Kernel::class);
+    $kernel->bootstrap();
+    if (!Illuminate\Support\Facades\Schema::hasColumn("pedidos", "observacao_interna")) {
+        fwrite(STDERR, "coluna pedidos.observacao_interna ausente\n");
+        exit(1);
+    }
+  '
+}
 
 assert_not_in_maintenance() {
   log "Validando que a aplicacao nao esta em maintenance mode..."
@@ -168,15 +206,97 @@ assert_not_in_maintenance() {
 }
 
 DID_SET_MAINTENANCE=false
-cleanup() {
-  if $DO_MAINTENANCE && $DID_SET_MAINTENANCE; then
+
+rollback_application() {
+  log "Iniciando rollback automático da aplicação…"
+  load_rollback_state
+
+  [[ "$ROLLBACK_GIT_SHA" =~ ^[0-9a-f]{40}$ ]] || {
+    echo "SHA de rollback inválido: $ROLLBACK_GIT_SHA" >&2
+    return 1
+  }
+  docker image inspect "$ROLLBACK_IMAGE" >/dev/null 2>&1 || {
+    echo "Imagem de rollback não encontrada: $ROLLBACK_IMAGE" >&2
+    return 1
+  }
+
+  if compose ps --services --status running | grep -qx "$SERVICE"; then
+    artisan down --render="errors::503" || true
+  fi
+  DID_SET_MAINTENANCE=true
+
+  git -C "$HTML_DIR" reset --hard "$ROLLBACK_GIT_SHA"
+  docker tag "$ROLLBACK_IMAGE" sierra-estoque-app:latest
+  compose up -d --no-deps --force-recreate "$SERVICE"
+  wait_for_php || { echo "PHP não respondeu após rollback" >&2; return 1; }
+
+  prepare_writable_paths
+  clear_runtime_caches
+  artisan config:cache
+  artisan route:cache
+  artisan view:cache
+  verify_file_cache
+  verify_log_write
+  verify_database_connection
+  compose exec -T "$SERVICE" curl -fsS http://127.0.0.1/api/v1/health >/dev/null
+  artisan up
+  DID_SET_MAINTENANCE=false
+  assert_not_in_maintenance
+  log "Rollback automático concluído com sucesso. O schema do banco foi preservado."
+}
+
+handle_exit() {
+  local status=$?
+  trap - EXIT
+
+  if (( status != 0 )) && $ROLLBACK_ONLY; then
+    log "ERRO: rollback solicitado falhou; mantendo a aplicação em manutenção."
+    if compose ps --services --status running | grep -qx "$SERVICE"; then
+      artisan down --render="errors::503" || true
+    fi
+  elif (( status != 0 )) && [[ "$AUTO_ROLLBACK" == "true" ]] && $ROLLBACK_READY; then
+    if ! rollback_application; then
+      log "ERRO: rollback automático falhou; mantendo a aplicação em manutenção."
+      if compose ps --services --status running | grep -qx "$SERVICE"; then
+        artisan down --render="errors::503" || true
+      fi
+    fi
+  elif (( status != 0 )) && $DO_MAINTENANCE && $DID_SET_MAINTENANCE; then
     log "Saindo do maintenance mode (cleanup)…"
     if compose ps --services --status running | grep -qx "$SERVICE"; then
       artisan up || true
     fi
   fi
+
+  exit "$status"
 }
-trap cleanup EXIT
+trap handle_exit EXIT
+
+[[ -d "$APP_DIR" ]] || { echo "APP_DIR não encontrado: $APP_DIR"; exit 1; }
+[[ -f "$COMPOSE_FILE" ]] || { echo "docker-compose.yml não encontrado"; exit 1; }
+
+log "Projeto: $APP_DIR | Serviço: $SERVICE"
+
+if $ROLLBACK_ONLY; then
+  ROLLBACK_READY=true
+  rollback_application
+  exit 0
+fi
+
+if [[ "$AUTO_ROLLBACK" == "true" ]]; then
+  [[ "$ROLLBACK_GIT_SHA" =~ ^[0-9a-f]{40}$ ]] || {
+    echo "AUTO_ROLLBACK exige ROLLBACK_GIT_SHA válido" >&2
+    exit 1
+  }
+  docker image inspect sierra-estoque-app:latest >/dev/null 2>&1 || {
+    echo "Imagem atual sierra-estoque-app:latest não encontrada para rollback" >&2
+    exit 1
+  }
+  docker tag sierra-estoque-app:latest "$ROLLBACK_IMAGE"
+  write_rollback_state
+  ROLLBACK_READY=true
+  log "Rollback preparado com SHA $ROLLBACK_GIT_SHA e imagem $ROLLBACK_IMAGE."
+fi
 
 if $DO_GIT; then
   log "Atualizando repositório Git…"
@@ -251,6 +371,7 @@ if $DO_MIGRATE; then
   fi
 
   log "Migrations executadas com sucesso!"
+  verify_expected_schema
 else
   log "Pulando migrations (flag --no-migrate)…"
 fi
@@ -261,6 +382,7 @@ artisan queue:restart || true
 if $DO_MAINTENANCE && $DID_SET_MAINTENANCE; then
   log "Saindo do maintenance mode…"
   artisan up
+  DID_SET_MAINTENANCE=false
 fi
 
 log "Últimas 150 linhas dos logs…"

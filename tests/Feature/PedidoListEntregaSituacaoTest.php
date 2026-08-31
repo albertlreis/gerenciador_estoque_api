@@ -10,6 +10,7 @@ use App\Models\Usuario;
 use Carbon\Carbon;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
@@ -28,7 +29,7 @@ class PedidoListEntregaSituacaoTest extends TestCase
     {
         $usuario = Usuario::create([
             'nome' => 'Usuario Pedidos',
-            'email' => uniqid('pedidos-list-', true) . '@test.com',
+            'email' => uniqid('pedidos-list-', true).'@test.com',
             'senha' => 'senha',
             'ativo' => true,
         ]);
@@ -49,7 +50,7 @@ class PedidoListEntregaSituacaoTest extends TestCase
             'id_cliente' => $cliente->id,
             'id_usuario' => $usuario->id,
             'tipo' => 'venda',
-            'numero_externo' => 'PED-' . strtoupper(substr(uniqid(), -6)),
+            'numero_externo' => 'PED-'.strtoupper(substr(uniqid(), -6)),
             'data_pedido' => '2026-02-06 10:00:00',
             'valor_total' => 100,
             'prazo_dias_uteis' => 1,
@@ -210,5 +211,30 @@ class PedidoListEntregaSituacaoTest extends TestCase
         $this->getJson('/api/v1/pedidos?page=abc&per_page=500')
             ->assertUnprocessable()
             ->assertJsonValidationErrors(['page', 'per_page']);
+    }
+
+    public function test_listagem_de_dez_pedidos_nao_executa_queries_por_pedido(): void
+    {
+        $usuario = $this->autenticar();
+
+        for ($i = 0; $i < 10; $i++) {
+            $pedido = $this->criarPedido($usuario, [
+                'numero_externo' => 'QUERY-'.str_pad((string) $i, 2, '0', STR_PAD_LEFT),
+            ]);
+            PedidoStatusHistorico::create([
+                'pedido_id' => $pedido->id,
+                'status' => PedidoStatus::PEDIDO_CRIADO->value,
+                'data_status' => now(),
+                'usuario_id' => $usuario->id,
+            ]);
+        }
+
+        DB::enableQueryLog();
+        DB::flushQueryLog();
+
+        $this->getJson('/api/v1/pedidos?per_page=10')->assertOk();
+        $queryCount = count(DB::getQueryLog());
+
+        $this->assertLessThanOrEqual(30, $queryCount, "Listagem executou {$queryCount} queries para 10 pedidos");
     }
 }

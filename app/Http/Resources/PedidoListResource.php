@@ -37,16 +37,18 @@ class PedidoListResource extends JsonResource
     public function toArray($request): array
     {
         $entregaService = app(\App\Services\EntregaProdutoService::class);
-        $statusAtualEnum  = $this->getStatusAtualEnum($this->resource);
-        $statusAtualRaw   = $this->statusAtual?->getRawOriginal('status');
+        $statusAtualEnum = $this->getStatusAtualEnum($this->resource);
+        $statusAtualRaw = $this->statusAtual?->getRawOriginal('status');
         $statusAtualValue = $statusAtualEnum?->value ?? (is_string($statusAtualRaw) ? $statusAtualRaw : null);
 
         $dataUltimoStatus = $this->getDataUltimoStatus($this->resource);
-        $proximoStatus    = $this->getProximoStatus($this->resource);
-        $previsao         = $this->getPrevisaoProximoStatus($this->resource);
-        $atrasadoFluxo    = $this->isAtrasado($this->resource);
-        $statusEnvio      = $entregaService->statusOperacionalPedido($this->resource);
-        $envioProdutos    = $entregaService->resumoPedido($this->resource);
+        $proximoStatus = $this->getProximoStatus($this->resource);
+        $previsao = $this->getPrevisaoProximoStatus($this->resource);
+        $atrasadoFluxo = $previsao
+            ? CarbonImmutable::now(config('app.timezone', 'America/Belem'))->greaterThan($previsao)
+            : false;
+        $statusEnvio = $entregaService->statusOperacionalPedido($this->resource);
+        $envioProdutos = $entregaService->resumoPedido($this->resource);
         $previsaoEmbarque = $this->resolvePrevisaoEmbarque();
 
         $timezone = config('app.timezone', 'America/Belem');
@@ -64,48 +66,48 @@ class PedidoListResource extends JsonResource
                 $diasAtraso = $hoje->diffInDays($entregaPrevista);
             }
 
-            if (!in_array($situacaoEntrega, ['Entregue', 'Cancelado'], true)) {
+            if (! in_array($situacaoEntrega, ['Entregue', 'Cancelado'], true)) {
                 $diasUteisRestantes = $hoje->diffInWeekdays($entregaPrevista, false);
             }
         }
 
         return [
-            'id'                     => $this->id,
-            'numero_externo'         => $this->numero_externo,
-            'data'                   => $this->data_pedido,
-            'cliente'                => $this->cliente,
-            'parceiro'               => $this->parceiro,
-            'vendedor'               => $this->usuario,
-            'data_ultimo_status'     => $dataUltimoStatus,
-            'valor_total'            => $this->valor_total,
+            'id' => $this->id,
+            'numero_externo' => $this->numero_externo,
+            'data' => $this->data_pedido,
+            'cliente' => $this->cliente,
+            'parceiro' => $this->parceiro,
+            'vendedor' => $this->usuario,
+            'data_ultimo_status' => $dataUltimoStatus,
+            'valor_total' => $this->valor_total,
 
-            'status'                 => $statusAtualValue,
-            'status_label'           => $statusAtualEnum?->label(),
-            'status_acompanhamento'  => $statusAtualValue,
-            'status_envio'           => $statusEnvio,
-            'entrega_produtos'       => $envioProdutos,
-            'envio_produtos'         => $envioProdutos,
-            'previsao_embarque'      => $previsaoEmbarque?->toDateString(),
-            'tipo'                   => $this->tipo,
-            'origem_abastecimento'   => $this->origem_abastecimento,
-            'separacao_status'       => $this->separacao_status,
-            'proximo_status'         => $proximoStatus['codigo'] ?? null,
-            'proximo_status_label'   => $proximoStatus['label'] ?? null,
-            'previsao'               => $previsao?->toDateString(),
-            'atrasado'               => $atrasadoFluxo,
+            'status' => $statusAtualValue,
+            'status_label' => $statusAtualEnum?->label(),
+            'status_acompanhamento' => $statusAtualValue,
+            'status_envio' => $statusEnvio,
+            'entrega_produtos' => $envioProdutos,
+            'envio_produtos' => $envioProdutos,
+            'previsao_embarque' => $previsaoEmbarque?->toDateString(),
+            'tipo' => $this->tipo,
+            'origem_abastecimento' => $this->origem_abastecimento,
+            'separacao_status' => $this->separacao_status,
+            'proximo_status' => $proximoStatus['codigo'] ?? null,
+            'proximo_status_label' => $proximoStatus['label'] ?? null,
+            'previsao' => $previsao?->toDateString(),
+            'atrasado' => $atrasadoFluxo,
 
             // Prazo/Entrega
-            'prazo_dias_uteis'       => $this->prazo_dias_uteis,
-            'data_limite_entrega'    => $entregaPrevista?->toDateString(),
-            'entrega_prevista'       => $entregaPrevista?->toDateString(),
-            'situacao_entrega'       => $situacaoEntrega,
-            'dias_atraso'            => $diasAtraso,
-            'dias_uteis_restantes'   => $diasUteisRestantes, // null quando nao se aplica
-            'atrasado_entrega'       => $atrasadoEntrega,
+            'prazo_dias_uteis' => $this->prazo_dias_uteis,
+            'data_limite_entrega' => $entregaPrevista?->toDateString(),
+            'entrega_prevista' => $entregaPrevista?->toDateString(),
+            'situacao_entrega' => $situacaoEntrega,
+            'dias_atraso' => $diasAtraso,
+            'dias_uteis_restantes' => $diasUteisRestantes, // null quando nao se aplica
+            'atrasado_entrega' => $atrasadoEntrega,
 
-            'observacoes'            => $this->observacoes,
-            'observacao_interna'     => $this->observacao_interna,
-            'tem_devolucao'          => $this->devolucoes->isNotEmpty(),
+            'observacoes' => $this->observacoes,
+            'observacao_interna' => $this->observacao_interna,
+            'tem_devolucao' => $this->devolucoes->isNotEmpty(),
         ];
     }
 
@@ -125,12 +127,12 @@ class PedidoListResource extends JsonResource
 
     private function resolveEntregaPrevista(string $timezone): ?CarbonImmutable
     {
-        if (!empty($this->data_limite_entrega)) {
+        if (! empty($this->data_limite_entrega)) {
             return CarbonImmutable::parse($this->data_limite_entrega, $timezone)->startOfDay();
         }
 
         $baseDate = $this->resolveDataBasePedido($timezone);
-        if (!$baseDate) {
+        if (! $baseDate) {
             return null;
         }
 
@@ -148,7 +150,7 @@ class PedidoListResource extends JsonResource
 
         foreach ($camposBase as $campo) {
             $valor = data_get($this, $campo);
-            if (!$valor) {
+            if (! $valor) {
                 continue;
             }
 
@@ -172,7 +174,7 @@ class PedidoListResource extends JsonResource
             return 'Entregue';
         }
 
-        if (!$entregaPrevista) {
+        if (! $entregaPrevista) {
             return null;
         }
 
@@ -195,7 +197,7 @@ class PedidoListResource extends JsonResource
 
         foreach ($camposEntrega as $campo) {
             $valor = data_get($this, $campo);
-            if (!$valor) {
+            if (! $valor) {
                 continue;
             }
 
@@ -211,7 +213,7 @@ class PedidoListResource extends JsonResource
 
     private function isStatusCancelado(?string $statusAtual): bool
     {
-        if (!$statusAtual) {
+        if (! $statusAtual) {
             return false;
         }
 
@@ -222,7 +224,7 @@ class PedidoListResource extends JsonResource
 
     private function isStatusEntregue(?string $statusAtual): bool
     {
-        if (!$statusAtual) {
+        if (! $statusAtual) {
             return false;
         }
 

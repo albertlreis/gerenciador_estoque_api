@@ -35,16 +35,17 @@ use App\Integrations\GoogleCalendar\Auth\GoogleCalendarOAuthService;
 use App\Integrations\GoogleCalendar\Clients\GoogleCalendarClient;
 use App\Integrations\GoogleCalendar\Services\GoogleCalendarConnectionService;
 use App\Integrations\GoogleCalendar\Services\GoogleCalendarEventService;
-use App\Repositories\Contracts\ContaPagarRepository;
-use App\Repositories\Eloquent\ContaPagarRepositoryEloquent;
-use App\Services\AuditoriaLogService;
-use App\Services\FinanceiroLedgerService;
-use App\Services\Google\NullGoogleCalendarSyncService;
-use App\Services\Dashboard\DashboardCacheVersion;
 use App\Models\Consignacao;
 use App\Models\Estoque;
 use App\Models\Pedido;
 use App\Models\ProdutoEntregaItem;
+use App\Repositories\Contracts\ContaPagarRepository;
+use App\Repositories\Eloquent\ContaPagarRepositoryEloquent;
+use App\Services\AuditoriaLogService;
+use App\Services\Dashboard\DashboardCacheVersion;
+use App\Services\FinanceiroLedgerService;
+use App\Services\Google\NullGoogleCalendarSyncService;
+use App\Services\PedidoStatusFluxoService;
 use Illuminate\Database\QueryException;
 use Illuminate\Filesystem\Filesystem;
 use Illuminate\Support\Facades\DB;
@@ -63,6 +64,7 @@ class AppServiceProvider extends ServiceProvider
     {
         $this->app->bind(ContaPagarRepository::class, ContaPagarRepositoryEloquent::class);
         $this->app->bind(GoogleCalendarSyncServiceInterface::class, NullGoogleCalendarSyncService::class);
+        $this->app->scoped(PedidoStatusFluxoService::class, fn () => new PedidoStatusFluxoService);
 
         $this->app->singleton(BancoDoBrasilExtratosClient::class, function ($app) {
             return new BancoDoBrasilExtratosClient($app['config']->get('banco_do_brasil.extratos', []));
@@ -84,23 +86,23 @@ class AppServiceProvider extends ServiceProvider
             );
         });
 
-        $this->app->singleton(ContaAzulPessoaMapper::class, fn () => new ContaAzulPessoaMapper());
-        $this->app->singleton(ContaAzulProdutoMapper::class, fn () => new ContaAzulProdutoMapper());
-        $this->app->singleton(ContaAzulPedidoMapper::class, fn () => new ContaAzulPedidoMapper());
-        $this->app->singleton(ContaAzulTituloMapper::class, fn () => new ContaAzulTituloMapper());
-        $this->app->singleton(ContaAzulBaixaMapper::class, fn () => new ContaAzulBaixaMapper());
-        $this->app->singleton(ContaAzulContaPagarMapper::class, fn () => new ContaAzulContaPagarMapper());
-        $this->app->singleton(ContaAzulBaixaContaPagarMapper::class, fn () => new ContaAzulBaixaContaPagarMapper());
-        $this->app->singleton(ContaAzulCobrancaMapper::class, fn () => new ContaAzulCobrancaMapper());
-        $this->app->singleton(PessoaContaAzulImportAdapter::class, fn () => new PessoaContaAzulImportAdapter());
-        $this->app->singleton(ProdutoContaAzulImportAdapter::class, fn () => new ProdutoContaAzulImportAdapter());
-        $this->app->singleton(VendaContaAzulImportAdapter::class, fn () => new VendaContaAzulImportAdapter());
-        $this->app->singleton(TituloContaAzulImportAdapter::class, fn () => new TituloContaAzulImportAdapter());
-        $this->app->singleton(ContaPagarContaAzulImportAdapter::class, fn () => new ContaPagarContaAzulImportAdapter());
-        $this->app->singleton(NotaContaAzulImportAdapter::class, fn () => new NotaContaAzulImportAdapter());
-        $this->app->singleton(ContaFinanceiraContaAzulImportAdapter::class, fn () => new ContaFinanceiraContaAzulImportAdapter());
-        $this->app->singleton(CategoriaFinanceiraContaAzulImportAdapter::class, fn () => new CategoriaFinanceiraContaAzulImportAdapter());
-        $this->app->singleton(CentroCustoContaAzulImportAdapter::class, fn () => new CentroCustoContaAzulImportAdapter());
+        $this->app->singleton(ContaAzulPessoaMapper::class, fn () => new ContaAzulPessoaMapper);
+        $this->app->singleton(ContaAzulProdutoMapper::class, fn () => new ContaAzulProdutoMapper);
+        $this->app->singleton(ContaAzulPedidoMapper::class, fn () => new ContaAzulPedidoMapper);
+        $this->app->singleton(ContaAzulTituloMapper::class, fn () => new ContaAzulTituloMapper);
+        $this->app->singleton(ContaAzulBaixaMapper::class, fn () => new ContaAzulBaixaMapper);
+        $this->app->singleton(ContaAzulContaPagarMapper::class, fn () => new ContaAzulContaPagarMapper);
+        $this->app->singleton(ContaAzulBaixaContaPagarMapper::class, fn () => new ContaAzulBaixaContaPagarMapper);
+        $this->app->singleton(ContaAzulCobrancaMapper::class, fn () => new ContaAzulCobrancaMapper);
+        $this->app->singleton(PessoaContaAzulImportAdapter::class, fn () => new PessoaContaAzulImportAdapter);
+        $this->app->singleton(ProdutoContaAzulImportAdapter::class, fn () => new ProdutoContaAzulImportAdapter);
+        $this->app->singleton(VendaContaAzulImportAdapter::class, fn () => new VendaContaAzulImportAdapter);
+        $this->app->singleton(TituloContaAzulImportAdapter::class, fn () => new TituloContaAzulImportAdapter);
+        $this->app->singleton(ContaPagarContaAzulImportAdapter::class, fn () => new ContaPagarContaAzulImportAdapter);
+        $this->app->singleton(NotaContaAzulImportAdapter::class, fn () => new NotaContaAzulImportAdapter);
+        $this->app->singleton(ContaFinanceiraContaAzulImportAdapter::class, fn () => new ContaFinanceiraContaAzulImportAdapter);
+        $this->app->singleton(CategoriaFinanceiraContaAzulImportAdapter::class, fn () => new CategoriaFinanceiraContaAzulImportAdapter);
+        $this->app->singleton(CentroCustoContaAzulImportAdapter::class, fn () => new CentroCustoContaAzulImportAdapter);
 
         $this->app->singleton(ImportacaoContaAzulService::class, function ($app) {
             return new ImportacaoContaAzulService(
@@ -225,7 +227,7 @@ class AppServiceProvider extends ServiceProvider
 
     private function ensureWritablePaths(): void
     {
-        $filesystem = new Filesystem();
+        $filesystem = new Filesystem;
 
         foreach ([
             storage_path('framework/cache/data'),

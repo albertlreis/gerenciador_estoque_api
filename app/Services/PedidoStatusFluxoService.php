@@ -33,11 +33,18 @@ class PedidoStatusFluxoService
         'finalizado',
     ];
 
-    private static ?Collection $catalogoCache = null;
+    private ?Collection $catalogoCache = null;
+
+    /** @var array<string, Collection<int, array<string, mixed>>> */
+    private array $fluxoCache = [];
+
+    private ?bool $tabelasConfiguraveisCache = null;
 
     public function limparCache(): void
     {
-        self::$catalogoCache = null;
+        $this->catalogoCache = null;
+        $this->fluxoCache = [];
+        $this->tabelasConfiguraveisCache = null;
     }
 
     public function catalogo(bool $incluirInativos = false): Collection
@@ -167,6 +174,11 @@ class PedidoStatusFluxoService
     public function fluxoDetalhadoPorTipo(string $tipo, bool $somenteAtivos = true): Collection
     {
         $tipo = $this->normalizarTipoFluxo($tipo);
+        $cacheKey = $tipo.'|'.($somenteAtivos ? 'ativos' : 'todos');
+
+        if (isset($this->fluxoCache[$cacheKey])) {
+            return $this->fluxoCache[$cacheKey];
+        }
 
         if ($this->tabelasConfiguraveisDisponiveis()) {
             $query = PedidoStatusFluxoItem::query()
@@ -182,14 +194,14 @@ class PedidoStatusFluxoService
             $itens = $query->get();
 
             if ($itens->isNotEmpty()) {
-                return $itens
+                return $this->fluxoCache[$cacheKey] = $itens
                     ->filter(fn (PedidoStatusFluxoItem $item) => $item->statusDefinicao !== null)
                     ->map(fn (PedidoStatusFluxoItem $item) => $this->itemFluxoParaArray($item))
                     ->values();
             }
         }
 
-        return $this->fluxoLegadoDetalhado($tipo, $somenteAtivos);
+        return $this->fluxoCache[$cacheKey] = $this->fluxoLegadoDetalhado($tipo, $somenteAtivos);
     }
 
     public function codigosFluxo(Pedido $pedido, bool $somenteAtivos = true): array
@@ -202,8 +214,7 @@ class PedidoStatusFluxoService
 
     public function opcoesDisponiveis(Pedido $pedido): Collection
     {
-        $registrados = $pedido->historicoStatus()
-            ->pluck('status')
+        $registrados = $this->statusRegistrados($pedido)
             ->map(fn ($status) => $this->normalizarStatus($status))
             ->filter()
             ->unique()
@@ -252,8 +263,7 @@ class PedidoStatusFluxoService
             return $fluxo->get($indiceAtual + 1);
         }
 
-        $registrados = $pedido->historicoStatus()
-            ->pluck('status')
+        $registrados = $this->statusRegistrados($pedido)
             ->map(fn ($status) => $this->normalizarStatus($status))
             ->filter()
             ->unique();
@@ -282,8 +292,11 @@ class PedidoStatusFluxoService
 
     public function previsoes(Pedido $pedido, array $previsoesManuais = []): array
     {
-        $datas = $pedido->historicoStatus()
-            ->get(['status', 'data_status'])
+        $historico = $pedido->relationLoaded('historicoStatus')
+            ? $pedido->historicoStatus
+            : $pedido->historicoStatus()->get(['status', 'data_status']);
+
+        $datas = $historico
             ->mapWithKeys(fn ($item) => [
                 (string) $item->getRawOriginal('status') => $item->data_status,
             ])
@@ -386,18 +399,32 @@ class PedidoStatusFluxoService
         return in_array($tipo, self::TIPOS_FLUXO, true) ? $tipo : self::TIPO_VENDA;
     }
 
+    private function statusRegistrados(Pedido $pedido): Collection
+    {
+        if ($pedido->relationLoaded('historicoStatus')) {
+            return $pedido->historicoStatus
+                ->map(fn ($item) => $item->getRawOriginal('status') ?: $item->status);
+        }
+
+        return $pedido->historicoStatus()->pluck('status');
+    }
+
     public function tabelasConfiguraveisDisponiveis(): bool
     {
+        if ($this->tabelasConfiguraveisCache !== null) {
+            return $this->tabelasConfiguraveisCache;
+        }
+
         $schema = DB::connection()->getSchemaBuilder();
 
-        return $schema->hasTable('pedido_statuses')
+        return $this->tabelasConfiguraveisCache = $schema->hasTable('pedido_statuses')
             && $schema->hasTable('pedido_status_fluxo_itens');
     }
 
     private function catalogoCompleto(): Collection
     {
-        if (self::$catalogoCache instanceof Collection) {
-            return self::$catalogoCache;
+        if ($this->catalogoCache instanceof Collection) {
+            return $this->catalogoCache;
         }
 
         if ($this->tabelasConfiguraveisDisponiveis()) {
@@ -406,11 +433,11 @@ class PedidoStatusFluxoService
                 ->get();
 
             if ($catalogo->isNotEmpty()) {
-                return self::$catalogoCache = $catalogo;
+                return $this->catalogoCache = $catalogo;
             }
         }
 
-        return self::$catalogoCache = collect(self::statusLegados())
+        return $this->catalogoCache = collect(self::statusLegados())
             ->map(fn (array $status) => new PedidoStatusDefinicao($status + [
                 'ativo' => true,
                 'sistema' => true,

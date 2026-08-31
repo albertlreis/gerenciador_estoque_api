@@ -2,8 +2,8 @@
 
 namespace App\Services;
 
-use App\Helpers\AuthHelper;
 use App\DTOs\FiltroEstoqueDTO;
+use App\Helpers\AuthHelper;
 use App\Repositories\EstoqueRepository;
 use Illuminate\Support\Facades\DB;
 
@@ -25,9 +25,18 @@ class EstoqueResumoService
     {
         $query = $this->estoqueRepository->queryBase($filtros);
         $baseSub = DB::query()->fromSub((clone $query)->toBase(), 'estoque_base');
+        $podeVisualizarValor = AuthHelper::hasPermissao('pedidos.visualizar.todos');
+        $agregadosQuery = (clone $baseSub)->selectRaw(
+            'COUNT(DISTINCT produto_id) AS total_produtos, COALESCE(SUM(quantidade_estoque), 0) AS total_pecas'
+        );
 
-        $totalProdutos = (int) (clone $baseSub)->distinct()->count('produto_id');
-        $totalPecas = (int) ((clone $baseSub)->sum('quantidade_estoque') ?? 0);
+        if ($podeVisualizarValor) {
+            $agregadosQuery->selectRaw(
+                'COALESCE(SUM(COALESCE(quantidade_estoque, 0) * COALESCE(custo, 0)), 0) AS total_valor_estoque'
+            );
+        }
+
+        $agregados = $agregadosQuery->first();
 
         $variacoesSub = DB::query()
             ->fromSub((clone $query)->toBase(), 'estoque_base')
@@ -39,21 +48,18 @@ class EstoqueResumoService
         if ($filtros->deposito) {
             $depositosQuery->where('e.id_deposito', (int) $filtros->deposito);
         }
-        if (!$filtros->zerados) {
+        if (! $filtros->zerados) {
             $depositosQuery->where('e.quantidade', '>', 0);
         }
 
         $resumo = [
-            'totalProdutos'  => $totalProdutos,
-            'totalPecas'     => $totalPecas,
+            'totalProdutos' => (int) ($agregados->total_produtos ?? 0),
+            'totalPecas' => (int) ($agregados->total_pecas ?? 0),
             'totalDepositos' => (int) $depositosQuery->distinct()->count('e.id_deposito'),
         ];
 
-        if (AuthHelper::hasPermissao('pedidos.visualizar.todos')) {
-            $totalValorEstoque = (float) (
-                (clone $baseSub)->sum(DB::raw('COALESCE(quantidade_estoque, 0) * COALESCE(custo, 0)')) ?? 0
-            );
-            $resumo['totalValorEstoque'] = $totalValorEstoque;
+        if ($podeVisualizarValor) {
+            $resumo['totalValorEstoque'] = (float) ($agregados->total_valor_estoque ?? 0);
         }
 
         return $resumo;

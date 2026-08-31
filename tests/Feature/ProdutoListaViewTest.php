@@ -238,7 +238,7 @@ class ProdutoListaViewTest extends TestCase
 
         DB::flushQueryLog();
         DB::enableQueryLog();
-        $response = $this->getJson('/api/v1/produtos?view=catalogo');
+        $response = $this->getJson('/api/v1/produtos?view=catalogo&q=Produto%20Catalogo');
         $queryCount = count(DB::getQueryLog());
         DB::disableQueryLog();
 

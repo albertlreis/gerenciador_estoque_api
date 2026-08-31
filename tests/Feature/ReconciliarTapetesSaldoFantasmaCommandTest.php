@@ -20,6 +20,7 @@ use App\Models\ProdutoVariacao;
 use App\Models\Usuario;
 use App\Services\EstoqueMovimentacaoService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
@@ -49,11 +50,13 @@ class ReconciliarTapetesSaldoFantasmaCommandTest extends TestCase
         $this->assertSame(24, $this->saldo($cenario['gatsby'], $cenario['jb']));
         $this->assertSame(1, $this->saldo($cenario['organico'], $cenario['loja']));
 
-        $this->artisan('estoque:reconciliar-tapetes-saldo-fantasma', [
+        $exitCode = Artisan::call('estoque:reconciliar-tapetes-saldo-fantasma', [
             '--aplicar' => true,
             '--confirmacao' => '10665:10.9884-4',
-        ])->expectsOutputToContain('Reconciliacao aplicada com sucesso')
-            ->assertExitCode(0);
+        ]);
+        $output = Artisan::output();
+        $this->assertSame(0, $exitCode, $output);
+        $this->assertStringContainsString('Reconciliacao aplicada com sucesso', $output);
 
         $this->assertSame(1, $this->saldo($cenario['geometria'], $cenario['jb']));
         $this->assertSame(1, $this->saldo($cenario['gatsby'], $cenario['jb']));

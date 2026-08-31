@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
 
 class Estoque extends Model
@@ -45,6 +46,10 @@ class Estoque extends Model
 
     public function quantidadeReservadaAberta(): int
     {
+        if (array_key_exists('quantidade_reservada_aberta', $this->attributes)) {
+            return (int) $this->attributes['quantidade_reservada_aberta'];
+        }
+
         $query = DB::table('estoque_reservas')
             ->where('id_variacao', $this->id_variacao)
             ->where('status', 'ativa')
@@ -60,6 +65,21 @@ class Estoque extends Model
         }
 
         return (int) $query->sum(DB::raw('CASE WHEN quantidade > quantidade_consumida THEN quantidade - quantidade_consumida ELSE 0 END'));
+    }
+
+    public function scopeWithQuantidadeReservadaAberta(Builder $query): Builder
+    {
+        return $query->select('estoque.*')->selectSub(function ($query) {
+            $query->from('estoque_reservas')
+                ->selectRaw('COALESCE(SUM(CASE WHEN quantidade > quantidade_consumida THEN quantidade - quantidade_consumida ELSE 0 END), 0)')
+                ->whereColumn('estoque_reservas.id_variacao', 'estoque.id_variacao')
+                ->whereColumn('estoque_reservas.id_deposito', 'estoque.id_deposito')
+                ->where('estoque_reservas.status', 'ativa')
+                ->where(function ($query) {
+                    $query->whereNull('estoque_reservas.data_expira')
+                        ->orWhere('estoque_reservas.data_expira', '>', now());
+                });
+        }, 'quantidade_reservada_aberta');
     }
 
     public function quantidadeDisponivelComReservas(): int

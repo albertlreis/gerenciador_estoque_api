@@ -331,7 +331,8 @@ class ConsignacaoRoteiroPdfTest extends TestCase
             'status' => ProdutoEntregaItem::STATUS_RESERVADO,
         ]);
 
-        $response = $this->post("/api/v1/consignacoes/pedidos/{$pedidoId}/devolucoes/roteiro", [
+        $response = $this->withHeader('Idempotency-Key', 'roteiro-persistir-1')
+            ->post("/api/v1/consignacoes/pedidos/{$pedidoId}/devolucoes/roteiro", [
             'itens' => [[
                 'consignacao_id' => $consignacao->id,
                 'quantidade' => 2,
@@ -355,7 +356,8 @@ class ConsignacaoRoteiroPdfTest extends TestCase
         [$pedidoId] = $this->criarPedidoConsignado('pendente', PedidoStatus::CONSIGNADO);
         [, $consignacaoDeOutroPedido, $deposito] = $this->criarPedidoConsignado('pendente', PedidoStatus::CONSIGNADO);
 
-        $response = $this->postJson("/api/v1/consignacoes/pedidos/{$pedidoId}/devolucoes/roteiro", [
+        $response = $this->withHeader('Idempotency-Key', 'roteiro-outro-pedido-1')
+            ->postJson("/api/v1/consignacoes/pedidos/{$pedidoId}/devolucoes/roteiro", [
             'itens' => [[
                 'consignacao_id' => $consignacaoDeOutroPedido->id,
                 'quantidade' => 1,
@@ -397,7 +399,8 @@ class ConsignacaoRoteiroPdfTest extends TestCase
             'quantidade' => 1,
         ]);
 
-        $response = $this->post("/api/v1/consignacoes/pedidos/{$pedidoId}/devolucoes/roteiro", [
+        $response = $this->withHeader('Idempotency-Key', 'roteiro-historico-1')
+            ->post("/api/v1/consignacoes/pedidos/{$pedidoId}/devolucoes/roteiro", [
             'itens' => [[
                 'consignacao_id' => $consignacao->id,
                 'quantidade' => 1,
@@ -415,7 +418,8 @@ class ConsignacaoRoteiroPdfTest extends TestCase
     {
         [$pedidoId, $consignacao, $deposito] = $this->criarPedidoConsignado('pendente', PedidoStatus::CONSIGNADO);
 
-        $this->postJson("/api/v1/consignacoes/pedidos/{$pedidoId}/devolucoes/roteiro", [
+        $this->withHeader('Idempotency-Key', 'roteiro-saldo-1')
+            ->postJson("/api/v1/consignacoes/pedidos/{$pedidoId}/devolucoes/roteiro", [
             'itens' => [[
                 'consignacao_id' => $consignacao->id,
                 'quantidade' => 2,
@@ -424,7 +428,8 @@ class ConsignacaoRoteiroPdfTest extends TestCase
         ])->assertUnprocessable()->assertJsonValidationErrors('itens');
 
         $consignacao->update(['status' => 'devolvido']);
-        $this->postJson("/api/v1/consignacoes/pedidos/{$pedidoId}/devolucoes/roteiro", [
+        $this->withHeader('Idempotency-Key', 'roteiro-finalizado-1')
+            ->postJson("/api/v1/consignacoes/pedidos/{$pedidoId}/devolucoes/roteiro", [
             'itens' => [[
                 'consignacao_id' => $consignacao->id,
                 'quantidade' => 1,
@@ -432,7 +437,8 @@ class ConsignacaoRoteiroPdfTest extends TestCase
             ]],
         ])->assertUnprocessable()->assertJsonValidationErrors('itens');
 
-        $this->postJson("/api/v1/consignacoes/pedidos/{$pedidoId}/devolucoes/roteiro", [
+        $this->withHeader('Idempotency-Key', 'roteiro-deposito-1')
+            ->postJson("/api/v1/consignacoes/pedidos/{$pedidoId}/devolucoes/roteiro", [
             'itens' => [[
                 'consignacao_id' => $consignacao->id,
                 'quantidade' => 1,

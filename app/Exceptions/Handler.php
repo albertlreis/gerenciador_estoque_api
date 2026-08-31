@@ -27,6 +27,7 @@ class Handler extends ExceptionHandler
      */
     protected $dontReport = [
         ContaAzulException::class,
+        PedidoConversaoRequerReconciliacaoException::class,
     ];
 
     /**

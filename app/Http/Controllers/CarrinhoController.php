@@ -32,10 +32,9 @@ class CarrinhoController extends Controller
             $carrinho->with([
                 'usuario:id,nome',
                 'cliente',
-                'itens.variacao.outlet',
                 'itens.variacao.outlets',
                 'itens.variacao.estoques' => function ($q) {
-                    $q->with(['deposito', 'localizacao']);
+                    $q->withQuantidadeReservadaAberta()->with(['deposito', 'localizacao']);
                 },
                 'itens.variacao.atributos',
                 'itens.variacao.produto.imagemPrincipal',
@@ -57,7 +56,7 @@ class CarrinhoController extends Controller
             'cliente',
             'itens.variacao.produto.imagemPrincipal',
             'itens.variacao.estoques' => function ($q) {
-                $q->with(['deposito', 'localizacao']);
+                $q->withQuantidadeReservadaAberta()->with(['deposito', 'localizacao']);
             },
             'itens.variacao.atributos',
         ])->where('id', $id);

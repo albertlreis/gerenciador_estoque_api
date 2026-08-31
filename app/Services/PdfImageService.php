@@ -6,7 +6,9 @@ use App\Models\ProdutoImagem;
 use App\Models\Produto;
 use App\Models\ProdutoVariacao;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Facade;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -51,12 +53,17 @@ class PdfImageService
         if ($relativePath !== null && Storage::disk('public')->exists($relativePath)) {
             $absolutePath = Storage::disk('public')->path($relativePath);
             if (is_file($absolutePath)) {
-                $raw = @file_get_contents($absolutePath);
-                if ($raw !== false) {
-                    $dataUri = $this->dataUriFromBytes($raw, File::mimeType($absolutePath) ?: null);
-                    if ($dataUri !== null) {
-                        return $dataUri;
-                    }
+                $cacheKey = 'pdf-image:v1:' . hash('sha256', implode('|', [
+                    $absolutePath,
+                    (string) (@filesize($absolutePath) ?: 0),
+                    (string) (@filemtime($absolutePath) ?: 0),
+                ]));
+                $dataUri = Cache::remember($cacheKey, now()->addDay(), function () use ($absolutePath) {
+                    $raw = @file_get_contents($absolutePath);
+                    return $raw === false ? null : $this->dataUriFromBytes($raw, File::mimeType($absolutePath) ?: null);
+                });
+                if (is_string($dataUri) && $dataUri !== '') {
+                    return $dataUri;
                 }
             }
         }
@@ -278,6 +285,13 @@ class PdfImageService
             return $this->catalogCardDataUris[$cacheKey];
         }
 
+        $facadeApp = Facade::getFacadeApplication();
+        $cache = $facadeApp !== null && $facadeApp->bound('cache') ? Cache::getFacadeRoot() : null;
+        $persistent = $cache?->get('pdf-catalog-card:v1:' . $cacheKey);
+        if (is_string($persistent) && $persistent !== '') {
+            return $this->catalogCardDataUris[$cacheKey] = $persistent;
+        }
+
         if (!preg_match('#^data:image/(?:png|jpeg|gif|webp);base64,(.+)$#s', $dataUri, $matches)) {
             return $this->catalogCardDataUris[$cacheKey] = null;
         }
@@ -347,7 +361,9 @@ class PdfImageService
                 return $this->catalogCardDataUris[$cacheKey] = null;
             }
 
-            return $this->catalogCardDataUris[$cacheKey] = 'data:image/jpeg;base64,' . base64_encode($jpeg);
+            $normalized = 'data:image/jpeg;base64,' . base64_encode($jpeg);
+            $cache?->put('pdf-catalog-card:v1:' . $cacheKey, $normalized, now()->addDay());
+            return $this->catalogCardDataUris[$cacheKey] = $normalized;
         } catch (Throwable) {
             return $this->catalogCardDataUris[$cacheKey] = null;
         } finally {

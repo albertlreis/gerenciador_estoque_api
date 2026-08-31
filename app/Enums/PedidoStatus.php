@@ -12,6 +12,7 @@ enum PedidoStatus: string
     case NOTA_RECEBIDA_COMPRA = 'nota_recebida_compra';
     case PREVISAO_ENTREGA_ESTOQUE = 'previsao_entrega_estoque';
     case ENTREGA_ESTOQUE = 'entrega_estoque';
+    case ENTREGA_PENDENTE = 'entrega_pendente';
     case PREVISAO_ENVIO_CLIENTE = 'previsao_envio_cliente';
     case ENVIO_CLIENTE = 'envio_cliente';
     case ENTREGA_CLIENTE = 'entrega_cliente';
@@ -31,6 +32,7 @@ enum PedidoStatus: string
             self::NOTA_RECEBIDA_COMPRA => 'Nota Recebida (Compra)',
             self::PREVISAO_ENTREGA_ESTOQUE => 'Previsão de Entrega ao Estoque',
             self::ENTREGA_ESTOQUE => 'Entrega ao Estoque',
+            self::ENTREGA_PENDENTE => 'Entrega Pendente',
             self::PREVISAO_ENVIO_CLIENTE => 'Previsão de Envio ao Cliente',
             self::ENVIO_CLIENTE => 'Envio ao Cliente',
             self::ENTREGA_CLIENTE => 'Entrega ao Cliente',

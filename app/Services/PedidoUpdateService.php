@@ -34,6 +34,7 @@ class PedidoUpdateService
     public function __construct(
         private readonly PedidoPrazoService $prazoService,
         private readonly EntregaProdutoService $entregaProdutoService,
+        private readonly PedidoTipoConversaoService $tipoConversaoService,
         private readonly ContaAzulExportDispatchService $contaAzulExports,
         private readonly AuditoriaEventoService $auditoria,
     ) {}
@@ -53,6 +54,17 @@ class PedidoUpdateService
             $itensInput = array_key_exists('itens', $data) ? (array) $data['itens'] : null;
             $itensAntigos = $pedido->itens()->get();
 
+            $exigeReconciliacao = $this->tipoConversaoService->exigeReconciliacao($pedido, $data);
+            if ($exigeReconciliacao) {
+                $this->tipoConversaoService->validarOuFalhar(
+                    $pedido,
+                    isset($data['conversao_fluxo']) && is_array($data['conversao_fluxo'])
+                        ? $data['conversao_fluxo']
+                        : null,
+                    $data
+                );
+            }
+
             $this->atualizarCabecalho($pedido, $data);
 
             $itensNovos = null;
@@ -71,6 +83,15 @@ class PedidoUpdateService
                 $this->entregaProdutoService->reconciliarPedidoEditado(
                     $pedido,
                     AuthHelper::getUsuarioId() ? (int) AuthHelper::getUsuarioId() : null
+                );
+            }
+
+            $conversaoResultado = null;
+            if ($exigeReconciliacao) {
+                $conversaoResultado = $this->tipoConversaoService->aplicar(
+                    $pedido,
+                    (array) $data['conversao_fluxo'],
+                    $usuarioId
                 );
             }
 
@@ -98,7 +119,8 @@ class PedidoUpdateService
                 $itensResumoAntes,
                 $this->itensResumo($pedido->itens),
                 $diffs,
-                $usuarioId
+                $usuarioId,
+                $conversaoResultado
             );
 
             return $pedido;
@@ -379,7 +401,8 @@ class PedidoUpdateService
         array $itensAntes,
         array $itensDepois,
         ?array $estoqueDiffs,
-        ?int $usuarioId
+        ?int $usuarioId,
+        ?array $conversaoResultado = null
     ): void {
         $mudancas = AuditoriaDiff::modelChanges($before, $after, self::PEDIDO_AUDIT_FIELDS);
         $mudancas = array_merge(
@@ -396,6 +419,7 @@ class PedidoUpdateService
             metadata: array_filter([
                 'usuario_id' => $usuarioId,
                 'estoque_diffs' => $estoqueDiffs,
+                'conversao_fluxo' => $conversaoResultado,
             ], fn ($value) => $value !== null && $value !== [])
         );
     }

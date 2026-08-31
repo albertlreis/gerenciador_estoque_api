@@ -323,6 +323,7 @@ class ProdutoEntregaCentralTest extends TestCase
 
         $response = $this->postJson("/api/v1/pedidos/{$pedido->id}/pdf/nota-entrega", [
             'registrar_entrega' => false,
+            'idempotency_key' => 'nota-documental-sem-registro',
             'observacao' => 'Nota sem registro operacional',
             'itens' => [
                 [
@@ -355,6 +356,7 @@ class ProdutoEntregaCentralTest extends TestCase
 
         $response = $this->postJson("/api/v1/pedidos/{$pedido->id}/pdf/nota-entrega", [
             'registrar_entrega' => false,
+            'idempotency_key' => 'nota-documental-sem-saldo',
             'observacao' => 'PDF documental sem saldo',
             'itens' => [
                 [
@@ -452,6 +454,7 @@ class ProdutoEntregaCentralTest extends TestCase
 
         $payload = [
             'registrar_entrega' => false,
+            'idempotency_key' => 'nota-endereco-obrigatorio',
             'itens' => [
                 [
                     'produto_entrega_item_id' => $entrega->id,
@@ -466,6 +469,7 @@ class ProdutoEntregaCentralTest extends TestCase
 
         $this->postJson("/api/v1/pedidos/{$pedido->id}/pdf/nota-entrega", $payload + [
             'cliente_endereco_id' => $enderecoEscolhido->id,
+            'idempotency_key' => 'nota-endereco-selecionado',
         ])->assertOk();
     }
 
@@ -672,6 +676,7 @@ class ProdutoEntregaCentralTest extends TestCase
 
         $this->postJson("/api/v1/pedidos/{$pedido->id}/pdf/nota-entrega", [
             'registrar_entrega' => false,
+            'idempotency_key' => 'nota-reimpressao-documental',
             'observacao' => 'Reimpressao da nota',
             'itens' => [
                 [
@@ -722,6 +727,7 @@ class ProdutoEntregaCentralTest extends TestCase
 
         $this->postJson("/api/v1/pedidos/{$pedido->id}/pdf/nota-entrega", [
             'registrar_entrega' => false,
+            'idempotency_key' => 'reimpressao-quantidade-invalida',
             'itens' => [
                 [
                     'produto_entrega_item_id' => $entrega->id,
@@ -814,6 +820,7 @@ class ProdutoEntregaCentralTest extends TestCase
 
         $this->postJson("/api/v1/pedidos/{$pedido->id}/pdf/nota-entrega", [
             'registrar_entrega' => false,
+            'idempotency_key' => 'nota-quantidade-acima-pendente',
             'itens' => [
                 [
                     'produto_entrega_item_id' => $entrega->id,
@@ -825,6 +832,7 @@ class ProdutoEntregaCentralTest extends TestCase
 
         $this->postJson("/api/v1/pedidos/{$pedido->id}/pdf/nota-entrega", [
             'registrar_entrega' => false,
+            'idempotency_key' => 'nota-item-outro-pedido',
             'itens' => [
                 [
                     'produto_entrega_item_id' => $entregaOutroPedido->id,

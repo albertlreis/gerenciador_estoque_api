@@ -294,7 +294,8 @@ class DashboardService
     private function profileCacheKey(string $profile, int $usuarioId, array $resolved): string
     {
         return sprintf(
-            'dashboard:%s:%d:%s:%s:%s:%s:%d:%s',
+            'dashboard:v%d:%s:%d:%s:%s:%s:%s:%d:%s',
+            DashboardCacheVersion::current(),
             $profile,
             $usuarioId,
             $resolved['period'],
@@ -387,7 +388,8 @@ class DashboardService
     private function seriesCacheKey(int $usuarioId, array $resolved): string
     {
         return sprintf(
-            'dashboard:series:comercial:%d:%s:%s:%s:%s:%d',
+            'dashboard:v%d:series:comercial:%d:%s:%s:%s:%s:%d',
+            DashboardCacheVersion::current(),
             $usuarioId,
             $resolved['period'],
             $resolved['inicio']->toDateString(),
@@ -399,19 +401,15 @@ class DashboardService
 
     private function remember(string $cacheKey, bool $fresh, callable $callback): array
     {
-        $debug = (bool) env('DASHBOARD_DEBUG', false);
-
-        $run = function () use ($callback, $cacheKey, $debug) {
+        $run = function () use ($callback, $cacheKey) {
             $start = microtime(true);
             $result = $callback();
             $elapsedMs = (int) round((microtime(true) - $start) * 1000);
 
-            if ($debug) {
-                SierraLog::debug('dashboard.query_timing', [
-                    'cache_key' => $cacheKey,
-                    'elapsed_ms' => $elapsedMs,
-                ]);
-            }
+            SierraLog::info('dashboard.query_timing', [
+                'cache_key_hash' => sha1($cacheKey),
+                'elapsed_ms' => $elapsedMs,
+            ]);
 
             return $result;
         };
@@ -421,6 +419,11 @@ class DashboardService
         }
 
         $ttlSeconds = max((int) config('dashboard.cache.ttl_seconds', 300), 60);
+        SierraLog::info('dashboard.cache_lookup', [
+            'cache_key_hash' => sha1($cacheKey),
+            'cache_hit' => Cache::has($cacheKey),
+            'ttl_seconds' => $ttlSeconds,
+        ]);
 
         return Cache::remember($cacheKey, now()->addSeconds($ttlSeconds), $run);
     }

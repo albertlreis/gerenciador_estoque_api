@@ -9,6 +9,7 @@ use App\Domain\Importacao\DTO\ProdutoImportadoDTO;
 use App\Domain\Importacao\Services\ImportacaoProdutosService;
 use App\Http\Resources\ProdutoMiniResource;
 use App\Http\Resources\ProdutoListaResource;
+use App\Http\Resources\ProdutoCatalogoResource;
 use App\Http\Resources\ProdutoSimplificadoResource;
 use App\Services\LogService;
 use App\Services\OutletCatalogoPricingService;
@@ -130,7 +131,7 @@ class ProdutoController extends Controller
     /**
      * Endpoint unificado de listagem e busca de produtos.
      * Aceita filtros e modos contextuais (com/sem estoque, depósito, outlet, etc).
-     * Aceita ?view=completa|simplificada|minima
+     * Aceita ?view=completa|simplificada|minima|lista|catalogo
      *
      * Exemplo:
      *  GET /produtos?q=mesa&deposito_id=2&incluir_estoque=true
@@ -138,7 +139,7 @@ class ProdutoController extends Controller
     public function index(FiltrarProdutosRequest $request): JsonResponse
     {
         $view = $request->get('view', 'completa');
-        $incluirEstoque = in_array($view, ['completa', 'simplificada', 'lista'])
+        $incluirEstoque = in_array($view, ['completa', 'simplificada', 'lista', 'catalogo'])
             || $request->filled('deposito_id')
             || $request->boolean('com_estoque');
         $request->merge(['incluir_estoque' => $incluirEstoque]);
@@ -146,6 +147,7 @@ class ProdutoController extends Controller
         $produtos = $this->produtoService->listarProdutosFiltrados($request);
 
         return match ($view) {
+            'catalogo' => ProdutoCatalogoResource::collection($produtos)->response(),
             'lista' => ProdutoListaResource::collection($produtos)->response(),
             'minima' => ProdutoMiniResource::collection($produtos)->response(),
             'simplificada' => ProdutoSimplificadoResource::collection($produtos)->response(),

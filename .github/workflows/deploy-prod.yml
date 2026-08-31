@@ -1,6 +1,9 @@
 name: Deploy Production
 
 on:
+  pull_request:
+    branches:
+      - master
   push:
     branches:
       - master
@@ -123,6 +126,7 @@ jobs:
         run: docker rm -f estoque-test-mysql >/dev/null 2>&1 || true
 
   deploy:
+    if: github.event_name != 'pull_request'
     needs: test
     runs-on: ubuntu-latest
     environment: production
@@ -149,8 +153,7 @@ jobs:
             deploy_args="--migrate"
           fi
 
-          compose_fix_cmd="if [ -f docker-compose.yml ]; then cp docker-compose.yml docker-compose.yml.bak-version-obsolete && sed -i '/^version:/d' docker-compose.yml; fi"
-          remote_command="cd /home/docker/acadsoft/sierra-estoque && rm -f .deploy-state/estoque-api.rollback && repo_git_dir=\$(find . -maxdepth 3 -type d -name .git -print -quit) && repo_dir=\${repo_git_dir%/.git} && test -n \"\${repo_dir}\" && previous_sha=\$(git -C \"\${repo_dir}\" rev-parse HEAD) && ./html/scripts/backup-production.sh && git -C \"\${repo_dir}\" fetch origin master && git -C \"\${repo_dir}\" reset --hard origin/master && git -C \"\${repo_dir}\" clean -fd && ${compose_fix_cmd} && AUTO_ROLLBACK=true ROLLBACK_GIT_SHA=\${previous_sha} bash ./html/scripts/deploy.sh ${deploy_args} && docker-compose -f docker-compose.yml up -d --no-deps nginx && docker update --restart always sierra_estoque_nginx >/dev/null && docker exec sierra_estoque_app sh -lc 'mkdir -p /var/www/html/storage/framework/cache/data /var/www/html/storage/logs /var/www/html/bootstrap/cache && chown -R www-data:www-data /var/www/html/storage/framework/cache /var/www/html/storage/logs /var/www/html/bootstrap/cache && chmod -R ug+rwX /var/www/html/storage/framework/cache /var/www/html/storage/logs /var/www/html/bootstrap/cache'"
+          remote_command="cd /home/docker/acadsoft/sierra-estoque && rm -f .deploy-state/estoque-api.rollback && repo_git_dir=\$(find . -maxdepth 3 -type d -name .git -print -quit) && repo_dir=\${repo_git_dir%/.git} && test -n \"\${repo_dir}\" && previous_sha=\$(git -C \"\${repo_dir}\" rev-parse HEAD) && ./html/scripts/backup-production.sh && git -C \"\${repo_dir}\" fetch origin master && git -C \"\${repo_dir}\" reset --hard origin/master && git -C \"\${repo_dir}\" clean -fd && install -m 644 ./html/docker/prod/docker-compose.production.yml docker-compose.yml && install -m 644 ./html/docker/prod/nginx.conf nginx.conf && AUTO_ROLLBACK=true ROLLBACK_GIT_SHA=\${previous_sha} bash ./html/scripts/deploy.sh ${deploy_args} && docker-compose -f docker-compose.yml up -d --no-deps nginx && docker update --restart always sierra_estoque_nginx sierra_estoque_document_worker >/dev/null && docker exec sierra_estoque_app sh -lc 'mkdir -p /var/www/html/storage/framework/cache/data /var/www/html/storage/logs /var/www/html/bootstrap/cache && chown -R www-data:www-data /var/www/html/storage/framework/cache /var/www/html/storage/logs /var/www/html/bootstrap/cache && chmod -R ug+rwX /var/www/html/storage/framework/cache /var/www/html/storage/logs /var/www/html/bootstrap/cache'"
 
           ssh -p "${{ secrets.DEPLOY_PORT }}" "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" "${remote_command}"
 

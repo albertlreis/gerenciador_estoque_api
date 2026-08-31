@@ -4,7 +4,6 @@ namespace App\Http\Middleware;
 
 use App\Support\Logging\SierraLog;
 use Closure;
-use Illuminate\Http\UploadedFile;
 
 class LogRequests
 {
@@ -13,29 +12,14 @@ class LogRequests
         $response = $next($request);
 
         if (in_array($request->method(), ['POST', 'PUT', 'DELETE'])) {
-            $isGoogleCalendar = $request->is('api/v1/integrations/google-calendar/*')
-                || $request->is('v1/integrations/google-calendar/*');
-            $safePayload = [];
-
-            if (!$isGoogleCalendar) {
-                foreach ($request->input() as $key => $value) {
-                    if (is_array($value)) {
-                        $safePayload[$key] = array_map(function ($item) {
-                            return $item instanceof UploadedFile ? '[uploaded file]' : $item;
-                        }, $value);
-                    } else {
-                        $safePayload[$key] = $value instanceof UploadedFile ? '[uploaded file]' : $value;
-                    }
-                }
-            }
-
-            SierraLog::http('http.write_request_payload', [
-                'user' => $isGoogleCalendar ? null : auth()->user()?->email,
+            SierraLog::http('http.write_request', [
+                'user_id' => $request->user()?->id,
                 'method' => $request->method(),
-                'uri' => $isGoogleCalendar
-                    ? ($request->route()?->uri() ?? 'api/v1/integrations/google-calendar')
-                    : $request->getRequestUri(),
-                'payload' => $safePayload,
+                'route' => $request->route()?->uri() ?? $request->path(),
+                'field_names' => $this->safeFieldNames(array_keys($request->all())),
+                'item_count' => $this->itemCount($request->all()),
+                'request_bytes' => (int) ($request->server('CONTENT_LENGTH') ?? 0),
+                'content_type' => $request->header('Content-Type'),
                 'status' => method_exists($response, 'status')
                     ? $response->status()
                     : (method_exists($response, 'getStatusCode') ? $response->getStatusCode() : null),
@@ -43,5 +27,23 @@ class LogRequests
         }
 
         return $response;
+    }
+
+    private function safeFieldNames(array $fields): array
+    {
+        return array_values(array_filter($fields, static function ($field) {
+            return !preg_match('/(?:password|senha|token|secret|email|observa|coment|note|cpf|cnpj|telefone|endereco)/i', (string) $field);
+        }));
+    }
+
+    private function itemCount(array $input): int
+    {
+        foreach (['itens', 'items', 'produtos', 'variacoes'] as $key) {
+            if (isset($input[$key]) && is_array($input[$key])) {
+                return count($input[$key]);
+            }
+        }
+
+        return count($input);
     }
 }

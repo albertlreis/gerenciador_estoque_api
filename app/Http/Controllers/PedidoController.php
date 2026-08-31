@@ -22,6 +22,7 @@ use App\Models\PedidoImportacao;
 use App\Models\ProdutoEntregaEvento;
 use App\Models\ProdutoEntregaItem;
 use App\Services\EntregaProdutoService;
+use App\Services\DocumentExportService;
 use App\Services\EstatisticaPedidoService;
 use App\Services\EstoqueDisponibilidadeService;
 use App\Services\FornecedorPedidoXmlParserService;
@@ -676,7 +677,7 @@ class PedidoController extends Controller
     /**
      * Gera PDF de roteiro do pedido.
      */
-    public function roteiroPdf(int $pedidoId, Request $request): Response
+    public function roteiroPdf(int $pedidoId, Request $request): Response|JsonResponse
     {
         // 1) Carrega o básico + statusAtual para decidir o tipo sem puxar consignações/itens
         $pedidoBase = Pedido::with([
@@ -700,6 +701,27 @@ class PedidoController extends Controller
         $isConsignado = in_array($status, ['consignado', 'devolucao_consignacao'], true);
         if (! $isConsignado) {
             $isConsignado = $pedidoBase->isConsignado();
+        }
+
+        $primarySelection = $isConsignado ? 'consignacao_ids' : 'item_ids';
+        $legacySelection = $isConsignado ? 'consignacoes' : 'itens';
+        $selectedIds = collect((array) $request->query($primarySelection, []))
+            ->merge((array) $request->query($legacySelection, []))
+            ->map(fn ($id) => (int) $id)->filter()->unique();
+        $itemCount = $selectedIds->isNotEmpty()
+            ? $selectedIds->count()
+            : ($isConsignado
+                ? Consignacao::where('pedido_id', $pedidoId)->count()
+                : ProdutoEntregaItem::where('pedido_id', $pedidoId)->count());
+        $queued = app(DocumentExportService::class)->enqueueWhenLarge(
+            'pedido_roteiro',
+            $pedidoId,
+            $request,
+            $itemCount,
+            $request->only(['cliente_endereco_id', 'consignacao_ids', 'consignacoes', 'item_ids', 'itens', 'tipo_roteiro'])
+        );
+        if ($queued) {
+            return $queued;
         }
 
         // Caso queira ser "à prova de inconsistência" (status divergente),
@@ -984,6 +1006,23 @@ class PedidoController extends Controller
             throw ValidationException::withMessages([
                 'itens' => ['Selecione ao menos um item com quantidade para a nota de entrega.'],
             ]);
+        }
+
+        if (!$registrarEntrega) {
+            $queued = app(DocumentExportService::class)->enqueueWhenLarge(
+                'pedido_nota_entrega',
+                $pedidoId,
+                $request,
+                $selecionados->count(),
+                [
+                    'acao' => 'somente_pdf',
+                    'cliente_endereco_id' => $data['cliente_endereco_id'] ?? null,
+                    'itens' => $data['itens'],
+                ]
+            );
+            if ($queued) {
+                return $queued;
+            }
         }
 
         $entregas = ProdutoEntregaItem::query()

@@ -196,4 +196,60 @@ class ProdutoListaViewTest extends TestCase
                 'dimensao_3' => 80,
             ]);
     }
+
+    public function test_view_catalogo_preserva_contrato_enxuto_sem_n_mais_um_de_reservas(): void
+    {
+        Sanctum::actingAs($this->criarUsuario());
+        $now = now();
+        $categoriaId = DB::table('categorias')->insertGetId([
+            'nome' => 'Catalogo', 'descricao' => null, 'categoria_pai_id' => null,
+            'created_at' => $now, 'updated_at' => $now,
+        ]);
+        $produtoId = DB::table('produtos')->insertGetId([
+            'nome' => 'Produto Catalogo', 'descricao' => null, 'id_categoria' => $categoriaId,
+            'id_fornecedor' => null, 'codigo_produto' => 'CAT-1', 'altura' => 1, 'largura' => 2,
+            'profundidade' => 3, 'peso' => 4, 'manual_conservacao' => null,
+            'estoque_minimo' => null, 'ativo' => true, 'motivo_desativacao' => null,
+            'created_at' => $now, 'updated_at' => $now,
+        ]);
+        $variacaoId = DB::table('produto_variacoes')->insertGetId([
+            'produto_id' => $produtoId, 'referencia' => 'CAT-REF', 'sku_interno' => 'CAT-SKU',
+            'chave_variacao' => 'CATALOGO', 'nome' => 'Azul', 'preco' => 100, 'custo' => 40,
+            'codigo_barras' => null, 'created_at' => $now, 'updated_at' => $now,
+        ]);
+        $depositoId = DB::table('depositos')->insertGetId([
+            'nome' => 'Central', 'endereco' => null, 'created_at' => $now, 'updated_at' => $now,
+        ]);
+        DB::table('estoque_reservas')
+            ->where('id_variacao', $variacaoId)
+            ->where('id_deposito', $depositoId)
+            ->delete();
+        DB::table('estoque')->updateOrInsert([
+            'id_variacao' => $variacaoId, 'id_deposito' => $depositoId,
+        ], [
+            'quantidade' => 8,
+            'created_at' => $now, 'updated_at' => $now,
+        ]);
+        DB::table('estoque_reservas')->insert([
+            'id_variacao' => $variacaoId, 'id_deposito' => $depositoId, 'quantidade' => 3,
+            'quantidade_consumida' => 0, 'status' => 'ativa', 'data_expira' => now()->addHour(),
+            'created_at' => $now, 'updated_at' => $now,
+        ]);
+
+        DB::flushQueryLog();
+        DB::enableQueryLog();
+        $response = $this->getJson('/api/v1/produtos?view=catalogo&q=Produto%20Catalogo');
+        $queryCount = count(DB::getQueryLog());
+        DB::disableQueryLog();
+
+        $response->assertOk()
+            ->assertJsonPath('data.0.id', $produtoId)
+            ->assertJsonPath('data.0.variacoes.0.id', $variacaoId)
+            ->assertJsonPath('data.0.variacoes.0.quantidade_fisica', 8)
+            ->assertJsonPath('data.0.variacoes.0.quantidade_reservada', 3)
+            ->assertJsonPath('data.0.variacoes.0.quantidade_disponivel', 5)
+            ->assertJsonMissingPath('data.0.descricao')
+            ->assertJsonMissingPath('data.0.fornecedor');
+        $this->assertLessThanOrEqual(18, $queryCount, "view=catalogo executou {$queryCount} queries");
+    }
 }

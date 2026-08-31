@@ -220,7 +220,7 @@ class ProdutoService
         $variacaoId     = $request->input('variacao_id');
         $comEstoque     = $request->boolean('com_estoque');
         $status         = $request->input('estoque_status'); // com_estoque | sem_estoque | null
-        $incluirEstoque = $request->boolean('incluir_estoque', in_array($view, ['completa', 'simplificada']));
+        $incluirEstoque = $request->boolean('incluir_estoque', in_array($view, ['completa', 'simplificada', 'catalogo']));
 
         // Escopos reutilizáveis
         $estoqueNoDeposito = function ($q) use ($depositoId) {
@@ -265,13 +265,42 @@ class ProdutoService
                         if ($depositoId) {
                             $e->where('id_deposito', $depositoId);
                         }
-                        $e->with(['deposito', 'localizacao']);
+                        $e->withQuantidadeReservadaAberta()->with(['deposito', 'localizacao']);
                     }]);
                 }
             },
         ];
 
+        if ($view === 'catalogo') {
+            $with = [
+                'imagemPrincipal:id,id_produto,url,principal',
+                'imagens:id,id_produto,url,principal',
+                'variacoes' => function ($q) use ($depositoId) {
+                    $q->with([
+                        'atributos',
+                        'imagem',
+                        'imagens',
+                        'outlets.imagemSelecionada',
+                        'outlets.motivo',
+                        'outlets.formasPagamento.formaPagamento',
+                        'estoques' => function ($e) use ($depositoId) {
+                            if ($depositoId) {
+                                $e->where('id_deposito', $depositoId);
+                            }
+                            $e->withQuantidadeReservadaAberta()->with(['deposito:id,nome', 'localizacao']);
+                        },
+                    ]);
+                },
+            ];
+        }
+
         $query = Produto::with($with);
+        if ($view === 'catalogo') {
+            $query->select([
+                'id', 'nome', 'codigo_produto', 'id_categoria', 'id_fornecedor',
+                'altura', 'largura', 'profundidade', 'peso', 'ativo',
+            ]);
+        }
 
         if ($variacaoId) {
             $query->whereHas('variacoes', fn ($q) => $q->where('id', $variacaoId));

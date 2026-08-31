@@ -55,6 +55,9 @@ class ReconciliarTapetesSaldoFantasmaCommandTest extends TestCase
             '--confirmacao' => '10665:10.9884-4',
         ]);
         $output = Artisan::output();
+        if ($exitCode !== 0) {
+            fwrite(STDERR, "\n[reconciliacao-command-output]\n{$output}\n");
+        }
         $this->assertSame(0, $exitCode, $output);
         $this->assertStringContainsString('Reconciliacao aplicada com sucesso', $output);
 

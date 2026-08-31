@@ -22,6 +22,7 @@ use App\Services\EstoqueMovimentacaoService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
+use Symfony\Component\Console\Output\BufferedOutput;
 use Tests\TestCase;
 
 class ReconciliarTapetesSaldoFantasmaCommandTest extends TestCase
@@ -50,11 +51,12 @@ class ReconciliarTapetesSaldoFantasmaCommandTest extends TestCase
         $this->assertSame(24, $this->saldo($cenario['gatsby'], $cenario['jb']));
         $this->assertSame(1, $this->saldo($cenario['organico'], $cenario['loja']));
 
+        $commandOutput = new BufferedOutput();
         $exitCode = Artisan::call('estoque:reconciliar-tapetes-saldo-fantasma', [
             '--aplicar' => true,
             '--confirmacao' => '10665:10.9884-4',
-        ]);
-        $output = Artisan::output();
+        ], $commandOutput);
+        $output = $commandOutput->fetch();
         if ($exitCode !== 0) {
             fwrite(STDERR, "\n[reconciliacao-command-output]\n{$output}\n");
         }

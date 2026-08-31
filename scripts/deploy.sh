@@ -215,9 +215,22 @@ verify_secure_runtime() {
 
 verify_storage_link() {
   log "Validando link publico de storage..."
-  artisan storage:link
-  compose exec -T "$SERVICE" test -L /var/www/html/public/storage
-  compose exec -T "$SERVICE" test -d /var/www/html/public/storage
+  compose exec -T "$SERVICE" bash -lc '
+    set -e
+    link_path=/var/www/html/public/storage
+    expected_target=/var/www/html/storage/app/public
+    if [[ -L "$link_path" ]]; then
+      [[ "$(readlink -f "$link_path")" == "$expected_target" ]]
+    elif [[ -e "$link_path" ]]; then
+      echo "public/storage existe e nao e um link simbolico" >&2
+      exit 1
+    else
+      su -s /bin/sh -c "php artisan storage:link" www-data
+    fi
+    [[ -L "$link_path" ]]
+    [[ "$(readlink -f "$link_path")" == "$expected_target" ]]
+    [[ -d "$link_path" ]]
+  '
 }
 
 verify_document_worker() {

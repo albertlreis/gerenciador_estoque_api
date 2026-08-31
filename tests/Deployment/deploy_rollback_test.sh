@@ -52,7 +52,7 @@ elif [[ "$*" == *"ps -q app"* ]]; then
   echo fake-container
 elif [[ "${FAKE_UNSAFE_CONFIG:-false}" == "true" && "$*" == *"unsafe effective Laravel configuration"* ]]; then
   exit 1
-elif [[ "${FAKE_STORAGE_LINK_MISSING:-false}" == "true" && "$*" == *"test -L /var/www/html/public/storage"* ]]; then
+elif [[ "${FAKE_STORAGE_LINK_MISSING:-false}" == "true" && "$*" == *"link_path=/var/www/html/public/storage"* ]]; then
   exit 1
 elif [[ "${FAKE_MIGRATION_FAIL:-false}" == "true" && "$*" == *"php artisan migrate --force"* ]]; then
   exit 1

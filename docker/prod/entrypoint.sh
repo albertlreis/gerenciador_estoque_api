@@ -6,6 +6,7 @@ mkdir -p \
   /var/www/html/storage/framework/sessions \
   /var/www/html/storage/framework/testing \
   /var/www/html/storage/framework/views \
+  /var/www/html/storage/app/public \
   /var/www/html/storage/app/document-exports \
   /var/www/html/storage/logs \
   /var/www/html/bootstrap/cache
@@ -33,9 +34,31 @@ assert_effective_configuration() {
   su -s /bin/sh -c 'php -r '\''require "vendor/autoload.php"; $app = require "bootstrap/app.php"; $app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap(); if (! $app->environment("production") || (bool) config("app.debug")) { fwrite(STDERR, "Unsafe effective Laravel configuration.\n"); exit(1); }'\''' www-data
 }
 
+assert_storage_link() {
+  link_path=/var/www/html/public/storage
+  expected_target=/var/www/html/storage/app/public
+
+  if [ -L "$link_path" ]; then
+    actual_target="$(readlink -f "$link_path")"
+    [ "$actual_target" = "$expected_target" ] || {
+      echo "Refusing to start: public/storage points to $actual_target, expected $expected_target." >&2
+      exit 1
+    }
+  elif [ -e "$link_path" ]; then
+    echo "Refusing to start: public/storage exists and is not a symbolic link." >&2
+    exit 1
+  else
+    run_artisan storage:link
+  fi
+
+  [ -L "$link_path" ] && [ "$(readlink -f "$link_path")" = "$expected_target" ] || {
+    echo "Refusing to start: public/storage link is unavailable or invalid." >&2
+    exit 1
+  }
+}
+
 assert_production_environment
-run_artisan storage:link
-test -L /var/www/html/public/storage
+assert_storage_link
 
 if [ "${SIERRA_RUNTIME_ROLE:-app}" = "worker" ]; then
   attempts=0

@@ -92,11 +92,34 @@ class ReconciliarTapetesSaldoFantasmaCommand extends Command
                     $eventoOriginal = ProdutoEntregaEvento::query()
                         ->lockForUpdate()
                         ->findOrFail($recebimento['evento_id']);
-                    $eventoEstorno = $entregas->estornarEvento(
-                        $eventoOriginal,
-                        null,
-                        "Reconciliacao {$loteId}: quantidade da NF-e em M2 tratada historicamente como unidades."
-                    );
+                    $reservasAtivas = EstoqueReserva::query()
+                        ->where('id_variacao', $recebimento['variacao_id'])
+                        ->where('id_deposito', $recebimento['deposito_id'])
+                        ->where('status', 'ativa')
+                        ->whereColumn('quantidade_consumida', '<', 'quantidade')
+                        ->where(function ($query) {
+                            $query->whereNull('data_expira')->orWhere('data_expira', '>', now());
+                        })
+                        ->lockForUpdate()
+                        ->pluck('id');
+
+                    // O estorno integral passa transitoriamente por saldo zero. As reservas
+                    // iguais ao saldo final ficam invisiveis apenas dentro desta transacao e
+                    // sao restauradas antes do recebimento unitario, sem janela externa.
+                    if ($reservasAtivas->isNotEmpty()) {
+                        EstoqueReserva::query()->whereKey($reservasAtivas)->update(['status' => 'cancelada']);
+                    }
+                    try {
+                        $eventoEstorno = $entregas->estornarEvento(
+                            $eventoOriginal,
+                            null,
+                            "Reconciliacao {$loteId}: quantidade da NF-e em M2 tratada historicamente como unidades."
+                        );
+                    } finally {
+                        if ($reservasAtivas->isNotEmpty()) {
+                            EstoqueReserva::query()->whereKey($reservasAtivas)->update(['status' => 'ativa']);
+                        }
+                    }
                     $item = $entregas->receberItem(
                         $recebimento['entrega_item_id'],
                         $recebimento['deposito_id'],

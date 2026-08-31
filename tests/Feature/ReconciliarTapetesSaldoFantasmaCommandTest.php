@@ -43,9 +43,15 @@ class ReconciliarTapetesSaldoFantasmaCommandTest extends TestCase
             ->get()
             ->toArray();
 
-        $this->artisan('estoque:reconciliar-tapetes-saldo-fantasma')
-            ->expectsOutputToContain('dry-run')
-            ->assertExitCode(0);
+        $dryRunOutput = new BufferedOutput();
+        $dryRunExitCode = Artisan::call(
+            'estoque:reconciliar-tapetes-saldo-fantasma',
+            [],
+            $dryRunOutput
+        );
+        $dryRunText = $dryRunOutput->fetch();
+        $this->assertSame(0, $dryRunExitCode, $dryRunText);
+        $this->assertStringContainsString('dry-run', $dryRunText);
 
         $this->assertSame(15, $this->saldo($cenario['geometria'], $cenario['jb']));
         $this->assertSame(24, $this->saldo($cenario['gatsby'], $cenario['jb']));
@@ -57,9 +63,6 @@ class ReconciliarTapetesSaldoFantasmaCommandTest extends TestCase
             '--confirmacao' => '10665:10.9884-4',
         ], $commandOutput);
         $output = $commandOutput->fetch();
-        if ($exitCode !== 0) {
-            fwrite(STDERR, "\n[reconciliacao-command-output]\n{$output}\n");
-        }
         $this->assertSame(0, $exitCode, $output);
         $this->assertStringContainsString('Reconciliacao aplicada com sucesso', $output);
 
@@ -99,16 +102,24 @@ class ReconciliarTapetesSaldoFantasmaCommandTest extends TestCase
         );
 
         $movimentosDepois = DB::table('estoque_movimentacoes')->count();
-        $this->artisan('estoque:reconciliar-tapetes-saldo-fantasma', [
+        $secondRunOutput = new BufferedOutput();
+        $secondRunExitCode = Artisan::call('estoque:reconciliar-tapetes-saldo-fantasma', [
             '--aplicar' => true,
             '--confirmacao' => '10665:10.9884-4',
-        ])->expectsOutputToContain('nenhuma alteracao e necessaria')
-            ->assertExitCode(0);
+        ], $secondRunOutput);
+        $secondRunText = $secondRunOutput->fetch();
+        $this->assertSame(0, $secondRunExitCode, $secondRunText);
+        $this->assertStringContainsString('nenhuma alteracao e necessaria', $secondRunText);
         $this->assertSame($movimentosDepois, DB::table('estoque_movimentacoes')->count());
 
-        $this->artisan('pedidos:auditar-fluxo', ['--pedido' => '10665', '--json' => true])
-            ->expectsOutputToContain('"total": 0')
-            ->assertExitCode(0);
+        $auditOutput = new BufferedOutput();
+        $auditExitCode = Artisan::call('pedidos:auditar-fluxo', [
+            '--pedido' => '10665',
+            '--json' => true,
+        ], $auditOutput);
+        $auditText = $auditOutput->fetch();
+        $this->assertSame(0, $auditExitCode, $auditText);
+        $this->assertStringContainsString('"total": 0', $auditText);
     }
 
     public function test_bloqueia_e_nao_altera_nada_quando_reserva_ativa_excede_saldo_final(): void

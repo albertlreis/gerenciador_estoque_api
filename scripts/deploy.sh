@@ -47,6 +47,23 @@ compose() {
 
 log() { printf "\n[%s] %s\n" "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
 
+normalize_tracked_permissions() {
+  log "Normalizando permissões dos arquivos versionados…"
+  (
+    cd "$HTML_DIR"
+    git ls-files -z | xargs -0 -r chmod a+r
+  )
+
+  local directory
+  for directory in app bootstrap config database docker public resources routes scripts; do
+    if [[ -d "$HTML_DIR/$directory" ]]; then
+      find "$HTML_DIR/$directory" -type d -exec chmod a+rx {} +
+    fi
+  done
+
+  chmod a+rx "$HTML_DIR/docker/prod/entrypoint.sh"
+}
+
 write_rollback_state() {
   mkdir -p "$(dirname "$ROLLBACK_STATE_FILE")"
   umask 077
@@ -264,6 +281,7 @@ rollback_application() {
   DID_SET_MAINTENANCE=true
 
   git -C "$HTML_DIR" reset --hard "$ROLLBACK_GIT_SHA"
+  normalize_tracked_permissions
   docker tag "$ROLLBACK_IMAGE" sierra-estoque-app:latest
   compose up -d --no-deps --force-recreate "$SERVICE"
   wait_for_php || { echo "PHP não respondeu após rollback" >&2; return 1; }
@@ -347,6 +365,8 @@ if $DO_GIT; then
 else
   log "Pulando git pull"
 fi
+
+normalize_tracked_permissions
 
 if $DO_BUILD; then
   log "Buildando imagem…"

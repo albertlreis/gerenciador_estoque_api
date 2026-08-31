@@ -12,7 +12,8 @@ FAKE_BIN="$TEST_DIR/bin"
 FAKE_LOG="$TEST_DIR/commands.log"
 ROLLBACK_SHA="0123456789abcdef0123456789abcdef01234567"
 
-mkdir -p "$HTML_DIR" "$APP_DIR/.deploy-state" "$FAKE_BIN"
+mkdir -p "$HTML_DIR/docker/prod" "$APP_DIR/.deploy-state" "$FAKE_BIN"
+: >"$HTML_DIR/docker/prod/entrypoint.sh"
 : >"$APP_DIR/docker-compose.yml"
 cat >"$APP_DIR/.deploy-state/estoque-api.rollback" <<EOF
 ROLLBACK_GIT_SHA=$ROLLBACK_SHA

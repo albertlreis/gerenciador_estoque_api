@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Http\Controllers\ConsignacaoController;
 use App\Http\Controllers\PedidoController;
 use App\Models\DocumentExport;
+use App\Models\Usuario;
 use App\Support\Logging\SierraLog;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -40,52 +41,77 @@ class GenerateDocumentExport implements ShouldQueue
         }
 
         $export->update(['status' => 'processing', 'started_at' => now(), 'error_code' => null, 'error_message' => null]);
-        Auth::onceUsingId($export->user_id);
+        $user = Usuario::query()
+            ->whereKey($export->user_id)
+            ->where('ativo', true)
+            ->first();
 
-        $request = Request::create('/internal/document-export', $export->request_method, $export->request_payload ?? []);
-        $request->headers->set('X-Document-Worker', '1');
-        $request->setUserResolver(fn () => Auth::user());
+        if (!$user) {
+            $export->update([
+                'status' => 'failed',
+                'error_code' => 'EXPORT_USER_UNAVAILABLE',
+                'error_message' => 'Nao foi possivel gerar o documento. Solicite um novo export.',
+                'completed_at' => now(),
+            ]);
 
-        $startedAt = microtime(true);
-        $response = match ($export->type) {
-            'consignacao_roteiro' => app(ConsignacaoController::class)->gerarPdf($export->subject_id, $request),
-            'pedido_roteiro' => app(PedidoController::class)->roteiroPdf($export->subject_id, $request),
-            'pedido_nota_entrega' => app()->call(
-                [app(PedidoController::class), 'notaEntregaPdf'],
-                ['pedidoId' => $export->subject_id, 'request' => $request]
-            ),
-            default => throw new RuntimeException('Unsupported document export type.'),
-        };
+            SierraLog::job('job.document_export.user_unavailable', [
+                'entity_type' => 'document_export',
+                'entity_id' => $export->id,
+            ], 'warning');
 
-        if ($response->getStatusCode() >= 400 || !method_exists($response, 'getContent')) {
-            throw new RuntimeException('Document renderer returned an invalid response.');
+            return;
         }
 
-        $content = $response->getContent();
-        if (!is_string($content) || $content === '') {
-            throw new RuntimeException('Document renderer returned an empty file.');
+        Auth::setUser($user);
+
+        try {
+            $request = Request::create('/internal/document-export', $export->request_method, $export->request_payload ?? []);
+            $request->headers->set('X-Document-Worker', '1');
+            $request->setUserResolver(fn () => $user);
+
+            $startedAt = microtime(true);
+            $response = match ($export->type) {
+                'consignacao_roteiro' => app(ConsignacaoController::class)->gerarPdf($export->subject_id, $request),
+                'pedido_roteiro' => app(PedidoController::class)->roteiroPdf($export->subject_id, $request),
+                'pedido_nota_entrega' => app()->call(
+                    [app(PedidoController::class), 'notaEntregaPdf'],
+                    ['pedidoId' => $export->subject_id, 'request' => $request]
+                ),
+                default => throw new RuntimeException('Unsupported document export type.'),
+            };
+
+            if ($response->getStatusCode() >= 400 || !method_exists($response, 'getContent')) {
+                throw new RuntimeException('Document renderer returned an invalid response.');
+            }
+
+            $content = $response->getContent();
+            if (!is_string($content) || $content === '') {
+                throw new RuntimeException('Document renderer returned an empty file.');
+            }
+
+            $path = "document-exports/{$export->id}.pdf";
+            Storage::disk('local')->put($path, $content);
+            $disposition = (string) $response->headers->get('Content-Disposition');
+            preg_match('/filename="?([^";]+)"?/i', $disposition, $matches);
+
+            $export->update([
+                'status' => 'completed',
+                'path' => $path,
+                'filename' => $matches[1] ?? "documento-{$export->subject_id}.pdf",
+                'mime_type' => $response->headers->get('Content-Type', 'application/pdf'),
+                'completed_at' => now(),
+            ]);
+
+            SierraLog::job('job.document_export.completed', [
+                'entity_type' => 'document_export',
+                'entity_id' => $export->id,
+                'document_type' => $export->type,
+                'duration_ms' => (int) round((microtime(true) - $startedAt) * 1000),
+                'response_bytes' => strlen($content),
+            ]);
+        } finally {
+            Auth::forgetUser();
         }
-
-        $path = "document-exports/{$export->id}.pdf";
-        Storage::disk('local')->put($path, $content);
-        $disposition = (string) $response->headers->get('Content-Disposition');
-        preg_match('/filename="?([^";]+)"?/i', $disposition, $matches);
-
-        $export->update([
-            'status' => 'completed',
-            'path' => $path,
-            'filename' => $matches[1] ?? "documento-{$export->subject_id}.pdf",
-            'mime_type' => $response->headers->get('Content-Type', 'application/pdf'),
-            'completed_at' => now(),
-        ]);
-
-        SierraLog::job('job.document_export.completed', [
-            'entity_type' => 'document_export',
-            'entity_id' => $export->id,
-            'document_type' => $export->type,
-            'duration_ms' => (int) round((microtime(true) - $startedAt) * 1000),
-            'response_bytes' => strlen($content),
-        ]);
     }
 
     public function failed(Throwable $exception): void

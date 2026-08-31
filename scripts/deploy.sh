@@ -183,6 +183,44 @@ verify_database_connection() {
     php artisan migrate:status >/dev/null
 }
 
+verify_secure_runtime() {
+  log "Validando ambiente efetivo de producao e debug desligado..."
+  compose exec -T -u www-data "$SERVICE" php -r '
+    require "/var/www/html/vendor/autoload.php";
+    $app = require "/var/www/html/bootstrap/app.php";
+    $app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap();
+    if (! $app->environment("production") || (bool) config("app.debug")) {
+        fwrite(STDERR, "unsafe effective Laravel configuration\n");
+        exit(1);
+    }
+  '
+}
+
+verify_storage_link() {
+  log "Validando link publico de storage..."
+  artisan storage:link
+  compose exec -T "$SERVICE" test -L /var/www/html/public/storage
+  compose exec -T "$SERVICE" test -d /var/www/html/public/storage
+}
+
+verify_document_worker() {
+  log "Validando worker dedicado de documentos..."
+  compose config --services | grep -qx document-worker
+  compose up -d --no-deps document-worker
+  local worker_id
+  worker_id="$(compose ps -q --all document-worker)"
+  [[ -n "$worker_id" ]] || return 1
+  local attempt
+  for attempt in $(seq 1 "${WORKER_VERIFY_ATTEMPTS:-30}"); do
+    if docker top "$worker_id" -eo pid,args 2>/dev/null | grep -F 'queue:work database --queue=documents' >/dev/null; then
+      return 0
+    fi
+    sleep 1
+  done
+  docker logs --tail=50 "$worker_id" >&2 || true
+  return 1
+}
+
 verify_expected_schema() {
   log "Validando schema esperado da observação interna…"
   compose exec -T -u www-data "$SERVICE" php -r '
@@ -229,12 +267,16 @@ rollback_application() {
   docker tag "$ROLLBACK_IMAGE" sierra-estoque-app:latest
   compose up -d --no-deps --force-recreate "$SERVICE"
   wait_for_php || { echo "PHP não respondeu após rollback" >&2; return 1; }
+  compose up -d --no-deps --force-recreate nginx
 
   prepare_writable_paths
   clear_runtime_caches
   artisan config:cache
   artisan route:cache
   artisan view:cache
+  verify_secure_runtime
+  verify_storage_link
+  verify_document_worker
   verify_file_cache
   verify_log_write
   verify_database_connection
@@ -306,9 +348,6 @@ else
   log "Pulando git pull"
 fi
 
-log "Fazendo pull da imagem…"
-compose pull "$SERVICE" || true
-
 if $DO_BUILD; then
   log "Buildando imagem…"
   docker build \
@@ -338,6 +377,9 @@ compose up -d --no-deps "$SERVICE"
 log "Aguardando PHP…"
 wait_for_php || { echo "PHP não respondeu"; exit 1; }
 
+log "Recriando Nginx para resolver o upstream atual..."
+compose up -d --no-deps --force-recreate nginx
+
 prepare_writable_paths
 
 if $DO_COMPOSER; then
@@ -358,6 +400,8 @@ artisan route:cache
 log "Gerando view cache…"
 artisan view:cache
 
+verify_secure_runtime
+verify_storage_link
 verify_file_cache
 verify_log_write
 verify_database_connection
@@ -378,6 +422,7 @@ fi
 
 log "Reiniciando workers…"
 artisan queue:restart || true
+verify_document_worker
 
 if $DO_MAINTENANCE && $DID_SET_MAINTENANCE; then
   log "Saindo do maintenance mode…"

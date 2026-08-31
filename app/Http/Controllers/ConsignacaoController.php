@@ -22,6 +22,7 @@ use App\Models\ProdutoEntregaEvento;
 use App\Models\ProdutoEntregaItem;
 use App\Models\ProdutoVariacao;
 use App\Services\DesfazerConsignacaoService;
+use App\Services\DocumentExportService;
 use App\Services\EntregaProdutoService;
 use App\Services\EstoqueDisponibilidadeService;
 use App\Services\EstoqueMovimentacaoService;
@@ -1263,7 +1264,7 @@ class ConsignacaoController extends Controller
      *
      * Inclui: parceiro, imagem do produto, e localização de estoque.
      */
-    public function gerarPdf(int $id, Request $request): Response
+    public function gerarPdf(int $id, Request $request): Response|JsonResponse
     {
         $pedido = Pedido::with([
             'cliente.enderecoPrincipal',
@@ -1297,6 +1298,17 @@ class ConsignacaoController extends Controller
                 'consignacoes',
                 $pedido->consignacoes->whereIn('id', $consignacaoIds)->values()
             );
+        }
+
+        $queued = app(DocumentExportService::class)->enqueueWhenLarge(
+            'consignacao_roteiro',
+            $id,
+            $request,
+            $pedido->consignacoes->count(),
+            $request->only(['cliente_endereco_id', 'consignacao_ids', 'consignacoes', 'tipo_roteiro'])
+        );
+        if ($queued) {
+            return $queued;
         }
 
         $pdfImageService = app(PdfImageService::class);

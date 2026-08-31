@@ -12,6 +12,11 @@ final class SierraLog
 {
     private const LEVELS = ['debug', 'info', 'notice', 'warning', 'error', 'critical', 'alert', 'emergency'];
     private const DEFAULT_EVENT = 'system.log.unclassified';
+    private const SENSITIVE_LOG_KEYS = [
+        'email', 'e_mail', 'observacao', 'observation', 'comment', 'note',
+        'cpf', 'cnpj', 'telefone', 'phone', 'endereco', 'address',
+        'payload', 'request_body', 'exception_message',
+    ];
 
     /**
      * @param array<string, mixed> $context
@@ -177,7 +182,37 @@ final class SierraLog
             'service' => env('APP_SERVICE', 'gerenciador-estoque-api'),
         ];
 
-        return AuditoriaRedactor::redact($base + $context);
+        return self::sanitizeApplicationLog(AuditoriaRedactor::redact($base + $context));
+    }
+
+    private static function sanitizeApplicationLog(mixed $value, ?string $key = null): mixed
+    {
+        $normalizedKey = strtolower((string) $key);
+        if ($normalizedKey === 'exception') {
+            return is_array($value) ? array_diff_key($value, ['message' => true]) : '[REDACTED]';
+        }
+        foreach (self::SENSITIVE_LOG_KEYS as $sensitive) {
+            if ($normalizedKey !== '' && str_contains($normalizedKey, $sensitive)) {
+                return '[REDACTED]';
+            }
+        }
+
+        if (is_array($value)) {
+            foreach ($value as $childKey => $childValue) {
+                $value[$childKey] = self::sanitizeApplicationLog($childValue, (string) $childKey);
+            }
+            return $value;
+        }
+
+        if (is_string($value)) {
+            return (string) preg_replace([
+                '/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i',
+                '/\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b/',
+                '/\b\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}\b/',
+            ], ['[REDACTED_EMAIL]', '[REDACTED_CPF]', '[REDACTED_CNPJ]'], $value);
+        }
+
+        return $value;
     }
 
     /**
@@ -214,7 +249,7 @@ final class SierraLog
             $context += [
                 'request_id' => $request->attributes->get('request_id') ?: $request->headers->get('X-Request-Id'),
                 'method' => $request->method(),
-                'route' => $request->path(),
+                'route' => $request->route()?->uri() ?: $request->path(),
                 'route_name' => $request->route()?->getName(),
                 'user_id' => $request->user()?->id,
             ];

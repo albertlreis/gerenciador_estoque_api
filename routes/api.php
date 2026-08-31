@@ -35,6 +35,7 @@ use App\Http\Controllers\ContaReceberRelatorioController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DepositoController;
 use App\Http\Controllers\DespesaRecorrenteController;
+use App\Http\Controllers\DocumentExportController;
 use App\Http\Controllers\DevolucaoController;
 use App\Http\Controllers\EstoqueController;
 use App\Http\Controllers\EstoqueMovimentacaoController;
@@ -103,6 +104,8 @@ Route::middleware(['auth:sanctum', 'senha.nao_obrigatoria'])
          * SISTEMA / DASHBOARD
          * ============================================================ */
         Route::get('configuracoes', [ConfiguracaoController::class, 'listar']);
+        Route::get('document-exports/{id}', [DocumentExportController::class, 'show'])->whereUuid('id');
+        Route::get('document-exports/{id}/download', [DocumentExportController::class, 'download'])->whereUuid('id');
         Route::put('configuracoes/{chave}', [ConfiguracaoController::class, 'atualizar']);
         Route::prefix('preferencias/telas')->group(function () {
             Route::get('{screenKey}', [UsuarioPreferenciaController::class, 'show']);
@@ -415,7 +418,8 @@ Route::middleware(['auth:sanctum', 'senha.nao_obrigatoria'])
             Route::post('reconciliacoes', [PedidoReconciliacaoController::class, 'aprovar']);
             Route::post('reconciliacoes/{reconciliacao}/aplicar', [PedidoReconciliacaoController::class, 'aplicar'])->whereNumber('reconciliacao');
             Route::get('pdf/roteiro', [PedidoController::class, 'roteiroPdf']);
-            Route::post('pdf/nota-entrega', [PedidoController::class, 'notaEntregaPdf']);
+            Route::post('pdf/nota-entrega', [PedidoController::class, 'notaEntregaPdf'])
+                ->middleware('idempotency.required');
             Route::post('recebimentos', [PedidoRecebimentoController::class, 'store']);
             Route::post('itens/{item}/antecipacao', [PedidoAntecipacaoController::class, 'store'])->whereNumber('item');
             Route::post('itens/{item}/antecipacao/cancelar', [PedidoAntecipacaoController::class, 'cancelar'])->whereNumber('item');
@@ -492,9 +496,9 @@ Route::middleware(['auth:sanctum', 'senha.nao_obrigatoria'])
             Route::post('pedidos/{pedido}/itens', [ConsignacaoController::class, 'adicionarItensAoPedido'])->whereNumber('pedido');
             Route::post('pedidos/{pedido}/desfazer', [ConsignacaoController::class, 'desfazerPedido'])->whereNumber('pedido');
             Route::post('pedidos/{pedido}/devolucoes-em-massa', [ConsignacaoController::class, 'registrarDevolucoesEmMassa'])
-                ->whereNumber('pedido');
+                ->whereNumber('pedido')->middleware('idempotency.required');
             Route::post('pedidos/{pedido}/devolucoes/roteiro', [ConsignacaoController::class, 'registrarDevolucoesEGerarRoteiro'])
-                ->whereNumber('pedido');
+                ->whereNumber('pedido')->middleware('idempotency.required');
             Route::get('pedidos/{pedido}/devolucoes/roteiro', [ConsignacaoController::class, 'reimprimirRoteiroDevolucoes'])
                 ->whereNumber('pedido');
             Route::post('pedidos/{pedido}/envios-em-massa', [ConsignacaoController::class, 'registrarEnviosEmMassa'])
@@ -515,7 +519,7 @@ Route::middleware(['auth:sanctum', 'senha.nao_obrigatoria'])
                 ->whereNumber('consignacao');
 
             Route::post('{consignacao}/devolucoes', [ConsignacaoController::class, 'registrarDevolucao'])
-                ->whereNumber('consignacao');
+                ->whereNumber('consignacao')->middleware('idempotency.required');
             Route::post('{consignacao}/envio', [ConsignacaoController::class, 'registrarEnvio'])
                 ->whereNumber('consignacao');
             Route::delete('{consignacao}/devolucoes/{devolucao}', [ConsignacaoController::class, 'cancelarDevolucao'])

@@ -42,12 +42,13 @@ class LogRequestsTest extends TestCase
         (new LogRequests())->handle($request, static fn () => response()->json(['ok' => true]));
 
         $this->assertSame('info', $logged['level']);
-        $this->assertSame('http.write_request_payload', $logged['event']);
-        $this->assertSame([], $logged['context']['payload']);
-        $this->assertNull($logged['context']['user'] ?? null);
+        $this->assertSame('http.write_request', $logged['event']);
+        $this->assertArrayNotHasKey('payload', $logged['context']);
+        $this->assertArrayNotHasKey('user', $logged['context']);
+        $this->assertSame(['calendar_id', 'summary', 'attendees'], $logged['context']['field_names']);
         $this->assertSame(
             'api/v1/integrations/google-calendar/events/{eventId}',
-            $logged['context']['uri']
+            $logged['context']['route']
         );
         $serialized = json_encode($logged['context']);
         $this->assertStringNotContainsString('Titulo privado', $serialized);

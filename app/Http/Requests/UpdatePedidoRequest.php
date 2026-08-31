@@ -35,6 +35,15 @@ class UpdatePedidoRequest extends FormRequest
             'itens.*.preco_unitario' => ['required_with:itens', 'numeric', 'min:0'],
             'itens.*.id_deposito' => ['nullable', 'integer', 'exists:depositos,id'],
             'itens.*.observacoes' => ['nullable', 'string', 'max:1000'],
+
+            'conversao_fluxo' => ['nullable', 'array'],
+            'conversao_fluxo.modo' => ['required_with:conversao_fluxo', 'in:entrega_pendente,entrega_confirmada'],
+            'conversao_fluxo.ocorrido_em' => ['nullable', 'date'],
+            'conversao_fluxo.idempotency_key' => ['required_with:conversao_fluxo', 'string', 'max:191', 'regex:/^[A-Za-z0-9._:-]+$/'],
+            'conversao_fluxo.itens' => ['nullable', 'array'],
+            'conversao_fluxo.itens.*.produto_entrega_item_id' => ['required_with:conversao_fluxo.itens', 'integer', 'distinct', 'exists:produto_entrega_itens,id'],
+            'conversao_fluxo.itens.*.id_deposito' => ['required_with:conversao_fluxo.itens', 'integer', 'exists:depositos,id'],
+            'conversao_fluxo.itens.*.quantidade' => ['required_with:conversao_fluxo.itens', 'integer', 'min:1'],
         ];
 
         if (AuthHelper::hasPermissao('pedidos.selecionar_vendedor')) {

@@ -5,6 +5,7 @@ namespace App\Http\Middleware;
 use App\Support\Logging\SierraLog;
 use Closure;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Throwable;
 
@@ -17,35 +18,45 @@ class AddRequestContext
         $request->attributes->set('request_id', $requestId);
 
         $startedAt = microtime(true);
+        $connection = DB::connection();
+        $connection->flushQueryLog();
+        $connection->enableQueryLog();
         $baseContext = $this->baseContext($request, $requestId);
         Log::withContext($baseContext);
 
         try {
             $response = $next($request);
         } catch (Throwable $exception) {
-            $context = array_merge($baseContext, [
+            $context = array_merge($baseContext, $this->databaseMetrics($connection), [
                 'status' => 500,
                 'duration_ms' => $this->durationMs($startedAt),
+                'response_bytes' => 0,
+                'memory_peak_bytes' => memory_get_peak_usage(true),
                 'user_id' => $request->user()?->id,
                 'exception' => $exception,
             ]);
 
             Log::withContext($context);
             SierraLog::http('http.request_failed', $context, 'error');
+            $connection->disableQueryLog();
+            $connection->flushQueryLog();
 
             throw $exception;
         }
 
         $requestId = (string) $request->attributes->get('request_id', $requestId);
         $baseContext['request_id'] = $requestId;
+        $baseContext['route'] = $request->route()?->uri() ?: $baseContext['route'];
 
         if (isset($response->headers)) {
             $response->headers->set('X-Request-Id', $requestId);
         }
 
-        $context = array_merge($baseContext, [
+        $context = array_merge($baseContext, $this->databaseMetrics($connection), [
             'status' => $this->statusCode($response),
             'duration_ms' => $this->durationMs($startedAt),
+            'response_bytes' => $this->responseBytes($response),
+            'memory_peak_bytes' => memory_get_peak_usage(true),
             'user_id' => $request->user()?->id,
             'route_name' => $request->route()?->getName(),
         ]);
@@ -55,6 +66,9 @@ class AddRequestContext
         if ($this->shouldLog($request)) {
             SierraLog::http('http.request', $context, $this->levelFor($context['status']));
         }
+
+        $connection->disableQueryLog();
+        $connection->flushQueryLog();
 
         return $response;
     }
@@ -78,7 +92,7 @@ class AddRequestContext
             'service' => env('APP_SERVICE', 'gerenciador-estoque-api'),
             'request_id' => $requestId,
             'method' => $request->method(),
-            'route' => $request->path(),
+            'route' => $request->route()?->uri() ?: $request->path(),
             'user_id' => $request->user()?->id,
         ];
     }
@@ -99,6 +113,31 @@ class AddRequestContext
         }
 
         return 200;
+    }
+
+    private function databaseMetrics($connection): array
+    {
+        $queries = $connection->getQueryLog();
+
+        return [
+            'db_query_count' => count($queries),
+            'db_duration_ms' => (int) round(array_sum(array_column($queries, 'time'))),
+        ];
+    }
+
+    private function responseBytes($response): ?int
+    {
+        $header = isset($response->headers) ? $response->headers->get('Content-Length') : null;
+        if (is_numeric($header)) {
+            return (int) $header;
+        }
+
+        if (method_exists($response, 'getContent')) {
+            $content = $response->getContent();
+            return is_string($content) ? strlen($content) : null;
+        }
+
+        return null;
     }
 
     private function shouldLog($request): bool

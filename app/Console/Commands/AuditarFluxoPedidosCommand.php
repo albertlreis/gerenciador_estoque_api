@@ -6,7 +6,9 @@ use App\Enums\PedidoStatus;
 use App\Models\Pedido;
 use App\Models\ProdutoEntregaEvento;
 use App\Models\ProdutoEntregaItem;
+use App\Models\Estoque;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\DB;
 
 class AuditarFluxoPedidosCommand extends Command
 {
@@ -75,6 +77,7 @@ class AuditarFluxoPedidosCommand extends Command
         $principais = $pedido->entregaItens
             ->where('tipo_origem', ProdutoEntregaItem::ORIGEM_PEDIDO)
             ->reject(fn (ProdutoEntregaItem $item) => $item->status === ProdutoEntregaItem::STATUS_CANCELADO);
+        $conversaoReposicaoVenda = $pedido->isVenda() && $this->possuiConversaoReposicaoVenda($pedido);
 
         foreach ($principais as $item) {
             $total = (int) $item->quantidade_total;
@@ -124,6 +127,43 @@ class AuditarFluxoPedidosCommand extends Command
                     "Quantidade entregue {$entregue} maior que expedida {$expedido}."));
             }
 
+            if (
+                $pedido->isVenda()
+                && in_array($status, [PedidoStatus::ENTREGA_CLIENTE->value, PedidoStatus::FINALIZADO->value], true)
+                && $entregue < $total
+            ) {
+                $achados->push($this->achado($rotuloPedido, $item, 'venda_finalizada_sem_entrega',
+                    "Status {$status} com {$entregue}/{$total} entregues ao cliente."));
+            }
+
+            if ($conversaoReposicaoVenda && $recebido > $expedido) {
+                $achados->push($this->achado($rotuloPedido, $item, 'conversao_reposicao_venda_sem_saida',
+                    "Pedido convertido após recebimento; recebido {$recebido}, expedido {$expedido}."));
+            }
+
+            $movimentacaoSaida = $item->eventos
+                ->where('tipo_evento', ProdutoEntregaEvento::EXPEDIDO_CLIENTE)
+                ->whereNotNull('estoque_movimentacao_id')
+                ->reject(fn (ProdutoEntregaEvento $evento) => $eventosEstornados->has((int) $evento->id));
+            if ($pedido->isVenda() && $entregue > 0 && $movimentacaoSaida->isEmpty() && $entregaSemSaidaAutorizada === 0) {
+                $achados->push($this->achado($rotuloPedido, $item, 'entrega_sem_movimentacao_fisica',
+                    'Há entrega registrada sem movimentação física de saída vinculada ao item.'));
+            }
+
+            if (
+                $pedido->isVenda()
+                && $entregue < $total
+                && ($conversaoReposicaoVenda || in_array($status, [PedidoStatus::ENTREGA_CLIENTE->value, PedidoStatus::FINALIZADO->value], true))
+            ) {
+                $saldo = (int) Estoque::query()
+                    ->where('id_variacao', $item->id_variacao)
+                    ->sum('quantidade');
+                if ($saldo > 0) {
+                    $achados->push($this->achado($rotuloPedido, $item, 'saldo_positivo_evidencia_auxiliar',
+                        "A variação possui saldo atual {$saldo}; requer conferência porque o saldo pode pertencer a outras unidades."));
+                }
+            }
+
             if (max($recebido, $reservado, $expedido, $entregue) > $total) {
                 $achados->push($this->achado($rotuloPedido, $item, 'contador_acima_total',
                     "Total {$total}; recebido {$recebido}; reservado {$reservado}; expedido {$expedido}; entregue {$entregue}."));
@@ -163,5 +203,26 @@ class AuditarFluxoPedidosCommand extends Command
             'tipo' => $tipo,
             'detalhes' => $detalhes,
         ];
+    }
+
+    private function possuiConversaoReposicaoVenda(Pedido $pedido): bool
+    {
+        return DB::table('auditoria_log_mudancas as mudanca')
+            ->join('auditoria_logs as log', 'log.id', '=', 'mudanca.auditoria_log_id')
+            ->where('log.entity_id', (string) $pedido->id)
+            ->where('mudanca.campo', 'tipo')
+            ->get(['log.entity_type', 'mudanca.old_value', 'mudanca.new_value'])
+            ->contains(fn ($mudanca) =>
+                $this->tipoEntidadeEhPedido((string) $mudanca->entity_type)
+                && trim((string) $mudanca->old_value, '"') === Pedido::TIPO_REPOSICAO
+                && trim((string) $mudanca->new_value, '"') === Pedido::TIPO_VENDA
+            );
+    }
+
+    private function tipoEntidadeEhPedido(string $tipo): bool
+    {
+        $tipo = str_replace('\\\\', '\\', trim($tipo));
+
+        return $tipo === Pedido::class || str_ends_with($tipo, '\\Pedido');
     }
 }

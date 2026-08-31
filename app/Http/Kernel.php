@@ -9,6 +9,7 @@ use App\Http\Middleware\EncryptCookies;
 use App\Http\Middleware\EnsureSenhaNaoObrigatoria;
 use App\Http\Middleware\LogRequests;
 use App\Http\Middleware\PreventRequestsDuringMaintenance;
+use App\Http\Middleware\RequireIdempotencyKey;
 use App\Http\Middleware\RedirectIfAuthenticated;
 use App\Http\Middleware\SincronizarPermissoes;
 use App\Http\Middleware\TrimStrings;
@@ -90,6 +91,7 @@ class Kernel extends HttpKernel
         'senha.nao_obrigatoria' => EnsureSenhaNaoObrigatoria::class,
         'guest' => RedirectIfAuthenticated::class,
         'password.confirm' => RequirePassword::class,
+        'idempotency.required' => RequireIdempotencyKey::class,
         'signed' => ValidateSignature::class,
         'throttle' => ThrottleRequests::class,
         'verified' => EnsureEmailIsVerified::class,

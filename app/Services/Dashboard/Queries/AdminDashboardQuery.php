@@ -8,6 +8,7 @@ use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Facades\DB;
+use App\Support\Logging\SierraLog;
 
 class AdminDashboardQuery
 {
@@ -36,25 +37,25 @@ class AdminDashboardQuery
     ): array {
         $pedidosBase = $this->basePedidosQuery($inicio, $fim, $depositoId);
 
-        $vendasTotal = (float) ((clone $pedidosBase)->sum('pedidos.valor_total') ?? 0);
-        $pedidosTotal = (int) ((clone $pedidosBase)->count('pedidos.id') ?? 0);
+        [$vendasTotal, $pedidosTotal, $clientesUnicos] = $this->timed('kpis', function () use ($pedidosBase) {
+            $row = (clone $pedidosBase)->selectRaw(
+                'COALESCE(SUM(pedidos.valor_total), 0) as vendas_total, COUNT(pedidos.id) as pedidos_total, COUNT(DISTINCT pedidos.id_cliente) as clientes_unicos'
+            )->first();
+
+            return [(float) $row->vendas_total, (int) $row->pedidos_total, (int) $row->clientes_unicos];
+        });
         $ticketMedio = $pedidosTotal > 0 ? round($vendasTotal / $pedidosTotal, 2) : 0.0;
 
-        $clientesUnicos = (int) ((clone $pedidosBase)
-            ->whereNotNull('pedidos.id_cliente')
-            ->distinct('pedidos.id_cliente')
-            ->count('pedidos.id_cliente') ?? 0);
-
-        $pedidosOperacionais = $this->pedidosOperacionais($pedidosBase);
+        $pedidosOperacionais = $this->timed('pedidos_operacionais', fn () => $this->pedidosOperacionais($pedidosBase));
         $pedidosEmAbertoQtd = count($pedidosOperacionais);
         $pedidosFinalizadosQtd = $this->pedidosFinalizadosQtd($pedidosBase);
         $pedidosResumo = $this->pedidosResumo($pedidosOperacionais, $pedidosFinalizadosQtd);
-        $pedidosPorEtapa = $this->pedidosPorEtapa($pedidosBase);
+        $pedidosPorEtapa = $this->timed('pedidos_por_etapa', fn () => $this->pedidosPorEtapa($pedidosBase));
 
         $itensEntregaPendenteQtd = $this->itensEntregaPendenteQtd($depositoId);
         $consignacoesVencendoQtd = $this->consignacoesVencendoQtd($depositoId);
         $ultimosPedidos = $this->ultimosPedidos($pedidosBase);
-        $tempoEstoqueCompleto = $this->produtosPorTempoEmEstoque($depositoId, $categoriasTempoEstoqueOcultasIds);
+        $tempoEstoqueCompleto = $this->timed('tempo_estoque', fn () => $this->produtosPorTempoEmEstoque($depositoId, $categoriasTempoEstoqueOcultasIds));
         $tempoEstoque = array_slice($tempoEstoqueCompleto, 0, 12);
         $tempoEstoqueResumo = $this->tempoEstoqueResumo($tempoEstoqueCompleto);
 
@@ -78,6 +79,18 @@ class AdminDashboardQuery
                 'tempo_estoque' => $tempoEstoque,
             ],
         ];
+    }
+
+    private function timed(string $block, callable $callback): mixed
+    {
+        $startedAt = microtime(true);
+        $result = $callback();
+        SierraLog::info('dashboard.query_block', [
+            'block' => $block,
+            'duration_ms' => (int) round((microtime(true) - $startedAt) * 1000),
+        ]);
+
+        return $result;
     }
 
     private function basePedidosQuery(CarbonInterface $inicio, CarbonInterface $fim, ?int $depositoId): Builder

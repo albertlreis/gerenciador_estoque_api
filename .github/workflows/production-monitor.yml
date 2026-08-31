@@ -16,10 +16,21 @@ jobs:
   dashboard-health:
     runs-on: ubuntu-latest
     timeout-minutes: 3
+    environment: production
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Start ssh-agent
+        uses: webfactory/ssh-agent@v0.10.0
+        with:
+          ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
+
+      - name: Add production host to known hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -p "${{ secrets.DEPLOY_PORT }}" "${{ secrets.DEPLOY_HOST }}" >> ~/.ssh/known_hosts
 
       - name: Verify API health and dashboard preflight
         run: bash scripts/check-production-dashboard.sh
@@ -38,3 +49,37 @@ jobs:
             '"status"[[:space:]]*:[[:space:]]*"ok"'
           printf '%s' "${auth_health}" | grep -Eq \
             '"service"[[:space:]]*:[[:space:]]*"autenticacao-api"'
+
+      - name: Verify host, observability and document worker
+        run: |
+          ssh -p "${{ secrets.DEPLOY_PORT }}" "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" 'bash -s' <<'REMOTE'
+            set -euo pipefail
+            disk_used="$(df --output=pcent / | tail -n 1 | tr -dc '0-9')"
+            test "${disk_used}" -lt 85
+            loki_ip="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' sierra-loki)"
+            alloy_ip="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' sierra-alloy)"
+            curl -fsS "http://${loki_ip}:3100/ready" >/dev/null
+            metrics="$(curl -fsS "http://${loki_ip}:3100/metrics")"
+            alloy_metrics="$(curl -fsS "http://${alloy_ip}:12345/metrics")"
+            wal_usage="$(printf '%s\n' "$metrics" | awk '/^loki_ingester_wal_disk_usage_percent / {value=$2} END {print value}')"
+            wal_failures="$(printf '%s\n' "$metrics" | awk '/^loki_ingester_wal_disk_full_failures_total / {value=$2} END {print value}')"
+            dropped_entries="$(printf '%s\n' "$alloy_metrics" | awk '$1 == "loki_write_dropped_entries_total" || index($1, "loki_write_dropped_entries_total{") == 1 {sum += $NF} END {printf "%.0f", sum + 0}')"
+            dropped_bytes="$(printf '%s\n' "$alloy_metrics" | awk '$1 == "loki_write_dropped_bytes_total" || index($1, "loki_write_dropped_bytes_total{") == 1 {sum += $NF} END {printf "%.0f", sum + 0}')"
+            awk -v value="${wal_usage:-1}" 'BEGIN { exit !(value < 0.85) }'
+
+            state_file="/home/docker/acadsoft/sierra-observability/.production-monitor-counters"
+            counters_increased=0
+            if [[ -f "$state_file" ]]; then
+              read -r previous_wal previous_entries previous_bytes < "$state_file"
+              awk -v current="$wal_failures" -v previous="$previous_wal" 'BEGIN { exit !(current > previous) }' && counters_increased=1 || true
+              awk -v current="$dropped_entries" -v previous="$previous_entries" 'BEGIN { exit !(current > previous) }' && counters_increased=1 || true
+              awk -v current="$dropped_bytes" -v previous="$previous_bytes" 'BEGIN { exit !(current > previous) }' && counters_increased=1 || true
+            fi
+            state_tmp="${state_file}.tmp.$$"
+            printf '%s %s %s\n' "$wal_failures" "$dropped_entries" "$dropped_bytes" > "$state_tmp"
+            mv "$state_tmp" "$state_file"
+            test "$counters_increased" -eq 0
+            test "$(docker inspect -f '{{.State.Running}}' sierra_estoque_document_worker)" = true
+            docker top sierra_estoque_document_worker -eo pid,args | grep -F \
+              'php artisan queue:work database --queue=documents --sleep=1 --tries=3 --timeout=180 --max-time=3600' >/dev/null
+          REMOTE

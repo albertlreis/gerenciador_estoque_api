@@ -5,6 +5,8 @@ namespace Tests\Feature;
 use App\Models\Categoria;
 use App\Models\Cliente;
 use App\Models\Deposito;
+use App\Models\Estoque;
+use App\Models\EstoqueMovimentacao;
 use App\Models\Parceiro;
 use App\Models\Pedido;
 use App\Models\PedidoItem;
@@ -13,7 +15,10 @@ use App\Models\ProdutoEntregaEvento;
 use App\Models\ProdutoEntregaItem;
 use App\Models\ProdutoVariacao;
 use App\Models\Usuario;
+use App\Services\EntregaProdutoService;
+use App\Services\AuditoriaEventoService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Laravel\Sanctum\Sanctum;
@@ -266,5 +271,217 @@ class PedidoUpdateTest extends TestCase
         $response->assertOk();
 
         $this->assertSame(2, Pedido::query()->where('numero_externo', 'PED-DUP')->count());
+    }
+
+    public function test_conversao_processada_exige_reconciliacao_sem_alterar_pedido(): void
+    {
+        [$pedido, $item, $variacao, , $deposito, $cliente] = $this->seedBase();
+        [$entrega] = $this->prepararReposicaoRecebida($pedido, $item, $variacao, $deposito, 2);
+
+        $response = $this->putJson("/api/v1/pedidos/{$pedido->id}", [
+            'tipo' => Pedido::TIPO_VENDA,
+            'id_cliente' => $cliente->id,
+        ]);
+
+        $response->assertStatus(409)
+            ->assertJsonPath('code', 'CONVERSAO_PEDIDO_REQUER_RECONCILIACAO')
+            ->assertJsonPath('itens.0.produto_entrega_item_id', $entrega->id)
+            ->assertJsonPath('itens.0.quantidade_recebida', 2);
+        $this->assertSame(Pedido::TIPO_REPOSICAO, $pedido->fresh()->tipo);
+        $this->assertSame(2, (int) Estoque::query()->where('id_variacao', $variacao->id)->where('id_deposito', $deposito->id)->value('quantidade'));
+    }
+
+    public function test_conversao_sem_processamento_continua_permitida_diretamente(): void
+    {
+        [$pedido, , , , , $cliente] = $this->seedBase();
+        $pedido->update(['tipo' => Pedido::TIPO_REPOSICAO, 'id_cliente' => null]);
+
+        $this->putJson("/api/v1/pedidos/{$pedido->id}", [
+            'tipo' => Pedido::TIPO_VENDA,
+            'id_cliente' => $cliente->id,
+        ])->assertOk();
+
+        $this->assertSame(Pedido::TIPO_VENDA, $pedido->fresh()->tipo);
+        $this->assertSame($cliente->id, (int) $pedido->fresh()->id_cliente);
+    }
+
+    public function test_conversao_guiada_pendente_preserva_saldo_e_reabre_fluxo_cliente(): void
+    {
+        [$pedido, $item, $variacao, , $deposito, $cliente] = $this->seedBase();
+        $this->prepararReposicaoRecebida($pedido, $item, $variacao, $deposito, 2);
+
+        $this->putJson("/api/v1/pedidos/{$pedido->id}", [
+            'tipo' => Pedido::TIPO_VENDA,
+            'id_cliente' => $cliente->id,
+            'conversao_fluxo' => [
+                'modo' => 'entrega_pendente',
+                'idempotency_key' => "conversao:{$pedido->id}:pendente",
+            ],
+        ])->assertOk();
+
+        $this->assertSame(Pedido::TIPO_VENDA, $pedido->fresh()->tipo);
+        $this->assertSame(2, (int) Estoque::query()->where('id_variacao', $variacao->id)->where('id_deposito', $deposito->id)->value('quantidade'));
+        $this->assertSame('entrega_pendente', $pedido->historicoStatus()->latest('id')->value('status'));
+        $this->assertSame(0, EstoqueMovimentacao::query()->where('pedido_id', $pedido->id)->whereNotNull('id_deposito_origem')->count());
+    }
+
+    public function test_conversao_guiada_confirmada_baixa_saldo_entrega_e_e_idempotente(): void
+    {
+        [$pedido, $item, $variacao, , $deposito, $cliente] = $this->seedBase();
+        [$entrega] = $this->prepararReposicaoRecebida($pedido, $item, $variacao, $deposito, 2);
+        $payload = [
+            'tipo' => Pedido::TIPO_VENDA,
+            'id_cliente' => $cliente->id,
+            'conversao_fluxo' => [
+                'modo' => 'entrega_confirmada',
+                'ocorrido_em' => '2026-08-03',
+                'idempotency_key' => "conversao:{$pedido->id}:confirmada",
+                'itens' => [[
+                    'produto_entrega_item_id' => $entrega->id,
+                    'id_deposito' => $deposito->id,
+                    'quantidade' => 2,
+                ]],
+            ],
+        ];
+
+        $this->putJson("/api/v1/pedidos/{$pedido->id}", $payload)->assertOk();
+        $this->putJson("/api/v1/pedidos/{$pedido->id}", $payload)->assertOk();
+
+        $entrega->refresh();
+        $this->assertSame(2, (int) $entrega->quantidade_expedida);
+        $this->assertSame(2, (int) $entrega->quantidade_entregue);
+        $this->assertSame(0, (int) Estoque::query()->where('id_variacao', $variacao->id)->where('id_deposito', $deposito->id)->value('quantidade'));
+        $this->assertSame(1, EstoqueMovimentacao::query()->where('pedido_id', $pedido->id)->where('tipo', 'saida_entrega_cliente')->count());
+        $this->assertSame(1, ProdutoEntregaEvento::query()->where('idempotency_key', "conversao:{$pedido->id}:confirmada:item:{$entrega->id}:entregar")->count());
+        $this->assertSame('finalizado', $pedido->historicoStatus()->latest('id')->value('status'));
+    }
+
+    public function test_conversao_confirmada_reaproveita_expedicao_anterior_sem_baixa_duplicada(): void
+    {
+        [$pedido, $item, $variacao, , $deposito, $cliente] = $this->seedBase();
+        [$entrega] = $this->prepararReposicaoRecebida($pedido, $item, $variacao, $deposito, 2);
+        $entrega = app(EntregaProdutoService::class)->expedirItem(
+            $entrega,
+            $deposito->id,
+            1,
+            $pedido->id_usuario,
+            'Expedição anterior à conversão',
+            ProdutoEntregaEvento::EXPEDIDO_CLIENTE,
+            "conversao:{$pedido->id}:expedicao-anterior"
+        );
+
+        $this->putJson("/api/v1/pedidos/{$pedido->id}", [
+            'tipo' => Pedido::TIPO_VENDA,
+            'id_cliente' => $cliente->id,
+            'conversao_fluxo' => [
+                'modo' => 'entrega_confirmada',
+                'ocorrido_em' => '2026-08-03',
+                'idempotency_key' => "conversao:{$pedido->id}:parcial",
+                'itens' => [[
+                    'produto_entrega_item_id' => $entrega->id,
+                    'id_deposito' => $deposito->id,
+                    'quantidade' => 2,
+                ]],
+            ],
+        ])->assertOk();
+
+        $entrega->refresh();
+        $this->assertSame(2, (int) $entrega->quantidade_expedida);
+        $this->assertSame(2, (int) $entrega->quantidade_entregue);
+        $this->assertSame(0, (int) Estoque::query()->where('id_variacao', $variacao->id)->where('id_deposito', $deposito->id)->value('quantidade'));
+        $this->assertSame(2, EstoqueMovimentacao::query()->where('pedido_id', $pedido->id)->where('tipo', 'saida_entrega_cliente')->count());
+    }
+
+    public function test_conversao_confirmada_sem_saldo_faz_rollback_integral(): void
+    {
+        [$pedido, $item, $variacao, , $deposito, $cliente] = $this->seedBase();
+        [$entrega] = $this->prepararReposicaoRecebida($pedido, $item, $variacao, $deposito, 2);
+        Estoque::query()->where('id_variacao', $variacao->id)->where('id_deposito', $deposito->id)->update(['quantidade' => 1]);
+
+        $this->putJson("/api/v1/pedidos/{$pedido->id}", [
+            'tipo' => Pedido::TIPO_VENDA,
+            'id_cliente' => $cliente->id,
+            'conversao_fluxo' => [
+                'modo' => 'entrega_confirmada',
+                'ocorrido_em' => '2026-08-03',
+                'idempotency_key' => "conversao:{$pedido->id}:sem-saldo",
+                'itens' => [[
+                    'produto_entrega_item_id' => $entrega->id,
+                    'id_deposito' => $deposito->id,
+                    'quantidade' => 2,
+                ]],
+            ],
+        ])->assertStatus(422)->assertJsonValidationErrors('conversao_fluxo.itens');
+
+        $this->assertSame(Pedido::TIPO_REPOSICAO, $pedido->fresh()->tipo);
+        $this->assertSame(0, (int) $entrega->fresh()->quantidade_expedida);
+        $this->assertSame(0, EstoqueMovimentacao::query()->where('pedido_id', $pedido->id)->where('tipo', 'saida_entrega_cliente')->count());
+    }
+
+    public function test_auditoria_detecta_venda_finalizada_convertida_sem_saida_e_saldo_como_evidencia(): void
+    {
+        [$pedido, $item, $variacao, , $deposito, $cliente] = $this->seedBase();
+        $this->prepararReposicaoRecebida($pedido, $item, $variacao, $deposito, 2);
+        $pedido->update(['tipo' => Pedido::TIPO_VENDA, 'id_cliente' => $cliente->id]);
+        $auditoria = app(AuditoriaEventoService::class)->registrar(
+            module: 'pedidos',
+            action: 'pedido.updated',
+            label: "Pedido #{$pedido->id} atualizado",
+            auditable: $pedido,
+            mudancas: [[
+                'campo' => 'tipo',
+                'old' => Pedido::TIPO_REPOSICAO,
+                'new' => Pedido::TIPO_VENDA,
+                'value_type' => 'string',
+            ]]
+        );
+        $this->assertNotNull($auditoria);
+        $this->assertDatabaseHas('auditoria_logs', [
+            'id' => $auditoria->id,
+            'entity_type' => Pedido::class,
+            'entity_id' => (string) $pedido->id,
+        ]);
+        $this->assertDatabaseHas('auditoria_log_mudancas', [
+            'auditoria_log_id' => $auditoria->id,
+            'campo' => 'tipo',
+            'old_value' => Pedido::TIPO_REPOSICAO,
+            'new_value' => Pedido::TIPO_VENDA,
+        ]);
+        $this->assertSame(0, Artisan::call('pedidos:auditar-fluxo', [
+            '--pedido' => (string) $pedido->id,
+            '--json' => true,
+        ]));
+        $saida = Artisan::output();
+        $this->assertStringContainsString('venda_finalizada_sem_entrega', $saida);
+        $this->assertStringContainsString('conversao_reposicao_venda_sem_saida', $saida);
+        $this->assertStringContainsString('saldo_positivo_evidencia_auxiliar', $saida);
+    }
+
+    private function prepararReposicaoRecebida(
+        Pedido $pedido,
+        PedidoItem $item,
+        ProdutoVariacao $variacao,
+        Deposito $deposito,
+        int $quantidade
+    ): array {
+        $pedido->update([
+            'tipo' => Pedido::TIPO_REPOSICAO,
+            'id_cliente' => null,
+            'origem_abastecimento' => Pedido::ORIGEM_ABASTECIMENTO_FABRICA,
+        ]);
+        $item->update(['quantidade' => $quantidade, 'subtotal' => $quantidade * 100]);
+
+        $service = app(EntregaProdutoService::class);
+        $entrega = $service->criarDemandaPedido($pedido->fresh(), $pedido->id_usuario, false)->firstOrFail();
+        $service->receberItem(
+            $entrega,
+            $deposito->id,
+            $quantidade,
+            $pedido->id_usuario,
+            'Recebimento para teste de conversão',
+            "conversao-recebimento:{$pedido->id}"
+        );
+
+        return [$entrega->fresh(), $variacao, $deposito];
     }
 }

@@ -40,6 +40,11 @@ use App\Repositories\Eloquent\ContaPagarRepositoryEloquent;
 use App\Services\AuditoriaLogService;
 use App\Services\FinanceiroLedgerService;
 use App\Services\Google\NullGoogleCalendarSyncService;
+use App\Services\Dashboard\DashboardCacheVersion;
+use App\Models\Consignacao;
+use App\Models\Estoque;
+use App\Models\Pedido;
+use App\Models\ProdutoEntregaItem;
 use Illuminate\Database\QueryException;
 use Illuminate\Filesystem\Filesystem;
 use Illuminate\Support\Facades\DB;
@@ -193,6 +198,11 @@ class AppServiceProvider extends ServiceProvider
         $this->ensureWritablePaths();
 
         Schema::defaultStringLength(191);
+
+        foreach ([Pedido::class, Consignacao::class, Estoque::class, ProdutoEntregaItem::class] as $model) {
+            $model::saved(fn () => DashboardCacheVersion::invalidate());
+            $model::deleted(fn () => DashboardCacheVersion::invalidate());
+        }
 
         config([
             'database.connections.mysql.charset' => 'utf8mb4',

@@ -15,12 +15,42 @@ run_artisan() {
   su -s /bin/sh -c "php artisan $*" www-data
 }
 
-run_artisan storage:link >/dev/null 2>&1 || true
+assert_production_environment() {
+  configured_env="${APP_ENV:-$(php -r '$values = @parse_ini_file("/var/www/html/.env", false, INI_SCANNER_RAW) ?: []; echo $values["APP_ENV"] ?? "";')}"
+  configured_debug="${APP_DEBUG:-$(php -r '$values = @parse_ini_file("/var/www/html/.env", false, INI_SCANNER_RAW) ?: []; echo $values["APP_DEBUG"] ?? "";')}"
+  [ "$configured_env" = "production" ] || {
+    echo "Refusing to start: APP_ENV must be production." >&2
+    exit 1
+  }
+  case "$(printf '%s' "$configured_debug" | tr '[:upper:]' '[:lower:]')" in
+    false|0|off|no) ;;
+    *) echo "Refusing to start: APP_DEBUG must be false." >&2; exit 1 ;;
+  esac
+}
 
-if [ "${APP_ENV:-production}" = "production" ]; then
-  run_artisan config:cache >/dev/null 2>&1 || true
-  run_artisan route:cache >/dev/null 2>&1 || true
-  run_artisan view:cache >/dev/null 2>&1 || true
+assert_effective_configuration() {
+  su -s /bin/sh -c 'php -r '\''require "vendor/autoload.php"; $app = require "bootstrap/app.php"; $app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap(); if (! $app->environment("production") || (bool) config("app.debug")) { fwrite(STDERR, "Unsafe effective Laravel configuration.\n"); exit(1); }'\''' www-data
+}
+
+assert_production_environment
+run_artisan storage:link
+test -L /var/www/html/public/storage
+
+if [ "${SIERRA_RUNTIME_ROLE:-app}" = "worker" ]; then
+  attempts=0
+  while [ ! -f /var/www/html/bootstrap/cache/config.php ] && [ "$attempts" -lt 30 ]; do
+    attempts=$((attempts + 1))
+    sleep 2
+  done
+  test -f /var/www/html/bootstrap/cache/config.php || {
+    echo "Refusing to start worker: application cache was not built." >&2
+    exit 1
+  }
+else
+  run_artisan config:cache
+  run_artisan route:cache
+  run_artisan view:cache
 fi
+assert_effective_configuration
 
 exec "$@"

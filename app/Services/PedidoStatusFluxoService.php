@@ -486,6 +486,7 @@ class PedidoStatusFluxoService
             'nota_recebida_compra' => ['codigo' => 'nota_recebida_compra', 'nome' => 'Nota Recebida (Compra)', 'cor' => '#6610f2', 'severidade' => 'success', 'icone' => 'pi pi-download', 'protegido' => false],
             'previsao_entrega_estoque' => ['codigo' => 'previsao_entrega_estoque', 'nome' => 'Previsao de Entrega ao Estoque', 'cor' => '#ffc107', 'severidade' => 'warning', 'icone' => 'pi pi-calendar-clock', 'protegido' => false],
             'entrega_estoque' => ['codigo' => 'entrega_estoque', 'nome' => 'Entrega ao Estoque', 'cor' => '#6f42c1', 'severidade' => 'success', 'icone' => 'pi pi-box', 'protegido' => true],
+            'entrega_pendente' => ['codigo' => 'entrega_pendente', 'nome' => 'Entrega Pendente', 'cor' => '#fd7e14', 'severidade' => 'warning', 'icone' => 'pi pi-clock', 'protegido' => true],
             'previsao_envio_cliente' => ['codigo' => 'previsao_envio_cliente', 'nome' => 'Previsao de Envio ao Cliente', 'cor' => '#ffc107', 'severidade' => 'warning', 'icone' => 'pi pi-calendar-minus', 'protegido' => false],
             'envio_cliente' => ['codigo' => 'envio_cliente', 'nome' => 'Envio ao Cliente', 'cor' => '#fd7e14', 'severidade' => 'warning', 'icone' => 'pi pi-send', 'protegido' => true],
             'entrega_cliente' => ['codigo' => 'entrega_cliente', 'nome' => 'Entrega ao Cliente', 'cor' => '#198754', 'severidade' => 'success', 'icone' => 'pi pi-home', 'protegido' => true],

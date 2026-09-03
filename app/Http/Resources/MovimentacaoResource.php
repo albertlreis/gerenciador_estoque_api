@@ -32,6 +32,8 @@ class MovimentacaoResource extends JsonResource
             'usuario_id' => $this->usuario?->id,
             'usuario_nome' => $this->usuario?->nome,
             'observacao' => $this->observacao,
+            'pedido_id' => $this->pedido_id ? (int) $this->pedido_id : null,
+            'pedido_numero' => $this->pedido?->numero_externo,
             'lote_id' => $this->lote_id,
             'ref_type' => $this->ref_type,
             'ref_id' => $this->ref_id,

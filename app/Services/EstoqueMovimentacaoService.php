@@ -48,6 +48,7 @@ class EstoqueMovimentacaoService
                 'usuario',
                 'depositoOrigem',
                 'depositoDestino',
+                'pedido:id,numero_externo',
             ]);
 
         // --- Filtros ---

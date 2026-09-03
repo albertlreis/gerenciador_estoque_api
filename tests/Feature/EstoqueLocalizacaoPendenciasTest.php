@@ -128,7 +128,7 @@ class EstoqueLocalizacaoPendenciasTest extends TestCase
         $reserva = collect($response->json('data'))->firstWhere('variacao_id', $comReserva->id);
         $this->assertSame(2, (int) ($reserva['quantidade_reservada_cliente'] ?? 0));
 
-        $filtro = $this->getJson('/api/v1/estoque/localizacoes/pendencias?deposito=' . $deposito->id . '&produto=SKU-RESERVA');
+        $filtro = $this->getJson('/api/v1/estoque/localizacoes/pendencias?deposito=' . $deposito->id . '&produto=skureserva');
         $filtro->assertOk();
         $this->assertSame([$comReserva->id], collect($filtro->json('data'))->pluck('variacao_id')->all());
     }

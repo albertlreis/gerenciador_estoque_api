@@ -18,6 +18,7 @@ use App\Services\OutletItensQueryService;
 use App\Services\PdfImageService;
 use App\Services\ProdutoSugestoesOutletService;
 use App\Support\Logging\SierraLog;
+use App\Support\ProductIdentifierSearch;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Storage;
@@ -213,6 +214,22 @@ class ProdutoController extends Controller
                                 ->orWhereRaw("LOWER(sku_interno) COLLATE utf8mb4_0900_ai_ci LIKE ? ESCAPE '\\\\'", [$like])
                                 ->orWhereRaw("LOWER(chave_variacao) COLLATE utf8mb4_0900_ai_ci LIKE ? ESCAPE '\\\\'", [$like]);
                         });
+                    ProductIdentifierSearch::whereAny($query, ['produtos.codigo_produto'], $term, 'or');
+                    $query->orWhereHas('variacoes', function ($variacoes) use ($term) {
+                        ProductIdentifierSearch::whereAny($variacoes, [
+                            'produto_variacoes.referencia',
+                            'produto_variacoes.sku_interno',
+                            'produto_variacoes.chave_variacao',
+                            'produto_variacoes.codigo_barras',
+                        ], $term);
+                        $variacoes->orWhereHas('codigosHistoricos', function ($codigos) use ($term) {
+                            ProductIdentifierSearch::whereAny($codigos, [
+                                'codigo',
+                                'codigo_origem',
+                                'codigo_modelo',
+                            ], $term);
+                        });
+                    });
                 });
             }
         }

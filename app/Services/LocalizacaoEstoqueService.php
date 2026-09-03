@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Deposito;
 use App\Models\Estoque;
 use App\Models\LocalizacaoEstoque;
+use App\Support\ProductIdentifierSearch;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
@@ -79,7 +80,7 @@ class LocalizacaoEstoqueService
         $produto = trim((string) ($filtros['produto'] ?? ''));
         if ($produto !== '') {
             $like = '%' . $this->escapeLike($produto) . '%';
-            $query->whereHas('variacao', function (Builder $variacaoQuery) use ($like) {
+            $query->whereHas('variacao', function (Builder $variacaoQuery) use ($like, $produto) {
                 $variacaoQuery
                     ->whereRaw("referencia LIKE ? ESCAPE '\\\\'", [$like])
                     ->orWhereRaw("sku_interno LIKE ? ESCAPE '\\\\'", [$like])
@@ -91,6 +92,22 @@ class LocalizacaoEstoqueService
                             ->whereRaw("nome LIKE ? ESCAPE '\\\\'", [$like])
                             ->orWhereRaw("codigo_produto LIKE ? ESCAPE '\\\\'", [$like]);
                     });
+                ProductIdentifierSearch::whereAny($variacaoQuery, [
+                    'produto_variacoes.referencia',
+                    'produto_variacoes.sku_interno',
+                    'produto_variacoes.chave_variacao',
+                    'produto_variacoes.codigo_barras',
+                ], $produto, 'or');
+                $variacaoQuery->orWhereHas('produto', function (Builder $produtoQuery) use ($produto) {
+                    ProductIdentifierSearch::whereAny($produtoQuery, ['produtos.codigo_produto'], $produto);
+                });
+                $variacaoQuery->orWhereHas('codigosHistoricos', function (Builder $codigoQuery) use ($produto) {
+                    ProductIdentifierSearch::whereAny($codigoQuery, [
+                        'codigo',
+                        'codigo_origem',
+                        'codigo_modelo',
+                    ], $produto);
+                });
             });
         }
 

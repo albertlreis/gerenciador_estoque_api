@@ -6,6 +6,7 @@ use App\DTOs\FiltroEstoqueDTO;
 use App\Models\Pedido;
 use App\Models\ProdutoEntregaItem;
 use App\Models\ProdutoVariacao;
+use App\Support\ProductIdentifierSearch;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Query\Builder as QueryBuilder;
@@ -192,6 +193,23 @@ class EstoqueRepository
                     $sub->whereRaw("codigo LIKE ? ESCAPE '\\\\'", [$termLikeAny])
                         ->orWhereRaw("codigo_origem LIKE ? ESCAPE '\\\\'", [$termLikeAny])
                         ->orWhereRaw("codigo_modelo LIKE ? ESCAPE '\\\\'", [$termLikeAny]);
+                });
+
+                ProductIdentifierSearch::whereAny($q, [
+                    'produto_variacoes.referencia',
+                    'produto_variacoes.sku_interno',
+                    'produto_variacoes.chave_variacao',
+                    'produto_variacoes.codigo_barras',
+                ], $term, 'or');
+                $q->orWhereHas('produto', function (Builder $produtoQuery) use ($term) {
+                    ProductIdentifierSearch::whereAny($produtoQuery, ['produtos.codigo_produto'], $term);
+                });
+                $q->orWhereHas('codigosHistoricos', function (Builder $codigoQuery) use ($term) {
+                    ProductIdentifierSearch::whereAny($codigoQuery, [
+                        'codigo',
+                        'codigo_origem',
+                        'codigo_modelo',
+                    ], $term);
                 });
             });
         }

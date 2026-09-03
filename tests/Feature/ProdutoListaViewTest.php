@@ -115,6 +115,14 @@ class ProdutoListaViewTest extends TestCase
                 'id' => $produtoId,
                 'codigo_produto' => 'P-LISTA-001',
             ]);
+
+        $this->getJson('/api/v1/produtos?view=lista&q=skulista001')
+            ->assertOk()
+            ->assertJsonPath('data.0.id', $produtoId);
+
+        $this->getJson('/api/v1/variacoes?search=skulista001')
+            ->assertOk()
+            ->assertJsonPath('0.id', $variacaoId);
     }
 
     public function test_view_minima_retorna_dimensoes_com_nomes_oficiais(): void

@@ -286,11 +286,21 @@ class ContaAzulOperationalEndpointsTest extends TestCase
             'created_at' => now(),
             'updated_at' => now(),
         ]);
-        DB::table('produtos')->insert([
+        $produtoId = DB::table('produtos')->insertGetId([
             'nome' => 'Bracelete Azul',
             'codigo_produto' => 'BR-AZUL',
             'id_categoria' => $categoriaId,
             'ativo' => true,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        DB::table('produto_variacoes')->insert([
+            'produto_id' => $produtoId,
+            'referencia' => 'BR AZUL/01',
+            'sku_interno' => 'BR-AZUL-01',
+            'nome' => 'Azul',
+            'preco' => 100,
+            'custo' => 50,
             'created_at' => now(),
             'updated_at' => now(),
         ]);
@@ -317,6 +327,10 @@ class ContaAzulOperationalEndpointsTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.0.label', 'Bracelete Azul')
             ->assertJsonPath('data.0.type', 'produto');
+
+        $this->getJson('/api/v1/integrations/conta-azul/local-lookup?entidade=produto&q=brazul01')
+            ->assertOk()
+            ->assertJsonPath('data.0.label', 'Bracelete Azul');
 
         $this->getJson('/api/v1/integrations/conta-azul/local-lookup?entidade=titulo&q=Parcela')
             ->assertOk()

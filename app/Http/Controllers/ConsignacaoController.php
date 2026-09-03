@@ -28,6 +28,7 @@ use App\Services\EstoqueDisponibilidadeService;
 use App\Services\EstoqueMovimentacaoService;
 use App\Services\PdfImageService;
 use App\Support\Pdf\ClienteEnderecoPdf;
+use App\Support\ProductIdentifierSearch;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -77,8 +78,24 @@ class ConsignacaoController extends Controller
 
         if ($request->filled('produto')) {
             $produto = $request->produto;
-            $query->whereHas('produtoVariacao.produto', function ($q) use ($produto) {
-                $q->where('nome', 'like', "%$produto%");
+            $query->whereHas('produtoVariacao', function ($variacao) use ($produto) {
+                $variacao->whereHas('produto', function ($q) use ($produto) {
+                    $q->where('nome', 'like', "%$produto%");
+                    ProductIdentifierSearch::whereAny($q, ['produtos.codigo_produto'], $produto, 'or');
+                });
+                ProductIdentifierSearch::whereAny($variacao, [
+                    'produto_variacoes.referencia',
+                    'produto_variacoes.sku_interno',
+                    'produto_variacoes.chave_variacao',
+                    'produto_variacoes.codigo_barras',
+                ], $produto, 'or');
+                $variacao->orWhereHas('codigosHistoricos', function ($codigo) use ($produto) {
+                    ProductIdentifierSearch::whereAny($codigo, [
+                        'codigo',
+                        'codigo_origem',
+                        'codigo_modelo',
+                    ], $produto);
+                });
             });
         }
 

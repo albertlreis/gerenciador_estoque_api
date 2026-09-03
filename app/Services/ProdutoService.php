@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Produto;
 use App\Support\Auditoria\AuditoriaDiff;
 use App\Support\Logging\SierraLog;
+use App\Support\ProductIdentifierSearch;
 use Exception;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
@@ -313,7 +314,7 @@ class ProdutoService
             $words = array_values(array_filter(preg_split('/\s+/u', $normalized) ?: []));
 
             if (!empty($words)) {
-                $query->where(function ($q) use ($words) {
+                $query->where(function ($q) use ($words, $normalized) {
                     foreach ($words as $w) {
                         $escaped = $this->escapeLike($w);
                         if ($escaped === '') {
@@ -346,6 +347,23 @@ class ProdutoService
                                 });
                         });
                     }
+
+                    ProductIdentifierSearch::whereAny($q, ['produtos.codigo_produto'], $normalized, 'or');
+                    $q->orWhereHas('variacoes', function ($variacaoQuery) use ($normalized) {
+                        ProductIdentifierSearch::whereAny($variacaoQuery, [
+                            'produto_variacoes.referencia',
+                            'produto_variacoes.sku_interno',
+                            'produto_variacoes.chave_variacao',
+                            'produto_variacoes.codigo_barras',
+                        ], $normalized);
+                        $variacaoQuery->orWhereHas('codigosHistoricos', function ($codigoQuery) use ($normalized) {
+                            ProductIdentifierSearch::whereAny($codigoQuery, [
+                                'codigo',
+                                'codigo_origem',
+                                'codigo_modelo',
+                            ], $normalized);
+                        });
+                    });
                 });
             }
         }
@@ -354,10 +372,15 @@ class ProdutoService
             $ref = trim((string) $referencia);
             if ($ref !== '') {
                 $likeRef = '%' . $this->escapeLike(mb_strtolower($ref)) . '%';
-                $query->whereHas('variacoes', function ($q) use ($likeRef) {
+                $query->whereHas('variacoes', function ($q) use ($likeRef, $ref) {
                     $q->whereRaw("LOWER(referencia) COLLATE utf8mb4_0900_ai_ci LIKE ? ESCAPE '\\\\'", [$likeRef])
                         ->orWhereRaw("LOWER(sku_interno) COLLATE utf8mb4_0900_ai_ci LIKE ? ESCAPE '\\\\'", [$likeRef])
                         ->orWhereRaw("LOWER(chave_variacao) COLLATE utf8mb4_0900_ai_ci LIKE ? ESCAPE '\\\\'", [$likeRef]);
+                    ProductIdentifierSearch::whereAny($q, [
+                        'produto_variacoes.referencia',
+                        'produto_variacoes.sku_interno',
+                        'produto_variacoes.chave_variacao',
+                    ], $ref, 'or');
                 });
             }
         }

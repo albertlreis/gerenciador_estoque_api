@@ -113,7 +113,7 @@ class ProdutosOutletTest extends TestCase
             'custo' => 30,
         ]);
 
-        $response = $this->getJson('/api/v1/produtos?is_outlet=1&referencia=REF-OUT&id_categoria=' . $categoriaA->id);
+        $response = $this->getJson('/api/v1/produtos?is_outlet=1&referencia=refout&id_categoria=' . $categoriaA->id);
 
         $response->assertStatus(200)
             ->assertJsonCount(1, 'data')
@@ -143,10 +143,10 @@ class ProdutosOutletTest extends TestCase
     {
         $this->seedUsuario();
         $categoria = Categoria::create(['nome' => 'Cadeiras']);
-        $produto = $this->criarProdutoOutlet('CADEIRA DUBLIN BASE INOX', '1827', $categoria, 15902, 65);
+        $produto = $this->criarProdutoOutlet('CADEIRA DUBLIN BASE INOX', '18.27-VD', $categoria, 15902, 65);
         $outlet = ProdutoVariacaoOutlet::whereHas('variacao', fn ($query) => $query->where('produto_id', $produto->id))->firstOrFail();
 
-        $response = $this->getJson('/api/v1/outlet/itens?q=1827&id_categoria[]=' . $categoria->id);
+        $response = $this->getJson('/api/v1/outlet/itens?q=1827vd&id_categoria[]=' . $categoria->id);
 
         $response->assertOk()
             ->assertJsonCount(1, 'data')

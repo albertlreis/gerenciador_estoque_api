@@ -860,6 +860,12 @@ class ProdutoEntregaCentralTest extends TestCase
             'bloqueio_motivo' => 'Deposito pendente para teste',
         ]);
 
+        $variacao->update(['referencia' => 'ENTREGA/REF-01']);
+
+        $this->getJson('/api/v1/entregas/itens?per_page=10&q=entregaref01')
+            ->assertOk()
+            ->assertJsonFragment(['id' => $entrega->id]);
+
         $this->getJson('/api/v1/entregas/itens?per_page=10&q=Cliente%20Entrega')
             ->assertOk()
             ->assertJsonFragment(['id' => $entrega->id]);

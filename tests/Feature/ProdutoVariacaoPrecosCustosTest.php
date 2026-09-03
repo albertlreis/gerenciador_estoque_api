@@ -143,7 +143,7 @@ class ProdutoVariacaoPrecosCustosTest extends TestCase
         $this->autenticar();
         $this->criarVariacao(['produto_imagem_url' => 'mesa-lunar.jpg']);
 
-        $response = $this->getJson('/api/v1/variacoes/precos-custos?search=Mesa&page=1&per_page=10');
+        $response = $this->getJson('/api/v1/variacoes/precos-custos?search=skupreco001&page=1&per_page=10');
 
         $response->assertOk()
             ->assertJsonPath('meta.total', 1)

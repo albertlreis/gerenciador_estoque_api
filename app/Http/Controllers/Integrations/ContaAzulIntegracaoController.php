@@ -13,6 +13,7 @@ use App\Integrations\ContaAzul\Services\ContaAzulLocalCreationService;
 use App\Integrations\ContaAzul\Services\ImportacaoContaAzulService;
 use App\Integrations\ContaAzul\Services\ReconciliacaoContaAzulService;
 use App\Models\AuditoriaLog;
+use App\Support\ProductIdentifierSearch;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -264,7 +265,7 @@ class ContaAzulIntegracaoController extends Controller
 
         $data = match ($tipo) {
             ContaAzulEntityType::PESSOA => $this->lookupPessoas($like, $numeric, $limit),
-            ContaAzulEntityType::PRODUTO => $this->lookupProdutos($like, $limit),
+            ContaAzulEntityType::PRODUTO => $this->lookupProdutos($q, $like, $limit),
             ContaAzulEntityType::VENDA => $this->lookupVendas($like, $numeric, $limit),
             ContaAzulEntityType::TITULO => $this->lookupContasReceber($like, $numeric, $limit),
             ContaAzulEntityType::CONTA_PAGAR => $this->lookupContasPagar($like, $numeric, $limit),
@@ -718,13 +719,42 @@ class ContaAzulIntegracaoController extends Controller
     /**
      * @return array<int, array{id:int,label:string,detail:string,type:string}>
      */
-    private function lookupProdutos(string $like, int $limit): array
+    private function lookupProdutos(string $term, string $like, int $limit): array
     {
         return DB::table('produtos')
             ->select(['id', 'nome', 'codigo_produto'])
-            ->where(function ($query) use ($like) {
+            ->where(function ($query) use ($term, $like) {
                 $query->where('nome', 'like', $like)
                     ->orWhere('codigo_produto', 'like', $like);
+                ProductIdentifierSearch::whereAny($query, ['produtos.codigo_produto'], $term, 'or');
+                $query->orWhereExists(function ($variacoes) use ($term) {
+                    $variacoes->selectRaw('1')
+                        ->from('produto_variacoes')
+                        ->whereColumn('produto_variacoes.produto_id', 'produtos.id')
+                        ->where(function ($identificadores) use ($term) {
+                            ProductIdentifierSearch::whereAny($identificadores, [
+                                'produto_variacoes.referencia',
+                                'produto_variacoes.sku_interno',
+                                'produto_variacoes.chave_variacao',
+                                'produto_variacoes.codigo_barras',
+                            ], $term);
+                            $identificadores->orWhereExists(function ($codigos) use ($term) {
+                                $codigos->selectRaw('1')
+                                    ->from('produto_variacao_codigos_historicos')
+                                    ->whereColumn(
+                                        'produto_variacao_codigos_historicos.produto_variacao_id',
+                                        'produto_variacoes.id'
+                                    )
+                                    ->where(function ($codigoQuery) use ($term) {
+                                        ProductIdentifierSearch::whereAny($codigoQuery, [
+                                            'produto_variacao_codigos_historicos.codigo',
+                                            'produto_variacao_codigos_historicos.codigo_origem',
+                                            'produto_variacao_codigos_historicos.codigo_modelo',
+                                        ], $term);
+                                    });
+                            });
+                        });
+                });
             })
             ->orderBy('nome')
             ->limit($limit)

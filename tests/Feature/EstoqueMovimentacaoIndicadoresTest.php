@@ -211,7 +211,7 @@ class EstoqueMovimentacaoIndicadoresTest extends TestCase
         $this->assertArrayHasKey('dias_sem_venda', $linha);
     }
 
-    public function test_filtro_de_movimentacoes_aceita_busca_com_barra_na_referencia(): void
+    public function test_filtro_de_movimentacoes_aceita_busca_sem_separadores_na_referencia(): void
     {
         [$usuario, $variacao, $deposito] = $this->criarCenarioBase();
         Sanctum::actingAs($usuario);
@@ -227,7 +227,7 @@ class EstoqueMovimentacaoIndicadoresTest extends TestCase
             'data_movimentacao' => '2026-02-10 08:00:00',
         ], $usuario->id);
 
-        $response = $this->getJson('/api/v1/estoque/movimentacoes?produto=VENDA%2F001');
+        $response = $this->getJson('/api/v1/estoque/movimentacoes?produto=venda001');
         $response->assertOk();
 
         $referencias = collect($response->json('data'))->pluck('produto_referencia')->filter()->all();

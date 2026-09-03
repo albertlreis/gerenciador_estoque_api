@@ -8,6 +8,7 @@ use App\Models\Pedido;
 use App\Models\ProdutoEntregaEvento;
 use App\Models\ProdutoEntregaItem;
 use App\Services\EntregaProdutoService;
+use App\Support\ProductIdentifierSearch;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -82,6 +83,39 @@ class ProdutoEntregaController extends Controller
                         })
                         ->orWhereHas('variacao.produto', fn ($produto) => $produto->where('nome', 'like', $like))
                         ->orWhereHas('pedidoItem.variacao.produto', fn ($produto) => $produto->where('nome', 'like', $like));
+                    $query->orWhereHas('variacao', function ($variacao) use ($busca) {
+                        ProductIdentifierSearch::whereAny($variacao, [
+                            'produto_variacoes.referencia',
+                            'produto_variacoes.sku_interno',
+                            'produto_variacoes.chave_variacao',
+                            'produto_variacoes.codigo_barras',
+                        ], $busca);
+                        $variacao->orWhereHas('produto', function ($produto) use ($busca) {
+                            ProductIdentifierSearch::whereAny($produto, ['produtos.codigo_produto'], $busca);
+                        });
+                        $variacao->orWhereHas('codigosHistoricos', function ($codigo) use ($busca) {
+                            ProductIdentifierSearch::whereAny($codigo, [
+                                'codigo',
+                                'codigo_origem',
+                                'codigo_modelo',
+                            ], $busca);
+                        });
+                    });
+                    $query->orWhereHas('pedidoItem.variacao', function ($variacao) use ($busca) {
+                        ProductIdentifierSearch::whereAny($variacao, [
+                            'produto_variacoes.referencia',
+                            'produto_variacoes.sku_interno',
+                            'produto_variacoes.chave_variacao',
+                            'produto_variacoes.codigo_barras',
+                        ], $busca);
+                        $variacao->orWhereHas('codigosHistoricos', function ($codigo) use ($busca) {
+                            ProductIdentifierSearch::whereAny($codigo, [
+                                'codigo',
+                                'codigo_origem',
+                                'codigo_modelo',
+                            ], $busca);
+                        });
+                    });
                 });
             })
             ->when($request->boolean('pendentes'), function ($q) {

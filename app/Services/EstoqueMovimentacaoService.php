@@ -12,6 +12,7 @@ use App\Models\EstoqueTransferencia;
 use App\Models\EstoqueTransferenciaItem;
 use App\Models\Pedido;
 use App\Models\ProdutoEntregaItem;
+use App\Support\ProductIdentifierSearch;
 use Carbon\Carbon;
 use Carbon\CarbonInterface;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
@@ -83,7 +84,7 @@ class EstoqueMovimentacaoService
                         });
                 });
             } else {
-                $query->where(function (Builder $q) use ($produtoLike) {
+                $query->where(function (Builder $q) use ($produto, $produtoLike) {
                     $q->whereHas('variacao.produto', function (Builder $sub) use ($produtoLike) {
                         $sub->whereRaw("nome LIKE ? ESCAPE '\\\\'", [$produtoLike])
                             ->orWhereRaw("codigo_produto LIKE ? ESCAPE '\\\\'", [$produtoLike]);
@@ -100,6 +101,25 @@ class EstoqueMovimentacaoService
                                         ->orWhereRaw("codigo_modelo LIKE ? ESCAPE '\\\\'", [$produtoLike]);
                                 });
                         });
+
+                    $q->orWhereHas('variacao', function (Builder $sub) use ($produto) {
+                        ProductIdentifierSearch::whereAny($sub, [
+                            'produto_variacoes.referencia',
+                            'produto_variacoes.sku_interno',
+                            'produto_variacoes.chave_variacao',
+                            'produto_variacoes.codigo_barras',
+                        ], $produto);
+                        $sub->orWhereHas('produto', function (Builder $produtoQuery) use ($produto) {
+                            ProductIdentifierSearch::whereAny($produtoQuery, ['produtos.codigo_produto'], $produto);
+                        });
+                        $sub->orWhereHas('codigosHistoricos', function (Builder $codigoQuery) use ($produto) {
+                            ProductIdentifierSearch::whereAny($codigoQuery, [
+                                'codigo',
+                                'codigo_origem',
+                                'codigo_modelo',
+                            ], $produto);
+                        });
+                    });
                 });
             }
         }

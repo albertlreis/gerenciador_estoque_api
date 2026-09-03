@@ -205,13 +205,22 @@ class EstoqueAtualFiltroTest extends TestCase
     {
         [$variacaoCom, $variacaoSem] = $this->seedBase();
 
-        $response = $this->getJson('/api/v1/estoque/atual?produto='.urlencode((string) $variacaoCom->sku_interno));
+        $variacaoCom->update(['sku_interno' => 'K1167 VD']);
+        $variacaoSem->update(['sku_interno' => 'K1167 XD']);
+
+        $response = $this->getJson('/api/v1/estoque/atual?produto=k1167vd');
         $response->assertOk();
 
         $ids = collect($response->json('data'))->pluck('variacao_id')->all();
         $this->assertContains($variacaoCom->id, $ids);
         $this->assertNotContains($variacaoSem->id, $ids);
         $this->assertSame($variacaoCom->sku_interno, data_get($response->json('data.0'), 'produto_sku_interno'));
+
+        $resumo = $this->getJson('/api/v1/estoque/resumo?produto=K.1167_VD');
+        $resumo->assertOk();
+        $resumoPayload = $resumo->json('data') ?? $resumo->json();
+
+        $this->assertSame(1, (int) ($resumoPayload['totalProdutos'] ?? 0));
     }
 
     public function test_retorna_dias_sem_venda_desde_entrada_quando_nunca_vendeu(): void

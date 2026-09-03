@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\ProdutoVariacaoOutlet;
+use App\Support\ProductIdentifierSearch;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
@@ -41,13 +42,29 @@ class OutletItensQueryService
             ))
             ->when($busca !== '', function (Builder $query) use ($busca) {
                 $like = '%' . addcslashes(mb_strtolower($busca), '%_\\') . '%';
-                $query->whereHas('variacao', function (Builder $variacao) use ($like) {
+                $query->whereHas('variacao', function (Builder $variacao) use ($busca, $like) {
                     $variacao->whereRaw('LOWER(referencia) LIKE ?', [$like])
                         ->orWhereRaw('LOWER(sku_interno) LIKE ?', [$like])
                         ->orWhereHas('produto', function (Builder $produto) use ($like) {
                             $produto->whereRaw('LOWER(nome) LIKE ?', [$like])
                                 ->orWhereRaw('LOWER(codigo_produto) LIKE ?', [$like]);
                         });
+                    ProductIdentifierSearch::whereAny($variacao, [
+                        'produto_variacoes.referencia',
+                        'produto_variacoes.sku_interno',
+                        'produto_variacoes.chave_variacao',
+                        'produto_variacoes.codigo_barras',
+                    ], $busca, 'or');
+                    $variacao->orWhereHas('produto', function (Builder $produto) use ($busca) {
+                        ProductIdentifierSearch::whereAny($produto, ['produtos.codigo_produto'], $busca);
+                    });
+                    $variacao->orWhereHas('codigosHistoricos', function (Builder $codigo) use ($busca) {
+                        ProductIdentifierSearch::whereAny($codigo, [
+                            'codigo',
+                            'codigo_origem',
+                            'codigo_modelo',
+                        ], $busca);
+                    });
                 });
             })
             ->orderBy('id');

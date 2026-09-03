@@ -166,6 +166,27 @@ class PedidosECarrinhosEscopoVendedorTest extends TestCase
         $this->assertContains((int) $consignacaoB->id, $ids);
     }
 
+    public function test_vendedor_filtra_consignacao_por_referencia_sem_separadores(): void
+    {
+        $this->autenticarComPermissoes(['pedidos.visualizar', 'carrinhos.finalizar']);
+
+        $vendedor = Usuario::create([
+            'nome' => 'Vendedor Referencia',
+            'email' => uniqid('consig-ref-', true) . '@test.com',
+            'senha' => 'senha',
+            'ativo' => true,
+        ]);
+
+        $consignacao = $this->criarConsignacaoParaVendedor($vendedor, 'Cliente Referencia');
+        $consignacao->produtoVariacao()->update(['referencia' => 'K1167 VD']);
+
+        $response = $this->getJson('/api/v1/consignacoes?per_page=50&produto=k1167vd');
+        $response->assertOk();
+
+        $ids = collect($response->json('data'))->pluck('id')->map(fn ($id) => (int) $id)->all();
+        $this->assertContains((int) $consignacao->id, $ids);
+    }
+
     public function test_vendedor_filtra_consignacoes_por_vendedor(): void
     {
         $this->autenticarComPermissoes(['pedidos.visualizar', 'carrinhos.finalizar']);

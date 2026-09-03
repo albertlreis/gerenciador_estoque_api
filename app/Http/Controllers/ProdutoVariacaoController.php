@@ -10,6 +10,7 @@ use App\Models\Produto;
 use App\Models\ProdutoImagem;
 use App\Models\ProdutoVariacao;
 use App\Services\ProdutoVariacaoService;
+use App\Support\ProductIdentifierSearch;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -151,6 +152,22 @@ class ProdutoVariacaoController extends Controller
                         $qp->whereRaw("LOWER(nome) COLLATE utf8mb4_general_ci LIKE ?", ["%{$busca}%"])
                             ->orWhereRaw("LOWER(codigo_produto) COLLATE utf8mb4_general_ci LIKE ?", ["%{$busca}%"]);
                     });
+                ProductIdentifierSearch::whereAny($q, [
+                    'produto_variacoes.referencia',
+                    'produto_variacoes.sku_interno',
+                    'produto_variacoes.chave_variacao',
+                    'produto_variacoes.codigo_barras',
+                ], $busca, 'or');
+                $q->orWhereHas('produto', function ($produto) use ($busca) {
+                    ProductIdentifierSearch::whereAny($produto, ['produtos.codigo_produto'], $busca);
+                });
+                $q->orWhereHas('codigosHistoricos', function ($codigo) use ($busca) {
+                    ProductIdentifierSearch::whereAny($codigo, [
+                        'codigo',
+                        'codigo_origem',
+                        'codigo_modelo',
+                    ], $busca);
+                });
             });
         }
 
@@ -193,7 +210,7 @@ class ProdutoVariacaoController extends Controller
             $termo = mb_strtolower($termo !== false ? $termo : $search);
             $like = '%' . str_replace(['\\', '%', '_'], ['\\\\', '\%', '\_'], $termo) . '%';
 
-            $query->where(function ($q) use ($like) {
+            $query->where(function ($q) use ($like, $search) {
                 $q->whereRaw("LOWER(referencia) LIKE ? ESCAPE '\\\\'", [$like])
                     ->orWhereRaw("LOWER(sku_interno) LIKE ? ESCAPE '\\\\'", [$like])
                     ->orWhereRaw("LOWER(chave_variacao) LIKE ? ESCAPE '\\\\'", [$like])
@@ -206,6 +223,22 @@ class ProdutoVariacaoController extends Controller
                         $atributos->whereRaw("LOWER(atributo) LIKE ? ESCAPE '\\\\'", [$like])
                             ->orWhereRaw("LOWER(valor) LIKE ? ESCAPE '\\\\'", [$like]);
                     });
+                ProductIdentifierSearch::whereAny($q, [
+                    'produto_variacoes.referencia',
+                    'produto_variacoes.sku_interno',
+                    'produto_variacoes.chave_variacao',
+                    'produto_variacoes.codigo_barras',
+                ], $search, 'or');
+                $q->orWhereHas('produto', function ($produto) use ($search) {
+                    ProductIdentifierSearch::whereAny($produto, ['produtos.codigo_produto'], $search);
+                });
+                $q->orWhereHas('codigosHistoricos', function ($codigo) use ($search) {
+                    ProductIdentifierSearch::whereAny($codigo, [
+                        'codigo',
+                        'codigo_origem',
+                        'codigo_modelo',
+                    ], $search);
+                });
             });
         }
 

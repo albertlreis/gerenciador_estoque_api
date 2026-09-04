@@ -12,11 +12,10 @@ class OutletCatalogoPdfService
     public function __construct(
         private readonly OutletCatalogoPricingService $pricingService,
         private readonly PdfImageService $pdfImageService,
-    ) {
-    }
+    ) {}
 
     /**
-     * @param Collection<int, Produto>|iterable<Produto> $produtos
+     * @param  Collection<int, Produto>|iterable<Produto>  $produtos
      * @return array{conjuntos: array<int, array<string,mixed>>, itens_avulsos: array<int, array<string,mixed>>}
      */
     public function build(iterable $produtos): array
@@ -77,7 +76,7 @@ class OutletCatalogoPdfService
                 'produto_id' => (int) $produto->id,
                 'nome' => $produto->nome,
                 'variacao_nome' => $variacao->nome_completo ?: $variacao->nome ?: $produto->nome,
-                'categoria_nome' => $produto->categoria?->nome,
+                'categoria_nome' => $this->categoriaNome($produto->categoria?->nome),
                 'referencia' => $variacao->referencia,
                 'altura' => $produto->altura,
                 'largura' => $produto->largura,
@@ -98,7 +97,7 @@ class OutletCatalogoPdfService
     }
 
     /**
-     * @param Collection<int, Produto> $produtos
+     * @param  Collection<int, Produto>  $produtos
      * @return Collection<int, array<string,mixed>>
      */
     private function buildDisponiveisMap(Collection $produtos): Collection
@@ -125,7 +124,7 @@ class OutletCatalogoPdfService
                         'variacao_id' => (int) $variacao->id,
                         'produto_id' => (int) $produto->id,
                         'produto_nome' => $produto->nome,
-                        'categoria_nome' => $produto->categoria?->nome,
+                        'categoria_nome' => $this->categoriaNome($produto->categoria?->nome),
                         'altura' => $produto->altura,
                         'largura' => $produto->largura,
                         'profundidade' => $produto->profundidade,
@@ -149,7 +148,7 @@ class OutletCatalogoPdfService
     }
 
     /**
-     * @param Collection<int, array<string,mixed>> $disponiveis
+     * @param  Collection<int, array<string,mixed>>  $disponiveis
      * @return array<string,mixed>|null
      */
     private function buildConjuntoCard(ProdutoConjunto $conjunto, Collection $disponiveis): ?array
@@ -175,6 +174,7 @@ class OutletCatalogoPdfService
                     'label' => $item->label ?: $disponivel['produto_nome'],
                     'referencia' => $disponivel['referencia'],
                     'nome' => $disponivel['nome_completo'] ?: $disponivel['produto_nome'],
+                    'categoria_nome' => $disponivel['categoria_nome'],
                     'preco' => $disponivel['preco'],
                     'preco_outlet' => $disponivel['preco_outlet'],
                     'preco_label' => $disponivel['preco_label'],
@@ -191,11 +191,19 @@ class OutletCatalogoPdfService
 
         $precoModo = (string) $conjunto->preco_modo;
         $precoExibicao = $this->buildPrecoConjunto($precoModo, $conjunto, $itensDisponiveis);
+        $principalDisponivel = $itensDisponiveis->firstWhere(
+            'produto_variacao_id',
+            (int) ($conjunto->principal_variacao_id ?? 0)
+        );
+        $categoriaNome = $principalDisponivel['categoria_nome']
+            ?? $itensDisponiveis->first()['categoria_nome']
+            ?? 'Sem categoria';
 
         return [
             'tipo' => 'conjunto',
             'id' => (int) $conjunto->id,
             'nome' => $conjunto->nome,
+            'categoria_nome' => $this->categoriaNome($categoriaNome),
             'descricao' => $conjunto->descricao,
             'imagem_src' => $heroSrc,
             'preco_modo' => $precoModo,
@@ -208,7 +216,7 @@ class OutletCatalogoPdfService
     }
 
     /**
-     * @param Collection<int, array<string,mixed>> $itensDisponiveis
+     * @param  Collection<int, array<string,mixed>>  $itensDisponiveis
      * @return array{label:string,valor:float|null,original_label:string|null}
      */
     private function buildPrecoConjunto(string $precoModo, ProdutoConjunto $conjunto, Collection $itensDisponiveis): array
@@ -234,10 +242,10 @@ class OutletCatalogoPdfService
                 ->min();
 
             return [
-                'label' => $valor !== null ? 'A partir de ' . $this->formatMoney((float) $valor) : 'A partir de -',
+                'label' => $valor !== null ? 'A partir de '.$this->formatMoney((float) $valor) : 'A partir de -',
                 'valor' => $valor !== null ? (float) $valor : null,
                 'original_label' => $valorOriginal !== null && $valor !== null && (float) $valor < (float) $valorOriginal
-                    ? 'De ' . $this->formatMoney((float) $valorOriginal)
+                    ? 'De '.$this->formatMoney((float) $valorOriginal)
                     : null,
             ];
         }
@@ -259,7 +267,7 @@ class OutletCatalogoPdfService
     }
 
     /**
-     * @param array<string,mixed> $item
+     * @param  array<string,mixed>  $item
      * @return array<string,mixed>
      */
     private function buildAvulsoCard(array $item): array
@@ -328,6 +336,13 @@ class OutletCatalogoPdfService
 
     private function formatMoney(float $value): string
     {
-        return 'R$ ' . number_format($value, 2, ',', '.');
+        return 'R$ '.number_format($value, 2, ',', '.');
+    }
+
+    private function categoriaNome(?string $nome): string
+    {
+        $nome = trim((string) $nome);
+
+        return $nome !== '' ? $nome : 'Sem categoria';
     }
 }

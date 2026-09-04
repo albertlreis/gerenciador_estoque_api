@@ -15,10 +15,13 @@ class OutletCatalogoPdfServiceTest extends TestCase
     use DatabaseTransactions;
 
     private const PNG_VARIACAO = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADUlEQVR42mP8z8BQDwAFgwJ/lb4qmgAAAABJRU5ErkJggg==';
+
     private const PNG_PRODUTO = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
 
     private int $categoriaId;
+
     private int $fornecedorId;
+
     private int $motivoId;
 
     protected function setUp(): void
@@ -27,7 +30,7 @@ class OutletCatalogoPdfServiceTest extends TestCase
 
         $now = now();
         $this->categoriaId = (int) DB::table('categorias')->insertGetId([
-            'nome' => 'Categoria Outlet PDF ' . uniqid(),
+            'nome' => 'Categoria Outlet PDF '.uniqid(),
             'descricao' => null,
             'categoria_pai_id' => null,
             'created_at' => $now,
@@ -35,7 +38,7 @@ class OutletCatalogoPdfServiceTest extends TestCase
         ]);
 
         $this->fornecedorId = (int) DB::table('fornecedores')->insertGetId([
-            'nome' => 'Fornecedor Outlet PDF ' . uniqid(),
+            'nome' => 'Fornecedor Outlet PDF '.uniqid(),
             'cnpj' => null,
             'email' => null,
             'telefone' => null,
@@ -47,7 +50,7 @@ class OutletCatalogoPdfServiceTest extends TestCase
         ]);
 
         $this->motivoId = (int) DB::table('outlet_motivos')->insertGetId([
-            'slug' => 'motivo-outlet-pdf-' . uniqid(),
+            'slug' => 'motivo-outlet-pdf-'.uniqid(),
             'nome' => 'Motivo Outlet PDF',
             'ativo' => 1,
             'created_at' => $now,
@@ -206,6 +209,70 @@ class OutletCatalogoPdfServiceTest extends TestCase
         $this->assertSame([], array_column($resultado['itens_avulsos'], 'id'));
     }
 
+    public function test_categoria_do_conjunto_usa_principal_disponivel_e_fallback_para_primeiro_item_disponivel(): void
+    {
+        Storage::fake('public');
+        Storage::disk('public')->put('conjuntos/hero-categoria-principal.jpg', 'hero');
+        Storage::disk('public')->put('conjuntos/hero-categoria-fallback.jpg', 'hero');
+
+        $agora = now();
+        $categoriaSala = (int) DB::table('categorias')->insertGetId([
+            'nome' => 'Sala',
+            'descricao' => null,
+            'categoria_pai_id' => null,
+            'created_at' => $agora,
+            'updated_at' => $agora,
+        ]);
+        $categoriaQuarto = (int) DB::table('categorias')->insertGetId([
+            'nome' => 'Quarto',
+            'descricao' => null,
+            'categoria_pai_id' => null,
+            'created_at' => $agora,
+            'updated_at' => $agora,
+        ]);
+
+        [$produtoSala, $variacaoSala] = $this->criarProdutoComVariacao('Sofa', 'SOF-CAT', 500, 2, $categoriaSala);
+        [$produtoQuarto, $variacaoQuarto] = $this->criarProdutoComVariacao('Cama', 'CAM-CAT', 700, 1, $categoriaQuarto);
+        [$produtoIndisponivel, $variacaoIndisponivel] = $this->criarProdutoComVariacao(
+            'Criado',
+            'CRI-CAT',
+            300,
+            0,
+            $categoriaQuarto
+        );
+
+        $this->criarConjunto(
+            nome: 'Conjunto Principal',
+            heroPath: 'conjuntos/hero-categoria-principal.jpg',
+            precoModo: 'soma',
+            principalVariacaoId: $variacaoQuarto,
+            itens: [
+                ['produto_variacao_id' => $variacaoSala, 'label' => 'Sofa', 'ordem' => 1],
+                ['produto_variacao_id' => $variacaoQuarto, 'label' => 'Cama', 'ordem' => 2],
+            ]
+        );
+        $this->criarConjunto(
+            nome: 'Conjunto Fallback',
+            heroPath: 'conjuntos/hero-categoria-fallback.jpg',
+            precoModo: 'soma',
+            principalVariacaoId: $variacaoIndisponivel,
+            itens: [
+                ['produto_variacao_id' => $variacaoIndisponivel, 'label' => 'Criado', 'ordem' => 1],
+                ['produto_variacao_id' => $variacaoSala, 'label' => 'Sofa', 'ordem' => 2],
+            ]
+        );
+
+        $resultado = $this->service()->build($this->carregarProdutos([
+            $produtoSala,
+            $produtoQuarto,
+            $produtoIndisponivel,
+        ]));
+        $categorias = collect($resultado['conjuntos'])->pluck('categoria_nome', 'nome');
+
+        $this->assertSame('Quarto', $categorias['Conjunto Principal']);
+        $this->assertSame('Sala', $categorias['Conjunto Fallback']);
+    }
+
     public function test_item_avulso_usa_imagem_da_variacao_antes_da_imagem_do_produto(): void
     {
         Storage::fake('public');
@@ -234,7 +301,7 @@ class OutletCatalogoPdfServiceTest extends TestCase
 
         $this->assertCount(1, $resultado['itens_avulsos']);
         $this->assertSame(
-            'data:image/png;base64,' . self::PNG_VARIACAO,
+            'data:image/png;base64,'.self::PNG_VARIACAO,
             $resultado['itens_avulsos'][0]['imagem_src']
         );
     }
@@ -247,14 +314,19 @@ class OutletCatalogoPdfServiceTest extends TestCase
     /**
      * @return array{0:int,1:int}
      */
-    private function criarProdutoComVariacao(string $nomeProduto, string $referencia, float $preco, int $quantidadeRestante): array
-    {
+    private function criarProdutoComVariacao(
+        string $nomeProduto,
+        string $referencia,
+        float $preco,
+        int $quantidadeRestante,
+        ?int $categoriaId = null
+    ): array {
         $now = now();
 
         $produtoId = (int) DB::table('produtos')->insertGetId([
-            'nome' => $nomeProduto . ' ' . uniqid(),
+            'nome' => $nomeProduto.' '.uniqid(),
             'descricao' => 'Produto para teste',
-            'id_categoria' => $this->categoriaId,
+            'id_categoria' => $categoriaId ?? $this->categoriaId,
             'id_fornecedor' => $this->fornecedorId,
             'altura' => 100,
             'largura' => 200,
@@ -270,7 +342,7 @@ class OutletCatalogoPdfServiceTest extends TestCase
 
         $variacaoId = (int) DB::table('produto_variacoes')->insertGetId([
             'produto_id' => $produtoId,
-            'referencia' => $referencia . '-' . uniqid(),
+            'referencia' => $referencia.'-'.uniqid(),
             'nome' => $nomeProduto,
             'preco' => $preco,
             'custo' => $preco / 2,
@@ -295,7 +367,7 @@ class OutletCatalogoPdfServiceTest extends TestCase
     }
 
     /**
-     * @param array<int, int> $produtoIds
+     * @param  array<int, int>  $produtoIds
      * @return \Illuminate\Support\Collection<int, Produto>
      */
     private function carregarProdutos(array $produtoIds)
@@ -313,7 +385,7 @@ class OutletCatalogoPdfServiceTest extends TestCase
     }
 
     /**
-     * @param array<int, array{produto_variacao_id:int,label:?string,ordem:int}> $itens
+     * @param  array<int, array{produto_variacao_id:int,label:?string,ordem:int}>  $itens
      */
     private function criarConjunto(
         string $nome,

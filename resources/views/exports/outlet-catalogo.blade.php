@@ -59,16 +59,37 @@
             border-collapse: collapse;
             table-layout: fixed;
         }
+        .catalog-grid tr {
+            page-break-inside: avoid;
+        }
         .catalog-grid td {
             width: 50%;
             vertical-align: top;
-            padding: 5px;
+            padding: 4px 5px;
+        }
+        .catalog-grid .category-cell {
+            width: auto;
+            padding: 1px 5px 2px;
+        }
+        .category-band {
+            padding: 4px 9px;
+            border-radius: 7px;
+            background: #1f1a17;
+            color: #f5ede2;
+            font-size: 9px;
+            font-weight: bold;
+            letter-spacing: 1.1px;
+            text-transform: uppercase;
+        }
+        .category-empty {
+            padding: 0;
         }
         .card {
             border: 1px solid #ddd2c2;
             border-radius: 12px;
             background: #fffdf9;
-            min-height: 304px;
+            min-height: 228px;
+            overflow: hidden;
         }
         .card-empty {
             background: #faf7f1;
@@ -83,15 +104,15 @@
             vertical-align: top;
         }
         .card-media {
-            width: 130px;
-            padding: 12px 0 12px 12px;
+            width: 108px;
+            padding: 8px 0 8px 8px;
         }
         .card-content {
-            padding: 12px 12px 11px 9px;
+            padding: 8px 9px 7px 7px;
         }
         .media-frame {
-            width: 118px;
-            height: 122px;
+            width: 96px;
+            height: 102px;
             border: 1px solid #e3d8c8;
             border-radius: 10px;
             background: #f6f1e8;
@@ -108,8 +129,8 @@
             padding: 6px;
         }
         .media-image {
-            width: 104px;
-            height: 108px;
+            width: 82px;
+            height: 88px;
             object-fit: cover;
         }
         .media-placeholder-icon {
@@ -191,7 +212,7 @@
             border: 1px solid #dfd1ba;
         }
         .card-title {
-            font-size: 17.5px;
+            font-size: 15px;
             font-weight: bold;
             line-height: 1.16;
             margin: 0 0 3px;
@@ -207,7 +228,9 @@
             overflow-wrap: anywhere;
         }
         .card-description {
-            font-size: 9.5px;
+            max-height: 24px;
+            overflow: hidden;
+            font-size: 8.5px;
             color: #50473e;
             line-height: 1.35;
             margin: 0 0 5px;
@@ -226,18 +249,18 @@
             border: 1px solid #ddcfb8;
             border-radius: 11px;
             background: #f8efe1;
-            padding: 11px 12px 10px;
-            margin-bottom: 5px;
+            padding: 7px 9px 6px;
+            margin-bottom: 3px;
         }
         .price-label {
             font-size: 8.2px;
             text-transform: uppercase;
             letter-spacing: 1.3px;
             color: #896a3f;
-            margin-bottom: 5px;
+            margin-bottom: 3px;
         }
         .price-current {
-            font-size: 25px;
+            font-size: 20px;
             line-height: 1;
             font-weight: bold;
             color: #1d1a16;
@@ -259,9 +282,9 @@
             font-weight: bold;
         }
         .availability {
-            font-size: 11.5px;
+            font-size: 9.5px;
             color: #2c241d;
-            margin-bottom: 4px;
+            margin-bottom: 3px;
         }
         .availability strong {
             color: #6d5432;
@@ -300,12 +323,12 @@
         .items-table {
             width: 100%;
             border-collapse: collapse;
-            margin-top: 6px;
+            margin-top: 3px;
         }
         .items-table th,
         .items-table td {
             border-top: 1px solid #ece3d6;
-            padding: 4px 3px;
+            padding: 2px 3px;
             text-align: left;
             vertical-align: top;
         }
@@ -317,7 +340,7 @@
             background: #f8f2e8;
         }
         .items-table td {
-            font-size: 9px;
+            font-size: 8px;
             color: #2f2821;
         }
         .item-name {
@@ -358,10 +381,28 @@
 </head>
 <body>
 @php
-    $cardsCollection = collect($cards ?? collect())->values();
+    $sortKey = static fn ($value) => \Illuminate\Support\Str::lower(
+        \Illuminate\Support\Str::ascii(trim((string) $value))
+    );
+    $cardsCollection = collect($cards ?? collect())
+        ->map(function (array $card) {
+            $card['categoria_nome'] = trim((string) ($card['categoria_nome'] ?? '')) ?: 'Sem categoria';
+
+            return $card;
+        })
+        ->sortBy(fn (array $card) => implode('|', [
+            $sortKey($card['categoria_nome']),
+            ($card['tipo'] ?? 'avulso') === 'conjunto' ? '0' : '1',
+            $sortKey($card['nome'] ?? ''),
+            $sortKey($card['referencia'] ?? ''),
+        ]))
+        ->values();
 @endphp
 
 @foreach($cardsCollection->chunk(4) as $pagina)
+    @php
+        $previousCategory = null;
+    @endphp
     <div class="page">
         <div class="header-accent"></div>
         <table class="header-shell">
@@ -380,6 +421,38 @@
         <table class="catalog-grid">
             <tbody>
             @foreach($pagina->chunk(2) as $linha)
+                @php
+                    $categorySegments = [];
+                    foreach ($linha as $cardLinha) {
+                        $categoriaNome = $cardLinha['categoria_nome'];
+                        $lastIndex = count($categorySegments) - 1;
+                        if ($lastIndex >= 0 && $categorySegments[$lastIndex]['nome'] === $categoriaNome) {
+                            $categorySegments[$lastIndex]['count']++;
+                        } else {
+                            $categorySegments[] = [
+                                'nome' => $categoriaNome,
+                                'count' => 1,
+                                'show' => $categoriaNome !== $previousCategory,
+                            ];
+                        }
+                        $previousCategory = $categoriaNome;
+                    }
+                    $showCategoryRow = collect($categorySegments)->contains('show', true);
+                @endphp
+                @if($showCategoryRow)
+                    <tr class="category-row">
+                        @foreach($categorySegments as $segment)
+                            <td class="{{ $segment['show'] ? 'category-cell' : 'category-empty' }}" colspan="{{ $segment['count'] }}">
+                                @if($segment['show'])
+                                    <div class="category-band">{{ $segment['nome'] }}</div>
+                                @endif
+                            </td>
+                        @endforeach
+                        @if($linha->count() === 1)
+                            <td class="category-empty"></td>
+                        @endif
+                    </tr>
+                @endif
                 <tr>
                     @foreach($linha as $card)
                         @php
@@ -396,6 +469,8 @@
                             $atributosVisiveis = $atributos->take(8);
                             $atributosRestantes = max(0, $atributos->count() - $atributosVisiveis->count());
                             $itensConjunto = collect($card['itens'] ?? []);
+                            $itensConjuntoVisiveis = $itensConjunto->take(2);
+                            $itensConjuntoRestantes = max(0, $itensConjunto->count() - $itensConjuntoVisiveis->count());
                             $tipoCard = $card['tipo'] ?? 'avulso';
                         @endphp
                         <td>
@@ -471,7 +546,7 @@
                                                     </tr>
                                                     </thead>
                                                     <tbody>
-                                                    @foreach($itensConjunto as $itemConjunto)
+                                                    @foreach($itensConjuntoVisiveis as $itemConjunto)
                                                         <tr>
                                                             <td>
                                                                 <div class="item-name">{{ $itemConjunto['label'] ?? '-' }}</div>
@@ -489,6 +564,13 @@
                                                             @endif
                                                         </tr>
                                                     @endforeach
+                                                    @if($itensConjuntoRestantes > 0)
+                                                        <tr>
+                                                            <td colspan="{{ ($card['preco_modo'] ?? null) === 'individual' ? 4 : 3 }}">
+                                                                +{{ $itensConjuntoRestantes }} itens disponiveis no conjunto
+                                                            </td>
+                                                        </tr>
+                                                    @endif
                                                     </tbody>
                                                 </table>
                                             @else

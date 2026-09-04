@@ -71,7 +71,7 @@ class CatalogoProdutosPdfTest extends TestCase
             'ativo' => true,
         ]);
         Sanctum::actingAs($usuario);
-        Cache::put('permissoes_usuario_' . $usuario->id, []);
+        Cache::put('permissoes_usuario_'.$usuario->id, []);
 
         $this->postJson('/api/v1/produtos/catalogo/export', [
             'mode' => 'filtered',
@@ -152,16 +152,43 @@ class CatalogoProdutosPdfTest extends TestCase
         );
     }
 
+    public function test_ordena_cards_por_categoria_nome_e_referencia(): void
+    {
+        $cadeiras = Categoria::create(['nome' => 'Cadeiras']);
+        $mesas = Categoria::create(['nome' => 'Mesas']);
+        $cadeiraZ = $this->criarProduto('Cadeira Zeta', 'REF-Z', $cadeiras, 100, 1);
+        $mesa = $this->criarProduto('Mesa Centro', 'REF-M', $mesas, 200, 1);
+        $cadeiraA = $this->criarProduto('Cadeira Alfa', 'REF-A', $cadeiras, 150, 1);
+
+        $produtos = Produto::query()
+            ->whereIn('id', [$cadeiraZ->produto_id, $mesa->produto_id, $cadeiraA->produto_id])
+            ->with([
+                'categoria',
+                'imagemPrincipal',
+                'imagens',
+                'variacoes.atributos',
+                'variacoes.imagem',
+                'variacoes.imagens',
+                'variacoes.estoques',
+                'variacoes.outlets.formasPagamento.formaPagamento',
+            ])->get();
+
+        $cards = app(CatalogoProdutosPdfService::class)->build($produtos);
+
+        $this->assertSame(['Cadeiras', 'Cadeiras', 'Mesas'], array_column($cards, 'categoria_nome'));
+        $this->assertSame(['Cadeira Alfa', 'Cadeira Zeta', 'Mesa Centro'], array_column($cards, 'nome'));
+    }
+
     private function autenticarComCatalogo(): Usuario
     {
         $usuario = Usuario::create([
             'nome' => 'Usuario Catalogo',
-            'email' => 'catalogo-' . uniqid() . '@example.com',
+            'email' => 'catalogo-'.uniqid().'@example.com',
             'senha' => 'senha',
             'ativo' => true,
         ]);
         Sanctum::actingAs($usuario);
-        Cache::put('permissoes_usuario_' . $usuario->id, ['produtos.catalogo']);
+        Cache::put('permissoes_usuario_'.$usuario->id, ['produtos.catalogo']);
 
         return $usuario;
     }
@@ -186,7 +213,7 @@ class CatalogoProdutosPdfTest extends TestCase
             'preco' => $preco,
             'custo' => 25,
         ]);
-        $deposito = Deposito::create(['nome' => 'Deposito ' . uniqid()]);
+        $deposito = Deposito::create(['nome' => 'Deposito '.uniqid()]);
         Estoque::updateOrCreate([
             'id_variacao' => $variacao->id,
             'id_deposito' => $deposito->id,

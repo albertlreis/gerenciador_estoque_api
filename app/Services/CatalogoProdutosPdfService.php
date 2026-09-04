@@ -12,12 +12,11 @@ class CatalogoProdutosPdfService
     public function __construct(
         private readonly OutletCatalogoPricingService $outletPricing,
         private readonly PdfImageService $pdfImage,
-    ) {
-    }
+    ) {}
 
     /**
-     * @param Collection<int, Produto> $produtos
-     * @param array<int, int>|null $variationIds
+     * @param  Collection<int, Produto>  $produtos
+     * @param  array<int, int>|null  $variationIds
      * @return array<int, array<string, mixed>>
      */
     public function build(Collection $produtos, ?array $variationIds = null): array
@@ -39,7 +38,11 @@ class CatalogoProdutosPdfService
             ->groupBy(fn (ProdutoVariacao $variacao) => $this->groupKey($variacao))
             ->map(fn (Collection $variacoes) => $this->buildCard($variacoes))
             ->filter()
-            ->sortBy(fn (array $card) => Str::lower(($card['nome'] ?? '') . '|' . ($card['referencia'] ?? '')))
+            ->sortBy(fn (array $card) => $this->sortKey(
+                $card['categoria_nome'] ?? null,
+                $card['nome'] ?? null,
+                $card['referencia'] ?? null,
+            ))
             ->values()
             ->all();
     }
@@ -48,14 +51,14 @@ class CatalogoProdutosPdfService
     {
         $identidade = trim((string) ($variacao->referencia ?: $variacao->sku_interno ?: $variacao->chave_variacao ?: ''));
         if ($identidade === '') {
-            return 'VAR-' . (int) $variacao->id;
+            return 'VAR-'.(int) $variacao->id;
         }
 
         return Str::upper((string) preg_replace('/\s+/u', '', $identidade));
     }
 
     /**
-     * @param Collection<int, ProdutoVariacao> $variacoes
+     * @param  Collection<int, ProdutoVariacao>  $variacoes
      * @return array<string, mixed>|null
      */
     private function buildCard(Collection $variacoes): ?array
@@ -130,7 +133,7 @@ class CatalogoProdutosPdfService
             $variacaoPrincipal = $melhorPreco['variacao'];
             $precoLabel = $this->formatMoney((float) $melhorPreco['preco']);
             if ($precosDistintos->count() > 1) {
-                $precoLabel = 'A partir de ' . $precoLabel;
+                $precoLabel = 'A partir de '.$precoLabel;
             }
         }
 
@@ -140,7 +143,7 @@ class CatalogoProdutosPdfService
                 $nome = trim((string) ($atributo->atributo_label ?? $atributo->atributo ?? ''));
                 $valor = trim((string) ($atributo->valor ?? ''));
 
-                return trim($nome . ($nome !== '' && $valor !== '' ? ': ' : '') . $valor);
+                return trim($nome.($nome !== '' && $valor !== '' ? ': ' : '').$valor);
             })
             ->filter()
             ->unique()
@@ -149,13 +152,14 @@ class CatalogoProdutosPdfService
             ->all();
 
         $disponivel = $variacoes->sum(fn (ProdutoVariacao $variacao) => $this->quantidadeDisponivel($variacao)) > 0;
+
         return [
             'nome' => $produto?->nome ?? $variacaoPrincipal->nome ?? 'Produto',
-            'categoria_nome' => $produto?->categoria?->nome,
+            'categoria_nome' => $this->categoriaNome($produto?->categoria?->nome),
             'referencia' => $variacaoPrincipal->sku_interno
                 ?: $variacaoPrincipal->referencia
                 ?: $variacaoPrincipal->chave_variacao
-                ?: ('#' . $variacaoPrincipal->id),
+                ?: ('#'.$variacaoPrincipal->id),
             'altura' => $variacaoPrincipal->dimensao_3 ?? $produto?->altura,
             'largura' => $variacaoPrincipal->dimensao_1 ?? $produto?->largura,
             'profundidade' => $variacaoPrincipal->dimensao_2 ?? $produto?->profundidade,
@@ -163,7 +167,7 @@ class CatalogoProdutosPdfService
             'preco_label' => $precoLabel,
             'preco_sob_consulta' => $precos->isEmpty(),
             'preco_original_label' => $melhorPreco['preco'] !== null
-                && !empty($melhorPreco['preco_original'])
+                && ! empty($melhorPreco['preco_original'])
                 && (float) $melhorPreco['preco_original'] > (float) $melhorPreco['preco']
                     ? $this->formatMoney((float) $melhorPreco['preco_original'])
                     : null,
@@ -177,7 +181,7 @@ class CatalogoProdutosPdfService
 
     private function quantidadeDisponivel(ProdutoVariacao $variacao): int
     {
-        if (!$variacao->relationLoaded('estoques')) {
+        if (! $variacao->relationLoaded('estoques')) {
             return 0;
         }
 
@@ -193,6 +197,20 @@ class CatalogoProdutosPdfService
 
     private function formatMoney(float $value): string
     {
-        return 'R$ ' . number_format($value, 2, ',', '.');
+        return 'R$ '.number_format($value, 2, ',', '.');
+    }
+
+    private function categoriaNome(?string $nome): string
+    {
+        $nome = trim((string) $nome);
+
+        return $nome !== '' ? $nome : 'Sem categoria';
+    }
+
+    private function sortKey(?string $categoria, ?string $nome, ?string $referencia): string
+    {
+        return collect([$categoria, $nome, $referencia])
+            ->map(fn ($valor) => Str::lower(Str::ascii(trim((string) $valor))))
+            ->implode('|');
     }
 }
